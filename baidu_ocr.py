@@ -5,6 +5,8 @@ import requests
 import json
 import configparser
 import logging
+import pandas as pd
+from fund_common import *
 
 
 token = None
@@ -53,17 +55,47 @@ def get_ocr(image_name: str):
         ocr_url += f"?access_token={token}"
         response = requests.post(ocr_url, headers=headers, data=body)
         if response.status_code == requests.codes.ok:
-            return json.loads(response.content.decode("UTF-8"))
+            content = json.loads(response.content.decode("UTF-8"))
+            words = []
+            try:
+                for x in content['words_result']:
+                    for k, v in x.items():
+                        if k == 'words':
+                            words.append(v.replace(' ', ''))
+                return words
+            except KeyError:
+                logging.error(content['error_msg'])
         else:
             logging.warning(f"status: {response.status_code}")
-            return None
+    return None
 
 
 # 天天基金app仓位
-def get_funds_position_ttjj_app(image: str):
-    content = get_ocr(image)
-    if content is not None:
-        return [[v for k, v in x.items() if k == 'words'] for x in content['words_result']]
-    else:
-        return None
+def get_funds_position_ttjj_app(image: str, funds: tuple):
+    words = get_ocr(image)
+    if words is not None:
+        data = {col_fund_id: [],
+                col_fund_name: [],
+                col_asset: [],
+                col_yesterday_earning: [],
+                col_position_income: [],
+                col_position_yield: []}
+        i = 0
+        while i + 7 < len(words):
+            if words[i] in funds:
+                data[col_fund_id].append(words[i])
+                data[col_fund_name].append(words[i - 1])
+                data[col_asset].append(float(words[i + 4].replace(',', '')))
+                data[col_yesterday_earning].append(float(words[i + 5].replace(',', '')))
+                data[col_position_income].append(float(words[i + 6].replace(',', '')))
+                data[col_position_yield].append(float(words[i + 7].strip('%').replace(',', '')))
+                i += 8
+            else:
+                i += 1
+
+        if len(data[col_fund_id]) != 0:
+            df = pd.DataFrame(data)
+            return df
+
+    return None
 
