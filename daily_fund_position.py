@@ -5,6 +5,7 @@ import sys
 import datetime
 import baidu_ocr
 from cv2 import imread, imwrite
+from tqdm import tqdm
 
 
 funds = ('002943', '000297', '001718', '001532', '000991', '004685', '006102',
@@ -51,7 +52,7 @@ def split_image(image_file_name):
 
 def update_fund_position(output_file_name, images):
     df = None
-    for image in images:
+    for image in tqdm(images):
         df0 = baidu_ocr.get_funds_position_ttjj_app(image, funds)
         if df0 is not None:
             if df is None:
