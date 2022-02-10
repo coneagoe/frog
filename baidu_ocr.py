@@ -12,6 +12,7 @@ from fund_common import *
 
 config_file_name = 'config.ini'
 token = None
+proxies = None
 
 
 def get_token():
@@ -26,7 +27,7 @@ def get_token():
     logging.info(f"client_id: {client_id}, client_secret: {client_secret}")
     token_url = 'https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials'
     token_url += f"&client_id={client_id}&client_secret={client_secret}"
-    response = requests.get(token_url)
+    response = requests.get(token_url, proxies=proxies)
     if response.status_code == requests.codes.ok:
         return response.json().get("access_token")
     else:
@@ -59,7 +60,7 @@ def get_ocr(image_name: str):
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         ocr_url = 'https://aip.baidubce.com/rest/2.0/ocr/v1/accurate'
         ocr_url += f"?access_token={token}"
-        response = requests.post(ocr_url, headers=headers, data=body)
+        response = requests.post(ocr_url, headers=headers, data=body, proxies=proxies)
         if response.status_code == requests.codes.ok:
             content = json.loads(response.content.decode("UTF-8"))
             words = []
@@ -79,6 +80,7 @@ def get_ocr(image_name: str):
 # 天天基金app仓位
 def get_funds_position_ttjj_app(image: str, funds: tuple):
     words = get_ocr(image)
+    print(words)
     if words is not None:
         data = {col_fund_id: [],
                 col_fund_name: [],
@@ -89,12 +91,22 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
         i = 0
         while i + 7 < len(words):
             if words[i] in funds:
+                try:
+                    asset = float(words[i + 4].replace(',', ''))
+                    yesterday_earning = float(words[i + 5].replace(',', ''))
+                    position_income = float(words[i + 6].replace(',', ''))
+                    position_yield = float(words[i + 7].strip('%').replace(',', ''))
+                except ValueError:
+                    logging.warning(f"{image}: {words}")
+                    i += 1
+                    continue
+
                 data[col_fund_id].append(words[i])
                 data[col_fund_name].append(words[i - 1])
-                data[col_asset].append(float(words[i + 4].replace(',', '')))
-                data[col_yesterday_earning].append(float(words[i + 5].replace(',', '')))
-                data[col_position_income].append(float(words[i + 6].replace(',', '')))
-                data[col_position_yield].append(float(words[i + 7].strip('%').replace(',', '')))
+                data[col_asset].append(asset)
+                data[col_yesterday_earning].append(yesterday_earning)
+                data[col_position_income].append(position_income)
+                data[col_position_yield].append(position_yield)
                 i += 8
             else:
                 i += 1
