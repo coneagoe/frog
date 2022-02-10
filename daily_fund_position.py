@@ -60,6 +60,7 @@ def update_fund_position(output_file_name, images):
                 df = df.append(df0, ignore_index=True)
 
     if df is not None:
+        print(df)
         df.to_csv(output_file_name, encoding='utf_8_sig', index=False)
 
 
