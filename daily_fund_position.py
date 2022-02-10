@@ -6,6 +6,7 @@ import datetime
 import baidu_ocr
 from cv2 import imread, imwrite
 from tqdm import tqdm
+from pathlib import Path
 
 
 funds = ('002943', '000297', '001718', '001532', '000991', '004685', '006102',
@@ -15,11 +16,15 @@ funds = ('002943', '000297', '001718', '001532', '000991', '004685', '006102',
          '006299', '006313', '161039', '001856', '003378', '040046', '000547',
          '001811', '005940', '005939', '006002')
 
+
+daily_fund_position_path = 'data/fund/position/summary'
+
+
 def usage():
     print(f"{os.path.basename(__file__)} <image>")
 
 
-def split_image(image_file_name):
+def crop_image(image_file_name):
     if not os.path.exists(image_file_name):
         logging.error(f"image {image_file_name} does not exist!")
         exit()
@@ -50,7 +55,7 @@ def split_image(image_file_name):
     return images
 
 
-def update_fund_position(output_file_name, images):
+def update_fund_position(timestamp, images):
     df = None
     for image in tqdm(images):
         df0 = baidu_ocr.get_funds_position_ttjj_app(image, funds)
@@ -62,6 +67,11 @@ def update_fund_position(output_file_name, images):
 
     if df is not None:
         print(df)
+        path = Path(daily_fund_position_path)
+        if not path.exists():
+            path.mkdir(parents=True)
+
+        output_file_name = os.path.join(path, f"{timestamp}.csv")
         df.to_csv(output_file_name, encoding='utf_8_sig', index=False)
 
 
@@ -70,8 +80,8 @@ if __name__ == '__main__':
         usage()
         exit()
 
-    images = split_image(sys.argv[1])
+    images = crop_image(sys.argv[1])
 
     today = datetime.date.today()
-    update_fund_position("{:04d}_{:02d}_{:02d}.csv".format(today.year, today.month, today.day),
+    update_fund_position("{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day),
                          images)
