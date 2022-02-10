@@ -125,8 +125,8 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
                 col_position_income: [],
                 col_position_yield: []}
         i = 0
-        while i + 7 < len(words):
-            print(f"{i}: {words[i]}")
+        while i < len(words):
+            # print(f"{i}: {words[i]}")
             if words[i] == '资产':
                 if is_valid_fund_id(words[i - 1]):
                     # fund_id doesn't stick to fund_name
@@ -150,12 +150,12 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
                         position_income, i = get_next_float(i, words)
                         position_yield, i = get_next_float(i, words)
                         save_data()
-                    else:
-                        # TODO get_possible_fund_id,
-                        # 不如通过fund_name反查，等fund db建立起来
-                        i += 1
-            else:
-                i += 1
+#                     else:
+                        # pass
+                        # # TODO get_possible_fund_id,
+                        # # 不如通过fund_name反查，等fund db建立起来
+#                         i += 1
+            i += 1
 
         if len(data[col_fund_id]) != 0:
             df = pd.DataFrame(data)
