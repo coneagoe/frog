@@ -7,12 +7,17 @@ import configparser
 import logging
 import pandas as pd
 import os
+import re
 from fund_common import *
 
 
 config_file_name = 'config.ini'
 token = None
 proxies = None
+
+
+pattern_stick = re.compile(r'(.*)(\d{6})')
+pattern_tailing_number = re.compile(r'\d+$')
 
 
 def get_token():
@@ -79,8 +84,32 @@ def get_ocr(image_name: str):
 
 # 天天基金app仓位
 def get_funds_position_ttjj_app(image: str, funds: tuple):
+    def save_data():
+        try:
+            _asset = float(asset.replace(',', ''))
+            _yesterday_earning = float(yesterday_earning.replace(',', ''))
+            _position_income = float(position_income.replace(',', ''))
+            _position_yield = float(position_yield.strip('%').replace(',', ''))
+        except ValueError as e:
+            logging.warning(f"{image}: {words}")
+            raise e
+
+        data[col_fund_id].append(fund_id)
+        data[col_fund_name].append(pattern_tailing_number.sub('', fund_name))
+        data[col_asset].append(_asset)
+        data[col_yesterday_earning].append(_yesterday_earning)
+        data[col_position_income].append(_position_income)
+        data[col_position_yield].append(_position_yield)
+
+    def is_stick(input):
+        m = pattern_stick.match(input)
+        if m is None:
+            return None
+
+        return (m.group(0), m.group(1))
+
     words = get_ocr(image)
-    print(words)
+    # print(words)
     if words is not None:
         data = {col_fund_id: [],
                 col_fund_name: [],
@@ -90,25 +119,26 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
                 col_position_yield: []}
         i = 0
         while i + 7 < len(words):
+            print(f"{i}: {words[i]}")
             if words[i] in funds:
+                fund_id = words[i]
+                fund_name = words[i - 1]
+                asset = words[i + 4]
+                yesterday_earning = words[i + 5]
+                position_income = words[i + 6]
+                position_yield = words[i + 7]
+
                 try:
-                    asset = float(words[i + 4].replace(',', ''))
-                    yesterday_earning = float(words[i + 5].replace(',', ''))
-                    position_income = float(words[i + 6].replace(',', ''))
-                    position_yield = float(words[i + 7].strip('%').replace(',', ''))
+                    save_data()
                 except ValueError:
-                    logging.warning(f"{image}: {words}")
                     i += 1
                     continue
 
-                data[col_fund_id].append(words[i])
-                data[col_fund_name].append(words[i - 1])
-                data[col_asset].append(asset)
-                data[col_yesterday_earning].append(yesterday_earning)
-                data[col_position_income].append(position_income)
-                data[col_position_yield].append(position_yield)
                 i += 8
             else:
+#                 tmp = is_stick(words[i - 1])
+                # if tmp:
+#                     pass
                 i += 1
 
         if len(data[col_fund_id]) != 0:
@@ -116,4 +146,7 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
             return df
 
     return None
+
+
+
 
