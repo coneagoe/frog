@@ -6,15 +6,21 @@ import json
 import configparser
 import logging
 import pandas as pd
+import os
 from fund_common import *
 
 
+config_file_name = 'config.ini'
 token = None
 
 
 def get_token():
+    if not os.path.exists(config_file_name):
+        logging.error(f"{config_file_name} does not exist!")
+        exit()
+
     config = configparser.ConfigParser()
-    config.read('config.ini')
+    config.read(config_file_name)
     client_id = config['baidu_ocr']['client_id']
     client_secret = config['baidu_ocr']['client_secret']
     logging.info(f"client_id: {client_id}, client_secret: {client_secret}")
