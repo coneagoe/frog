@@ -19,6 +19,7 @@ proxies = None
 pattern_stick = re.compile(r'.*(\d{6})$')
 pattern_tailing_number = re.compile(r'\d+$')
 pattern_valid_fund_id = re.compile(r'^\d{6}$')
+pattern_float = re.compile(r'^\s*([-+\.,\d%]+)\s*$')
 
 
 def get_token():
@@ -89,21 +90,12 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
         return pattern_valid_fund_id.match(fund_id)
 
     def save_data():
-        try:
-            _asset = float(asset.replace(',', ''))
-            _yesterday_earning = float(yesterday_earning.replace(',', ''))
-            _position_income = float(position_income.replace(',', ''))
-            _position_yield = float(position_yield.strip('%').replace(',', ''))
-        except ValueError as e:
-            logging.warning(f"convert error in {image}: {e}")
-            raise e
-
         data[col_fund_id].append(fund_id)
         data[col_fund_name].append(pattern_tailing_number.sub('', fund_name))
-        data[col_asset].append(_asset)
-        data[col_yesterday_earning].append(_yesterday_earning)
-        data[col_position_income].append(_position_income)
-        data[col_position_yield].append(_position_yield)
+        data[col_asset].append(float(asset.replace(',', '')))
+        data[col_yesterday_earning].append(float(yesterday_earning.replace(',', '')))
+        data[col_position_income].append(float(position_income.replace(',', '')))
+        data[col_position_yield].append(float(position_yield.strip('%').replace(',', '')))
 
     def is_stick(input):
         m = pattern_stick.match(input)
@@ -111,6 +103,14 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
             return None
 
         return (input, m.group(1))
+
+    def get_next_float(i: int, words: list):
+        while i < len(words):
+            tmp = pattern_float.match(words[i])
+            if tmp:
+                i += 1
+                return (tmp.group(1), i)
+            i += 1
 
     def get_possible_fund_id(input):
         pass
@@ -132,36 +132,24 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
                     # fund_id doesn't stick to fund_name
                     fund_id = words[i - 1]
                     fund_name = words[i - 2]
-                    asset = words[i + 3]
-                    yesterday_earning = words[i + 4]
-                    position_income = words[i + 5]
-                    position_yield = words[i + 6]
-
-                    try:
-                        save_data()
-                    except ValueError:
-                        i += 1
-                        continue
-
-                    i += 7
+                    i += 1
+                    asset, i = get_next_float(i, words)
+                    yesterday_earning, i = get_next_float(i, words)
+                    position_income, i = get_next_float(i, words)
+                    position_yield, i = get_next_float(i, words)
+                    save_data()
                 else:
                     output = is_stick(words[i - 1])
                     if output:
                         # fund_id sticks to fund_name
                         fund_id = output[1]
                         fund_name = output[0]
-                        asset = words[i + 3]
-                        yesterday_earning = words[i + 4]
-                        position_income = words[i + 5]
-                        position_yield = words[i + 6]
-
-                        try:
-                            save_data()
-                        except ValueError:
-                            i += 1
-                            continue
-
-                        i += 7
+                        i += 1
+                        asset, i = get_next_float(i, words)
+                        yesterday_earning, i = get_next_float(i, words)
+                        position_income, i = get_next_float(i, words)
+                        position_yield, i = get_next_float(i, words)
+                        save_data()
                     else:
                         # TODO get_possible_fund_id,
                         # 不如通过fund_name反查，等fund db建立起来
