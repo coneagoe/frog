@@ -16,8 +16,9 @@ token = None
 proxies = None
 
 
-pattern_stick = re.compile(r'(.*)(\d{6})')
+pattern_stick = re.compile(r'.*(\d{6})$')
 pattern_tailing_number = re.compile(r'\d+$')
+pattern_valid_fund_id = re.compile(r'^\d{6}$')
 
 
 def get_token():
@@ -84,6 +85,9 @@ def get_ocr(image_name: str):
 
 # 天天基金app仓位
 def get_funds_position_ttjj_app(image: str, funds: tuple):
+    def is_valid_fund_id(fund_id: str):
+        return pattern_valid_fund_id.match(fund_id)
+
     def save_data():
         try:
             _asset = float(asset.replace(',', ''))
@@ -91,7 +95,7 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
             _position_income = float(position_income.replace(',', ''))
             _position_yield = float(position_yield.strip('%').replace(',', ''))
         except ValueError as e:
-            logging.warning(f"{image}: {words}")
+            logging.warning(f"convert error in {image}: {e}")
             raise e
 
         data[col_fund_id].append(fund_id)
@@ -106,7 +110,10 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
         if m is None:
             return None
 
-        return (m.group(0), m.group(1))
+        return (input, m.group(1))
+
+    def get_possible_fund_id(input):
+        pass
 
     words = get_ocr(image)
     # print(words)
@@ -120,25 +127,46 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
         i = 0
         while i + 7 < len(words):
             print(f"{i}: {words[i]}")
-            if words[i] in funds:
-                fund_id = words[i]
-                fund_name = words[i - 1]
-                asset = words[i + 4]
-                yesterday_earning = words[i + 5]
-                position_income = words[i + 6]
-                position_yield = words[i + 7]
+            if words[i] == '资产':
+                if is_valid_fund_id(words[i - 1]):
+                    # fund_id doesn't stick to fund_name
+                    fund_id = words[i - 1]
+                    fund_name = words[i - 2]
+                    asset = words[i + 3]
+                    yesterday_earning = words[i + 4]
+                    position_income = words[i + 5]
+                    position_yield = words[i + 6]
 
-                try:
-                    save_data()
-                except ValueError:
-                    i += 1
-                    continue
+                    try:
+                        save_data()
+                    except ValueError:
+                        i += 1
+                        continue
 
-                i += 8
+                    i += 7
+                else:
+                    output = is_stick(words[i - 1])
+                    if output:
+                        # fund_id sticks to fund_name
+                        fund_id = output[1]
+                        fund_name = output[0]
+                        asset = words[i + 3]
+                        yesterday_earning = words[i + 4]
+                        position_income = words[i + 5]
+                        position_yield = words[i + 6]
+
+                        try:
+                            save_data()
+                        except ValueError:
+                            i += 1
+                            continue
+
+                        i += 7
+                    else:
+                        # TODO get_possible_fund_id,
+                        # 不如通过fund_name反查，等fund db建立起来
+                        i += 1
             else:
-#                 tmp = is_stick(words[i - 1])
-                # if tmp:
-#                     pass
                 i += 1
 
         if len(data[col_fund_id]) != 0:
@@ -146,7 +174,5 @@ def get_funds_position_ttjj_app(image: str, funds: tuple):
             return df
 
     return None
-
-
 
 
