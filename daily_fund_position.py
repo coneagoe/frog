@@ -4,7 +4,7 @@ import os
 import sys
 import datetime
 import baidu_ocr
-from cv2 import imread, imwrite
+from PIL import Image
 from tqdm import tqdm
 from pathlib import Path
 
@@ -29,8 +29,8 @@ def crop_image(image_file_name):
         logging.error(f"image {image_file_name} does not exist!")
         exit()
 
-    image = imread(image_file_name)
-    width, height = image.shape[1::-1]
+    image = Image.open(image_file_name)
+    width, height = image.size
     x0, x1 = 0, width
     y0, y1 = 0, 0
     end = False
@@ -42,8 +42,8 @@ def crop_image(image_file_name):
             y1 = height
             end = True
 
-        cropped = image[y0:y1, x0:x1]  # 裁剪坐标为[y0:y1, x0:x1]
-        imwrite(f"{i}.jpg", cropped)
+        cropped = image.crop((x0, y0, x1, y1))
+        cropped.save(f"{i}.jpg")
         images.append(f"{i}.jpg")
 
         if end:
