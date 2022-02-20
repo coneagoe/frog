@@ -30,6 +30,8 @@ timeout = aiohttp.ClientTimeout(total=5)
 market = mcal.get_calendar('XSHG')
 holidays = list(market.holidays().holidays)
 
+pattern_timestamp = re.compile(r'\d{4}-\d{2}-\d{2}')
+
 
 def retry(times):
     def wrapper(func):
@@ -45,27 +47,6 @@ def retry(times):
             return None
         return wrapped
     return wrapper
-
-
-# class TooManyTriesException(BaseException):
-#     pass
-
-
-# def retry(times):
-    # def func_wrapper(func):
-        # @functools.wraps(func)
-        # async def wrapper(*args, **kwargs):
-            # for time in range(times):
-                # print('times:', time + 1)
-                # # noinspection
-                # # PyBroadException
-                # try:
-                    # return await func(*args, **kwargs)
-                # except Exception as exc:
-                    # pass
-                # raise TooManyTriesException() from exc
-            # return wrapper
-#         return func_wrapper
 
 
 def check_path():
@@ -130,10 +111,10 @@ class TianTianCrawler(object):
     async def do_download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
         df = None
         page_count = self.calculate_page_count(start_date, end_date)
-        print(f"download_history_netvalues: page_count = {page_count}")
 
         async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-            tasks = [self.fetch_history_netvalues(fund_id, session, start_date, end_date, i) for i in range(1, page_count + 1)]
+            tasks = [self.fetch_history_netvalues(fund_id, session, start_date, end_date, i)
+                     for i in range(1, page_count + 1)]
             pages = await asyncio.gather(*tasks)
             for page in pages:
                 if page is not None:
@@ -145,8 +126,13 @@ class TianTianCrawler(object):
         return df
 
 
+    def history_netvalue_checker(self, page):
+        df = pd.read_html(page, encoding='utf-8')[0]
+        return pattern_timestamp.match(df.iat[0, 0])
+
+
     @retry(times=10)
-    async def fetch(self, session, url, params):
+    async def fetch(self, session, url, params, checker):
         if enable_proxy:
             while True:
                 if self.worker_count >= self.max_workers:
@@ -158,12 +144,14 @@ class TianTianCrawler(object):
 
         result = None
         proxy = get_proxy()
-        # logging.info(f"fetch: params: {params}, proxy: {proxy}, worker: {self.worker_count}")
 
         async with session.get(url, params=params, proxy=proxy['http']) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"status: {resp.status}, {url}, {params}")
+
             result = await resp.text()
+            if not checker(result):
+                raise RuntimeError(result)
 
         if enable_proxy: self.worker_count -= 1
         return result
@@ -185,7 +173,7 @@ class TianTianCrawler(object):
         if start_date: params['sdate'] = start_date
         if end_date: params['edate'] = end_date
 
-        return await self.fetch(session, history_url, params)
+        return await self.fetch(session, history_url, params, self.history_netvalue_checker)
 
 
     def download_directly(self, url, params):
