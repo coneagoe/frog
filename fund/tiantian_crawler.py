@@ -10,19 +10,15 @@ import aiohttp
 import asyncio
 import aiofiles
 from datetime import datetime
-# from fake_useragent import UserAgent
 import requests
 import numpy as np
 import pandas_market_calendars as mcal
-# from retrying_async import retry
 from common import *
 from proxy import get_proxy
 
 
-test_url = "http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&sdate=2021-01-01&edate=2022-01-01&per=20&page=13"
-
-
-logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)
+# logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)
+enable_proxy = False
 
 
 headers = {
@@ -35,10 +31,6 @@ market = mcal.get_calendar('XSHG')
 holidays = list(market.holidays().holidays)
 
 
-class TooManyTriesException(BaseException):
-    pass
-
-
 def retry(times):
     def wrapper(func):
         @functools.wraps(func)
@@ -47,11 +39,16 @@ def retry(times):
                 try:
                     return await func(*args, **kwargs)
                 except Exception as e:
-                    print(e)
+                    if str(e) != "":
+                        logging.error(e)
                 await asyncio.sleep(3)
             return None
         return wrapped
     return wrapper
+
+
+# class TooManyTriesException(BaseException):
+#     pass
 
 
 # def retry(times):
@@ -148,8 +145,31 @@ class TianTianCrawler(object):
         return df
 
 
-    # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&sdate=2001-12-18&edate=2020-05-18&per=20&page=1
     @retry(times=10)
+    async def fetch(self, session, url, params):
+        if enable_proxy:
+            while True:
+                if self.worker_count >= self.max_workers:
+                    await asyncio.sleep(3)
+                else:
+                    self.worker_count += 1
+                    break
+
+
+        result = None
+        proxy = get_proxy()
+        # logging.info(f"fetch: params: {params}, proxy: {proxy}, worker: {self.worker_count}")
+
+        async with session.get(url, params=params, proxy=proxy['http']) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"status: {resp.status}, {url}, {params}")
+            result = await resp.text()
+
+        if enable_proxy: self.worker_count -= 1
+        return result
+
+
+    # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&sdate=2001-12-18&edate=2020-05-18&per=20&page=1
     async def fetch_history_netvalues(self, fund_id: str,
                                       session,
                                       start_date: str,
@@ -165,45 +185,7 @@ class TianTianCrawler(object):
         if start_date: params['sdate'] = start_date
         if end_date: params['edate'] = end_date
 
-#         if self.proxies is None:
-            # proxy = None
-        # else:
-            # proxy = self.proxies[self.i]
-            # self.i += 1
-            # if self.i == len(self.proxies):
-#                 self.i = 0
-
-#         while True:
-            # if self.worker_count >= self.max_workers:
-                # await asyncio.sleep(3)
-            # else:
-                # self.worker_count += 1
-#                 break
-
-
-        result = None
-        # for i in range(3):
-        proxy = get_proxy()
-        print(f"fetch_history_netvalues: params: {params}, proxy: {proxy}, worker: {self.worker_count}")
-
-        # try:
-        async with session.get(history_url, params=params, proxy=proxy['http']) as resp:
-            assert resp.status == 200
-            result = await resp.text()
-            # print(f"page({page}): {result}")
-#                 if resp.status == 200:
-                    # result = await resp.text()
-                    # # break
-                # else:
-                    # # self.worker_count -= 1
-                    # logging.warning(f"status: {resp.status}, fund_id = {fund_id}, page = {page}")
-#                     # raise RuntimeError
-#         except Exception as e:
-            # logging.warning(f"e: {e}, fund_id = {fund_id}, page = {page}")
-#             result = self.download_directly(history_url, params)
-
-        # self.worker_count -= 1
-        return result
+        return await self.fetch(session, history_url, params)
 
 
     def download_directly(self, url, params):
