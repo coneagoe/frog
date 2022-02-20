@@ -5,18 +5,70 @@ import pandas as pd
 from pathlib import Path
 import json
 import re
+import functools
 import aiohttp
 import asyncio
 import aiofiles
 from datetime import datetime
-from fake_useragent import UserAgent
+# from fake_useragent import UserAgent
+import requests
+import numpy as np
+import pandas_market_calendars as mcal
+# from retrying_async import retry
 from common import *
-import proxy
+from proxy import get_proxy
+
+
+test_url = "http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&sdate=2021-01-01&edate=2022-01-01&per=20&page=13"
+
+
+logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)
 
 
 headers = {
-    'User-Agent': UserAgent().random
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2227.0 Safari/537.36'
 }
+
+timeout = aiohttp.ClientTimeout(total=5)
+
+market = mcal.get_calendar('XSHG')
+holidays = list(market.holidays().holidays)
+
+
+class TooManyTriesException(BaseException):
+    pass
+
+
+def retry(times):
+    def wrapper(func):
+        @functools.wraps(func)
+        async def wrapped(*args, **kwargs):
+            for i in range(times):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    print(e)
+                await asyncio.sleep(3)
+            return None
+        return wrapped
+    return wrapper
+
+
+# def retry(times):
+    # def func_wrapper(func):
+        # @functools.wraps(func)
+        # async def wrapper(*args, **kwargs):
+            # for time in range(times):
+                # print('times:', time + 1)
+                # # noinspection
+                # # PyBroadException
+                # try:
+                    # return await func(*args, **kwargs)
+                # except Exception as exc:
+                    # pass
+                # raise TooManyTriesException() from exc
+            # return wrapper
+#         return func_wrapper
 
 
 def check_path():
@@ -32,8 +84,9 @@ def is_older_than_30_days(f):
 
 class TianTianCrawler(object):
     def __init__(self):
-        self.proxies = proxy.get_https_proxies()
         self.i = 0
+        self.max_workers = 8
+        self.worker_count = 0
 
 
     def get_all_fund_general_info(self):
@@ -52,7 +105,7 @@ class TianTianCrawler(object):
             fund_dict_path = 'http://fund.eastmoney.com/js/fundcode_search.js'
             async with session.get(fund_dict_path) as resp:
                 if resp.status == 200:
-                    # you have download all fund general info first,
+                    # you have to download all fund general info first,
                     # writng csv asynchronously is meaningless.
                     # (only one task at that time)
                     tmp = re.sub(r'^var\s*r\s*=\s*', '', await resp.text()).strip(';')
@@ -69,59 +122,98 @@ class TianTianCrawler(object):
         item_per_page = 20
         sdate = datetime.strptime(start_date, '%Y-%m-%d')
         edate = datetime.strptime(end_date, '%Y-%m-%d')
-        delta_date = edate - sdate
-        page_count = (delta_date.days + 1) // item_per_page
-        if (delta_date.days + 1) % item_per_page:
+        days = np.busday_count(sdate.date(), edate.date(), holidays=holidays)
+        page_count = days // item_per_page
+        if days % item_per_page:
             page_count += 1
 
         return page_count
 
 
     async def do_download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
-        print("download_history_netvalues: start")
         df = None
         page_count = self.calculate_page_count(start_date, end_date)
+        print(f"download_history_netvalues: page_count = {page_count}")
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
             tasks = [self.fetch_history_netvalues(fund_id, session, start_date, end_date, i) for i in range(1, page_count + 1)]
             pages = await asyncio.gather(*tasks)
             for page in pages:
-                df0 = pd.read_html(page, encoding='utf-8')[0]
-                if df is None:
-                    df = df0
-                else:
-                    df = df.append(df0, ignore_index=True)
+                if page is not None:
+                    df0 = pd.read_html(page, encoding='utf-8')[0]
+                    if df is None:
+                        df = df0
+                    else:
+                        df = df.append(df0, ignore_index=True)
         return df
 
 
     # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&sdate=2001-12-18&edate=2020-05-18&per=20&page=1
+    @retry(times=10)
     async def fetch_history_netvalues(self, fund_id: str,
                                       session,
-                                      start_date: str = None,
-                                      end_date: str = None,
-                                      page: int = 1):
+                                      start_date: str,
+                                      end_date: str,
+                                      page: int):
         '''
         :param start_date: YYYY-MM-DD
         :param end_date: YYYY-MM-DD
         :return:
         '''
-        print("fetch_history_netvalues: start")
         history_url = "http://fund.eastmoney.com/f10/F10DataApi.aspx"
-        params = {'type': 'lsjz', 'code': fund_id, 'page': page}
+        params = {'type': 'lsjz', 'code': fund_id, 'per': 20, 'page': page}
         if start_date: params['sdate'] = start_date
         if end_date: params['edate'] = end_date
-        proxy = self.proxies[self.i]
-        self.i += 1
-        if self.i == len(self.proxies):
-            self.i = 0
-        print(f"proxy: {proxy}")
 
-        async with session.get(history_url, params=params, proxy=proxy) as resp:
-            if resp.status == 200:
-                return await resp.text()
-            else:
-                logging.warning(f"status: {resp.status_code}, fund_id = {fund_id}, page = {page}")
-                return None
+#         if self.proxies is None:
+            # proxy = None
+        # else:
+            # proxy = self.proxies[self.i]
+            # self.i += 1
+            # if self.i == len(self.proxies):
+#                 self.i = 0
+
+#         while True:
+            # if self.worker_count >= self.max_workers:
+                # await asyncio.sleep(3)
+            # else:
+                # self.worker_count += 1
+#                 break
+
+
+        result = None
+        # for i in range(3):
+        proxy = get_proxy()
+        print(f"fetch_history_netvalues: params: {params}, proxy: {proxy}, worker: {self.worker_count}")
+
+        # try:
+        async with session.get(history_url, params=params, proxy=proxy['http']) as resp:
+            assert resp.status == 200
+            result = await resp.text()
+            # print(f"page({page}): {result}")
+#                 if resp.status == 200:
+                    # result = await resp.text()
+                    # # break
+                # else:
+                    # # self.worker_count -= 1
+                    # logging.warning(f"status: {resp.status}, fund_id = {fund_id}, page = {page}")
+#                     # raise RuntimeError
+#         except Exception as e:
+            # logging.warning(f"e: {e}, fund_id = {fund_id}, page = {page}")
+#             result = self.download_directly(history_url, params)
+
+        # self.worker_count -= 1
+        return result
+
+
+    def download_directly(self, url, params):
+        result = None
+        resp = requests.get(url, params=params, headers=headers)
+        if resp.status_code == 200:
+            result = resp.content
+        else:
+            logging.warning(f"status: {resp.status_code}, fund_id = {fund_id}, page = {page}")
+        return result
 
 
     async def save_history_netvalues(self, output, df):
