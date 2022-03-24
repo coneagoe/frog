@@ -17,11 +17,6 @@ from datetime import datetime
 from common import *
 
 
-found_code = '111111'
-page_number = ''
-#start_date='2010-08-20'
-end_date = ''
-
 url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz'\
       '&code=110022&page=10&sdate=2019-01-01&edate=2019-02-13&per=1'
 
