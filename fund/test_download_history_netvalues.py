@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import asyncio
 from tiantian_crawler import TianTianCrawler
 from timeit import Timer
 
@@ -10,7 +9,7 @@ from timeit import Timer
 #     await ttc.save_history_netvalues('tmp.csv', df)
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
     t = Timer()
     ttc = TianTianCrawler()
     ttc.download_history_netvalues('000001', '2021-01-01', '2022-01-01')

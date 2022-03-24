@@ -10,14 +10,16 @@ import aiohttp
 import asyncio
 import aiofiles
 from datetime import datetime
-import requests
 import numpy as np
 import pandas_market_calendars as mcal
+from bs4 import BeautifulSoup
+import motor.motor_asyncio
 from common import *
 from proxy import get_proxy
 
 
 # logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)
+worker_restrict = False
 enable_proxy = False
 
 
@@ -65,12 +67,44 @@ class TianTianCrawler(object):
         self.i = 0
         self.max_workers = 8
         self.worker_count = 0
+        self.mongodb_client = motor.motor_asyncio.AsyncIOMotorClient()
+        self.db = self.mongodb_client['fund']
+        self.collection_general_info = self.db['general_info']
+
+
+    @retry(times=10)
+    async def fetch(self, session, url, params, checker):
+        if worker_restrict:
+            while True:
+                if self.worker_count >= self.max_workers:
+                    await asyncio.sleep(3)
+                else:
+                    self.worker_count += 1
+                    break
+
+        result = None
+        proxy = None
+        if enable_proxy:
+            proxy = get_proxy()['http']
+
+        async with session.get(url, params=params, proxy=proxy) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"status: {resp.status}, {url}, {params}")
+
+            result = await resp.text()
+            if not checker(result):
+                raise RuntimeError(result)
+
+        if worker_restrict: self.worker_count -= 1
+
+        return result
 
 
     def get_all_fund_general_info(self):
         if not os.path.exists(all_general_info_csv) or \
                 is_older_than_30_days(all_general_info_csv):
-            asyncio.run(download_all_fund_general_info())
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(download_all_fund_general_info())
 
         if not os.path.exists(all_general_info_csv):
             return None
@@ -96,16 +130,14 @@ class TianTianCrawler(object):
                     logging.warning(f"status: {resp.status}")
 
 
-    def calculate_page_count(self, start_date: str, end_date: str) -> int:
-        item_per_page = 20
-        sdate = datetime.strptime(start_date, '%Y-%m-%d')
-        edate = datetime.strptime(end_date, '%Y-%m-%d')
-        days = np.busday_count(sdate.date(), edate.date(), holidays=holidays)
-        page_count = days // item_per_page
-        if days % item_per_page:
-            page_count += 1
+    def download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
+        output_file_name = os.path.join(history_netvalue_path, f"{fund_id}.csv")
+        async def foo():
+            df = await self.do_download_history_netvalues(fund_id, start_date, end_date)
+            await self.save_history_netvalues(output_file_name, df)
 
-        return page_count
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(foo())
 
 
     async def do_download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
@@ -113,7 +145,7 @@ class TianTianCrawler(object):
         page_count = self.calculate_page_count(start_date, end_date)
 
         async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-            tasks = [self.fetch_history_netvalues(fund_id, session, start_date, end_date, i)
+            tasks = [self.fetch_history_netvalues(session, fund_id, start_date, end_date, i)
                      for i in range(1, page_count + 1)]
             pages = await asyncio.gather(*tasks)
             for page in pages:
@@ -126,40 +158,9 @@ class TianTianCrawler(object):
         return df
 
 
-    def history_netvalue_checker(self, page):
-        df = pd.read_html(page, encoding='utf-8')[0]
-        return pattern_timestamp.match(df.iat[0, 0])
-
-
-    @retry(times=10)
-    async def fetch(self, session, url, params, checker):
-        if enable_proxy:
-            while True:
-                if self.worker_count >= self.max_workers:
-                    await asyncio.sleep(3)
-                else:
-                    self.worker_count += 1
-                    break
-
-
-        result = None
-        proxy = get_proxy()
-
-        async with session.get(url, params=params, proxy=proxy['http']) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"status: {resp.status}, {url}, {params}")
-
-            result = await resp.text()
-            if not checker(result):
-                raise RuntimeError(result)
-
-        if enable_proxy: self.worker_count -= 1
-        return result
-
-
-    # http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code=000001&sdate=2001-12-18&edate=2020-05-18&per=20&page=1
-    async def fetch_history_netvalues(self, fund_id: str,
+    async def fetch_history_netvalues(self,
                                       session,
+                                      fund_id: str,
                                       start_date: str,
                                       end_date: str,
                                       page: int):
@@ -176,16 +177,6 @@ class TianTianCrawler(object):
         return await self.fetch(session, history_url, params, self.history_netvalue_checker)
 
 
-    def download_directly(self, url, params):
-        result = None
-        resp = requests.get(url, params=params, headers=headers)
-        if resp.status_code == 200:
-            result = resp.content
-        else:
-            logging.warning(f"status: {resp.status_code}, fund_id = {fund_id}, page = {page}")
-        return result
-
-
     async def save_history_netvalues(self, output, df):
         print("save_history_netvalues: start")
         if df is not None:
@@ -194,11 +185,98 @@ class TianTianCrawler(object):
                 await f.write(tmp)
 
 
-    def download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
-        output_file_name = os.path.join(history_netvalue_path, f"{fund_id}.csv")
-        async def foo():
-            df = await self.do_download_history_netvalues(fund_id, start_date, end_date)
-            await self.save_history_netvalues(output_file_name, df)
-        asyncio.run(foo())
+    def calculate_page_count(self, start_date: str, end_date: str) -> int:
+        item_per_page = 20
+        sdate = datetime.strptime(start_date, '%Y-%m-%d')
+        edate = datetime.strptime(end_date, '%Y-%m-%d')
+        days = np.busday_count(sdate.date(), edate.date(), holidays=holidays)
+        page_count = days // item_per_page
+        if days % item_per_page:
+            page_count += 1
+
+        return page_count
 
 
+    def history_netvalue_checker(self, page):
+        df = pd.read_html(page, encoding='utf-8')[0]
+        return pattern_timestamp.match(df.iat[0, 0])
+
+
+    # general info
+    def download_general_info(self, fund_ids: list[str]):
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.do_download_general_info(fund_ids))
+
+
+    async def do_download_general_info(self, fund_ids: list[str]):
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+            tasks = [self.fetch_and_save_general_info(session, fund_id)
+                     for fund_id in fund_ids]
+            await asyncio.gather(*tasks)
+
+
+    async def fetch_and_save_general_info(self, session, fund_id: str):
+        page = await self.fetch_general_info(session, fund_id)
+        await self.save_general_info(fund_id, page)
+
+
+    async def fetch_general_info(self, session, fund_id: str):
+        # http://fundf10.eastmoney.com/jbgk_000001.html
+        general_info_url = f"http://fundf10.eastmoney.com/jbgk_{fund_id}.html"
+        return await self.fetch(session, general_info_url, None, self.general_info_checker)
+
+
+    async def save_general_info(self, fund_id, page):
+        fund_name = None
+        launch_date = None
+        asset_size = None
+        fund_company = None
+        managers = {}
+
+        soup = BeautifulSoup(page, 'lxml')
+        for th in soup.find_all('th'):
+            if th.text == u'基金简称':
+                fund_name = th.next_sibling.text
+                continue
+
+            if th.text == u'发行日期':
+                Y, M, D, tmp = re.split(u'年|月|日', th.next_sibling.text)
+                launch_date = f'{Y}-{M}-{D}'
+                continue
+
+            if th.text == u'资产规模':
+                asset_size_mch = re.match('([0-9.]+)', th.next_sibling.text)
+                if asset_size_mch:
+                    asset_size = asset_size_mch.group(1)
+                continue
+
+            if th.text == u'基金管理人':
+                a = th.next_sibling.find('a')
+                ref = a.get('href').strip('//')
+                fund_company = [a.text, ref]
+                continue
+
+            if th.text == u'基金经理人':
+                for a in th.next_sibling.find_all('a'):
+                    ref = a.get('href').strip('//')
+                    manager_id_mch = re.match('[a-zA-Z./]+(\d+)\.html', ref)
+                    if manager_id_mch:
+                        manager_id = manager_id_mch.group(1)
+                        manager_name = a.text
+                        managers[manager_id] = [manager_name, ref]
+                break
+
+        if fund_id and fund_name and launch_date \
+                and asset_size and fund_company \
+                and managers:
+            document = {'fund_id': fund_id,
+                        'fund_name': fund_name,
+                        'launch_date': launch_date,
+                        'asset_size': asset_size,
+                        'fund_company': fund_company,
+                        'managers': managers}
+            await self.collection_general_info.insert_one(document)
+
+
+    def general_info_checker(self, page):
+        return True
