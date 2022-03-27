@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import re
 import functools
+import random
 import aiohttp
 import asyncio
 import aiofiles
@@ -52,9 +53,10 @@ def retry(times):
 
 
 def check_path():
-    path = Path(fund_data_path)
-    if not path.exists():
-        path.mkdir(parents=True)
+    for i in [history_netvalue_path]:
+        path = Path(i)
+        if not path.exists():
+            path.mkdir(parents=True)
 
 
 def is_older_than_30_days(f):
@@ -70,6 +72,9 @@ class TianTianCrawler(object):
         self.mongodb_client = motor.motor_asyncio.AsyncIOMotorClient()
         self.db = self.mongodb_client['fund']
         self.collection_general_info = self.db['general_info']
+        self.collection_managers = self.db['managers']
+        self.collection_scales = self.db['scales']
+        check_path()
 
 
     @retry(times=10)
@@ -92,8 +97,9 @@ class TianTianCrawler(object):
                 raise RuntimeError(f"status: {resp.status}, {url}, {params}")
 
             result = await resp.text()
-            if not checker(result):
-                raise RuntimeError(result)
+            if checker is not None:
+                if not checker(result):
+                    raise RuntimeError(result)
 
         if worker_restrict: self.worker_count -= 1
 
@@ -178,7 +184,6 @@ class TianTianCrawler(object):
 
 
     async def save_history_netvalues(self, output, df):
-        print("save_history_netvalues: start")
         if df is not None:
             async with aiofiles.open(output, mode='w') as f:
                 tmp = df.to_csv(encoding='utf_8_sig', index=False)
@@ -202,16 +207,19 @@ class TianTianCrawler(object):
         return pattern_timestamp.match(df.iat[0, 0])
 
 
-    # general info
-    def download_general_info(self, fund_ids: list[str]):
+    def download_fund_info(self, fund_ids: list[str]):
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.do_download_general_info(fund_ids))
+        loop.run_until_complete(self.do_download_fund_info(fund_ids))
 
 
-    async def do_download_general_info(self, fund_ids: list[str]):
+    async def do_download_fund_info(self, fund_ids: list[str]):
         async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
             tasks = [self.fetch_and_save_general_info(session, fund_id)
                      for fund_id in fund_ids]
+            tasks.extend([self.fetch_and_save_managers(session, fund_id)
+                          for fund_id in fund_ids])
+            tasks.extend([self.fetch_and_save_history_scales(session, fund_id)
+                          for fund_id in fund_ids])
             await asyncio.gather(*tasks)
 
 
@@ -223,11 +231,12 @@ class TianTianCrawler(object):
     async def fetch_general_info(self, session, fund_id: str):
         # http://fundf10.eastmoney.com/jbgk_000001.html
         general_info_url = f"http://fundf10.eastmoney.com/jbgk_{fund_id}.html"
-        return await self.fetch(session, general_info_url, None, self.general_info_checker)
+        return await self.fetch(session, general_info_url, None, None)
 
 
     async def save_general_info(self, fund_id, page):
         fund_name = None
+        fund_type = None
         launch_date = None
         asset_size = None
         fund_company = None
@@ -237,6 +246,10 @@ class TianTianCrawler(object):
         for th in soup.find_all('th'):
             if th.text == u'基金简称':
                 fund_name = th.next_sibling.text
+                continue
+
+            if th.text == u'基金类型':
+                fund_type = th.next_sibling.text
                 continue
 
             if th.text == u'发行日期':
@@ -266,11 +279,11 @@ class TianTianCrawler(object):
                         managers[manager_id] = [manager_name, ref]
                 break
 
-        if fund_id and fund_name and launch_date \
-                and asset_size and fund_company \
-                and managers:
+        if fund_id and fund_name and fund_type and launch_date \
+                and asset_size and fund_company and managers:
             document = {'fund_id': fund_id,
                         'fund_name': fund_name,
+                        'fund_type': fund_type,
                         'launch_date': launch_date,
                         'asset_size': asset_size,
                         'fund_company': fund_company,
@@ -278,5 +291,39 @@ class TianTianCrawler(object):
             await self.collection_general_info.insert_one(document)
 
 
-    def general_info_checker(self, page):
-        return True
+    async def fetch_and_save_managers(self, session, fund_id: str):
+        page = await self.fetch_managers(session, fund_id)
+        await self.save_managers(fund_id, page)
+
+
+    async def fetch_managers(self, session, fund_id: str):
+        # http://fundf10.eastmoney.com/jjjl_000001.html
+        manager_url = f"http://fundf10.eastmoney.com/jjjl_{fund_id}.html"
+        return await self.fetch(session, manager_url, None, None)
+
+
+    async def save_managers(self, fund_id, page):
+        df = pd.read_html(page, encoding='utf-8')[1]
+        document = {'fund_id': fund_id,
+                    'managers': df.iloc[0:].values.tolist()}
+        await self.collection_managers.insert_one(document)
+
+
+    async def fetch_and_save_history_scales(self, session, fund_id: str):
+        # 'http://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=gmbd&mode=0&code=000001&rt={random.random()}'
+        page = await self.fetch_history_scales(session, fund_id)
+        await self.save_history_scales(fund_id, page)
+
+
+    async def fetch_history_scales(self, session, fund_id: str):
+        scale_url = "http://fundf10.eastmoney.com/FundArchivesDatas.aspx"
+        params = {'type': 'gmbd', 'mode': 0, 'code': fund_id, 'rt': random.random()}
+        return await self.fetch(session, scale_url, params, None)
+
+
+    async def save_history_scales(self, fund_id: str, page):
+        df = pd.read_html(page, encoding='utf-8')[0]
+        document = {'fund_id': fund_id,
+                    'scales': df.iloc[0:].values.tolist()}
+        await self.collection_scales.insert_one(document)
+
