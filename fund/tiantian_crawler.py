@@ -139,14 +139,14 @@ class TianTianCrawler(object):
     def download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
         output_file_name = os.path.join(history_netvalue_path, f"{fund_id}.csv")
         async def foo():
-            df = await self.do_download_history_netvalues(fund_id, start_date, end_date)
+            df = await self.download_history_netvalues(fund_id, start_date, end_date)
             await self.save_history_netvalues(output_file_name, df)
 
         loop = asyncio.get_event_loop()
         loop.run_until_complete(foo())
 
 
-    async def do_download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
+    async def download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
         df = None
         page_count = self.calculate_page_count(start_date, end_date)
 
@@ -208,19 +208,18 @@ class TianTianCrawler(object):
 
 
     def download_fund_info(self, fund_ids: list[str]):
+        async def foo(fund_ids: list[str]):
+            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                tasks = [self.fetch_and_save_general_info(session, fund_id)
+                        for fund_id in fund_ids]
+                tasks.extend([self.fetch_and_save_managers(session, fund_id)
+                            for fund_id in fund_ids])
+                tasks.extend([self.fetch_and_save_history_scales(session, fund_id)
+                            for fund_id in fund_ids])
+                await asyncio.gather(*tasks)
+
         loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.do_download_fund_info(fund_ids))
-
-
-    async def do_download_fund_info(self, fund_ids: list[str]):
-        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-            tasks = [self.fetch_and_save_general_info(session, fund_id)
-                     for fund_id in fund_ids]
-            tasks.extend([self.fetch_and_save_managers(session, fund_id)
-                          for fund_id in fund_ids])
-            tasks.extend([self.fetch_and_save_history_scales(session, fund_id)
-                          for fund_id in fund_ids])
-            await asyncio.gather(*tasks)
+        loop.run_until_complete(foo(fund_ids))
 
 
     async def fetch_and_save_general_info(self, session, fund_id: str):
@@ -327,3 +326,9 @@ class TianTianCrawler(object):
                     'scales': df.iloc[0:].values.tolist()}
         await self.collection_scales.insert_one(document)
 
+
+    async def query_launch_date(self, fund_id: str):
+        document = await self.collection_general_info.find_one(filter={'fund_id': fund_id})
+        if document:
+            return document['launch_date']
+        return None
