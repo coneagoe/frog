@@ -1,2 +1,2 @@
-# -*- coding: utf-8 -*-
-
+from . common import *
+from . tiantian_parse_position import TiantianParser

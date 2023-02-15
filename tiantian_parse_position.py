@@ -3,10 +3,14 @@ import logging
 import os
 import sys
 import datetime
-import baidu_ocr
-from PIL import Image
 from tqdm import tqdm
 from pathlib import Path
+import conf
+from ocr import *
+from fund import TiantianParser
+
+
+config_file_name = 'config.ini'
 
 
 funds = ('002943', '000297', '001718', '001532', '000991', '004685', '006102',
@@ -19,46 +23,25 @@ funds = ('002943', '000297', '001718', '001532', '000991', '004685', '006102',
 
 daily_fund_position_path = 'data/fund/position/summary'
 
+parser = TiantianParser()
+
 
 def usage():
     print(f"{os.path.basename(__file__)} <image>")
 
 
-def crop_image(image_file_name):
-    if not os.path.exists(image_file_name):
-        logging.error(f"image {image_file_name} does not exist!")
-        exit()
-
-    image = Image.open(image_file_name)
-    width, height = image.size
-    x0, x1 = 0, width
-    y0, y1 = 0, 0
-    end = False
-    i = 0
-    images = []
-    while True:
-        y1 += 2000
-        if y1 >= height:
-            y1 = height
-            end = True
-
-        cropped = image.crop((x0, y0, x1, y1))
-        cropped.save(f"{i}.jpg")
-        images.append(f"{i}.jpg")
-
-        if end:
-            break
-
-        y0 = y1 - 100
-        i += 1
-
-    return images
-
-
-def update_fund_position(timestamp, images):
+def update_fund_position(timestamp, images, ocr_type):
+    '''
+    parse fund positions according to screenshots, save the results in csv
+    :param timestamp: csv file name
+    :param images:
+    :param ocr_type:
+    :return: None
+    '''
+    global parser
     df = None
     for image in tqdm(images):
-        df0 = baidu_ocr.get_funds_position_ttjj_app(image, funds)
+        df0 = parser.parse_position(image, ocr_type)
         if df0 is not None:
             if df is None:
                 df = df0
@@ -80,8 +63,11 @@ if __name__ == '__main__':
         usage()
         exit()
 
-    images = crop_image(sys.argv[1])
+    # logging.getLogger().setLevel(logging.DEBUG)
+    conf.config = conf.parse_config(config_file_name)
+
+    images = crop_image(sys.argv[1], OCR_ACCURATE_BASIC, 6000)
 
     today = datetime.date.today()
     update_fund_position("{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day),
-                         images)
+                         images, OCR_ACCURATE_BASIC)
