@@ -15,8 +15,9 @@ import numpy as np
 import pandas_market_calendars as mcal
 from bs4 import BeautifulSoup
 import motor.motor_asyncio
-from common import *
+from conf import *
 from proxy import get_proxy
+from fund import *
 
 
 # logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)

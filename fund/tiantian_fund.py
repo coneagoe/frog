@@ -14,7 +14,7 @@ from datetime import datetime
 # import sys
 # par_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 # sys.path.append(par_path)
-from common import *
+from conf import *
 
 
 url = 'http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz'\
