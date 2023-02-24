@@ -1,2 +1,2 @@
 from . common import *
-from . tiantian_parse_position import TiantianParser
+from . tiantian import TiantianParser

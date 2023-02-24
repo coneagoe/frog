@@ -1,26 +1,25 @@
 # -*- coding: utf-8 -*-
-# import csv
-# import logging
+import logging
+import os
 import sys
 import datetime
-
 import pandas as pd
 from tqdm import tqdm
 import conf
 from ocr import *
-from fund import *
+from stock import *
 
 
-parser = TiantianParser()
+parser = GuotaiParser()
 
 
 def usage():
     print(f"{os.path.basename(__file__)} <image>")
 
 
-def update_fund_position(timestamp, images, ocr_type):
+def update_stock_position(timestamp, images, ocr_type):
     '''
-    parse fund positions according to screenshots, save the results in csv
+    parse stock positions according to screenshots, save the results in csv
     :param timestamp: csv file name
     :param images:
     :param ocr_type:
@@ -34,14 +33,14 @@ def update_fund_position(timestamp, images, ocr_type):
             if df is None:
                 df = df0
             else:
-                # df = df.append(df0, ignore_index=True)
                 df = pd.concat(df, df0, ignore_index=True)
+                # df = df.append(df0, ignore_index=True)
 
     if df is not None:
         # df[col_fund_id] = df[col_fund_id].astype('str')
         print(df)
 
-        output_file_name = os.path.join(get_fund_position_path(), f"{timestamp}.csv")
+        output_file_name = os.path.join(get_stock_position_path(), f"{timestamp}.csv")
         df.to_csv(output_file_name, encoding='utf_8_sig', index=False)
 
 
@@ -51,11 +50,10 @@ if __name__ == '__main__':
         exit()
 
     # logging.getLogger().setLevel(logging.DEBUG)
-
     conf.config = conf.parse_config()
 
     images = crop_image(sys.argv[1], OCR_ACCURATE_BASIC, 6000)
 
     today = datetime.date.today()
-    update_fund_position("{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day),
-                         images, OCR_ACCURATE_BASIC)
+    update_stock_position("{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day),
+                          images, OCR_ACCURATE_BASIC)

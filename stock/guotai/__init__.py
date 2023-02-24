@@ -1,0 +1,1 @@
+from . guotai_parse_position import GuotaiParser

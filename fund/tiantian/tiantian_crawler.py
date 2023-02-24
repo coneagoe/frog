@@ -18,6 +18,7 @@ import motor.motor_asyncio
 from conf import *
 from proxy import get_proxy
 from fund import *
+import conf
 
 
 # logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)
@@ -53,13 +54,6 @@ def retry(times):
     return wrapper
 
 
-def check_path():
-    for i in [history_netvalue_path]:
-        path = Path(i)
-        if not path.exists():
-            path.mkdir(parents=True)
-
-
 def is_older_than_30_days(f):
     dt = datetime.now() - datetime.fromtimestamp(os.path.getmtime(f))
     return dt.days > 30
@@ -75,7 +69,6 @@ class TianTianCrawler(object):
         self.collection_general_info = self.db['general_info']
         self.collection_managers = self.db['managers']
         self.collection_scales = self.db['scales']
-        check_path()
 
 
     @retry(times=10)
@@ -138,7 +131,7 @@ class TianTianCrawler(object):
 
 
     def download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
-        output_file_name = os.path.join(history_netvalue_path, f"{fund_id}.csv")
+        output_file_name = os.path.join(get_fund_history_path(), f"{fund_id}.csv")
         async def foo():
             df = await self.download_history_netvalues(fund_id, start_date, end_date)
             await self.save_history_netvalues(output_file_name, df)
