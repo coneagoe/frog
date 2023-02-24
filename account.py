@@ -29,14 +29,14 @@ if not engine.dialect.has_table(engine, account_table_name):
 
 exit()
 
-df = pd.read_csv('account.csv',encoding='GBK')
+stocks_general_info = pd.read_csv('account.csv', encoding='GBK')
 
 app.layout = html.Div([
     html.H1(u'账户'),
     dash_table.DataTable(
         id='account_table',
-        columns=[{"name": i, "id": i} for i in df.columns],
-        data=df.to_dict('records'),
+        columns=[{"name": i, "id": i} for i in stocks_general_info.columns],
+        data=stocks_general_info.to_dict('records'),
     ),
 ])
 

@@ -10,22 +10,22 @@ from ocr import get_ocr
 pattern_stick = re.compile(r'(\D+)(\d{6})$')
 pattern_tailing_number = re.compile(r'\d+$')
 pattern_valid_fund_id = re.compile(r'^\d{6}$')
-pattern_float = re.compile(r'^\s*([-+\.,\d%]+)\s*$')
+pattern_float = re.compile(r'^\s*([-+.,\d%]+)\s*$')
 
 
 def is_valid_fund_id(fund_id: str):
     return pattern_valid_fund_id.match(fund_id)
 
 
-def is_fund_name_stick_with_fund_id(input):
-    m = pattern_stick.match(input)
+def is_fund_name_stick_with_fund_id(word):
+    m = pattern_stick.match(word)
     if m is None:
-        return (None, None)
+        return None, None
 
-    return (m.group(1), m.group(2))
+    return m.group(1), m.group(2)
 
 
-def get_next_float(i: int, words: list):
+def get_next_float(words: list, i: int):
     while i < len(words):
         logging.debug(f'{i}: {words[i]}')
         tmp = pattern_float.match(words[i])
@@ -34,13 +34,13 @@ def get_next_float(i: int, words: list):
             tmp0 = tmp.group(1).strip('%')
             # ocr may recognize ',' as '.' by mistake
             tmp1, tmp2 = tmp0[:-3], tmp0[-3:]
-            tmp3 = re.sub(r'[,\.]', '', tmp1)
+            tmp3 = re.sub(r'[,.]', '', tmp1)
             logging.debug(f'tmp0: {tmp0}, tmp1: {tmp1}, tmp2: {tmp2}, tmp3: {tmp3}')
-            return (float(tmp3 + tmp2), i)
+            return float(tmp3 + tmp2), i
     logging.error(f'get_next_float: {i}, {words}')
 
 
-def get_possible_fund_id(input):
+def get_possible_fund_id(word):
     pass
 
 
@@ -101,16 +101,16 @@ class TiantianParser:
 
                 try:
                     if self.asset == 0:
-                        self.asset, i = get_next_float(i, words)
+                        self.asset, i = get_next_float(words, i)
 
                     if self.yesterday_earning == 0:
-                        self.yesterday_earning, i = get_next_float(i, words)
+                        self.yesterday_earning, i = get_next_float(words, i)
 
                     if self.position_income == 0:
-                        self.position_income, i = get_next_float(i, words)
+                        self.position_income, i = get_next_float(words, i)
 
                     if self.position_income and self.position_yield == 0:
-                        self.position_yield, i = get_next_float(i, words)
+                        self.position_yield, i = get_next_float(words, i)
                     else:
                         self.position_yield = 0
                         i += 1
@@ -128,4 +128,5 @@ class TiantianParser:
                 return df
 
         return None
+
 
