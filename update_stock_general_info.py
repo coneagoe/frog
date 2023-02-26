@@ -1,17 +1,13 @@
 from stock import *
-from datetime import date
 import conf
+from utility import *
+import os
 
 
 stocks_general_info = None
 
 
-def is_data_older_than_a_week(data_file_path: str):
-    modified_time = os.path.getmtime(data_file_path)
-    today = date.today()
-    pass
-
-
 if __name__ == '__main__':
     conf.config = conf.parse_config()
-    download_stock_general_info()
+    if is_older_than_n_days(os.path.join(get_stock_general_info_path(), )):
+        download_stock_general_info()

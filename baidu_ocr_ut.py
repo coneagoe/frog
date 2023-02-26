@@ -1,5 +1,5 @@
 import unittest
-from fund import tiantian_parse_position as ocr
+from fund.tiantian import tiantian_parse_position as ocr
 
 
 class MyTestCase(unittest.TestCase):

@@ -22,8 +22,8 @@ class Stock(Base):
         return f"code: {self.code}, name: {self.name}, target: {self.target_price}"
 
 
-df = pd.read_sql_table(table_name='stock_pool', con=engine, index_col='code')
-print(df)
+stocks_general_info = pd.read_sql_table(table_name='stock_pool', con=engine, index_col='code')
+print(stocks_general_info)
 
 exit(0)
 
