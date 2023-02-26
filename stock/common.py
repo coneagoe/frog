@@ -30,5 +30,9 @@ def get_stock_position_path() -> Path:
     return get_stock_data_path('position')
 
 
-def get_stock_general_info_path() -> Path:
-    return get_stock_data_path('info')
+def get_stock_general_info_path() -> str:
+    return os.path.join(get_stock_data_path('info'), general_info_file_name)
+
+
+def get_stock_history_path() -> Path:
+    return get_stock_data_path('history')

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import os
-import logging
+# import logging
+# logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)
 import pandas as pd
-from pathlib import Path
 import json
 import re
 import functools
@@ -16,12 +16,12 @@ import pandas_market_calendars as mcal
 from bs4 import BeautifulSoup
 import motor.motor_asyncio
 from conf import *
-from proxy import get_proxy
+# from proxy import get_proxy
 from fund import *
 import conf
+from utility import *
 
 
-# logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)
 worker_restrict = False
 enable_proxy = False
 
@@ -54,11 +54,6 @@ def retry(times):
     return wrapper
 
 
-def is_older_than_30_days(f):
-    dt = datetime.now() - datetime.fromtimestamp(os.path.getmtime(f))
-    return dt.days > 30
-
-
 class TianTianCrawler(object):
     def __init__(self):
         self.i = 0
@@ -83,8 +78,8 @@ class TianTianCrawler(object):
 
         result = None
         proxy = None
-        if enable_proxy:
-            proxy = get_proxy()['http']
+        # if enable_proxy:
+        #    proxy = get_proxy()['http']
 
         async with session.get(url, params=params, proxy=proxy) as resp:
             if resp.status != 200:
@@ -95,14 +90,15 @@ class TianTianCrawler(object):
                 if not checker(result):
                     raise RuntimeError(result)
 
-        if worker_restrict: self.worker_count -= 1
+        if worker_restrict:
+            self.worker_count -= 1
 
         return result
 
 
     def get_all_fund_general_info(self):
         if not os.path.exists(all_general_info_csv) or \
-                is_older_than_30_days(all_general_info_csv):
+                is_older_than_n_days(all_general_info_csv, 30):
             loop = asyncio.get_event_loop()
             loop.run_until_complete(download_all_fund_general_info())
 

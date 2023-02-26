@@ -62,16 +62,16 @@ class TiantianParser:
                      col_fund_name: [],
                      col_asset: [],
                      col_yesterday_earning: [],
-                     col_position_income: [],
-                     col_position_yield: []}
+                     col_profit: [],
+                     col_profit_rate: []}
 
     def save_data(self):
         self.data[col_fund_id].append(self.fund_id)
         self.data[col_fund_name].append(pattern_tailing_number.sub('', self.fund_name))
         self.data[col_asset].append(self.asset)
         self.data[col_yesterday_earning].append(self.yesterday_earning)
-        self.data[col_position_income].append(self.position_income)
-        self.data[col_position_yield].append(self.position_yield)
+        self.data[col_profit].append(self.position_income)
+        self.data[col_profit_rate].append(self.position_yield)
         self.fund_id, self.fund_name = (None, None)
         self.asset, self.yesterday_earning, \
             self.position_income, self.position_yield = \
