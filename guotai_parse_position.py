@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
-import os
+from os.path import basename, join
 import sys
 import datetime
 import pandas as pd
@@ -14,7 +14,7 @@ parser = GuotaiParser()
 
 
 def usage():
-    print(f"{os.path.basename(__file__)} <image>")
+    print(f"{basename(__file__)} <image>")
 
 
 def update_stock_position(timestamp, images, ocr_type):
@@ -40,7 +40,7 @@ def update_stock_position(timestamp, images, ocr_type):
         # df[col_fund_id] = df[col_fund_id].astype('str')
         print(df)
 
-        output_file_name = os.path.join(get_stock_position_path(), f"{timestamp}.csv")
+        output_file_name = join(get_stock_position_path(), f"{timestamp}.csv")
         df.to_csv(output_file_name, encoding='utf_8_sig', index=False)
 
 

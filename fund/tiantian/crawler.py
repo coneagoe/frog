@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-import os
-# import logging
-# logging.getLogger('aiohttp.client').setLevel(logging.DEBUG)
+from os.path import exists
+import logging
 import pandas as pd
 import json
 import re
@@ -18,7 +17,6 @@ import motor.motor_asyncio
 from conf import *
 # from proxy import get_proxy
 from fund import *
-import conf
 from utility import *
 
 
@@ -27,7 +25,8 @@ enable_proxy = False
 
 
 headers = {
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2227.0 Safari/537.36'
+    'User-Agent':
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2227.0 Safari/537.36'
 }
 
 timeout = aiohttp.ClientTimeout(total=5)
@@ -67,7 +66,7 @@ class TianTianCrawler(object):
 
 
     @retry(times=10)
-    async def fetch(self, session, url, params, checker):
+    async def __fetch(self, session, url, params, checker):
         if worker_restrict:
             while True:
                 if self.worker_count >= self.max_workers:
@@ -96,32 +95,20 @@ class TianTianCrawler(object):
         return result
 
 
-    def get_all_fund_general_info(self):
-        if not os.path.exists(all_general_info_csv) or \
-                is_older_than_n_days(all_general_info_csv, 30):
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(download_all_fund_general_info())
-
-        if not os.path.exists(all_general_info_csv):
-            return None
-
-        return pd.read_csv(all_general_info_csv)
-
-
     async def download_all_fund_general_info(self):
         async with aiohttp.ClientSession(headers=headers) as session:
             fund_dict_path = 'http://fund.eastmoney.com/js/fundcode_search.js'
             async with session.get(fund_dict_path) as resp:
                 if resp.status == 200:
-                    # you have to download all fund general info first,
-                    # writng csv asynchronously is meaningless.
+                    # You have to download all fund general info first.
+                    # Writing csv asynchronously is meaningless.
                     # (only one task at that time)
                     tmp = re.sub(r'^var\s*r\s*=\s*', '', await resp.text()).strip(';')
                     tmp = json.loads(tmp)
                     df = pd.DataFrame(tmp,
                                       columns=[col_fund_id, col_pinyin_abbreviation,
                                                col_fund_name, col_fund_type, col_pinyin])
-                    df.to_csv(all_general_info_csv, encoding='utf_8_sig', index=False)
+                    df.to_csv(get_fund_general_info_path(), encoding='utf_8_sig', index=False)
                 else:
                     logging.warning(f"status: {resp.status}")
 
@@ -129,19 +116,19 @@ class TianTianCrawler(object):
     def download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
         output_file_name = os.path.join(get_fund_history_path(), f"{fund_id}.csv")
         async def foo():
-            df = await self.download_history_netvalues(fund_id, start_date, end_date)
-            await self.save_history_netvalues(output_file_name, df)
+            df = await self._download_history_netvalues(fund_id, start_date, end_date)
+            await self._save_history_netvalues(output_file_name, df)
 
         loop = asyncio.get_event_loop()
         loop.run_until_complete(foo())
 
 
-    async def download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
+    async def _download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
         df = None
-        page_count = self.calculate_page_count(start_date, end_date)
+        page_count = self._calculate_page_count(start_date, end_date)
 
         async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-            tasks = [self.fetch_history_netvalues(session, fund_id, start_date, end_date, i)
+            tasks = [self._fetch_history_netvalues(session, fund_id, start_date, end_date, i)
                      for i in range(1, page_count + 1)]
             pages = await asyncio.gather(*tasks)
             for page in pages:
@@ -154,12 +141,12 @@ class TianTianCrawler(object):
         return df
 
 
-    async def fetch_history_netvalues(self,
-                                      session,
-                                      fund_id: str,
-                                      start_date: str,
-                                      end_date: str,
-                                      page: int):
+    async def _fetch_history_netvalues(self,
+                                       session,
+                                       fund_id: str,
+                                       start_date: str,
+                                       end_date: str,
+                                       page: int):
         '''
         :param start_date: YYYY-MM-DD
         :param end_date: YYYY-MM-DD
@@ -170,17 +157,17 @@ class TianTianCrawler(object):
         if start_date: params['sdate'] = start_date
         if end_date: params['edate'] = end_date
 
-        return await self.fetch(session, history_url, params, self.history_netvalue_checker)
+        return await self.__fetch(session, history_url, params, self._history_netvalue_checker)
 
 
-    async def save_history_netvalues(self, output, df):
+    async def _save_history_netvalues(self, output, df):
         if df is not None:
             async with aiofiles.open(output, mode='w') as f:
                 tmp = df.to_csv(encoding='utf_8_sig', index=False)
                 await f.write(tmp)
 
 
-    def calculate_page_count(self, start_date: str, end_date: str) -> int:
+    def _calculate_page_count(self, start_date: str, end_date: str) -> int:
         item_per_page = 20
         sdate = datetime.strptime(start_date, '%Y-%m-%d')
         edate = datetime.strptime(end_date, '%Y-%m-%d')
@@ -192,7 +179,7 @@ class TianTianCrawler(object):
         return page_count
 
 
-    def history_netvalue_checker(self, page):
+    def _history_netvalue_checker(self, page):
         df = pd.read_html(page, encoding='utf-8')[0]
         return pattern_timestamp.match(df.iat[0, 0])
 
@@ -200,11 +187,11 @@ class TianTianCrawler(object):
     def download_fund_info(self, fund_ids: list[str]):
         async def foo(fund_ids: list[str]):
             async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                tasks = [self.fetch_and_save_general_info(session, fund_id)
+                tasks = [self._fetch_and_save_general_info(session, fund_id)
                         for fund_id in fund_ids]
-                tasks.extend([self.fetch_and_save_managers(session, fund_id)
+                tasks.extend([self._fetch_and_save_managers(session, fund_id)
                             for fund_id in fund_ids])
-                tasks.extend([self.fetch_and_save_history_scales(session, fund_id)
+                tasks.extend([self._fetch_and_save_history_scales(session, fund_id)
                             for fund_id in fund_ids])
                 await asyncio.gather(*tasks)
 
@@ -212,18 +199,18 @@ class TianTianCrawler(object):
         loop.run_until_complete(foo(fund_ids))
 
 
-    async def fetch_and_save_general_info(self, session, fund_id: str):
-        page = await self.fetch_general_info(session, fund_id)
-        await self.save_general_info(fund_id, page)
+    async def _fetch_and_save_general_info(self, session, fund_id: str):
+        page = await self._fetch_general_info(session, fund_id)
+        await self._save_general_info(fund_id, page)
 
 
-    async def fetch_general_info(self, session, fund_id: str):
+    async def _fetch_general_info(self, session, fund_id: str):
         # http://fundf10.eastmoney.com/jbgk_000001.html
         general_info_url = f"http://fundf10.eastmoney.com/jbgk_{fund_id}.html"
-        return await self.fetch(session, general_info_url, None, None)
+        return await self.__fetch(session, general_info_url, None, None)
 
 
-    async def save_general_info(self, fund_id, page):
+    async def _save_general_info(self, fund_id, page):
         fund_name = None
         fund_type = None
         launch_date = None
@@ -280,37 +267,37 @@ class TianTianCrawler(object):
             await self.collection_general_info.insert_one(document)
 
 
-    async def fetch_and_save_managers(self, session, fund_id: str):
-        page = await self.fetch_managers(session, fund_id)
-        await self.save_managers(fund_id, page)
+    async def _fetch_and_save_managers(self, session, fund_id: str):
+        page = await self._fetch_managers(session, fund_id)
+        await self._save_managers(fund_id, page)
 
 
-    async def fetch_managers(self, session, fund_id: str):
+    async def _fetch_managers(self, session, fund_id: str):
         # http://fundf10.eastmoney.com/jjjl_000001.html
         manager_url = f"http://fundf10.eastmoney.com/jjjl_{fund_id}.html"
-        return await self.fetch(session, manager_url, None, None)
+        return await self.__fetch(session, manager_url, None, None)
 
 
-    async def save_managers(self, fund_id, page):
+    async def _save_managers(self, fund_id, page):
         df = pd.read_html(page, encoding='utf-8')[1]
         document = {'fund_id': fund_id,
                     'managers': df.iloc[0:].values.tolist()}
         await self.collection_managers.insert_one(document)
 
 
-    async def fetch_and_save_history_scales(self, session, fund_id: str):
+    async def _fetch_and_save_history_scales(self, session, fund_id: str):
         # 'http://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=gmbd&mode=0&code=000001&rt={random.random()}'
-        page = await self.fetch_history_scales(session, fund_id)
-        await self.save_history_scales(fund_id, page)
+        page = await self._fetch_history_scales(session, fund_id)
+        await self._save_history_scales(fund_id, page)
 
 
-    async def fetch_history_scales(self, session, fund_id: str):
+    async def _fetch_history_scales(self, session, fund_id: str):
         scale_url = "http://fundf10.eastmoney.com/FundArchivesDatas.aspx"
         params = {'type': 'gmbd', 'mode': 0, 'code': fund_id, 'rt': random.random()}
-        return await self.fetch(session, scale_url, params, None)
+        return await self.__fetch(session, scale_url, params, None)
 
 
-    async def save_history_scales(self, fund_id: str, page):
+    async def _save_history_scales(self, fund_id: str, page):
         df = pd.read_html(page, encoding='utf-8')[0]
         document = {'fund_id': fund_id,
                     'scales': df.iloc[0:].values.tolist()}

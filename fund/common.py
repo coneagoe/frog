@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
-import os
+from os.path import join
 import conf
 
 
-# path
-fund_data_path = 'data/fund'
-all_general_info_csv = 'data/fund/all_general_info.csv'
+general_info_file_name = 'general_info.csv'
 
 # column name
 col_fund_id = u'基金代号'
@@ -22,7 +20,7 @@ col_date = u'日期'
 
 
 def get_fund_data_path(subdir: str) -> str:
-    path = Path(os.path.join(conf.config['fund']['data_path'], subdir))
+    path = Path(join(conf.config['fund']['data_path'], subdir))
     if not path.exists():
         path.mkdir(parents=True)
 
@@ -35,3 +33,7 @@ def get_fund_history_path() -> str:
 
 def get_fund_position_path() -> str:
     return get_fund_data_path('position')
+
+
+def get_fund_general_info_path() -> str:
+    return join(get_fund_data_path('info'), general_info_file_name)

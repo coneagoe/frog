@@ -65,7 +65,7 @@ def get_token():
     logging.info(f"client_id: {client_id}, client_secret: {client_secret}")
     token_url = 'https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials'
     token_url += f"&client_id={client_id}&client_secret={client_secret}"
-    response = requests.get(token_url, proxies=conf.config['utility']['proxies'])
+    response = requests.get(token_url, proxies=conf.config['common']['proxies'])
     if response.status_code == requests.codes.ok:
         return response.json().get("access_token")
     else:
@@ -167,7 +167,7 @@ def get_ocr(image_file_name: str, ocr_type):
 
         body, headers, ocr_url = ocr_parameter_table[ocr_type](image, token)
         response = requests.post(ocr_url, headers=headers, data=body,
-                                 proxies=conf.config['utility']['proxies'])
+                                 proxies=conf.config['common']['proxies'])
         if response.status_code == requests.codes.ok:
             content = json.loads(response.content.decode("UTF-8"))
             words = []

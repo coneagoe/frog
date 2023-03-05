@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
-import os
+from os.path import join
 import conf
 
 
@@ -19,7 +19,7 @@ col_profit_loss_percent = u'盈亏(%)'
 
 
 def get_stock_data_path(subdir: str) -> Path:
-    path = Path(os.path.join(conf.config['stock']['data_path'], subdir))
+    path = Path(join(conf.config['stock']['data_path'], subdir))
     if not path.exists():
         path.mkdir(parents=True)
 
@@ -31,7 +31,7 @@ def get_stock_position_path() -> Path:
 
 
 def get_stock_general_info_path() -> str:
-    return os.path.join(get_stock_data_path('info'), general_info_file_name)
+    return join(get_stock_data_path('info'), general_info_file_name)
 
 
 def get_stock_history_path() -> Path:

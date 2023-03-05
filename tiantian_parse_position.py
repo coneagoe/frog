@@ -2,14 +2,15 @@
 # import csv
 # import logging
 import sys
-import datetime
-
+from datetime import date
 import pandas as pd
 from tqdm import tqdm
 import conf
 from ocr import *
 from fund import *
 
+
+conf.config = conf.parse_config()
 
 parser = TiantianParser()
 
@@ -52,10 +53,8 @@ if __name__ == '__main__':
 
     # logging.getLogger().setLevel(logging.DEBUG)
 
-    conf.config = conf.parse_config()
-
     images = crop_image(sys.argv[1], OCR_ACCURATE_BASIC, 6000)
 
-    today = datetime.date.today()
+    today = date.today()
     update_fund_position("{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day),
                          images, OCR_ACCURATE_BASIC)
