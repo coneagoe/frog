@@ -1,3 +1,4 @@
+from os.path import exists, join
 import pandas as pd
 from fund import *
 import logging
@@ -10,8 +11,7 @@ def convert_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(df.index[0])
     df.rename_axis(col_date, inplace=True)
     df.index = pd.to_datetime(df.index)
-    # df_asset = pd.to_numeric(df_asset)
-    # df_asset.astype()
+    df = df.astype(float)
     # logging.debug(df)
     return df
 
@@ -25,8 +25,8 @@ def load_history_position(start_date: str, end_date: str) -> (pd.DataFrame, pd.D
     for i in date_range:
         if j % 2 == 0:
             date_stamp = f"{i.year}-{str(i.month).zfill(2)}-{i.day}"
-            position_path = os.path.join(get_fund_position_path(), f"{date_stamp}.csv")
-            if not os.path.exists(position_path):
+            position_path = join(get_fund_position_path(), f"{date_stamp}.csv")
+            if not exists(position_path):
                 logging.warning(f"file does not exist: {position_path}.")
                 j += 1
                 continue
@@ -34,25 +34,25 @@ def load_history_position(start_date: str, end_date: str) -> (pd.DataFrame, pd.D
             df = pd.read_csv(position_path)
             df[col_fund_id] = df[col_fund_id].astype(str)
             df[col_fund_id] = df[col_fund_id].str.zfill(6)
-            df.set_index(col_fund_name)
+            df = df.set_index(col_fund_name)
             if df_asset is None:
                 df_asset = pd.DataFrame({col_fund_name: df[col_fund_name],
                                          date_stamp: df[col_asset]})
-                df_asset.set_index(col_fund_name)
+                df_asset = df_asset.set_index(col_fund_name)
             else:
                 df_asset[date_stamp] = df[col_asset]
 
             if df_profit is None:
                 df_profit = pd.DataFrame({col_fund_name: df[col_fund_name],
                                           date_stamp: df[col_profit]})
-                df_profit.set_index(col_fund_name)
+                df_profit = df_profit.set_index(col_fund_name)
             else:
                 df_profit[date_stamp] = df[col_profit]
 
             if df_profit_rate is None:
                 df_profit_rate = pd.DataFrame({col_fund_name: df[col_fund_name],
                                                date_stamp: df[col_profit_rate]})
-                df_profit_rate.set_index(col_fund_name)
+                df_profit_rate = df_profit_rate.set_index(col_fund_name)
             else:
                 df_profit_rate[date_stamp] = df[col_profit_rate]
 

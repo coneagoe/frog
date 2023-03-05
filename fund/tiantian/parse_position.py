@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 
 import logging
+from os.path import exists
 import pandas as pd
 import re
-from fund import *
 from ocr import get_ocr
+from fund import *
+from .. interface import get_fund_name
 
 
 pattern_stick = re.compile(r'(\D+)(\d{6})$')
@@ -13,8 +15,21 @@ pattern_valid_fund_id = re.compile(r'^\d{6}$')
 pattern_float = re.compile(r'^\s*([-+.,\d%]+)\s*$')
 
 
-def is_valid_fund_id(fund_id: str):
-    return pattern_valid_fund_id.match(fund_id)
+def _get_all_fund_general_info():
+    fund_general_info_path = get_fund_general_info_path()
+    if not exists(fund_general_info_path):
+        logging.error(f"No {fund_general_info_path}")
+        return None
+
+    df = pd.read_csv(fund_general_info_path)
+    df[col_fund_id] = df[col_fund_id].astype(str)
+    df[col_fund_id] = df[col_fund_id].str.zfill(6)
+    return df
+
+
+def is_valid_fund_id(df: pd.DataFrame, fund_id: str) -> bool:
+    return pattern_valid_fund_id.match(fund_id) and \
+            fund_id in df[col_fund_id].values
 
 
 def is_fund_name_stick_with_fund_id(word):
@@ -51,6 +66,7 @@ class TiantianParser:
     data = None
 
     def __init__(self):
+        self.all_fund_general_info = _get_all_fund_general_info()
         self.reset()
 
     def reset(self):
@@ -88,11 +104,11 @@ class TiantianParser:
                 if self.fund_name is None and self.fund_id is None:
                     self.fund_name, self.fund_id = is_fund_name_stick_with_fund_id(words[i])
                     if self.fund_name and self.fund_id:
-                        pass
-                    elif is_valid_fund_id(words[i]):
+                        self.fund_name = get_fund_name(self.all_fund_general_info, self.fund_id)
+                    elif is_valid_fund_id(self.all_fund_general_info, words[i]):
                         # fund_id doesn't stick to fund_name
                         self.fund_id = words[i]
-                        self.fund_name = words[i - 1]
+                        self.fund_name = get_fund_name(self.all_fund_general_info, self.fund_id)
                     else:
                         i += 1
                         continue
