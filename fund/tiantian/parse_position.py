@@ -55,10 +55,6 @@ def get_next_float(words: list, i: int):
     logging.error(f'get_next_float: {i}, {words}')
 
 
-def get_possible_fund_id(word):
-    pass
-
-
 class TiantianParser:
     fund_id, fund_name = (None, None)
     asset, yesterday_earning, position_income, position_yield =\
@@ -134,9 +130,6 @@ class TiantianParser:
                     return None
 
                 self.save_data()
-                # # TODO get_possible_fund_id,
-                # # 不如通过fund_name反查，等fund db建立起来
-                # i += 1
 
             if len(self.data[col_fund_id]) != 0:
                 df = pd.DataFrame(self.data)
@@ -144,5 +137,3 @@ class TiantianParser:
                 return df
 
         return None
-
-

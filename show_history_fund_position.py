@@ -8,6 +8,8 @@ import conf
 from fund import *
 
 
+# logging.getLogger().setLevel(logging.DEBUG)
+
 conf.config = conf.parse_config()
 
 

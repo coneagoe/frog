@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
 # import csv
 # import logging
+import os
 import sys
 from datetime import date
+import re
 import pandas as pd
 from tqdm import tqdm
 import conf
 from ocr import *
 from fund import *
 
+# logging.getLogger().setLevel(logging.DEBUG)
 
 conf.config = conf.parse_config()
 
@@ -20,13 +23,13 @@ def usage():
 
 
 def update_fund_position(timestamp, images, ocr_type):
-    '''
+    """
     parse fund positions according to screenshots, save the results in csv
     :param timestamp: csv file name
     :param images:
     :param ocr_type:
     :return: None
-    '''
+    """
     global parser
     df = None
     for image in tqdm(images):
@@ -51,10 +54,14 @@ if __name__ == '__main__':
         usage()
         exit()
 
-    # logging.getLogger().setLevel(logging.DEBUG)
+    image_file_name = sys.argv[1]
+    images = crop_image(image_file_name, OCR_ACCURATE_BASIC, 6000)
 
-    images = crop_image(sys.argv[1], OCR_ACCURATE_BASIC, 6000)
+    m = re.match(r'Screenshot_(\d{4})-(\d{2})-(\d{2}).*', image_file_name)
+    if m:
+        timestamp = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    else:
+        today = date.today()
+        timestamp = "{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day)
 
-    today = date.today()
-    update_fund_position("{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day),
-                         images, OCR_ACCURATE_BASIC)
+    update_fund_position(timestamp, images, OCR_ACCURATE_BASIC)

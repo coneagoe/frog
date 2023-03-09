@@ -16,7 +16,8 @@ from bs4 import BeautifulSoup
 import motor.motor_asyncio
 from conf import *
 # from proxy import get_proxy
-from fund import *
+from fund import col_fund_id, col_pinyin_abbreviation, col_fund_name, col_fund_type, col_pinyin, \
+                get_fund_general_info_path, get_fund_history_path
 from utility import *
 
 
@@ -95,7 +96,8 @@ class TianTianCrawler(object):
         return result
 
 
-    async def download_all_fund_general_info(self):
+    @staticmethod
+    async def download_all_fund_general_info():
         async with aiohttp.ClientSession(headers=headers) as session:
             fund_dict_path = 'http://fund.eastmoney.com/js/fundcode_search.js'
             async with session.get(fund_dict_path) as resp:
@@ -115,6 +117,7 @@ class TianTianCrawler(object):
 
     def download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
         output_file_name = os.path.join(get_fund_history_path(), f"{fund_id}.csv")
+
         async def foo():
             df = await self._download_history_netvalues(fund_id, start_date, end_date)
             await self._save_history_netvalues(output_file_name, df)
@@ -147,27 +150,31 @@ class TianTianCrawler(object):
                                        start_date: str,
                                        end_date: str,
                                        page: int):
-        '''
+        """
         :param start_date: YYYY-MM-DD
         :param end_date: YYYY-MM-DD
         :return:
-        '''
+        """
         history_url = "http://fund.eastmoney.com/f10/F10DataApi.aspx"
         params = {'type': 'lsjz', 'code': fund_id, 'per': 20, 'page': page}
-        if start_date: params['sdate'] = start_date
-        if end_date: params['edate'] = end_date
+        if start_date:
+            params['sdate'] = start_date
+        if end_date:
+            params['edate'] = end_date
 
         return await self.__fetch(session, history_url, params, self._history_netvalue_checker)
 
 
-    async def _save_history_netvalues(self, output, df):
+    @staticmethod
+    async def _save_history_netvalues(output, df):
         if df is not None:
             async with aiofiles.open(output, mode='w') as f:
                 tmp = df.to_csv(encoding='utf_8_sig', index=False)
                 await f.write(tmp)
 
 
-    def _calculate_page_count(self, start_date: str, end_date: str) -> int:
+    @staticmethod
+    def _calculate_page_count(start_date: str, end_date: str) -> int:
         item_per_page = 20
         sdate = datetime.strptime(start_date, '%Y-%m-%d')
         edate = datetime.strptime(end_date, '%Y-%m-%d')
@@ -179,7 +186,8 @@ class TianTianCrawler(object):
         return page_count
 
 
-    def _history_netvalue_checker(self, page):
+    @staticmethod
+    def _history_netvalue_checker(page):
         df = pd.read_html(page, encoding='utf-8')[0]
         return pattern_timestamp.match(df.iat[0, 0])
 
@@ -188,11 +196,11 @@ class TianTianCrawler(object):
         async def foo(fund_ids: list[str]):
             async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
                 tasks = [self._fetch_and_save_general_info(session, fund_id)
-                        for fund_id in fund_ids]
+                         for fund_id in fund_ids]
                 tasks.extend([self._fetch_and_save_managers(session, fund_id)
-                            for fund_id in fund_ids])
+                              for fund_id in fund_ids])
                 tasks.extend([self._fetch_and_save_history_scales(session, fund_id)
-                            for fund_id in fund_ids])
+                              for fund_id in fund_ids])
                 await asyncio.gather(*tasks)
 
         loop = asyncio.get_event_loop()
@@ -248,7 +256,7 @@ class TianTianCrawler(object):
             if th.text == u'基金经理人':
                 for a in th.next_sibling.find_all('a'):
                     ref = a.get('href').strip('//')
-                    manager_id_mch = re.match('[a-zA-Z./]+(\d+)\.html', ref)
+                    manager_id_mch = re.match(r'[a-zA-Z./]+(\d+)\.html', ref)
                     if manager_id_mch:
                         manager_id = manager_id_mch.group(1)
                         manager_name = a.text
