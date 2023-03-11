@@ -4,7 +4,7 @@ This script is to convert the fund name as a full name according to the fund gen
 
 from os import walk
 from os.path import join
-import logging
+# import logging
 from fund import *
 import conf
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
-from stock.eastmoney import fetch_close_price
+from stock.data.eastmoney import fetch_close_price
 
 
 execl_name = u"青蛙计划.xlsm"
