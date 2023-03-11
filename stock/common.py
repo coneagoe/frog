@@ -11,11 +11,12 @@ col_stock_id = u'股票代码'
 col_stock_name = u'股票名称'
 col_position = u'持仓'
 col_position_available = u'可用'
-col_position_market_value = u'市值'
+col_market_value = u'市值'
 col_current_price = u'现价'
 col_cost = u'成本'
-col_profit_loss = u'浮动盈亏'
-col_profit_loss_percent = u'盈亏(%)'
+col_profit = u'浮动盈亏'
+col_profit_rate = u'盈亏(%)'
+col_date = u'日期'
 
 
 def get_stock_data_path(subdir: str) -> Path:

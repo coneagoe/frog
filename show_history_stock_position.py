@@ -5,7 +5,7 @@ import sys
 import plotly.express as px
 # from plotly.subplots import make_subplots
 import conf
-from fund import *
+from stock import *
 
 
 # logging.getLogger().setLevel(logging.DEBUG)
@@ -14,7 +14,7 @@ conf.config = conf.parse_config()
 
 
 def get_available_date_range() -> (str, str):
-    filenames = next(walk(get_fund_position_path()), (None, None, []))[2]
+    filenames = next(walk(get_stock_position_path()), (None, None, []))[2]
     if len(filenames) > 0:
         start_date = filenames[0].rstrip('.csv')
         end_date = filenames[-1].rstrip('.csv')
@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
     df_asset, df_profit, df_profit_rate = load_history_position(start_date, end_date)
 
-    fig = px.line(df_asset, title=col_asset)
+    fig = px.line(df_asset, title=col_market_value)
     fig.show()
 
     fig = px.line(df_profit, title=col_profit)

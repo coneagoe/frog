@@ -31,4 +31,7 @@ def get_fund_name(df: pd.DataFrame, fund_id: str):
     :return:
     """
     df = df.set_index(col_fund_id)
-    return df.at[fund_id, col_fund_name]
+    try:
+        return df.at[fund_id, col_fund_name]
+    except KeyError:
+        return None

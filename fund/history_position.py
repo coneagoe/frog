@@ -1,13 +1,13 @@
 from os.path import exists, join
 import pandas as pd
-from fund import *
+from stock import *
 import logging
 import pandas_market_calendars as mcal
 
 
 def convert_data(df: pd.DataFrame) -> pd.DataFrame:
-    # df[col_fund_name] = df.index.to_series().apply(get_fund_name, axis=1)
-    # df = df.set_index(col_fund_name)
+    # df[col_stock_name] = df.index.to_series().apply(get_fund_name, axis=1)
+    # df = df.set_index(col_stock_name)
     # df = df.drop(columns=[col_fund_id])
     df = df.T
     logging.debug(df)
@@ -30,7 +30,7 @@ def load_history_position(start_date: str, end_date: str) -> (pd.DataFrame, pd.D
     for i in date_range:
         if j % 2 == 0:
             date_stamp = f"{i.year}-{str(i.month).zfill(2)}-{str(i.day).zfill(2)}"
-            position_path = join(get_fund_position_path(), f"{date_stamp}.csv")
+            position_path = join(get_stock_position_path(), f"{date_stamp}.csv")
             if not exists(position_path):
                 logging.warning(f"file does not exist: {position_path}.")
                 j += 1
@@ -40,16 +40,16 @@ def load_history_position(start_date: str, end_date: str) -> (pd.DataFrame, pd.D
             # df[col_fund_id] = df[col_fund_id].astype(str)
             # df[col_fund_id] = df[col_fund_id].str.zfill(6)
 
-            df0 = pd.DataFrame({col_fund_name: df[col_fund_name], date_stamp: df[col_asset]})
-            df0 = df0.set_index(col_fund_name)
+            df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_market_value]})
+            df0 = df0.set_index(col_stock_name)
             assets.append(df0)
 
-            df0 = pd.DataFrame({col_fund_name: df[col_fund_name], date_stamp: df[col_profit]})
-            df0 = df0.set_index(col_fund_name)
+            df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_profit]})
+            df0 = df0.set_index(col_stock_name)
             profits.append(df0)
 
-            df0 = pd.DataFrame({col_fund_name: df[col_fund_name], date_stamp: df[col_profit_rate]})
-            df0 = df0.set_index(col_fund_name)
+            df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_profit_rate]})
+            df0 = df0.set_index(col_stock_name)
             profit_rates.append(df0)
 
         j += 1

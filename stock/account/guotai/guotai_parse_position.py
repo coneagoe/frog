@@ -3,7 +3,7 @@
 import logging
 import pandas as pd
 import re
-from stock import *
+from stock.common import *
 from ocr import get_ocr
 
 
@@ -86,24 +86,24 @@ class GuotaiParser:
             (None, None, None, None, None, None, None)
         self.data = {col_stock_id: [],
                      col_stock_name: [],
-                     col_position_market_value: [],
+                     col_market_value: [],
                      col_position: [],
                      col_position_available: [],
                      col_current_price: [],
                      col_cost: [],
-                     col_profit_loss: [],
-                     col_profit_loss_percent: []}
+                     col_profit: [],
+                     col_profit_rate: []}
 
     def save_data(self):
         self.data[col_stock_id].append(self.stock_id)
         self.data[col_stock_name].append(pattern_tailing_number.sub('', self.stock_name))
-        self.data[col_position_market_value].append(self.position_market_value)
+        self.data[col_market_value].append(self.position_market_value)
         self.data[col_position].append(self.position)
         self.data[col_position_available].append(self.position_available)
         self.data[col_current_price].append(self.current_price)
         self.data[col_cost].append(self.cost)
-        self.data[col_profit_loss].append(self.profit_loss)
-        self.data[col_profit_loss_percent].append(self.profit_loss_percent)
+        self.data[col_profit].append(self.profit_loss)
+        self.data[col_profit_rate].append(self.profit_loss_percent)
 
         self.stock_id, self.stock_name = (None, None)
         self.position, self.position_available, self.position_market_value,\
