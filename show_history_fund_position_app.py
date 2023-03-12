@@ -60,7 +60,7 @@ def update_asset_graph(start_date, end_date):
     #     string_prefix = string_prefix + 'End Date: ' + end_date_string
 
     if start_date and end_date:
-        df_asset, df_profit, df_profit_rate = load_history_position(start_date, end_date)
+        df_asset, df_profit, df_profit_rate = load_history_positions(start_date, end_date)
 
         fig = px.line(df_asset, x="date", y="price", title='Life expectancy in Canada')
 

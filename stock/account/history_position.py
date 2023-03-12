@@ -45,7 +45,7 @@ def convert_data(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_data(position_path: str):
+def load_history_position(position_path: str):
     if not exists(position_path):
         logging.warning(f"file does not exist: {position_path}.")
         return None
@@ -59,7 +59,7 @@ def load_data(position_path: str):
     return df
 
 
-def load_history_position(start_date: str, end_date: str) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
+def load_history_positions(start_date: str, end_date: str) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     global all_fund_general_info, all_stock_general_info
     assets, profits, profit_rates = ([], [], [])
 
@@ -78,7 +78,7 @@ def load_history_position(start_date: str, end_date: str) -> (pd.DataFrame, pd.D
 
         date_stamp = f"{i.year}-{str(i.month).zfill(2)}-{str(i.day).zfill(2)}"
         position_path = join(get_stock_position_path(), f"{date_stamp}.csv")
-        df = load_data(position_path)
+        df = load_history_position(position_path)
         if df is None:
             continue
 
