@@ -35,6 +35,6 @@ if __name__ == "__main__":
 
     for i in filenames:
         file_path = join(get_stock_position_path(), i)
-        df = load_data(file_path)
+        df = load_history_position(file_path)
         print(df)
         # df.to_csv(file_path, encoding='utf_8_sig', index=False)

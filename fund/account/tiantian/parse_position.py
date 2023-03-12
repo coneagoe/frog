@@ -1,30 +1,17 @@
 # -*- coding: utf-8 -*-
 
 import logging
-from os.path import exists
-import pandas as pd
 import re
+import pandas as pd
 from ocr import get_ocr
-from fund import *
-from .. interface import get_fund_name
+from fund.common import *
+from fund.data.general_info import get_fund_name, get_all_fund_general_info
 
 
 pattern_stick = re.compile(r'(\D+)(\d{6})$')
 pattern_tailing_number = re.compile(r'\d+$')
 pattern_valid_fund_id = re.compile(r'^\d{6}$')
 pattern_float = re.compile(r'^\s*([-+.,\d%]+)\s*$')
-
-
-def _get_all_fund_general_info():
-    fund_general_info_path = get_fund_general_info_path()
-    if not exists(fund_general_info_path):
-        logging.error(f"No {fund_general_info_path}")
-        return None
-
-    df = pd.read_csv(fund_general_info_path)
-    df[col_fund_id] = df[col_fund_id].astype(str)
-    df[col_fund_id] = df[col_fund_id].str.zfill(6)
-    return df
 
 
 def is_valid_fund_id(df: pd.DataFrame, fund_id: str) -> bool:
@@ -62,7 +49,7 @@ class TiantianParser:
     data = None
 
     def __init__(self):
-        self.all_fund_general_info = _get_all_fund_general_info()
+        self.all_fund_general_info = get_all_fund_general_info()
         self.reset()
 
     def reset(self):

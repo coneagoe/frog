@@ -36,7 +36,7 @@ if __name__ == "__main__":
 
     start_date, end_date = sys.argv[1], sys.argv[2]
 
-    df_asset, df_profit, df_profit_rate = load_history_position(start_date, end_date)
+    df_asset, df_profit, df_profit_rate = load_history_positions(start_date, end_date)
 
     fig = px.line(df_asset, title=col_market_value)
     fig.show()
