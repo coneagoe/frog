@@ -82,18 +82,15 @@ def load_history_positions(start_date: str, end_date: str) -> (pd.DataFrame, pd.
         if df is None:
             continue
 
-        df0 = pd.DataFrame({col_stock_name: df[col_stock_name],
-                            date_stamp: df[col_market_value]})
+        df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_market_value]})
         df0 = df0.set_index(col_stock_name)
         assets.append(df0)
 
-        df0 = pd.DataFrame({col_stock_name: df[col_stock_name],
-                            date_stamp: df[col_profit]})
+        df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_profit]})
         df0 = df0.set_index(col_stock_name)
         profits.append(df0)
 
-        df0 = pd.DataFrame({col_stock_name: df[col_stock_name],
-                            date_stamp: df[col_profit_rate]})
+        df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_profit_rate]})
         df0 = df0.set_index(col_stock_name)
         profit_rates.append(df0)
 
