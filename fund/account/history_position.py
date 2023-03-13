@@ -60,12 +60,9 @@ def load_history_positions(start_date: str, end_date: str) -> (pd.DataFrame, pd.
 
         date_stamp = f"{i.year}-{str(i.month).zfill(2)}-{str(i.day).zfill(2)}"
         position_path = join(get_fund_position_path(), f"{date_stamp}.csv")
-        if not exists(position_path):
-            logging.warning(f"file does not exist: {position_path}.")
-            j += 1
-            continue
-
         df = load_history_position(position_path)
+        if df is None:
+            continue
 
         df0 = pd.DataFrame({col_fund_name: df[col_fund_name], date_stamp: df[col_asset]})
         df0 = df0.set_index(col_fund_name)
