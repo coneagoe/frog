@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from os.path import exists
 import logging
 import pandas as pd
 import json
@@ -192,19 +191,19 @@ class TianTianCrawler(object):
         return pattern_timestamp.match(df.iat[0, 0])
 
 
-    def download_fund_info(self, fund_ids: list[str]):
-        async def foo(fund_ids: list[str]):
-            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                tasks = [self._fetch_and_save_general_info(session, fund_id)
-                         for fund_id in fund_ids]
-                tasks.extend([self._fetch_and_save_managers(session, fund_id)
-                              for fund_id in fund_ids])
-                tasks.extend([self._fetch_and_save_history_scales(session, fund_id)
-                              for fund_id in fund_ids])
-                await asyncio.gather(*tasks)
-
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(foo(fund_ids))
+#    def download_fund_info(self, fund_ids: list[str]):
+#        async def foo(fund_ids: list[str]):
+#            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+#                tasks = [self._fetch_and_save_general_info(session, fund_id)
+#                         for fund_id in fund_ids]
+#                tasks.extend([self._fetch_and_save_managers(session, fund_id)
+#                              for fund_id in fund_ids])
+#                tasks.extend([self._fetch_and_save_history_scales(session, fund_id)
+#                              for fund_id in fund_ids])
+#                await asyncio.gather(*tasks)
+#
+#        loop = asyncio.get_event_loop()
+#        loop.run_until_complete(foo(fund_ids))
 
 
     async def _fetch_and_save_general_info(self, session, fund_id: str):
