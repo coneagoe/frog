@@ -46,6 +46,12 @@ def convert_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_history_position(position_path: str):
+    global all_fund_general_info, all_stock_general_info
+
+    if all_fund_general_info is None and all_stock_general_info is None:
+        all_fund_general_info = get_all_fund_general_info()
+        all_stock_general_info = get_all_stock_general_info()
+
     if not exists(position_path):
         logging.warning(f"file does not exist: {position_path}.")
         return None
@@ -60,11 +66,7 @@ def load_history_position(position_path: str):
 
 
 def load_history_positions(start_date: str, end_date: str) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
-    global all_fund_general_info, all_stock_general_info
     assets, profits, profit_rates = ([], [], [])
-
-    all_fund_general_info = get_all_fund_general_info()
-    all_stock_general_info = get_all_stock_general_info()
 
     market_calendar = mcal.get_calendar('XSHG')
     date_range = mcal.date_range(market_calendar.schedule(start_date, end_date), frequency='1D')
