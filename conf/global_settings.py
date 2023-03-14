@@ -16,5 +16,3 @@ def parse_config():
     config = configparser.ConfigParser()
     config.read(config_file_name)
     return config
-
-
