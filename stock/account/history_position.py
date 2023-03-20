@@ -14,6 +14,12 @@ all_fund_general_info = None
 all_stock_general_info = None
 
 
+# def check_stock_id(df):
+#     if not pattern_valid_stock_id.match(df[col_stock_id]):
+#         logging.error(f"Invalid stock id: {df[col_stock_id]}")
+#         exit(-1)
+
+
 def fetch_name(df):
     name = get_stock_name(all_stock_general_info, df[col_stock_id])
     if name:
@@ -58,6 +64,7 @@ def load_history_position(position_path: str):
 
     df = pd.read_csv(position_path)
     df = df.drop_duplicates()
+    # df.apply(check_stock_id, axis=1)
     df[col_stock_id] = df[col_stock_id].astype(str)
     df[col_stock_id] = df[col_stock_id].str.zfill(6)
     df[col_stock_name] = df.apply(fetch_name, axis=1)
