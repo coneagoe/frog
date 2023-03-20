@@ -9,7 +9,6 @@ from ocr import get_ocr
 
 pattern_stick = re.compile(r'(\D+)(\d{6})$')
 pattern_tailing_number = re.compile(r'\d+$')
-pattern_valid_fund_id = re.compile(r'^\d{6}$')
 pattern_float = re.compile(r'^\s*([-+.,\d%]+)\s*$')
 pattern_int = re.compile(r'^(\d+)$')
 
@@ -63,10 +62,6 @@ def get_next_int(words: list, i: int):
         if tmp:
             return int(tmp.group(1)), i
     logging.error(f'get_next_float: {i}, {words}')
-
-
-def get_possible_stock_id(word):
-    pass
 
 
 class GuotaiParser:
@@ -166,5 +161,3 @@ class GuotaiParser:
                 return df
 
         return None
-
-
