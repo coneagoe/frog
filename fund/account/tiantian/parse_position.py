@@ -5,7 +5,7 @@ import re
 import pandas as pd
 from ocr import get_ocr
 from fund.common import *
-from fund.data.general_info import get_fund_name, get_all_fund_general_info
+from fund.data.general_info import get_fund_name, load_all_fund_general_info
 
 
 pattern_stick = re.compile(r'(\D+)(\d{6})$')
@@ -14,7 +14,8 @@ pattern_valid_fund_id = re.compile(r'^\d{6}$')
 pattern_float = re.compile(r'^\s*([-+.,\d%]+)\s*$')
 
 
-def is_valid_fund_id(df: pd.DataFrame, fund_id: str) -> bool:
+def is_valid_fund_id(fund_id: str) -> bool:
+    df = load_all_fund_general_info()
     return pattern_valid_fund_id.match(fund_id) and \
             fund_id in df[col_fund_id].values
 
@@ -49,7 +50,6 @@ class TiantianParser:
     data = None
 
     def __init__(self):
-        self.all_fund_general_info = get_all_fund_general_info()
         self.reset()
 
     def reset(self):
@@ -87,11 +87,11 @@ class TiantianParser:
                 if self.fund_name is None and self.fund_id is None:
                     self.fund_name, self.fund_id = is_fund_name_stick_with_fund_id(words[i])
                     if self.fund_name and self.fund_id:
-                        self.fund_name = get_fund_name(self.all_fund_general_info, self.fund_id)
-                    elif is_valid_fund_id(self.all_fund_general_info, words[i]):
+                        self.fund_name = get_fund_name(self.fund_id)
+                    elif is_valid_fund_id(words[i]):
                         # fund_id doesn't stick to fund_name
                         self.fund_id = words[i]
-                        self.fund_name = get_fund_name(self.all_fund_general_info, self.fund_id)
+                        self.fund_name = get_fund_name(self.fund_id)
                     else:
                         i += 1
                         continue

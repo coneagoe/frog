@@ -5,12 +5,16 @@ import logging
 import conf
 
 
-general_info_file_name = 'general_info.csv'
+stock_general_info_file_name = 'stock_general_info.csv'
+etf_general_info_file_name = 'etf_general_info.csv'
+
 trading_book_name = "trading book.xlsm"
 
 # column name
 col_stock_id = u'股票代码'
 col_stock_name = u'股票名称'
+col_etf_id = u'基金代码'
+col_etf_name = u'基金简称'
 col_position = u'持仓'
 col_position_available = u'可用'
 col_market_value = u'市值'
@@ -43,7 +47,11 @@ def get_stock_position_path() -> Path:
 
 
 def get_stock_general_info_path() -> str:
-    return join(_get_stock_data_path('info'), general_info_file_name)
+    return join(_get_stock_data_path('info'), stock_general_info_file_name)
+
+
+def get_etf_general_info_path() -> str:
+    return join(_get_stock_data_path('info'), etf_general_info_file_name)
 
 
 def get_stock_history_path() -> Path:

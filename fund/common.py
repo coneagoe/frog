@@ -4,7 +4,7 @@ from os.path import join
 import conf
 
 
-general_info_file_name = 'general_info.csv'
+fund_general_info_file_name = 'fund_general_info.csv'
 
 # column name
 col_fund_id = u'基金代号'
@@ -36,4 +36,4 @@ def get_fund_position_path() -> str:
 
 
 def get_fund_general_info_path() -> str:
-    return join(get_fund_data_path('info'), general_info_file_name)
+    return join(get_fund_data_path('info'), fund_general_info_file_name)

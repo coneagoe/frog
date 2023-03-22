@@ -4,14 +4,11 @@ import numpy as np
 import logging
 import pandas_market_calendars as mcal
 from stock.common import *
-from stock.data.general_info import get_stock_name, get_all_stock_general_info
-from fund import get_fund_name, get_all_fund_general_info
+from stock.data.access_general_info import get_stock_name, load_all_stock_general_info
+from fund import get_fund_name, load_all_fund_general_info
 
 
 pd.set_option('display.max_rows', None)
-
-all_fund_general_info = None
-all_stock_general_info = None
 
 
 # def check_stock_id(df):
@@ -21,11 +18,11 @@ all_stock_general_info = None
 
 
 def fetch_name(df):
-    name = get_stock_name(all_stock_general_info, df[col_stock_id])
+    name = get_stock_name(df[col_stock_id])
     if name:
         return name
 
-    name = get_fund_name(all_fund_general_info, df[col_stock_id])
+    name = get_fund_name(df[col_stock_id])
     if name:
         return name
 
@@ -52,12 +49,6 @@ def convert_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_history_position(position_path: str):
-    global all_fund_general_info, all_stock_general_info
-
-    if all_fund_general_info is None and all_stock_general_info is None:
-        all_fund_general_info = get_all_fund_general_info()
-        all_stock_general_info = get_all_stock_general_info()
-
     if not exists(position_path):
         logging.warning(f"file does not exist: {position_path}.")
         return None
