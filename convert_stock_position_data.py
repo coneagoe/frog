@@ -13,17 +13,13 @@ import conf
 
 conf.config = conf.parse_config()
 
-all_fund_general_info = get_all_fund_general_info()
-
-all_stock_general_info = get_all_stock_general_info()
-
 
 def fetch_name(df):
-    name = get_stock_name(all_stock_general_info, df[col_stock_id])
+    name = get_stock_name(df[col_stock_id])
     if name:
         return name
 
-    name = get_fund_name(all_fund_general_info, df[col_stock_id])
+    name = get_fund_name(df[col_stock_id])
     if name:
         return name
 

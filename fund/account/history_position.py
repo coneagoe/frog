@@ -1,31 +1,21 @@
 from os.path import exists, join
 import pandas as pd
 from fund.common import *
-from fund.data.general_info import get_fund_name, get_all_fund_general_info
+from fund.data.general_info import get_fund_name, load_all_fund_general_info
 import logging
 import pandas_market_calendars as mcal
 import numpy as np
 
 
-all_general_info = None
-
-
 def fetch_fund_name(df):
-    return get_fund_name(all_general_info, df[col_fund_id])
+    return get_fund_name(df[col_fund_id])
 
 
 def convert_data(df: pd.DataFrame) -> pd.DataFrame:
-    # df[col_stock_name] = df.index.to_series().apply(get_fund_name, axis=1)
-    # df = df.set_index(col_stock_name)
-    # df = df.drop(columns=[col_fund_id])
     df = df.T
-    logging.debug(df)
-    # df.columns = df.iloc[0]
-    # df = df.drop(df.index[0])
     df.rename_axis(col_date, inplace=True)
     df.index = pd.to_datetime(df.index)
     df = df.astype(float)
-    # logging.debug(df)
     return df
 
 
@@ -46,7 +36,7 @@ def load_history_position(position_path: str):
 def load_history_positions(start_date: str, end_date: str) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     global all_general_info
     assets, profits, profit_rates = ([], [], [])
-    all_general_info = get_all_fund_general_info()
+    all_general_info = load_all_fund_general_info()
 
     market_calendar = mcal.get_calendar('XSHG')
     date_range = mcal.date_range(market_calendar.schedule(start_date, end_date), frequency='1D')
