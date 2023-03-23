@@ -16,3 +16,13 @@ def parse_config():
     config = configparser.ConfigParser()
     config.read(config_file_name)
     return config
+
+
+def get_http_proxy():
+    global config
+    return config['common']['http_proxy']
+
+
+def get_https_proxy():
+    global config
+    return config['common']['https_proxy']

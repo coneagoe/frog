@@ -2,6 +2,9 @@ import requests
 import re
 import json
 from urllib.parse import urlencode
+import logging
+import conf
+import numpy as np
 
 
 def convert_secid(secid: str) -> str:
@@ -32,7 +35,16 @@ def fetch_close_price(secid: str) -> float:
 
     url = base_url + '?' + urlencode(parameters)
 
-    resp = requests.get(url, headers=headers)
+    proxies = None
+    http_proxy = conf.get_http_proxy()
+    https_proxy = conf.get_https_proxy()
+    if http_proxy and https_proxy:
+        proxies = {
+            'http': http_proxy,
+            'https': https_proxy
+        }
+
+    resp = requests.get(url, headers=headers, proxies=proxies)
     if resp.status_code == requests.codes.ok:
         try:
             jq = resp.content.decode('utf-8')
@@ -44,10 +56,10 @@ def fetch_close_price(secid: str) -> float:
             close_price = close_price_int / pow(10, precision)
             return close_price
         except:
-            print(f"url = {url}")
-            print(f"resp = {resp.content}")
+            logging.warning("the content is unexpected, please check.")
+            logging.warning(f"url = {url}")
+            logging.warning(f"resp = {resp.content}")
+            return np.nan
     else:
-        print(f"url = {url}")
-        print(f"status = {resp.status_code}")
-
-
+        logging.warning(f"status = {resp.status_code}, url = {url}")
+        return np.nan
