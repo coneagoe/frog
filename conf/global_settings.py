@@ -20,9 +20,15 @@ def parse_config():
 
 def get_http_proxy():
     global config
-    return config['common']['http_proxy']
+    try:
+        return config['common']['http_proxy']
+    except KeyError:
+        return None
 
 
 def get_https_proxy():
     global config
-    return config['common']['https_proxy']
+    try:
+        return config['common']['https_proxy']
+    except KeyError:
+        return None
