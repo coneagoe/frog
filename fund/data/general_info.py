@@ -14,8 +14,8 @@ def load_all_fund_general_info():
 
     fund_general_info_path = get_fund_general_info_path()
     if not exists(fund_general_info_path):
-        logging.error(f"No {fund_general_info_path}")
-        return None
+        logging.error(f"No such file: {fund_general_info_path}, please check.")
+        exit(-1)
 
     g_df_funds = pd.read_csv(fund_general_info_path)
     g_df_funds[col_fund_id] = g_df_funds[col_fund_id].astype(str)
