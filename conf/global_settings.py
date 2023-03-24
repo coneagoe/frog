@@ -15,6 +15,13 @@ def parse_config():
 
     config = configparser.ConfigParser()
     config.read(config_file_name)
+
+    if get_http_proxy():
+        os.environ['http_proxy'] = get_http_proxy()
+
+    if get_https_proxy():
+        os.environ['https_proxy'] = get_https_proxy()
+
     return config
 
 
