@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import argrelextrema
 import pandas as pd
-from stock import *
+from stock import col_close
 
 
 percent = 0.05
