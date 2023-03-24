@@ -1,5 +1,6 @@
 from os.path import basename
 import sys
+import argparse
 from datetime import date
 import pandas as pd
 import akshare as ak
@@ -89,20 +90,17 @@ def usage():
 
 
 if __name__ == "__main__":
-    stock_id = None
-    start_date = None
-    end_date = None
-    n = 120
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n', type=int)
+    parser.add_argument('-s', type=str)
+    parser.add_argument('-e', type=str)
+    parser.add_argument('start_id', type=str)
+    args = parser.parse_args()
 
-    for i in range(1, len(sys.argv)):
-        if sys.argv[i] == '-n':
-            n = int(sys.argv[i+1])
-        elif sys.argv[i] == '-s':
-            start_date = sys.argv[i+1]
-        elif sys.argv[i] == '-e':
-            end_date = sys.argv[i+1]
-        else:
-            stock_id = sys.argv[i]
+    stock_id = args.start_id
+    start_date = args.s
+    end_date = args.e
+    n = args.n if args.n else 120
 
     if not stock_id:
         usage()
