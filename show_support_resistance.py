@@ -10,8 +10,10 @@ import plotly.graph_objs as go
 
 conf.config = conf.parse_config()
 
+trading_book_path = get_trading_book_path()
 
-def load_data(stock_id: str, start_date: str, end_date: str):
+
+def load_history_data(stock_id: str, start_date: str, end_date: str):
     stock_name = get_stock_name(stock_id)
     if stock_name:
         df = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
@@ -30,8 +32,25 @@ def load_data(stock_id: str, start_date: str, end_date: str):
     exit()
 
 
+def get_target_prices(stock_id: str):
+    df = pd.read_excel(trading_book_path, sheet_name=u'持仓', dtype={col_stock_id: str})
+    df[col_stock_id] = df[col_stock_id].astype(str)
+    df[col_stock_id] = df[col_stock_id].str.zfill(6)
+    cost, tp0, tp1, tp2 = None, None, None, None
+    try:
+        cost = df.loc[df[col_stock_id] == stock_id][col_buying_price].iloc[0]
+        tp0 = df.loc[df[col_stock_id] == stock_id][u'目标价格1'].iloc[0]
+        tp1 = df.loc[df[col_stock_id] == stock_id][u'目标价格2'].iloc[0]
+        tp2 = df.loc[df[col_stock_id] == stock_id][u'目标价格3'].iloc[0]
+    except IndexError:
+        pass
+
+    return cost, tp0, tp1, tp2
+
+
 def draw_support_resistance(stock_name: str, df: pd.DataFrame,
-                            turning_points, support_point, resistance_point):
+                            turning_points, support_point, resistance_point,
+                            cost, target_price_0, target_price_1, target_price_2):
     fig = go.Figure()
     fig.update_layout(title={
         'text': f"{stock_name}",
@@ -80,6 +99,38 @@ def draw_support_resistance(stock_name: str, df: pd.DataFrame,
                            text=f"支撑位\n{df[col_close][support_point]}元\n({diff_percent}%)",
                            showarrow=True, arrowhead=1, ax=0, ay=40)
 
+    if not pd.isna(cost):
+        fig.add_shape(type="line",
+                      x0=df[col_date].iloc[0],
+                      y0=cost,
+                      x1=df[col_date].iloc[-1],
+                      y1=cost,
+                      line=dict(color='black', width=1, dash='dash'),
+                      name=u"成本价格")
+
+        fig.add_annotation(x=df[col_date].iloc[-1], y=cost,
+                           text=f"{cost}",
+                           showarrow=False, xanchor='left', yanchor='middle')
+
+    colors = ('red', 'blue', 'green')
+    target_prices = (target_price_0, target_price_1, target_price_2)
+    for i in range(3):
+        tp = target_prices[i]
+        if not pd.isna(tp):
+            fig.add_shape(type="line",
+                          x0=df[col_date].iloc[0],
+                          y0=tp,
+                          x1=df[col_date].iloc[-1],
+                          y1=tp,
+                          line=dict(color=colors[i], width=1, dash='dash'),
+                          name=f"目标价格{i + 1}")
+
+            fig.add_annotation(x=df[col_date].iloc[-1], y=tp,
+                               text=f"{tp}",
+                               showarrow=False, xanchor='left', yanchor='middle')
+        else:
+            break
+
     fig.show()
 
 
@@ -112,6 +163,9 @@ if __name__ == "__main__":
         start_date = start_date.strftime('%Y%m%d')
         end_date = end_date.strftime('%Y%m%d')
 
-    stock_name, df = load_data(stock_id, start_date, end_date)
+    stock_name, df = load_history_data(stock_id, start_date, end_date)
     turning_points, support_point, resistance_point = get_support_resistance(df)
-    draw_support_resistance(stock_name, df, turning_points, support_point, resistance_point)
+    cost, tp0, tp1, tp2 = get_target_prices(stock_id)
+    draw_support_resistance(stock_name, df,
+                            turning_points, support_point, resistance_point,
+                            cost, tp0, tp1, tp2)
