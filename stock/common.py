@@ -24,6 +24,8 @@ col_profit = u'浮动盈亏'
 col_profit_rate = u'盈亏(%)'
 col_date = u'日期'
 col_close = u'收盘'
+col_buy_count = u"买入数量"
+col_buying_price = u"买入价格"
 
 
 def get_stock_data_path() -> Path:
