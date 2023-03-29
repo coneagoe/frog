@@ -1,33 +1,12 @@
 from os.path import basename
-import sys
 import argparse
 from datetime import date
 import pandas as pd
-import akshare as ak
 from stock import *
 import plotly.graph_objs as go
 
 
 conf.config = conf.parse_config()
-
-
-def load_data(stock_id: str, start_date: str, end_date: str):
-    stock_name = get_stock_name(stock_id)
-    if stock_name:
-        df = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
-                                start_date=start_date, end_date=end_date,
-                                adjust="")
-        return stock_name, df
-
-    etf_name = get_etf_name(stock_id)
-    if etf_name:
-        df = ak.fund_etf_hist_em(symbol=stock_id, period="daily",
-                                 start_date=start_date, end_date=end_date,
-                                 adjust="")
-        return etf_name, df
-
-    logging.error(f"wrong stock id({stock_id}), please check.")
-    exit()
 
 
 def show_two_securities(stock_name_0: str, df0: pd.DataFrame, stock_name_1: str, df1: pd.DataFrame):
@@ -72,6 +51,6 @@ if __name__ == "__main__":
         start_date = start_date.strftime('%Y%m%d')
         end_date = end_date.strftime('%Y%m%d')
 
-    stock_name_0, df0 = load_data(stock_id_0, start_date, end_date)
-    stock_name_1, df1 = load_data(stock_id_1, start_date, end_date)
+    stock_name_0, df0 = load_history_data(stock_id_0, start_date, end_date)
+    stock_name_1, df1 = load_history_data(stock_id_1, start_date, end_date)
     show_two_securities(stock_name_0, df0, stock_name_1, df1)

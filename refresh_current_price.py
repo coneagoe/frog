@@ -20,8 +20,8 @@ for sheet_name in sheet_names:
     df = pd.read_excel(trading_book_path, sheet_name=sheet_name, dtype={col_stock_id: str})
     security_ids = df[col_stock_id]
     current_prices = []
-    for index, value in security_ids.items():
-        current_prices.append(fetch_close_price(value))
+    for index, security_id in security_ids.items():
+        current_prices.append(fetch_close_price(security_id))
 
     series_prices = pd.Series(current_prices, name=col_current_price)
     df.update(series_prices)

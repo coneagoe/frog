@@ -5,3 +5,4 @@ from . download_history_stock import download_history_stock
 from . download_history_etf import download_history_etf
 from . download_etf_general_info import download_etf_general_info
 from . eastmoney import *
+from . access_data import load_history_data

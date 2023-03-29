@@ -1,9 +1,7 @@
 from os.path import basename
-import sys
 import argparse
 from datetime import date
 import pandas as pd
-import akshare as ak
 from stock import *
 import plotly.graph_objs as go
 
@@ -11,25 +9,6 @@ import plotly.graph_objs as go
 conf.config = conf.parse_config()
 
 trading_book_path = get_trading_book_path()
-
-
-def load_history_data(stock_id: str, start_date: str, end_date: str):
-    stock_name = get_stock_name(stock_id)
-    if stock_name:
-        df = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
-                                start_date=start_date, end_date=end_date,
-                                adjust="")
-        return stock_name, df
-
-    etf_name = get_etf_name(stock_id)
-    if etf_name:
-        df = ak.fund_etf_hist_em(symbol=stock_id, period="daily",
-                                 start_date=start_date, end_date=end_date,
-                                 adjust="")
-        return etf_name, df
-
-    logging.error(f"wrong stock id({stock_id}), please check.")
-    exit()
 
 
 def get_target_prices(stock_id: str):
