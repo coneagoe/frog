@@ -38,7 +38,7 @@ def update_fund_position(timestamp, images, ocr_type):
             if df is None:
                 df = df0
             else:
-                df = pd.concat(df, df0, ignore_index=True)
+                df = pd.concat([df, df0], ignore_index=True)
 
     if df is not None:
         # df[col_fund_id] = df[col_fund_id].astype('str')

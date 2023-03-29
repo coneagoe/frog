@@ -26,6 +26,8 @@ col_date = u'日期'
 col_close = u'收盘'
 col_buy_count = u"买入数量"
 col_buying_price = u"买入价格"
+col_support = u"支撑"
+col_resistance = u"阻力"
 
 
 def get_stock_data_path() -> Path:
