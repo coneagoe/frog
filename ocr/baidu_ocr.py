@@ -20,7 +20,7 @@ image_length_limits = {
 token = None
 
 
-def crop_image(image_file_name: str, ocr_type, image_length: int):
+def crop_image(image_file_name: str, ocr_type, image_length: int) -> list:
     '''
     Because the baidu ocr has the limits on the image size,
     we have to crap it first. See https://cloud.baidu.com/doc/OCR/s/Ck3h7y2ia

@@ -1,1 +1,1 @@
-from . guotai_parse_position import GuotaiParser
+from . parse_position import GuotaiParser
