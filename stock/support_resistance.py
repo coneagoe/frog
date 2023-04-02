@@ -29,7 +29,7 @@ def get_support_resistance(df: pd.DataFrame):
     return turning_points, support_point, resistance_point
 
 
-def get_turning_points(df):
+def get_turning_points(df: pd.DataFrame):
     turning_points = argrelextrema(df[col_close].values, np.greater)[0]
     turning_points = np.append(turning_points, argrelextrema(df[col_close].values, np.less)[0])
 
