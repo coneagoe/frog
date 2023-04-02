@@ -1,11 +1,11 @@
-from os.path import exists, join
+import os
 import pandas as pd
 import numpy as np
 import logging
 import pandas_market_calendars as mcal
 from stock.common import *
-from stock.data.access_general_info import get_stock_name, load_all_stock_general_info
-from fund import get_fund_name, load_all_fund_general_info
+from stock.data.access_general_info import get_stock_name
+from fund import get_fund_name
 
 
 pd.set_option('display.max_rows', None)
@@ -49,7 +49,7 @@ def convert_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_history_position(position_path: str):
-    if not exists(position_path):
+    if not os.path.exists(position_path):
         logging.warning(f"file does not exist: {position_path}.")
         return None
 
@@ -63,7 +63,7 @@ def load_history_position(position_path: str):
     return df
 
 
-def load_history_positions(start_date: str, end_date: str) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
+def load_history_positions(start_date: str, end_date: str, stock_id=None) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     assets, profits, profit_rates = ([], [], [])
 
     market_calendar = mcal.get_calendar('XSHG')
@@ -77,10 +77,13 @@ def load_history_positions(start_date: str, end_date: str) -> (pd.DataFrame, pd.
         j += 1
 
         date_stamp = f"{i.year}-{str(i.month).zfill(2)}-{str(i.day).zfill(2)}"
-        position_path = join(get_stock_position_path(), f"{date_stamp}.csv")
+        position_path = os.path.join(get_stock_position_path(), f"{date_stamp}.csv")
         df = load_history_position(position_path)
         if df is None:
             continue
+
+        if stock_id is not None:
+            df = df[df[col_stock_id] == stock_id]
 
         df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_market_value]})
         df0 = df0.set_index(col_stock_name)

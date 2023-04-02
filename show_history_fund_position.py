@@ -1,42 +1,37 @@
-import logging
-from os import walk
-from os.path import basename
-import sys
+from datetime import date
+import argparse
+import pandas as pd
 import plotly.express as px
-# from plotly.subplots import make_subplots
 import conf
 from fund import *
 
 
+# import logging
 # logging.getLogger().setLevel(logging.DEBUG)
 
 conf.config = conf.parse_config()
 
 
-def get_available_date_range() -> (str, str):
-    filenames = next(walk(get_fund_position_path()), (None, None, []))[2]
-    if len(filenames) > 0:
-        start_date = filenames[0].rstrip('.csv')
-        end_date = filenames[-1].rstrip('.csv')
-        return start_date, end_date
-    else:
-        logging.info("No history fund position data")
-        exit()
-
-
-def usage():
-    print(f"{basename(__file__)} <start-date> <end-date>")
-    print("start-date/end-date: YYYY-MM-DD")
-
-
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        usage()
-        exit()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n', type=int, default=120, help='how many days ago to show, default is 120')
+    parser.add_argument('-s', type=str, help='start date, format: YYYY-M-D')
+    parser.add_argument('-e', type=str, help='end date, format: YYYY-M-D')
+    parser.add_argument('-i', type=str, default=None, help='fund id, default is None')
+    args = parser.parse_args()
 
-    start_date, end_date = sys.argv[1], sys.argv[2]
+    start_date = args.s
+    end_date = args.e
+    n = args.n
+    fund_id = args.i
 
-    df_asset, df_profit, df_profit_rate = load_history_positions(start_date, end_date)
+    if start_date is None or end_date is None:
+        end_date = date.today()
+        start_date = end_date - pd.Timedelta(days=n)
+        start_date = start_date.strftime('%Y-%m-%d')
+        end_date = end_date.strftime('%Y-%m-%d')
+
+    df_asset, df_profit, df_profit_rate = load_history_positions(start_date, end_date, fund_id)
 
     fig = px.line(df_asset, title=col_asset)
     fig.show()
@@ -46,7 +41,3 @@ if __name__ == "__main__":
 
     fig = px.line(df_profit_rate, title=col_profit_rate)
     fig.show()
-    #fig = make_subplots(rows=3, cols=1)
-    #fig.add_trace(px.line(df_asset))
-    #fig.add_trace(px.line(df_profit))
-    #fig.add_trace(px.line(df_profit_rate))

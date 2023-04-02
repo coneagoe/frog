@@ -115,19 +115,20 @@ def draw_support_resistance(stock_name: str, df: pd.DataFrame,
 
 def usage():
     print(f"{basename(__file__)} [-n days] [-s start_date] [-e end_date] <stock_id>")
+    print(f"{basename(__file__)} -h")
     print("-n days: since how many days ago, cannot be used together with -s and -e. default is 120")
     print("start_date/end_date: YYYYMMDD")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-n', type=int)
-    parser.add_argument('-s', type=str)
-    parser.add_argument('-e', type=str)
-    parser.add_argument('start_id', type=str)
+    parser.add_argument('-n', type=int, help='show how many days ago')
+    parser.add_argument('-s', type=str, help='start date, format: YYYY-M-D')
+    parser.add_argument('-e', type=str, help='end date, format: YYYY-M-D')
+    parser.add_argument('stock_id', type=str)
     args = parser.parse_args()
 
-    stock_id = args.start_id
+    stock_id = args.stock_id
     start_date = args.s
     end_date = args.e
     n = args.n if args.n else 120
