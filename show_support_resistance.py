@@ -11,7 +11,7 @@ conf.config = conf.parse_config()
 trading_book_path = get_trading_book_path()
 
 
-def get_target_prices(stock_id: str):
+def get_target_prices(df: pd.DataFrame, stock_id: str):
     df = pd.read_excel(trading_book_path, sheet_name=u'持仓', dtype={col_stock_id: str})
     df[col_stock_id] = df[col_stock_id].astype(str)
     df[col_stock_id] = df[col_stock_id].str.zfill(6)
@@ -27,9 +27,14 @@ def get_target_prices(stock_id: str):
     return cost, tp0, tp1, tp2
 
 
-def draw_support_resistance(stock_name: str, df: pd.DataFrame,
+def draw_support_resistance(stock_id: str, df: pd.DataFrame,
                             turning_points, support_point, resistance_point,
                             cost, target_price_0, target_price_1, target_price_2):
+    if is_stock(stock_id):
+        stock_name = get_stock_name(stock_id)
+    else:
+        stock_name = get_etf_name(stock_id)
+
     fig = go.Figure()
     fig.update_layout(title={
         'text': f"{stock_name}",
@@ -143,9 +148,9 @@ if __name__ == "__main__":
         start_date = start_date.strftime('%Y%m%d')
         end_date = end_date.strftime('%Y%m%d')
 
-    stock_name, df = load_history_data(stock_id, start_date, end_date)
+    df = load_history_data(stock_id, start_date, end_date)
     turning_points, support_point, resistance_point = get_support_resistance(df)
-    cost, tp0, tp1, tp2 = get_target_prices(stock_id)
-    draw_support_resistance(stock_name, df,
+    cost, tp0, tp1, tp2 = get_target_prices(df, stock_id)
+    draw_support_resistance(stock_id, df,
                             turning_points, support_point, resistance_point,
                             cost, tp0, tp1, tp2)

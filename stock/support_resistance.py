@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.signal import argrelextrema
 import pandas as pd
-from stock import col_close
+from stock.common import *
+from stock.data import load_history_data
 
 
 percent = 0.05
@@ -45,3 +46,19 @@ def get_turning_points(df: pd.DataFrame):
     turning_points = np.sort(turning_points)
 
     return turning_points
+
+
+def calculate_support_resistance(df: pd.DataFrame, start_date_ts: str, end_date_ts: str):
+    df_history_data = load_history_data(df[col_stock_id], start_date_ts, end_date_ts)
+    if df_history_data is not None:
+        turning_points, support_point, resistance_point = get_support_resistance(df_history_data)
+        if support_point:
+            support_point = df_history_data[col_close][support_point]
+
+        if resistance_point:
+            resistance_point = df_history_data[col_close][resistance_point]
+    else:
+        support_point = np.nan
+        resistance_point = np.nan
+
+    return support_point, resistance_point
