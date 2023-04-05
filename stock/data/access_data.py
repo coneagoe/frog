@@ -2,7 +2,7 @@ import logging
 import os
 import akshare as ak
 import pandas as pd
-from . access_general_info import get_stock_name, get_etf_name
+from . access_general_info import get_stock_name, get_etf_name, is_etf, is_stock
 from stock.common import *
 from stock.data.download_history_stock import download_history_stock_1d
 
@@ -61,25 +61,23 @@ def load_stock_history_data(stock_id: str, start_date: str, end_date: str):
         return df
 
 
-def load_history_data(stock_id: str, start_date: str, end_date: str):
-    stock_name = get_stock_name(stock_id)
-    if stock_name:
-        df = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
+def load_history_data(security_id: str, start_date: str, end_date: str):
+    if is_stock(security_id):
+        df = ak.stock_zh_a_hist(symbol=security_id, period="daily",
                                 start_date=start_date, end_date=end_date,
                                 adjust="")
-        return stock_name, df
+        return df
 
-    etf_name = get_etf_name(stock_id)
-    if etf_name:
+    if is_etf(security_id):
         try:
-            df = ak.fund_etf_hist_em(symbol=stock_id, period="daily",
+            df = ak.fund_etf_hist_em(symbol=security_id, period="daily",
                                      start_date=start_date, end_date=end_date,
                                      adjust="")
-            return etf_name, df
+            return df
         except KeyError:
             start_timestamp = pd.Timestamp(start_date)
             end_timestamp = pd.Timestamp(end_date)
-            df = ak.fund_money_fund_info_em(stock_id)
+            df = ak.fund_money_fund_info_em(security_id)
             df[u'净值日期'] = pd.to_datetime(df[u'净值日期'])
             df = df[(df[u'净值日期'] >= start_timestamp) & (df[u'净值日期'] <= end_timestamp)]
             df = df.rename(columns={'净值日期': col_date, '每万份收益': col_close})
@@ -88,7 +86,7 @@ def load_history_data(stock_id: str, start_date: str, end_date: str):
             df = df.sort_index(ascending=True)
             df = df.reset_index()
 
-            return etf_name, df
+            return df
 
-    logging.warning(f"wrong stock id({stock_id}), please check.")
-    return None, None
+    logging.warning(f"wrong stock id({security_id}), please check.")
+    return None

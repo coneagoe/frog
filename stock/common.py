@@ -8,7 +8,7 @@ import conf
 stock_general_info_file_name = 'stock_general_info.csv'
 etf_general_info_file_name = 'etf_general_info.csv'
 
-trading_book_name = "trading book.xlsm"
+trading_book_name = 'trading book.xlsm'
 
 # column name
 col_stock_id = u'股票代码'
@@ -24,10 +24,15 @@ col_profit = u'浮动盈亏'
 col_profit_rate = u'盈亏(%)'
 col_date = u'日期'
 col_close = u'收盘'
-col_buy_count = u"买入数量"
-col_buying_price = u"买入价格"
-col_support = u"支撑"
-col_resistance = u"阻力"
+col_buy_count = u'买入数量'
+col_buying_price = u'买入价格'
+col_support = u'支撑'
+col_resistance = u'阻力'
+col_adjusted_stoploss = u'调整后/移动止损价格'
+col_adjusted_take_profit = u'调整后止盈价格'
+col_stoploss_percent = u'止损(%)'
+col_take_profit_percent = u'止盈(%)'
+col_profit_stoploss_rate = u'盈亏比'
 
 
 def get_stock_data_path() -> Path:
