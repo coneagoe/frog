@@ -4,6 +4,10 @@ import swifter
 import conf
 from stock import *
 
+
+pd.set_option('display.max_columns', None)
+pd.set_option('display.max_rows', None)
+
 conf.config = conf.parse_config()
 
 percent = 0.995
@@ -49,11 +53,13 @@ def calculate_stoploss_takeprofit(df: pd.DataFrame):
     return df
 
 
-stock_ids = ('000001', '000002', '000004', '000005', '000006')
-stock_names = (u'平安银行', u'万  科Ａ', u'ST国华', u'ST星源', u'深振业Ａ')
-df = pd.DataFrame({col_stock_id: stock_ids, col_stock_name: stock_names})
-# df = load_all_stock_general_info()
+# stock_ids = ('000001', '000002', '000004', '000005', '000006')
+# stock_names = (u'平安银行', u'万  科Ａ', u'ST国华', u'ST星源', u'深振业Ａ')
+# df = pd.DataFrame({col_stock_id: stock_ids, col_stock_name: stock_names})
+df = load_all_stock_general_info()
 df = df[~df[col_stock_name].str.contains('ST')]
+
+print(df)
 
 df[col_buying_price] = df[col_stock_id].swifter.apply(fetch_close_price)
 
@@ -63,6 +69,6 @@ df[[col_support, col_resistance]] = \
 
 df = calculate_stoploss_takeprofit(df)
 
-print(df)
+df0 = df[(df[col_profit_stoploss_rate] > 5) & (df[col_take_profit_percent] > 0)]
 
-
+df.to_csv('spot_trading.csv', encoding='utf_8_sig', index=False)
