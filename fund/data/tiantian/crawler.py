@@ -3,7 +3,6 @@ import logging
 import pandas as pd
 import json
 import re
-import functools
 import random
 import aiohttp
 import asyncio
@@ -37,21 +36,6 @@ holidays = list(market.holidays().holidays)
 pattern_timestamp = re.compile(r'\d{4}-\d{2}-\d{2}')
 
 
-def retry(times):
-    def wrapper(func):
-        @functools.wraps(func)
-        async def wrapped(*args, **kwargs):
-            for i in range(times):
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    if str(e) != "":
-                        logging.error(e)
-                await asyncio.sleep(3)
-            return None
-        return wrapped
-    return wrapper
-
 
 class TianTianCrawler(object):
     def __init__(self):
@@ -65,7 +49,7 @@ class TianTianCrawler(object):
         self.collection_scales = self.db['scales']
 
 
-    @retry(times=10)
+    @retry_async(times=10, seconds=3)
     async def __fetch(self, session, url, params, checker):
         if worker_restrict:
             while True:

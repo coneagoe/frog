@@ -3,8 +3,8 @@ import re
 import json
 from urllib.parse import urlencode
 import logging
-import conf
 import numpy as np
+import conf
 
 
 def convert_secid(secid: str) -> str:

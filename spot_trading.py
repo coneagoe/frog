@@ -61,7 +61,7 @@ df = df[~df[col_stock_name].str.contains('ST')]
 
 print(df)
 
-df[col_buying_price] = df[col_stock_id].swifter.apply(fetch_close_price)
+df.loc[:, col_buying_price] = df[col_stock_id].swifter.apply(fetch_close_price)
 
 df[[col_support, col_resistance]] = \
     df.swifter.apply(calculate_support_resistance, args=(start_date_ts, end_date_ts),
