@@ -1,5 +1,9 @@
 from datetime import datetime
 import os
+import time
+import functools
+import logging
+import asyncio
 
 
 def is_older_than_n_days(filename: str, n: int) -> bool:
@@ -17,3 +21,35 @@ def is_older_than_a_month(filename: str) -> bool:
 
 def is_older_than_a_quarter(filename: str) -> bool:
     return is_older_than_n_days(filename, 90)
+
+
+def retry_async(times: int, seconds: int):
+    def wrapper(func):
+        @functools.wraps(func)
+        async def wrapped(*args, **kwargs):
+            for i in range(times):
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    if str(e) != "":
+                        logging.error(e)
+                await asyncio.sleep(seconds)
+            return None
+        return wrapped
+    return wrapper
+
+
+def retry_sync(times: int, seconds: int):
+    def wrapper(func):
+        @functools.wraps(func)
+        def wrapped(*args, **kwargs):
+            for i in range(times):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if str(e) != "":
+                        logging.error(e)
+                time.sleep(seconds)
+            return None
+        return wrapped
+    return wrapper

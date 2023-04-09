@@ -1,7 +1,7 @@
 import conf
-from stock import download_etf_general_info
+from stock import download_general_info_etf
 
 
 conf.config = conf.parse_config()
 
-download_etf_general_info()
+download_general_info_etf()
