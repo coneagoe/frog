@@ -127,7 +127,7 @@ def usage():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-n', type=int, default=120, help='since how many days ago to show')
+    parser.add_argument('-n', type=int, default=360, help='since how many days ago to show')
     parser.add_argument('-s', type=str, help='start date, format: YYYY-M-D')
     parser.add_argument('-e', type=str, help='end date, format: YYYY-M-D')
     parser.add_argument('stock_id', type=str)
