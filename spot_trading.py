@@ -1,3 +1,5 @@
+import sys
+import os
 from datetime import date
 import pandas as pd
 import swifter
@@ -53,22 +55,34 @@ def calculate_stoploss_takeprofit(df: pd.DataFrame):
     return df
 
 
-# stock_ids = ('000001', '000002', '000004', '000005', '000006')
-# stock_names = (u'平安银行', u'万  科Ａ', u'ST国华', u'ST星源', u'深振业Ａ')
-# df = pd.DataFrame({col_stock_id: stock_ids, col_stock_name: stock_names})
-df = load_all_stock_general_info()
-df = df[~df[col_stock_name].str.contains('ST')]
+def usage():
+    print(f"{os.path.basename(__file__)} <stock list.csv>")
 
-print(df)
 
-df.loc[:, col_buying_price] = df[col_stock_id].swifter.apply(fetch_close_price)
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        usage()
+        exit()
 
-df[[col_support, col_resistance]] = \
-    df.swifter.apply(calculate_support_resistance, args=(start_date_ts, end_date_ts),
-                     axis=1, result_type='expand')
+    stock_list_file_name = sys.argv[1]
+    if not os.path.exists(stock_list_file_name):
+        logging.error(f"{stock_list_file_name} does not exist, please check.")
+        exit()
 
-df = calculate_stoploss_takeprofit(df)
+    df = pd.read_csv(stock_list_file_name)
+    df = df.rename(columns={u'证券代码': col_stock_id, u'证券名称': col_stock_name})
+    df = df[~df[col_stock_id].str.contains('BJ')]
+    df = df[~df[col_stock_name].str.contains('ST')]
+    df[col_stock_id] = df[col_stock_id].str[:-3]
 
-df0 = df[(df[col_profit_stoploss_rate] > 5) & (df[col_take_profit_percent] > 0)]
+    df.loc[:, col_buying_price] = df[col_stock_id].swifter.apply(fetch_close_price)
 
-df.to_csv('spot_trading.csv', encoding='utf_8_sig', index=False)
+    df[[col_support, col_resistance]] = \
+        df.swifter.apply(calculate_support_resistance, args=(start_date_ts, end_date_ts),
+                         axis=1, result_type='expand')
+
+    df = calculate_stoploss_takeprofit(df)
+
+    df0 = df[(df[col_profit_stoploss_rate] > 5) & (df[col_take_profit_percent] > 0)]
+
+    df0.to_csv('spot_trading.csv', encoding='utf_8_sig', index=False)

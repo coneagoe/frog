@@ -44,7 +44,12 @@ def fetch_close_price(secid: str) -> float:
             'https': https_proxy
         }
 
-    resp = requests.get(url, headers=headers, proxies=proxies)
+    try:
+        resp = requests.get(url, headers=headers, proxies=proxies)
+    except requests.ConnectionError as e:
+        logging.error(e.args)
+        raise e
+
     if resp.status_code == requests.codes.ok:
         try:
             jq = resp.content.decode('utf-8')
