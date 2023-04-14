@@ -20,6 +20,9 @@ start_date = end_date - pd.Timedelta(days=n)
 start_date_ts = start_date.strftime('%Y%m%d')
 end_date_ts = end_date.strftime('%Y%m%d')
 
+output_file_name = f"spot_trading_{end_date_ts}.csv"
+
+
 def calculate_stoploss_takeprofit(df: pd.DataFrame):
     df[col_adjusted_stoploss] = df[col_support] * percent
     df[col_adjusted_take_profit] = df[col_resistance] * percent
@@ -71,9 +74,11 @@ if __name__ == '__main__':
 
     df = pd.read_csv(stock_list_file_name)
     df = df.rename(columns={u'证券代码': col_stock_id, u'证券名称': col_stock_name})
+    df[col_stock_id] = df[col_stock_id].astype(str)
     df = df[~df[col_stock_id].str.contains('BJ')]
     df = df[~df[col_stock_name].str.contains('ST')]
-    df[col_stock_id] = df[col_stock_id].str[:-3]
+    df[col_stock_id] = df[col_stock_id].str.replace('\..*', '', regex=True)
+    df[col_stock_id] = df[col_stock_id].str.zfill(6)
 
     df.loc[:, col_buying_price] = df[col_stock_id].swifter.apply(fetch_close_price)
 
@@ -83,6 +88,8 @@ if __name__ == '__main__':
 
     df = calculate_stoploss_takeprofit(df)
 
-    df0 = df[(df[col_profit_stoploss_rate] > 5) & (df[col_take_profit_percent] > 0)]
+    df = df[(df[col_profit_stoploss_rate] > 5) &
+            (df[col_take_profit_percent] > 0) &
+            (df[col_stoploss_percent] < -1)]
 
-    df0.to_csv('spot_trading.csv', encoding='utf_8_sig', index=False)
+    df.to_csv(output_file_name, encoding='utf_8_sig', index=False)
