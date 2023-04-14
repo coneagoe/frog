@@ -12,6 +12,7 @@ pattern_stick = re.compile(r'(\D+)(\d{6})$')
 pattern_tailing_number = re.compile(r'\d+$')
 pattern_valid_fund_id = re.compile(r'^\d{6}$')
 pattern_float = re.compile(r'^\s*([-+.,\d%]+)\s*$')
+pattern_date = re.compile(r'\d+-\d+')
 
 
 def is_valid_fund_id(fund_id: str) -> bool:
@@ -31,6 +32,10 @@ def is_fund_name_stick_with_fund_id(word):
 def get_next_float(words: list, i: int):
     while i < len(words):
         logging.debug(f'{i}: {words[i]}')
+        if pattern_date.match(words[i]):
+            i += 1
+            continue
+
         tmp = pattern_float.match(words[i])
         i += 1
         if tmp:
