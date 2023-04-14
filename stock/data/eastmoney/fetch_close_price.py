@@ -46,7 +46,7 @@ def fetch_close_price(secid: str) -> float:
 
     try:
         resp = requests.get(url, headers=headers, proxies=proxies)
-    except requests.ConnectionError as e:
+    except requests.exceptions.ConnectionError as e:
         logging.error(e.args)
         raise e
 
