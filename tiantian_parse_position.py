@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-# import csv
 # import logging
 import os
 import sys
