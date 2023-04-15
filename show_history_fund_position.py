@@ -17,13 +17,13 @@ if __name__ == "__main__":
     parser.add_argument('-n', type=int, default=120, help='how many days ago to show, default is 120')
     parser.add_argument('-s', type=str, help='start date, format: YYYY-M-D')
     parser.add_argument('-e', type=str, help='end date, format: YYYY-M-D')
-    parser.add_argument('-i', type=str, default=None, help='fund id, default is None')
+    parser.add_argument('-i', type=str, nargs='*', default=None, help='fund id, default is None')
     args = parser.parse_args()
 
     start_date = args.s
     end_date = args.e
     n = args.n
-    fund_id = args.i
+    fund_ids = args.i
 
     if start_date is None or end_date is None:
         end_date = date.today()
@@ -31,7 +31,7 @@ if __name__ == "__main__":
         start_date = start_date.strftime('%Y-%m-%d')
         end_date = end_date.strftime('%Y-%m-%d')
 
-    df_asset, df_profit, df_profit_rate = load_history_positions(start_date, end_date, fund_id)
+    df_asset, df_profit, df_profit_rate = load_history_positions(start_date, end_date, fund_ids)
 
     fig = px.line(df_asset, title=col_asset)
     fig.show()

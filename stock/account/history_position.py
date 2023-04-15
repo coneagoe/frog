@@ -63,7 +63,7 @@ def load_history_position(position_path: str):
     return df
 
 
-def load_history_positions(start_date: str, end_date: str, stock_id=None) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
+def load_history_positions(start_date: str, end_date: str, stock_ids=tuple) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     assets, profits, profit_rates = ([], [], [])
 
     market_calendar = mcal.get_calendar('XSHG')
@@ -82,8 +82,8 @@ def load_history_positions(start_date: str, end_date: str, stock_id=None) -> (pd
         if df is None:
             continue
 
-        if stock_id is not None:
-            df = df[df[col_stock_id] == stock_id]
+        if stock_ids:
+            df = df[df[col_stock_id].isin(stock_ids)]
 
         df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_market_value]})
         df0 = df0.set_index(col_stock_name)
