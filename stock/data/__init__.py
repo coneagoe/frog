@@ -1,5 +1,5 @@
 from . access_general_info import load_all_stock_general_info, get_stock_name, \
-    load_all_etf_general_info, get_etf_name, is_stock, is_etf
+    load_all_etf_general_info, get_etf_name, is_stock, is_etf, get_stock_or_etf_name
 from . download_general_info import download_general_info_stock, download_general_info_etf
 from . download_history_stock import download_history_stock_1d
 from . download_history_etf import download_history_etf
