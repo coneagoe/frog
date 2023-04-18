@@ -39,3 +39,33 @@ def get_https_proxy():
         return config['common']['https_proxy']
     except KeyError:
         return None
+
+
+def get_smtp_server() -> str:
+    global config
+    return config['email']['smtp_server']
+
+
+def get_smtp_port() -> int:
+    global config
+    return config['email']['smtp_port']
+
+
+def get_sender_email() -> str:
+    global config
+    return config['email']['sender_email']
+
+
+def get_sender_user() -> str:
+    global config
+    return config['email']['sender_user']
+
+
+def get_sender_password() -> str:
+    global config
+    return config['email']['sender_password']
+
+
+def get_receiver_email() -> str:
+    global config
+    return config['email']['receiver_email']
