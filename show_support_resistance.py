@@ -30,10 +30,7 @@ def get_target_prices(df: pd.DataFrame, stock_id: str):
 def draw_support_resistance(stock_id: str, df: pd.DataFrame,
                             turning_points, support_point, resistance_point,
                             cost, target_price_0, target_price_1, target_price_2):
-    if is_stock(stock_id):
-        stock_name = get_stock_name(stock_id)
-    else:
-        stock_name = get_etf_name(stock_id)
+    stock_name = get_stock_or_etf_name(stock_id)
 
     fig = go.Figure()
     fig.update_layout(title={
@@ -83,37 +80,27 @@ def draw_support_resistance(stock_id: str, df: pd.DataFrame,
                            text=f"支撑位\n{df[col_close][support_point]}元\n({diff_percent}%)",
                            showarrow=True, arrowhead=1, ax=0, ay=40)
 
-    if not pd.isna(cost):
-        fig.add_shape(type="line",
-                      x0=df[col_date].iloc[0],
-                      y0=cost,
-                      x1=df[col_date].iloc[-1],
-                      y1=cost,
-                      line=dict(color='black', width=1, dash='dash'),
-                      name=u"成本价格")
-
-        fig.add_annotation(x=df[col_date].iloc[-1], y=cost,
-                           text=f"{cost}",
-                           showarrow=False, xanchor='left', yanchor='middle')
-
-    colors = ('red', 'blue', 'green')
-    target_prices = (target_price_0, target_price_1, target_price_2)
-    for i in range(3):
+    colors = ('black', 'red', 'blue', 'green')
+    target_prices = (cost, target_price_0, target_price_1, target_price_2)
+    for i in range(len(target_prices)):
         tp = target_prices[i]
         if not pd.isna(tp):
+            if i == 0:
+                name = u"成本价格"
+            else:
+                name = f"目标价格{i + 1}"
+
             fig.add_shape(type="line",
                           x0=df[col_date].iloc[0],
                           y0=tp,
                           x1=df[col_date].iloc[-1],
                           y1=tp,
                           line=dict(color=colors[i], width=1, dash='dash'),
-                          name=f"目标价格{i + 1}")
+                          name=name)
 
             fig.add_annotation(x=df[col_date].iloc[-1], y=tp,
                                text=f"{tp}",
                                showarrow=False, xanchor='left', yanchor='middle')
-        else:
-            break
 
     fig.show()
 

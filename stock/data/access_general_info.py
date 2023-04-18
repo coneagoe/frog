@@ -84,3 +84,10 @@ def get_etf_name(etf_id: str):
         return g_df_etfs.loc[g_df_etfs[col_etf_id] == etf_id][col_etf_name].iloc[0]
     except IndexError:
         return None
+
+
+def get_stock_or_etf_name(security_id: str) -> str:
+    if is_stock(security_id):
+        return get_stock_name(security_id)
+    else:
+        return get_etf_name(security_id)

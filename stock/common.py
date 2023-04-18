@@ -33,6 +33,7 @@ col_adjusted_take_profit = u'调整后止盈价格'
 col_stoploss_percent = u'止损(%)'
 col_take_profit_percent = u'止盈(%)'
 col_profit_stoploss_rate = u'盈亏比'
+col_time = u'时间'
 
 
 def get_stock_data_path() -> Path:
