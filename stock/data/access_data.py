@@ -63,18 +63,18 @@ def load_stock_history_data(stock_id: str, start_date: str, end_date: str):
 
 
 @retry_sync(10, 10)
-def load_history_data(security_id: str, start_date: str, end_date: str) -> pd.DataFrame | None:
+def load_history_data(security_id: str, start_date: str, end_date: str, adjust="qfq") -> pd.DataFrame | None:
     if is_stock(security_id):
         df = ak.stock_zh_a_hist(symbol=security_id, period="daily",
                                 start_date=start_date, end_date=end_date,
-                                adjust="")
+                                adjust=adjust)
         return df
 
     if is_etf(security_id):
         try:
             df = ak.fund_etf_hist_em(symbol=security_id, period="daily",
                                      start_date=start_date, end_date=end_date,
-                                     adjust="")
+                                     adjust=adjust)
             return df
         except KeyError:
             start_timestamp = pd.Timestamp(start_date)

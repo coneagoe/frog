@@ -4,17 +4,14 @@ from datetime import date
 import pandas as pd
 import numpy as np
 import swifter
-import conf
 from stock import *
-
-
-sheet_names = [u"交易计划(1d)", u"持仓"]
-output_book_name = "tmp.xlsx"
 
 
 conf.config = conf.parse_config()
 
 trading_book_path = get_trading_book_path()
+sheet_names = [u"交易计划(1d)", u"持仓"]
+output_book_name = "tmp.xlsx"
 
 excel_writer = pd.ExcelWriter(output_book_name, engine='xlsxwriter')
 
