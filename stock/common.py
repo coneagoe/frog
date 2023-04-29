@@ -23,7 +23,10 @@ col_cost = u'成本'
 col_profit = u'浮动盈亏'
 col_profit_rate = u'盈亏(%)'
 col_date = u'日期'
+col_open = u'开盘'
 col_close = u'收盘'
+col_high = u'最高'
+col_low = u'最低'
 col_buy_count = u'买入数量'
 col_buying_price = u'买入价格'
 col_support = u'支撑'
@@ -34,6 +37,7 @@ col_stoploss_percent = u'止损(%)'
 col_take_profit_percent = u'止盈(%)'
 col_profit_stoploss_rate = u'盈亏比'
 col_time = u'时间'
+col_buy_amount = u'买入金额'
 
 
 def get_stock_data_path() -> Path:

@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
-# import logging
 import os
 import sys
 from datetime import date
 import re
 import pandas as pd
 from tqdm import tqdm
-import conf
 from ocr import *
 from fund import *
 
+# import logging
 # logging.getLogger().setLevel(logging.DEBUG)
 
 conf.config = conf.parse_config()
