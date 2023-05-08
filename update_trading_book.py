@@ -11,15 +11,15 @@ conf.config = conf.parse_config()
 
 trading_book_path = get_trading_book_path()
 sheet_names = [u"交易计划(1d)", u"持仓"]
-output_book_name = "tmp.xlsx"
-
-excel_writer = pd.ExcelWriter(output_book_name, engine='xlsxwriter')
 
 n = 360
 end_date = date.today()
 start_date = end_date - pd.Timedelta(days=n)
 start_date_ts = start_date.strftime('%Y%m%d')
 end_date_ts = end_date.strftime('%Y%m%d')
+
+output_file_name = f"trading_book_{end_date_ts}.xlsx"
+excel_writer = pd.ExcelWriter(output_file_name, engine='xlsxwriter')
 
 
 def update_support_resistance(df: pd.DataFrame):

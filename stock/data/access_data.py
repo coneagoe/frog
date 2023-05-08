@@ -1,8 +1,8 @@
 import logging
 import os
+import retrying
 import akshare as ak
 import pandas as pd
-from utility import retry_sync
 from stock.common import *
 from stock.data.access_general_info import is_etf, is_stock
 from stock.data.download_history_stock import download_history_stock_1d
@@ -62,7 +62,7 @@ def load_stock_history_data(stock_id: str, start_date: str, end_date: str):
         return df
 
 
-@retry_sync(10, 10)
+@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
 def load_history_data(security_id: str, start_date: str, end_date: str, adjust="qfq") -> pd.DataFrame | None:
     if is_stock(security_id):
         df = ak.stock_zh_a_hist(symbol=security_id, period="daily",

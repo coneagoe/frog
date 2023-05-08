@@ -1,10 +1,13 @@
 import os
 import logging
+import re
 import pandas as pd
 from stock.common import *
 from stock.data.download_general_info import download_general_info_stock, download_general_info_etf
 from utility import is_older_than_a_month, is_older_than_a_week
 
+
+pattern_stock_id = re.compile(r'^600|601|603|00|30|688')
 
 g_df_stocks = None
 g_df_etfs = None
@@ -45,12 +48,19 @@ def load_all_etf_general_info():
 
 
 def is_stock(stock_id: str):
+    #print(f"haha: {stock_id}")
+    #return pattern_stock_id.match(stock_id)
+
     global g_df_stocks
 
     if g_df_stocks is None:
         g_df_stocks = load_all_stock_general_info()
 
-    return stock_id in g_df_stocks[col_stock_id].values
+    try:
+        return stock_id in g_df_stocks[col_stock_id].values
+    except:
+        logging.error(f"haha stock_id: {stock_id}")
+        return False
 
 
 def get_stock_name(stock_id: str):
