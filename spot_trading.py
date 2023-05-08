@@ -3,13 +3,13 @@ import os
 from datetime import date
 import pandas as pd
 import swifter
-import conf
+# import conf
 from stock import *
 from utility import send_email
 
 
-pd.set_option('display.max_columns', None)
-pd.set_option('display.max_rows', None)
+# pd.set_option('display.max_columns', None)
+# pd.set_option('display.max_rows', None)
 
 conf.config = conf.parse_config()
 
@@ -78,7 +78,7 @@ if __name__ == '__main__':
     df[col_stock_id] = df[col_stock_id].astype(str)
     df = df[~df[col_stock_id].str.contains('BJ')]
     df = df[~df[col_stock_name].str.contains('ST')]
-    df[col_stock_id] = df[col_stock_id].str.replace('..*', '', regex=True)
+    df[col_stock_id] = df[col_stock_id].str.replace('\..*', '', regex=True)
     df[col_stock_id] = df[col_stock_id].str.zfill(6)
 
     df.loc[:, col_buying_price] = df[col_stock_id].swifter.apply(fetch_close_price)
