@@ -11,14 +11,6 @@ trading_book_path = get_trading_book_path()
 sheet_names = [u"持仓"]
 output_book_name = "fluctuation.xlsx"
 
-excel_writer = pd.ExcelWriter(output_book_name, engine='xlsxwriter')
-
-n = 20
-end_date = date.today()
-start_date = end_date - pd.Timedelta(days=n)
-start_date_ts = start_date.strftime('%Y%m%d')
-end_date_ts = end_date.strftime('%Y%m%d')
-
 col_positive_fluctuation = u"正向波动"
 col_positive_fluctuation_percent = u"正向波动(%)"
 col_negative_fluctuation = u"负向波动"
@@ -26,9 +18,15 @@ col_negative_fluctuation_percent = u"负向波动(%)"
 col_buy_price = u"买入价"
 col_sell_price = u"卖出价"
 col_sell_count = u"卖出数量"
+col_fluctuation_days = u"波动天数"
 
 
-def _calculate_fluctuation(df: pd.DataFrame, start_date_ts: str, end_date_ts: str):
+def _calculate_fluctuation(df: pd.DataFrame):
+    end_date = date.today()
+    start_date = end_date - pd.Timedelta(days=df[col_fluctuation_days])
+    start_date_ts = start_date.strftime('%Y%m%d')
+    end_date_ts = end_date.strftime('%Y%m%d')
+
     positive_fluctuation = np.nan
     negative_fluctuation = np.nan
 
@@ -48,8 +46,7 @@ def _calculate_fluctuation(df: pd.DataFrame, start_date_ts: str, end_date_ts: st
 
 def calculate_fluctuation(df: pd.DataFrame):
     df[[col_positive_fluctuation, col_negative_fluctuation]] = \
-        df.swifter.apply(_calculate_fluctuation, args=(start_date_ts, end_date_ts),
-                         axis=1, result_type='expand')
+        df.swifter.apply(_calculate_fluctuation, axis=1, result_type='expand')
 
     df[col_positive_fluctuation_percent] = df[col_positive_fluctuation] * 100
     df[col_negative_fluctuation_percent] = df[col_negative_fluctuation] * 100
