@@ -45,6 +45,7 @@ def _calculate_fluctuation(df: pd.DataFrame):
 
 
 def calculate_fluctuation(df: pd.DataFrame):
+    df[col_current_price] = df[col_stock_id].swifter.apply(fetch_close_price)
     df[[col_positive_fluctuation, col_negative_fluctuation]] = \
         df.swifter.apply(_calculate_fluctuation, axis=1, result_type='expand')
 
