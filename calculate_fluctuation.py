@@ -22,13 +22,16 @@ col_fluctuation_days = u"波动天数"
 
 
 def _calculate_fluctuation(df: pd.DataFrame):
+    positive_fluctuation = np.nan
+    negative_fluctuation = np.nan
+
+    if pd.isna(df[col_fluctuation_days]):
+        return positive_fluctuation, negative_fluctuation
+
     end_date = date.today()
     start_date = end_date - pd.Timedelta(days=df[col_fluctuation_days])
     start_date_ts = start_date.strftime('%Y%m%d')
     end_date_ts = end_date.strftime('%Y%m%d')
-
-    positive_fluctuation = np.nan
-    negative_fluctuation = np.nan
 
     df_history_data = load_history_data(df[col_stock_id], start_date_ts, end_date_ts)
     if df_history_data is not None:
