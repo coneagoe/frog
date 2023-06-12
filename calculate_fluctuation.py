@@ -17,7 +17,11 @@ col_negative_fluctuation = u"负向波动"
 col_negative_fluctuation_percent = u"负向波动(%)"
 col_buy_price = u"买入价"
 col_sell_price = u"卖出价"
+col_buy_price_reverse = u"买入价(反向)"
+col_sell_price_reverse = u"卖出价(反向)"
 col_sell_count = u"卖出数量"
+col_buy_count_reverse = u"买入数量(反向)"
+col_sell_count_reverse = u"卖出数量(反向)"
 col_fluctuation_days = u"波动天数"
 
 
@@ -61,11 +65,19 @@ def calculate_fluctuation(df: pd.DataFrame):
     df[col_buy_count] = np.floor(df[col_buy_amount] * 0.1 / df[col_buy_price] / 100) * 100
     df[col_sell_count] = np.floor(df[col_buy_amount] * 0.1 / df[col_sell_price] / 100) * 100
 
+    df[col_buy_price_reverse] = round(df[col_current_price] * (1 - df[col_positive_fluctuation]), 3)
+    df[col_sell_price_reverse] = round(df[col_current_price] * (1 - df[col_negative_fluctuation]), 3)
+
+    df[col_buy_count_reverse] = np.floor(df[col_buy_amount] * 0.1 / df[col_buy_price_reverse] / 100) * 100
+    df[col_sell_count_reverse] = np.floor(df[col_buy_amount] * 0.1 / df[col_sell_price_reverse] / 100) * 100
+
     df = pd.DataFrame(df, columns=[col_stock_id, col_stock_name,
                                    col_positive_fluctuation_percent,
                                    col_negative_fluctuation_percent,
-                                   col_buy_price, col_sell_price,
-                                   col_buy_count, col_sell_count])
+                                   col_buy_price, col_buy_count,
+                                   col_sell_price,col_sell_count,
+                                   col_buy_price_reverse, col_buy_count_reverse,
+                                   col_sell_price_reverse, col_sell_count_reverse])
     return df
 
 
