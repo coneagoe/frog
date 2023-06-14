@@ -13,7 +13,9 @@ col_ma_20 = u"20日均线"
 conf.config = conf.parse_config()
 
 trading_book_path = get_trading_book_path()
-sheet_names = [u"交易计划(1d)", u"持仓"]
+sheet_name_etf = u"ETF"
+sheet_name_position = u"持仓"
+sheet_name_stock = 'stock'
 
 n = 360
 end_date = date.today()
@@ -26,10 +28,6 @@ excel_writer = pd.ExcelWriter(output_file_name, engine='xlsxwriter')
 
 
 def update_support_resistance(df: pd.DataFrame):
-    df[col_current_price] = df[col_stock_id].swifter.apply(fetch_close_price)
-
-    filter_na = df[col_buy_count].isna()
-    df.loc[filter_na, col_buying_price] = df.loc[filter_na, col_current_price]
     df[[col_support, col_resistance]] = \
         df.swifter.apply(calculate_support_resistance, args=(start_date_ts, end_date_ts),
                          axis=1, result_type='expand')
@@ -58,12 +56,26 @@ def update_stoploss(df: pd.DataFrame):
     return df
 
 
-df = pd.read_excel(trading_book_path, sheet_name=u"交易计划(1d)", dtype={col_stock_id: str})
-df = update_support_resistance(df)
-df.to_excel(excel_writer, sheet_name=u"交易计划(1d)")
+def update_current_price(df: pd.DataFrame):
+    df[col_current_price] = df[col_stock_id].swifter.apply(fetch_close_price)
 
-df = pd.read_excel(trading_book_path, sheet_name=u"持仓", dtype={col_stock_id: str})
+    filter_na = df[col_buy_count].isna()
+    df.loc[filter_na, col_buying_price] = df.loc[filter_na, col_current_price]
+
+    return df
+
+
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_etf, dtype={col_stock_id: str})
+df = update_current_price(df)
+df.to_excel(excel_writer, sheet_name=sheet_name_etf)
+
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_stock, dtype={col_stock_id: str})
+df = update_current_price(df)
+df = update_support_resistance(df)
+df.to_excel(excel_writer, sheet_name=sheet_name_stock)
+
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_position, dtype={col_stock_id: str})
 df = update_stoploss(df)
-df.to_excel(excel_writer, sheet_name=u"持仓")
+df.to_excel(excel_writer, sheet_name=sheet_name_position)
 
 excel_writer.close()
