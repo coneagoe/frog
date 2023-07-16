@@ -32,7 +32,7 @@ if __name__ == "__main__":
         start_date = start_date.strftime('%Y-%m-%d')
         end_date = end_date.strftime('%Y-%m-%d')
 
-    df = pd.read_csv(account_path)
+    df = pd.read_csv(account_path, encoding='GBK')
     df[col_date] = pd.to_datetime(df[col_date])
     df = df[(df[col_date] >= start_date) & (df[col_date] <= end_date)]
 
