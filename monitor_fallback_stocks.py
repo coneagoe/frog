@@ -22,14 +22,23 @@ sleep_interval = 300
 
 
 def is_market_open():
-    today = date.today()
-    start_date = today.strftime('%Y-%m-%d')
-    end_date = (today + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-    schedule = market_calendar.schedule(start_date=start_date, end_date=end_date)
-    try:
-        return market_calendar.open_at_time(schedule, pd.Timestamp.today())
-    except ValueError:
+    if date.today().weekday() >= 5:
         return False
+
+    now = datetime.now()
+    if (pd.Timedelta(hours=9) < now.time() < pd.Timedelta(hours=11, minutes=30)) \
+            or (pd.Timedelta(hours=13) < now.time() < pd.Timedelta(hours=15)):
+        return True
+
+    return False
+
+    #start_date = today.strftime('%Y-%m-%d')
+    #end_date = (today + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    #schedule = market_calendar.schedule(start_date=start_date, end_date=end_date)
+    #try:
+    #    return market_calendar.open_at_time(schedule, pd.Timestamp.today())
+    #except ValueError:
+    #    return False
 
 
 def usage():
@@ -45,7 +54,6 @@ if __name__ == '__main__':
 
     while True:
         if not is_market_open():
-            print(f"{datetime.now()} market is not open")
             time.sleep(sleep_interval)
             continue
 
