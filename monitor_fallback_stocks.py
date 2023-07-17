@@ -6,7 +6,8 @@ from datetime import date, datetime
 import pandas as pd
 import swifter
 import pandas_market_calendars as mcal
-from stock import *
+import conf
+from stock import col_stock_id, col_current_price, fetch_close_price
 from utility import send_email
 
 
