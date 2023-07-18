@@ -26,19 +26,11 @@ def is_market_open():
         return False
 
     now = datetime.now()
-    if (pd.Timedelta(hours=9) < now.time() < pd.Timedelta(hours=11, minutes=30)) \
-            or (pd.Timedelta(hours=13) < now.time() < pd.Timedelta(hours=15)):
+    if (now.hour == 9 and now.minute >= 30) or (now.hour == 10) or (now.hour == 11 and now.minute <= 30) or \
+            (now.hour == 13) or (now.hour == 14) or (now.hour == 15 and now.minute <= 30):
         return True
 
     return False
-
-    #start_date = today.strftime('%Y-%m-%d')
-    #end_date = (today + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-    #schedule = market_calendar.schedule(start_date=start_date, end_date=end_date)
-    #try:
-    #    return market_calendar.open_at_time(schedule, pd.Timestamp.today())
-    #except ValueError:
-    #    return False
 
 
 def usage():
