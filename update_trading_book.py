@@ -4,6 +4,7 @@ from datetime import date
 import pandas as pd
 import numpy as np
 import swifter
+import conf
 from stock import *
 
 
