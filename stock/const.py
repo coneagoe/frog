@@ -1,3 +1,9 @@
+stock_general_info_file_name = 'stock_general_info.csv'
+etf_general_info_file_name = 'etf_general_info.csv'
+
+trading_book_name = 'trading book.xlsm'
+
+
 col_stock_id = u'股票代码'
 col_stock_name = u'股票名称'
 col_etf_id = u'基金代码'
