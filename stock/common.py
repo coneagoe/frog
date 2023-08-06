@@ -2,6 +2,7 @@
 from pathlib import Path
 from os.path import join, exists
 import logging
+from datetime import date, datetime
 import conf
 from . const import *
 
@@ -54,3 +55,15 @@ def get_trading_book_path():
         exit()
 
     return trading_book_path
+
+
+def is_market_open():
+    if date.today().weekday() >= 5:
+        return False
+
+    now = datetime.now()
+    if (now.hour == 9 and now.minute >= 30) or (now.hour == 10) or (now.hour == 11 and now.minute <= 30) or \
+            (now.hour == 13) or (now.hour == 14) or (now.hour == 15 and now.minute <= 30):
+        return True
+
+    return False
