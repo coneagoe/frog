@@ -20,18 +20,19 @@ if __name__ == "__main__":
     parser.add_argument('-i', type=str, nargs='*', default=None, help='stock id, default is None')
     args = parser.parse_args()
 
-    start_date = args.s
-    end_date = args.e
+    start_date_str = args.s
+    end_date_str = args.e
     n = args.n
     stock_ids = args.i
 
-    if start_date is None or end_date is None:
-        end_date = date.today()
-        start_date = end_date - pd.Timedelta(days=n)
-        start_date = start_date.strftime('%Y-%m-%d')
-        end_date = end_date.strftime('%Y-%m-%d')
+    if end_date_str is None:
+        end_date_str = date.today().strftime('%Y-%m-%d')
 
-    df_asset, df_profit, df_profit_rate = load_history_positions(start_date, end_date, stock_ids)
+    if start_date_str is None:
+        start_date = pd.to_datetime(end_date_str) - pd.Timedelta(days=n)
+        start_date_str = start_date.strftime('%Y-%m-%d')
+
+    df_asset, df_profit, df_profit_rate = load_history_positions(start_date_str, end_date_str, stock_ids)
 
     fig = px.line(df_asset, title=col_market_value)
     fig.show()
