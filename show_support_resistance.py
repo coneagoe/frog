@@ -2,8 +2,9 @@ from os.path import basename
 import argparse
 from datetime import date
 import pandas as pd
-from stock import *
 import plotly.graph_objs as go
+from stock import *
+import conf
 
 
 conf.config = conf.parse_config()
@@ -11,7 +12,7 @@ conf.config = conf.parse_config()
 trading_book_path = get_trading_book_path()
 
 
-def get_target_prices(df: pd.DataFrame, stock_id: str):
+def get_target_prices(stock_id: str):
     df = pd.read_excel(trading_book_path, sheet_name=u'持仓', dtype={col_stock_id: str})
     df[col_stock_id] = df[col_stock_id].astype(str)
     df[col_stock_id] = df[col_stock_id].str.zfill(6)
@@ -137,7 +138,7 @@ if __name__ == "__main__":
 
     df = load_history_data(stock_id, start_date, end_date)
     turning_points, support_point, resistance_point = get_support_resistance(df)
-    cost, tp0, tp1, tp2 = get_target_prices(df, stock_id)
+    cost, tp0, tp1, tp2 = get_target_prices(stock_id)
     draw_support_resistance(stock_id, df,
                             turning_points, support_point, resistance_point,
                             cost, tp0, tp1, tp2)
