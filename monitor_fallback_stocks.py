@@ -7,12 +7,14 @@ import pandas as pd
 import swifter
 import pandas_market_calendars as mcal
 import conf
-from stock import col_stock_id, col_current_price, fetch_close_price, is_market_open
+from stock import col_stock_id, col_stock_name, col_current_price, fetch_close_price, is_market_open
 from utility import send_email
 
 
 col_email = 'email'
 col_monitor_price = u'监控价格'
+col_comment = 'comment'
+
 sleep_interval = 300
 stock_csv = 'fallback_stocks.csv'
 
@@ -39,6 +41,7 @@ if __name__ == '__main__':
         if not df1.empty:
             df.loc[df1.index, col_email] = 1
             fallback_stock_output = f"fallback_stock_{date.today().strftime('%Y%m%d')}.csv"
+            df1 = df1.loc[:, [col_stock_id, col_stock_name, col_monitor_price, col_current_price, col_comment]]
             df1.to_csv(fallback_stock_output, encoding='GBK', index=False)
             send_email('fallback stock report', fallback_stock_output)
 
