@@ -2,7 +2,6 @@
 import logging
 from datetime import date
 import pandas as pd
-import numpy as np
 import swifter
 import conf
 from stock import *
@@ -36,23 +35,9 @@ def update_support_resistance(df: pd.DataFrame):
     return df
 
 
-def calculate_ma_20(df: pd.DataFrame):
-    n = 40
-    end_date = date.today()
-    start_date = end_date - pd.Timedelta(days=n)
-    start_date_ts = start_date.strftime('%Y%m%d')
-    end_date_ts = end_date.strftime('%Y%m%d')
-    df_history_data = load_history_data(df[col_stock_id], start_date_ts, end_date_ts)
-    if df_history_data is not None:
-        ma_20 = df_history_data[col_close].rolling(window=20).mean()
-        return ma_20.iloc[-1]
-
-    return np.nan
-
-
 def update_stoploss(df: pd.DataFrame):
     df[col_current_price] = df[col_stock_id].swifter.apply(fetch_close_price)
-    df[col_ma_20] = df.swifter.apply(calculate_ma_20, axis=1)
+    df[col_ma_20] = df[col_stock_id].swifter.apply(calculate_ma, period=20)
 
     return df
 
