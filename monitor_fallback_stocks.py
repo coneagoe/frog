@@ -48,8 +48,9 @@ if __name__ == '__main__':
                 df0[col_monitor_price].str.extract('ma(\d+)').astype(int)
 
             df0[col_monitor_price] = \
-                df0.apply(lambda row: calculate_ma(row[col_stock_id],
-                                                   row[col_period]), axis=1)
+                df0.swifter.apply(lambda row: calculate_ma(row[col_stock_id],
+                                                           row[col_period]),
+                                  axis=1)
 
             df_tmp.loc[df0.index, col_monitor_price] = df0[col_monitor_price]
 
@@ -62,7 +63,8 @@ if __name__ == '__main__':
             df.loc[df_output.index, col_email] = 1
             fallback_stock_output = f"fallback_stock_{date.today().strftime('%Y%m%d')}.csv"
             df_output = df_output.loc[:, [col_stock_id, col_stock_name,
-                                          col_monitor_price, col_current_price, col_comment]]
+                                          col_monitor_price, col_current_price,
+                                          col_comment]]
             df_output.to_csv(fallback_stock_output, encoding='GBK', index=False)
             if test:
                 print(df_output)
