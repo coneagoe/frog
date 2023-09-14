@@ -12,7 +12,8 @@ def calculate_ma(stock_id: str, period: int) -> float:
     end_date_ts = end_date.strftime('%Y%m%d')
     df_history_data = load_history_data(stock_id, start_date_ts, end_date_ts)
     if df_history_data is not None:
-        ma_20 = df_history_data[col_close].rolling(window=period).mean()
-        return ma_20.iloc[-1]
+        ma = df_history_data[col_close].rolling(window=period).mean()
+        return ma.iloc[-1]
 
     return np.nan
+

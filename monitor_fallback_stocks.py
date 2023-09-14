@@ -5,8 +5,8 @@ import pandas as pd
 import swifter
 import pandas_market_calendars as mcal
 import conf
-from stock import col_stock_id, col_stock_name, col_current_price, fetch_close_price, \
-    is_market_open, calculate_ma
+from stock import col_stock_id, col_stock_name, col_current_price, \
+    fetch_close_price, is_market_open, calculate_ma
 from utility import send_email
 
 
@@ -15,6 +15,7 @@ test = False
 col_email = 'email'
 col_monitor_price = u'监控价格'
 col_comment = 'comment'
+col_period = 'period'
 
 sleep_interval = 300
 stock_csv = 'fallback_stocks.csv'
@@ -41,20 +42,19 @@ if __name__ == '__main__':
         df_tmp = df.copy()
 
         df_tmp[col_monitor_price] = df_tmp[col_monitor_price].astype(str)
-        if df_tmp[col_monitor_price].str.contains('ma').any():
-            df0 = df_tmp[df_tmp[col_email].isna() & df_tmp[col_monitor_price].str.contains('ma5')]
-            df_tmp.loc[df0.index, col_monitor_price] = \
-                df0[col_stock_id].swifter.apply(calculate_ma, period=5)
+        df0 = df_tmp[df_tmp[col_monitor_price].str.contains('ma')]
+        if not df0.empty:
+            df0[col_period] = \
+                df0[col_monitor_price].str.extract('ma(\d+)').astype(int)
 
-            df0 = df_tmp[df_tmp[col_email].isna() & df_tmp[col_monitor_price].str.contains('ma10')]
-            df_tmp.loc[df0.index, col_monitor_price] = \
-                df0[col_stock_id].swifter.apply(calculate_ma, period=10)
+            df0[col_monitor_price] = \
+                df0.apply(lambda row: calculate_ma(row[col_stock_id],
+                                                   row[col_period]), axis=1)
 
-            df0 = df_tmp[df_tmp[col_email].isna() & df_tmp[col_monitor_price].str.contains('ma20')]
-            df_tmp.loc[df0.index, col_monitor_price] = \
-                df0[col_stock_id].swifter.apply(calculate_ma, period=20)
+            df_tmp.loc[df0.index, col_monitor_price] = df0[col_monitor_price]
 
         df_tmp[col_monitor_price] = df_tmp[col_monitor_price].astype(float)
+
         df_output = df_tmp[df_tmp[col_email].isna() &
                            (df_tmp[col_monitor_price] >= df_tmp[col_current_price])]
 
@@ -75,3 +75,4 @@ if __name__ == '__main__':
             break
 
         time.sleep(sleep_interval)
+
