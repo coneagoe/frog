@@ -6,7 +6,7 @@ import swifter
 import pandas_market_calendars as mcal
 import conf
 from stock import col_stock_id, col_stock_name, col_current_price, \
-    fetch_close_price, is_market_open, calculate_ma
+    fetch_close_price, is_market_open, get_yesterday_ma
 from utility import send_email
 
 
@@ -48,8 +48,8 @@ if __name__ == '__main__':
                 df0[col_monitor_price].str.extract('ma(\d+)').astype(int)
 
             df0[col_monitor_price] = \
-                df0.swifter.apply(lambda row: calculate_ma(row[col_stock_id],
-                                                           row[col_period]),
+                df0.swifter.apply(lambda row: get_yesterday_ma(row[col_stock_id],
+                                                               row[col_period]),
                                   axis=1)
 
             df_tmp.loc[df0.index, col_monitor_price] = df0[col_monitor_price]

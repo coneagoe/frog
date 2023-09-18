@@ -37,7 +37,7 @@ def update_support_resistance(df: pd.DataFrame):
 
 def update_stoploss(df: pd.DataFrame):
     df[col_current_price] = df[col_stock_id].swifter.apply(fetch_close_price)
-    df[col_ma_20] = df[col_stock_id].swifter.apply(calculate_ma, period=20)
+    df[col_ma_20] = df[col_stock_id].swifter.apply(get_yesterday_ma, period=20)
 
     return df
 
