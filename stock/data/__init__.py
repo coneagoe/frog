@@ -5,4 +5,5 @@ from . download_general_info import download_general_info_stock, download_genera
 from . download_history_stock import download_history_stock_1d
 from . download_history_etf import download_history_etf
 from . eastmoney import *
-from . moving_average import calculate_ma
+from . moving_average import get_yesterday_ma, get_today_ma
+
