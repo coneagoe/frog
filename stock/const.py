@@ -31,3 +31,15 @@ col_take_profit_percent = u'止盈(%)'
 col_profit_stoploss_rate = u'盈亏比'
 col_time = u'时间'
 col_buy_amount = u'买入金额'
+
+col_monitor_price = u'监控价格'
+col_comment = 'comment'
+# platforms to be notified
+col_email = 'email'
+col_mobile = 'mobile'
+col_pc = 'pc'
+
+
+# database
+database_name = 'frog.db'
+monitor_stock_table_name = 'monitor_stock'
