@@ -3,6 +3,7 @@ import io
 import sqlite3
 import flask
 import pandas as pd
+
 from stock import col_stock_id, col_stock_name, col_current_price, \
     col_monitor_price, col_email, col_comment, col_mobile, col_pc, \
     database_name, monitor_stock_table_name
