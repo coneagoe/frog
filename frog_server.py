@@ -1,34 +1,60 @@
 import base64
 import io
-import sqlite3
-import flask
+from flask import Flask, request
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import Integer, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 import pandas as pd
-
 from stock import col_stock_id, col_stock_name, col_current_price, \
     col_monitor_price, col_email, col_comment, col_mobile, col_pc, \
     database_name, monitor_stock_table_name
 
 
-app = flask.Flask(__name__)
+class Base(DeclarativeBase):
+    pass
+
+
+db = SQLAlchemy(model_class=Base)
+
+
+class MonitorStock(db.Model):
+    __tablename__ = monitor_stock_table_name
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stock_id: Mapped[str] = mapped_column(String(6), name=col_stock_id, nullable=False)
+    stock_name: Mapped[str] = mapped_column(String(20), name=col_stock_name, nullable=False)
+    monitor_price: Mapped[str] = mapped_column(String(10), name=col_monitor_price, nullable=False)
+    comment: Mapped[str] = mapped_column(String)
+
+    def __repr__(self):
+        return f"<MonitorStock(stock_id={self.stock_id}, stock_name={self.stock_name}, " \
+               f"monitor_price={self.monitor_price}, comment={self.comment})>"
+
+
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{database_name}"
+
+db.init_app(app)
+
+with app.app_context():
+    db.create_all()
 
 
 # curl -X POST -F file=@<stock_cvs_path> 'http://localhost:5000/upload_stocks'
 @app.route("/upload_stocks", methods=["POST"])
 def upload_stocks():
-    if flask.request.method == "POST":
-        if flask.request.files.get("file"):
-            stocks_base64 = flask.request.files["file"].stream.read()
+    if request.method == "POST":
+        if request.files.get("file"):
+            stocks_base64 = request.files["file"].stream.read()
             stocks_str = base64.b64decode(stocks_base64)
             df = pd.read_csv(io.BytesIO(stocks_str), encoding='GBK')
             if all(col in df.columns for col in [col_stock_id, col_stock_name,
-                                                 col_monitor_price, col_current_price,
-                                                 col_email, col_mobile, col_pc, col_comment]):
+                                                 col_monitor_price, col_comment]):
                 df[col_stock_id] = df[col_stock_id].astype(str)
                 df[col_stock_id] = df[col_stock_id].str.zfill(6)
+                df = df[[col_stock_id, col_stock_name, col_monitor_price, col_comment]]
 
-                conn = sqlite3.connect(database_name)
-                df.to_sql(monitor_stock_table_name, conn, if_exists='replace', index=False)
-                conn.close()
+                df.to_sql(monitor_stock_table_name, con=db.engine, if_exists='replace', index=False)
                 return "Success"
             else:
                 return "Please check csv!"
