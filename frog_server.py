@@ -1,6 +1,6 @@
 import base64
 import io
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Integer, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -57,9 +57,19 @@ def upload_stocks():
                 df.to_sql(monitor_stock_table_name, con=db.engine, if_exists='replace', index=False)
                 return "Success"
             else:
-                return "Please check csv!"
+                return "Please check stocks csv!"
         else:
-            return "No csv!"
+            return "No stocks csv!"
+
+
+@app.route("/download_stocks", methods=["GET"])
+def download_stocks():
+    if request.method == "GET":
+        df = pd.read_sql(monitor_stock_table_name, con=db.engine)
+        stocks_base64 = base64.b64encode(df.to_csv(index=False).encode('GBK'))
+        return stocks_base64
+    else:
+        return "Wrong method!"
 
 
 if __name__ == "__main__":
