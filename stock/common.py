@@ -62,8 +62,9 @@ def is_market_open():
         return False
 
     now = datetime.now()
-    if (now.hour == 9 and now.minute >= 30) or (now.hour == 10) or (now.hour == 11 and now.minute <= 30) or \
-            (now.hour == 13) or (now.hour == 14) or (now.hour == 15 and now.minute <= 30):
+    if (now.hour == 9 and now.minute >= 30) or (now.hour == 10) or \
+            (now.hour == 11 and now.minute <= 30) or (now.hour == 13) or \
+            (now.hour == 14) or (now.hour == 15 and now.minute <= 30):
         return True
 
     return False
