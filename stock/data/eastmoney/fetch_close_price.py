@@ -61,10 +61,11 @@ def fetch_close_price(secid: str) -> float:
             close_price = close_price_int / pow(10, precision)
             return close_price
         except:
-            logging.warning("the content is unexpected, please check.")
+            logging.warning(f"content of {secid} is unexpected, please check.")
             logging.warning(f"url = {url}")
             logging.warning(f"resp = {resp.content}")
             return np.nan
     else:
         logging.warning(f"status = {resp.status_code}, url = {url}")
         return np.nan
+
