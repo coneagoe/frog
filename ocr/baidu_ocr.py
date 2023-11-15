@@ -63,14 +63,25 @@ def get_token():
     client_id = conf.config['baidu_ocr']['client_id']
     client_secret = conf.config['baidu_ocr']['client_secret']
     logging.info(f"client_id: {client_id}, client_secret: {client_secret}")
-    token_url = 'https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials'
-    token_url += f"&client_id={client_id}&client_secret={client_secret}"
-    response = requests.get(token_url, proxies=conf.config['common']['proxies'])
-    if response.status_code == requests.codes.ok:
-        return response.json().get("access_token")
-    else:
-        logging.warning(f"status: {response.status_code}")
+    
+    token_url = 'https://aip.baidubce.com/oauth/2.0/token'
+    params = {
+        'grant_type': 'client_credentials',
+        'client_id': client_id,
+        'client_secret': client_secret
+    }
+
+    try:
+        response = requests.get(token_url, params=params)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as err:
+        logging.error(f"HTTP error occurred: {err}")
         return None
+    except requests.exceptions.RequestException as err:
+        logging.error(f"Error occurred: {err}")
+        return None
+
+    return response.json().get("access_token")
 
 
 def get_parameter_ocr_accurate(image, token):
@@ -166,8 +177,7 @@ def get_ocr(image_file_name: str, ocr_type):
         image = base64.b64encode(f.read())
 
         body, headers, ocr_url = ocr_parameter_table[ocr_type](image, token)
-        response = requests.post(ocr_url, headers=headers, data=body,
-                                 proxies=conf.config['common']['proxies'])
+        response = requests.post(ocr_url, headers=headers, data=body)
         if response.status_code == requests.codes.ok:
             content = json.loads(response.content.decode("UTF-8"))
             words = []
