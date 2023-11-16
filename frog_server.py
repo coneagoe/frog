@@ -4,8 +4,9 @@ import io
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_apscheduler import APScheduler
-from sqlalchemy import Integer, String
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import Mapped
+from sqlalchemy.ext.declarative import declarative_base
 import pandas as pd
 
 import conf
@@ -26,8 +27,7 @@ class Config(object):
     SCHEDULER_API_ENABLED = True
 
 
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
 
 
 db = SQLAlchemy(model_class=Base)
@@ -36,11 +36,11 @@ db = SQLAlchemy(model_class=Base)
 class MonitorStock(db.Model):
     __tablename__ = monitor_stock_table_name
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    stock_id: Mapped[str] = mapped_column(String(6), name=col_stock_id, nullable=False)
-    stock_name: Mapped[str] = mapped_column(String(20), name=col_stock_name, nullable=False)
-    monitor_price: Mapped[str] = mapped_column(String(10), name=col_monitor_price, nullable=False)
-    comment: Mapped[str] = mapped_column(String)
+    id: Mapped[int] = Column(Integer, primary_key=True)
+    stock_id: Mapped[str] = Column(String(6), name=col_stock_id, nullable=False)
+    stock_name: Mapped[str] = Column(String(20), name=col_stock_name, nullable=False)
+    monitor_price: Mapped[str] = Column(String(10), name=col_monitor_price, nullable=False)
+    comment: Mapped[str] = Column(String)
 
     def __repr__(self):
         return f"<MonitorStock(stock_id={self.stock_id}, stock_name={self.stock_name}, " \
@@ -141,3 +141,4 @@ def monitor_stocks():
 if __name__ == "__main__":
     scheduler.start()
     app.run()
+
