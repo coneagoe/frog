@@ -35,17 +35,8 @@ def fetch_close_price(secid: str) -> float:
 
     url = base_url + '?' + urlencode(parameters)
 
-    proxies = None
-    http_proxy = conf.get_http_proxy()
-    https_proxy = conf.get_https_proxy()
-    if http_proxy and https_proxy:
-        proxies = {
-            'http': http_proxy,
-            'https': https_proxy
-        }
-
     try:
-        resp = requests.get(url, headers=headers, proxies=proxies)
+        resp = requests.get(url, headers=headers)
     except requests.exceptions.ConnectionError as e:
         logging.error(e.args)
         raise e
