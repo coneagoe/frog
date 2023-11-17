@@ -22,6 +22,16 @@ def parse_config():
     if get_https_proxy():
         os.environ['https_proxy'] = get_https_proxy()
 
+    try:
+        os.environ['frog_server_ip'] = config['frog_server']['ip']
+    except KeyError:
+        pass
+
+    try:
+        os.environ['frog_server_port'] = config['frog_server']['port']
+    except KeyError:
+        pass
+
     return config
 
 
