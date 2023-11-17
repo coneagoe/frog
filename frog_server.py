@@ -89,6 +89,7 @@ def upload_stocks():
 def download_stocks():
     if request.method == "GET":
         df = pd.read_sql(monitor_stock_table_name, con=db.engine)
+        df.set_index(col_stock_id, inplace=True)
         stocks_base64 = base64.b64encode(df.to_csv(index=False).encode('GBK'))
         return stocks_base64
     else:
