@@ -3,12 +3,87 @@ import logging
 import configparser
 
 
-config = None
 config_file_name = 'config.ini'
 
 
+def parse_email_config(config: dict):
+    try:
+        os.environ['email_server'] = config['email']['smtp_server']
+    except KeyError:
+        logging.warning("email server is not configured")
+
+    try:
+        os.environ['email_server_port'] = config['email']['smtp_port']
+    except KeyError:
+        logging.warning("email server port is not configured")
+
+    try:
+        os.environ['email_sender'] = config['email']['sender_email']
+    except KeyError:
+        logging.warning("email sender is not configured")
+
+    try:
+        os.environ['email_user'] = config['email']['sender_user']
+    except KeyError:
+        logging.warning("email user is not configured")
+
+    try:
+        os.environ['email_password'] = config['email']['sender_password']
+    except KeyError:
+        logging.warning("email password is not configured")
+
+    try:
+        os.environ['email_receiver'] = config['email']['receiver_email']
+    except KeyError:
+        logging.warning("email receiver is not configured")
+
+
+def parse_common_config(config: dict):
+    try:
+        os.environ['http_proxy'] = config['common']['http_proxy']
+    except KeyError:
+        pass
+
+    try:
+        os.environ['https_proxy'] = config['common']['https_proxy']
+    except KeyError:
+        pass
+
+
+def parse_ocr_config(config: dict):
+    try:
+        os.environ['baidu_ocr_client_id'] = config['baidu_ocr']['client_id']
+    except KeyError:
+        logging.warning("baidu ocr client id is not configured")
+
+    try:
+        os.environ['baidu_ocr_client_secret'] = config['baidu_ocr']['client_secret']
+    except KeyError:
+        logging.warning("baidu ocr client secret is not configured")
+
+
+def parse_fund_config(config: dict):
+    try:
+        os.environ['fund_data_path'] = config['fund']['data_path']
+    except KeyError:
+        logging.warning("fund data path is not configured")
+
+
+def parse_stock_config(config: dict):
+    try:
+        os.environ['stock_data_path'] = config['stock']['data_path']
+    except KeyError:
+        logging.warning("stock data path is not configured")
+
+
+def parse_account_config(config: dict):
+    try:
+        os.environ['account_data_path'] = config['account']['data_path']
+    except KeyError:
+        logging.warning("account data path is not configured")
+
+
 def parse_config():
-    global config
     if not os.path.exists(config_file_name):
         logging.error(f"{config_file_name} does not exist!")
         exit()
@@ -16,66 +91,8 @@ def parse_config():
     config = configparser.ConfigParser()
     config.read(config_file_name)
 
-    if get_http_proxy():
-        os.environ['http_proxy'] = get_http_proxy()
-
-    if get_https_proxy():
-        os.environ['https_proxy'] = get_https_proxy()
-
-    try:
-        os.environ['frog_server_ip'] = config['frog_server']['ip']
-    except KeyError:
-        pass
-
-    try:
-        os.environ['frog_server_port'] = config['frog_server']['port']
-    except KeyError:
-        pass
-
-    return config
-
-
-def get_http_proxy():
-    global config
-    try:
-        return config['common']['http_proxy']
-    except KeyError:
-        return None
-
-
-def get_https_proxy():
-    global config
-    try:
-        return config['common']['https_proxy']
-    except KeyError:
-        return None
-
-
-def get_smtp_server() -> str:
-    global config
-    return config['email']['smtp_server']
-
-
-def get_smtp_port() -> int:
-    global config
-    return config['email']['smtp_port']
-
-
-def get_sender_email() -> str:
-    global config
-    return config['email']['sender_email']
-
-
-def get_sender_user() -> str:
-    global config
-    return config['email']['sender_user']
-
-
-def get_sender_password() -> str:
-    global config
-    return config['email']['sender_password']
-
-
-def get_receiver_email() -> str:
-    global config
-    return config['email']['receiver_email']
+    parse_common_config(config)
+    parse_email_config(config)
+    parse_ocr_config(config)
+    parse_fund_config(config)
+    parse_stock_config(config)

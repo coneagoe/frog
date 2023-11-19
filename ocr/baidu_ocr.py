@@ -1,33 +1,36 @@
 import base64
+from enum import Enum
 import logging
 import requests
 import json
-import conf
 import os
 from PIL import Image
 
 
-OCR_GENERAL_BASIC = 0
-OCR_ACCURATE = 1
-OCR_ACCURATE_BASIC = 2
-image_length_limits = {
-    OCR_GENERAL_BASIC: 4000,
-    OCR_ACCURATE_BASIC: 8000,
-    OCR_ACCURATE: 8000
-}
+class OcrType(Enum):
+    OCR_GENERAL_BASIC = 1
+    OCR_ACCURATE = 2
+    OCR_ACCURATE_BASIC = 3
 
+
+image_length_limits = {
+    OcrType.OCR_GENERAL_BASIC: 4000,
+    OcrType.OCR_ACCURATE_BASIC: 8000,
+    OcrType.OCR_ACCURATE: 8000
+}
 
 token = None
 
 
-def crop_image(image_file_name: str, ocr_type, image_length: int) -> list:
-    '''
+def crop_image(image_file_name: str, ocr_type: OcrType, image_length: int) -> list:
+    """
     Because the baidu ocr has the limits on the image size,
     we have to crap it first. See https://cloud.baidu.com/doc/OCR/s/Ck3h7y2ia
     :param image_file_name:
     :param ocr_type: OCR_GENERAL_BASIC, OCR_ACCURATE, OCR_ACCURATE_BASIC
+    :param image_length:
     :return: image list
-    '''
+    """
     if not os.path.exists(image_file_name):
         logging.error(f"image {image_file_name} does not exist!")
         exit()
@@ -60,10 +63,10 @@ def crop_image(image_file_name: str, ocr_type, image_length: int) -> list:
 
 
 def get_token():
-    client_id = conf.config['baidu_ocr']['client_id']
-    client_secret = conf.config['baidu_ocr']['client_secret']
+    client_id = os.environ['baidu_ocr_client_id']
+    client_secret = os.environ['baidu_ocr_client_secret']
     logging.info(f"client_id: {client_id}, client_secret: {client_secret}")
-    
+
     token_url = 'https://aip.baidubce.com/oauth/2.0/token'
     params = {
         'grant_type': 'client_credentials',
@@ -84,8 +87,8 @@ def get_token():
     return response.json().get("access_token")
 
 
-def get_parameter_ocr_accurate(image, token):
-    '''
+def get_parameter_ocr_accurate(image, token: str):
+    """
     通用文字识别（高精度含位置版）接口
     :param image: 15px < length < 8192px and image size < 10MB.
             See https://cloud.baidu.com/doc/OCR/s/tk3h7y2aq
@@ -93,7 +96,7 @@ def get_parameter_ocr_accurate(image, token):
     :return:
             success: list
             fail: None
-    '''
+    """
     ocr_url = 'https://aip.baidubce.com/rest/2.0/ocr/v1/accurate'
     ocr_url += f"?access_token={token}"
     body = {
@@ -110,14 +113,14 @@ def get_parameter_ocr_accurate(image, token):
 
 
 def get_parameter_ocr_accurate_basic(image, token):
-    '''
+    """
     通用文字识别（高精度版）接口
     :param image: 15px < length < 8192px and image size < 10MB.
             See https://cloud.baidu.com/doc/OCR/s/1k3h7y3db
     :return:
             success: list
             fail: None
-    '''
+    """
     ocr_url = 'https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic'
     ocr_url += f"?access_token={token}"
     body = {
@@ -132,14 +135,14 @@ def get_parameter_ocr_accurate_basic(image, token):
 
 
 def get_parameter_ocr_general_basic(image, token):
-    '''
+    """
     通用文字识别（标准版）接口
     :param image: 15px < length < 4096px and image size < 4MB.
             See https://cloud.baidu.com/doc/OCR/s/zk3h7xz52
     :return:
             success: list
             fail: None
-    '''
+    """
     ocr_url = 'https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic'
     ocr_url += f"?access_token={token}"
     body = {
@@ -153,20 +156,20 @@ def get_parameter_ocr_general_basic(image, token):
 
 
 ocr_parameter_table = {
-    OCR_GENERAL_BASIC: get_parameter_ocr_general_basic,
-    OCR_ACCURATE_BASIC: get_parameter_ocr_accurate_basic,
-    OCR_ACCURATE: get_parameter_ocr_accurate
+    OcrType.OCR_GENERAL_BASIC: get_parameter_ocr_general_basic,
+    OcrType.OCR_ACCURATE_BASIC: get_parameter_ocr_accurate_basic,
+    OcrType.OCR_ACCURATE: get_parameter_ocr_accurate
 }
 
 
-def get_ocr(image_file_name: str, ocr_type):
-    '''
+def get_ocr(image_file_name: str, ocr_type: OcrType):
+    """
     :param image_file_name:
     :param ocr_type: OCR_GENERAL_BASIC, OCR_ACCURATE, OCR_ACCURATE_BASIC
     :return:
             success: words list
             fail: None
-    '''
+    """
     global token
     with open(image_file_name, "rb") as f:
         if token is None:
@@ -192,4 +195,3 @@ def get_ocr(image_file_name: str, ocr_type):
         else:
             logging.warning(f"status: {response.status_code}")
     return None
-
