@@ -20,7 +20,7 @@ from utility import send_email
 col_period = 'period'
 
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 
 class Config(object):

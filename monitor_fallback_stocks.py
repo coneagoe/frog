@@ -23,7 +23,7 @@ stock_csv = 'fallback_stocks.csv'
 conn = sqlite3.connect(database_name)
 cursor = conn.cursor()
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 
 def exit_handler():

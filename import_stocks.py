@@ -58,5 +58,5 @@ if __name__ == '__main__':
         exit()
 
     image_file_name = sys.argv[1]
-    images = crop_image(image_file_name, OCR_ACCURATE_BASIC, 6000)
-    import_stocks(images, OCR_ACCURATE_BASIC)
+    images = crop_image(image_file_name, OcrType.OCR_ACCURATE_BASIC, 6000)
+    import_stocks(images, OcrType.OCR_ACCURATE_BASIC)

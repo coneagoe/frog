@@ -2,11 +2,12 @@ from os.path import basename
 import argparse
 from datetime import date
 import pandas as pd
-from stock import *
 import plotly.graph_objs as go
+import conf
+from stock import *
 
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 
 def show_two_securities(stock_id_0: str, df0: pd.DataFrame, stock_id_1: str, df1: pd.DataFrame):

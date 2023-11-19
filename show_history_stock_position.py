@@ -9,7 +9,7 @@ from stock import *
 # import logging
 # logging.getLogger().setLevel(logging.DEBUG)
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 
 if __name__ == "__main__":

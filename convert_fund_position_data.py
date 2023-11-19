@@ -9,7 +9,7 @@ from fund import *
 import conf
 
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 
 if __name__ == "__main__":

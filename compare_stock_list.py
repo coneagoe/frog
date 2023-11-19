@@ -27,7 +27,6 @@ if __name__ == '__main__':
     df3 = df1[~df1[col_stock_id].isin(df0[col_stock_id])]
 
     print(f'stocks in only in {stock_list_0}:')
-    print(df2)
-    print()
+    print(f'{df2}\n')
     print(f'stocks in only in {stock_list_1}:')
     print(df3)

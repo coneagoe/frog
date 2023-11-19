@@ -6,7 +6,7 @@ import requests
 import conf
 
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 
 def upload_stocks(csv_path: str, ip: str, port: int):

@@ -7,7 +7,7 @@ from stock import *
 import conf
 
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 trading_book_path = get_trading_book_path()
 
