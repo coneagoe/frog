@@ -7,11 +7,12 @@ import pandas as pd
 from tqdm import tqdm
 from ocr import *
 from fund import *
+import conf
 
 # import logging
 # logging.getLogger().setLevel(logging.DEBUG)
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 parser = TiantianParser()
 
@@ -20,7 +21,7 @@ def usage():
     print(f"{os.path.basename(__file__)} <image>")
 
 
-def update_fund_position(timestamp, images, ocr_type):
+def update_fund_position(timestamp, images, ocr_type: OcrType):
     """
     parse fund positions according to screenshots, save the results in csv
     :param timestamp: csv file name
@@ -52,7 +53,7 @@ if __name__ == '__main__':
         exit()
 
     image_file_name = sys.argv[1]
-    images = crop_image(image_file_name, OCR_ACCURATE_BASIC, 6000)
+    images = crop_image(image_file_name, OcrType.OCR_ACCURATE_BASIC, 6000)
 
     m = re.match(r'Screenshot_(\d{4})-(\d{2})-(\d{2}).*', image_file_name)
     if m:
@@ -61,4 +62,4 @@ if __name__ == '__main__':
         today = date.today()
         timestamp = "{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day)
 
-    update_fund_position(timestamp, images, OCR_ACCURATE_BASIC)
+    update_fund_position(timestamp, images, OcrType.OCR_ACCURATE_BASIC)

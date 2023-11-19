@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
+import os
 from os.path import join, exists
 import logging
 from datetime import date, datetime
-import conf
 from . const import *
 
 
 def get_stock_data_path() -> Path:
-    path = Path(conf.config['stock']['data_path'])
+    path = Path(os.environ['stock_data_path'])
     if not path.exists():
         path.mkdir(parents=True)
 
@@ -16,7 +16,7 @@ def get_stock_data_path() -> Path:
 
 
 def _get_stock_data_path(subdir: str) -> Path:
-    path = Path(join(conf.config['stock']['data_path'], subdir))
+    path = Path(join(os.environ['stock_data_path'], subdir))
     if not path.exists():
         path.mkdir(parents=True)
 

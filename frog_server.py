@@ -1,7 +1,7 @@
 import base64
 from datetime import date
 import io
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_apscheduler import APScheduler
 from sqlalchemy import Column, Integer, String
@@ -129,8 +129,8 @@ def monitor_stocks():
             if not df_output.empty:
                 fallback_stock_output = f"fallback_stock_{date.today().strftime('%Y%m%d')}.csv"
                 df_output = df_output.loc[:, [col_stock_id, col_stock_name,
-                                            col_monitor_price, col_current_price,
-                                            col_comment]]
+                                              col_monitor_price, col_current_price,
+                                              col_comment]]
                 df_output.to_csv(fallback_stock_output, encoding='GBK', index=False)
                 # print(df_output)
                 send_email('fallback stock report', fallback_stock_output)
@@ -142,4 +142,3 @@ def monitor_stocks():
 if __name__ == "__main__":
     scheduler.start()
     app.run()
-

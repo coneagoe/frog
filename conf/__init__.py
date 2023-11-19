@@ -1,1 +1,1 @@
-from . global_settings import *
+from . global_settings import parse_config

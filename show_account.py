@@ -10,9 +10,8 @@ import conf
 col_date = u'日期'
 
 
-conf.config = conf.parse_config()
-account_path = conf.config['account']['data_path']
-account_path = os.path.join(account_path, u'账户.csv')
+conf.parse_config()
+account_path = os.path.join(os.environ['account_data_path'], u'账户.csv')
 
 
 if __name__ == "__main__":

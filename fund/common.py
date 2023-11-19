@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from pathlib import Path
+import os
 from os.path import join
-import conf
 
 
 fund_general_info_file_name = 'fund_general_info.csv'
@@ -20,7 +20,7 @@ col_date = u'日期'
 
 
 def get_fund_data_path(subdir: str) -> str:
-    path = Path(join(conf.config['fund']['data_path'], subdir))
+    path = Path(join(os.environ['fund_data_path'], subdir))
     if not path.exists():
         path.mkdir(parents=True)
 
