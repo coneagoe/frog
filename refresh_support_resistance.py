@@ -11,7 +11,7 @@ sheet_names = [u"交易计划(1d)", u"持仓"]
 output_book_name = "tmp.xlsx"
 
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 trading_book_path = get_trading_book_path()
 

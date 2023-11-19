@@ -10,7 +10,7 @@ from stock import *
 col_ma_20 = u"20日均线"
 
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 trading_book_path = get_trading_book_path()
 sheet_name_etf = u"ETF"

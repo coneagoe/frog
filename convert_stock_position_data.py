@@ -11,7 +11,7 @@ from stock import *
 import conf
 
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 
 def fetch_name(df):

@@ -7,7 +7,6 @@ from ocr import get_ocr
 from fund.common import *
 from fund.data.general_info import get_fund_name, load_all_fund_general_info
 
-
 pattern_stick = re.compile(r'(\D+)(\d{6})$')
 pattern_tailing_number = re.compile(r'\d+$')
 pattern_valid_fund_id = re.compile(r'^\d{6}$')
@@ -18,7 +17,7 @@ pattern_date = re.compile(r'\d+-\d+')
 def is_valid_fund_id(fund_id: str) -> bool:
     df = load_all_fund_general_info()
     return pattern_valid_fund_id.match(fund_id) and \
-            fund_id in df[col_fund_id].values
+        fund_id in df[col_fund_id].values
 
 
 def is_fund_name_stick_with_fund_id(word):
@@ -50,7 +49,7 @@ def get_next_float(words: list, i: int):
 
 class TiantianParser:
     fund_id, fund_name = (None, None)
-    asset, yesterday_earning, position_income, position_yield =\
+    asset, yesterday_earning, position_income, position_yield = \
         (0, 0, 0, 0)
     data = None
 
@@ -59,7 +58,7 @@ class TiantianParser:
 
     def reset(self):
         self.fund_id, self.fund_name = (None, None)
-        self.asset, self.yesterday_earning,\
+        self.asset, self.yesterday_earning, \
             self.position_income, self.position_yield = \
             (0, 0, 0, 0)
         self.data = {col_fund_id: [],
