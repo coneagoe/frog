@@ -96,3 +96,4 @@ def parse_config():
     parse_ocr_config(config)
     parse_fund_config(config)
     parse_stock_config(config)
+    parse_account_config(config)
