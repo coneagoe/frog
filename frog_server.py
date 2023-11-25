@@ -18,6 +18,7 @@ from utility import send_email
 
 
 col_period = 'period'
+encoding = 'GBK'
 
 
 conf.parse_config()
@@ -70,7 +71,7 @@ def upload_stocks():
         if request.files.get("file"):
             stocks_base64 = request.files["file"].stream.read()
             stocks_str = base64.b64decode(stocks_base64)
-            df = pd.read_csv(io.BytesIO(stocks_str), encoding='GBK')
+            df = pd.read_csv(io.BytesIO(stocks_str), encoding=encoding)
             if all(col in df.columns for col in [col_stock_id, col_stock_name,
                                                  col_monitor_price, col_comment]):
                 df[col_stock_id] = df[col_stock_id].astype(str)
@@ -90,7 +91,7 @@ def download_stocks():
     if request.method == "GET":
         df = pd.read_sql(monitor_stock_table_name, con=db.engine)
         df.set_index(col_stock_id, inplace=True)
-        stocks_base64 = base64.b64encode(df.to_csv(index=False).encode('GBK'))
+        stocks_base64 = base64.b64encode(df.to_csv(index=False).encode(encoding))
         return stocks_base64
     else:
         return "Wrong method!"
@@ -131,7 +132,7 @@ def monitor_stocks():
                 df_output = df_output.loc[:, [col_stock_id, col_stock_name,
                                               col_monitor_price, col_current_price,
                                               col_comment]]
-                df_output.to_csv(fallback_stock_output, encoding='GBK', index=False)
+                df_output.to_csv(fallback_stock_output, encoding=encoding, index=False)
                 # print(df_output)
                 send_email('fallback stock report', fallback_stock_output)
 
