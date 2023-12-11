@@ -4,7 +4,9 @@ import json
 from urllib.parse import urlencode
 import logging
 import numpy as np
-import conf
+
+
+p = re.compile("jQuery[0-9_(]+(.*)\);")
 
 
 def convert_secid(secid: str) -> str:
@@ -44,7 +46,6 @@ def fetch_close_price(secid: str) -> float:
     if resp.status_code == requests.codes.ok:
         try:
             jq = resp.content.decode('utf-8')
-            p = re.compile("jQuery[0-9_(]+(.*)\);")
             m = p.match(jq)
             js = json.loads(m.group(1))
             close_price_int = int(js["data"]["f43"])
@@ -59,4 +60,3 @@ def fetch_close_price(secid: str) -> float:
     else:
         logging.warning(f"status = {resp.status_code}, url = {url}")
         return np.nan
-
