@@ -1,8 +1,10 @@
 import base64
 from datetime import date
 import io
+import os
 from flask import Flask, request
 from flask_apscheduler import APScheduler
+from flask_mail import Mail, Message
 import pandas as pd
 
 import conf
@@ -10,7 +12,6 @@ from stock import col_stock_id, col_stock_name, col_current_price, \
     col_monitor_price, col_comment, database_name, \
     monitor_stock_table_name, fetch_close_price, get_yesterday_ma, \
     is_market_open
-from utility import send_email
 from db import db
 from strategy import MonitorStock
 
@@ -41,6 +42,15 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 
+# email
+app.config['MAIL_SERVER'] = os.environ['MAIL_SERVER']
+app.config['MAIL_PORT'] = os.environ['MAIL_PORT']
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_DEFAULT_SENDER'] = os.environ['MAIL_SENDER']
+app.config['MAIL_USERNAME'] = os.environ['MAIL_USERNAME']
+app.config['MAIL_PASSWORD'] = os.environ['MAIL_PASSWORD']
+mail = Mail(app)
+
 
 # curl -X POST -F file=@<stock_cvs_path> 'http://localhost:5000/upload_stocks'
 @app.route("/upload_stocks", methods=["POST"])
@@ -68,7 +78,6 @@ def upload_stocks():
 def download_stocks():
     if request.method == "GET":
         df = pd.read_sql(monitor_stock_table_name, con=db.engine)
-        df.set_index(col_stock_id, inplace=True)
         stocks_base64 = base64.b64encode(df.to_csv(index=False).encode(encoding))
         return stocks_base64
     else:
@@ -106,13 +115,16 @@ def monitor_stocks():
             df_output = df_tmp[(df_tmp[col_monitor_price] >= df_tmp[col_current_price])]
 
             if not df_output.empty:
-                fallback_stock_output = f"fallback_stock_{date.today().strftime('%Y%m%d')}.csv"
+                monitor_stock_output = f"monitor_stock_{date.today().strftime('%Y%m%d')}.csv"
                 df_output = df_output.loc[:, [col_stock_id, col_stock_name,
                                               col_monitor_price, col_current_price,
                                               col_comment]]
-                df_output.to_csv(fallback_stock_output, encoding=encoding, index=False)
-                # print(df_output)
-                send_email('fallback stock report', fallback_stock_output)
+                df_output.to_csv(monitor_stock_output, encoding=encoding, index=False)
+                with app.open_resource(monitor_stock_output) as f:
+                    msg = Message('monitor stock report', recipients=[os.environ['MAIL_RECEIVER']])
+                    msg.body = "monitor stock report"
+                    msg.attach(monitor_stock_output, 'text/csv', f.read())
+                    mail.send(msg)
 
                 df = df[~df[col_stock_id].isin(df_output[col_stock_id])]
                 df.to_sql(monitor_stock_table_name, con=db.engine, if_exists='replace', index=False)
