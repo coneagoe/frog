@@ -8,32 +8,32 @@ config_file_name = 'config.ini'
 
 def parse_email_config(config: dict):
     try:
-        os.environ['email_server'] = config['email']['smtp_server']
+        os.environ['MAIL_SERVER'] = config['email']['smtp_server']
     except KeyError:
         logging.warning("email server is not configured")
 
     try:
-        os.environ['email_server_port'] = config['email']['smtp_port']
+        os.environ['MAIL_PORT'] = config['email']['smtp_port']
     except KeyError:
         logging.warning("email server port is not configured")
 
     try:
-        os.environ['email_sender'] = config['email']['sender_email']
+        os.environ['MAIL_SENDER'] = config['email']['sender_email']
     except KeyError:
         logging.warning("email sender is not configured")
 
     try:
-        os.environ['email_user'] = config['email']['sender_user']
+        os.environ['MAIL_USERNAME'] = config['email']['sender_username']
     except KeyError:
         logging.warning("email user is not configured")
 
     try:
-        os.environ['email_password'] = config['email']['sender_password']
+        os.environ['MAIL_PASSWORD'] = config['email']['sender_password']
     except KeyError:
         logging.warning("email password is not configured")
 
     try:
-        os.environ['email_receiver'] = config['email']['receiver_email']
+        os.environ['MAIL_RECEIVER'] = config['email']['receiver_email']
     except KeyError:
         logging.warning("email receiver is not configured")
 
@@ -83,6 +83,18 @@ def parse_account_config(config: dict):
         logging.warning("account data path is not configured")
 
 
+def parse_frog_server(config: dict):
+    try:
+        os.environ['FROG_SERVER'] = config['frog']['server']
+    except KeyError:
+        os.environ['FROG_SERVER'] = 'localhost'
+
+    try:
+        os.environ['FROG_PORT'] = config['frog']['port']
+    except KeyError:
+        os.environ['FROG_PORT'] = '5000'
+
+
 def parse_config():
     if not os.path.exists(config_file_name):
         logging.error(f"{config_file_name} does not exist!")
@@ -97,3 +109,4 @@ def parse_config():
     parse_fund_config(config)
     parse_stock_config(config)
     parse_account_config(config)
+    parse_frog_server(config)
