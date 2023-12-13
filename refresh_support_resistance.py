@@ -4,7 +4,15 @@ import pandas as pd
 import numpy as np
 from datetime import date
 import conf
-from stock import *
+from stock import (
+    get_trading_book_path,
+    col_stock_id,
+    col_close,
+    col_support,
+    col_resistance,
+    load_history_data,
+    get_support_resistance
+)
 
 
 sheet_names = [u"交易计划(1d)", u"持仓"]

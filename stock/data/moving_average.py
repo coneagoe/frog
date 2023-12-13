@@ -1,7 +1,7 @@
 from datetime import date
 import numpy as np
 import pandas as pd
-from . access_data import load_history_data
+from .access_data import load_history_data
 from .. common import col_close
 
 

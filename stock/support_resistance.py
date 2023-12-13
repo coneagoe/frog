@@ -8,7 +8,7 @@ from stock.data import load_history_data
 percent = 0.05
 
 
-def get_support_resistance(df: pd.DataFrame):
+def get_support_resistance(df: pd.DataFrame) -> tuple:
     turning_points = get_turning_points(df)
 
     current_price = df[col_close].iloc[-1]

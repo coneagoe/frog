@@ -1,5 +1,10 @@
 import akshare as ak
-from stock.common import *
+from stock.common import (
+    col_stock_id,
+    col_stock_name,
+    get_stock_general_info_path,
+    get_etf_general_info_path
+)
 
 
 pattern_stock_id = r'60|00|30|68'

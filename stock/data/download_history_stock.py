@@ -2,7 +2,10 @@ import os
 import logging
 import pandas as pd
 import akshare as ak
-from stock.common import *
+from stock.common import (
+    col_date,
+    get_stock_1d_path
+)
 
 
 def download_history_stock_1d(stock_id: str, start_date: str, end_date: str):
