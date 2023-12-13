@@ -3,9 +3,9 @@ import pandas as pd
 import numpy as np
 import logging
 import pandas_market_calendars as mcal
+from fund import get_fund_name
 from stock.common import *
 from stock.data.access_general_info import get_stock_name
-from fund import get_fund_name
 
 
 pd.set_option('display.max_rows', None)
@@ -17,7 +17,7 @@ pd.set_option('display.max_rows', None)
 #         exit(-1)
 
 
-def fetch_name(df):
+def fetch_name(df: pd.DataFrame) -> str:
     name = get_stock_name(df[col_stock_id])
     if name:
         return name
@@ -48,7 +48,7 @@ def convert_data(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_history_position(position_path: str):
+def load_history_position(position_path: str) -> pd.DataFrame | None:
     if not os.path.exists(position_path):
         logging.warning(f"file does not exist: {position_path}.")
         return None
@@ -63,7 +63,8 @@ def load_history_position(position_path: str):
     return df
 
 
-def load_history_positions(start_date: str, end_date: str, stock_ids=tuple) -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
+def load_history_positions(start_date: str, end_date: str, stock_ids=tuple) \
+    -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
     assets, profits, profit_rates = ([], [], [])
 
     market_calendar = mcal.get_calendar('XSHG')

@@ -4,7 +4,12 @@ from datetime import date
 import pandas as pd
 import plotly.graph_objs as go
 import conf
-from stock import *
+from stock import (
+    get_stock_or_etf_name,
+    col_date,
+    col_close,
+    load_history_data
+)
 
 
 conf.parse_config()

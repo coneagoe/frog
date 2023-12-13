@@ -4,7 +4,7 @@ import os
 from os.path import join, exists
 import logging
 from datetime import date, datetime
-from . const import *
+from .const import *
 
 
 def get_stock_data_path() -> Path:

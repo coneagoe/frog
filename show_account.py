@@ -16,7 +16,7 @@ account_path = os.path.join(os.environ['account_data_path'], u'账户.csv')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-n', type=int, default=360, help='how many days ago to show, default is 120')
+    parser.add_argument('-n', type=int, default=360, help='how many days ago to show')
     parser.add_argument('-s', type=str, help='start date, format: YYYY-M-D')
     parser.add_argument('-e', type=str, help='end date, format: YYYY-M-D')
     args = parser.parse_args()

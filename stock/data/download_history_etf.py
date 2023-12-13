@@ -1,6 +1,6 @@
 import os
-from stock import get_stock_data_path
 import akshare as ak
+from stock import get_stock_data_path
 
 
 def download_history_etf(etf_id: str, start_date: str, end_date: str):

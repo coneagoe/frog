@@ -6,8 +6,14 @@ This script is to convert the stock name or fund name as a full name
 from os import walk
 from os.path import join
 # import logging
-from fund import *
-from stock import *
+from fund import get_fund_name
+from stock import (
+    get_stock_name,
+    col_stock_id,
+    col_stock_name,
+    get_stock_position_path,
+    load_history_position
+)
 import conf
 
 
