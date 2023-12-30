@@ -3,7 +3,7 @@
 import logging
 import re
 import pandas as pd
-from ocr import get_ocr
+from ocr import get_ocr, OcrType
 from fund.common import *
 from fund.data.general_info import get_fund_name, load_all_fund_general_info
 
@@ -80,7 +80,7 @@ class TiantianParser:
             self.position_income, self.position_yield = \
             (0, 0, 0, 0)
 
-    def parse_position(self, image_file_name: str, ocr_type):
+    def parse_position(self, image_file_name: str, ocr_type: OcrType) -> pd.DataFrame | None:
         # parse fund positions according to the screenshot
         words = get_ocr(image_file_name, ocr_type)
         logging.debug(f'{image_file_name}: {words}')
