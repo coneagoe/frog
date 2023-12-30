@@ -112,11 +112,12 @@ def get_parameter_ocr_accurate(image, token: str):
     return body, headers, ocr_url
 
 
-def get_parameter_ocr_accurate_basic(image, token):
+def get_parameter_ocr_accurate_basic(image, token: str):
     """
     通用文字识别（高精度版）接口
     :param image: 15px < length < 8192px and image size < 10MB.
             See https://cloud.baidu.com/doc/OCR/s/1k3h7y3db
+    :param token:
     :return:
             success: list
             fail: None
@@ -139,6 +140,7 @@ def get_parameter_ocr_general_basic(image, token):
     通用文字识别（标准版）接口
     :param image: 15px < length < 4096px and image size < 4MB.
             See https://cloud.baidu.com/doc/OCR/s/zk3h7xz52
+    :param token:
     :return:
             success: list
             fail: None

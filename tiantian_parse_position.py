@@ -9,7 +9,7 @@ from ocr import *
 from fund import *
 import conf
 
-# import logging
+import logging
 # logging.getLogger().setLevel(logging.DEBUG)
 
 conf.parse_config()
@@ -21,7 +21,7 @@ def usage():
     print(f"{os.path.basename(__file__)} <image>")
 
 
-def update_fund_position(timestamp, images, ocr_type: OcrType):
+def update_fund_position(timestamp: str, images: list, ocr_type: OcrType):
     """
     parse fund positions according to screenshots, save the results in csv
     :param timestamp: csv file name
@@ -39,7 +39,9 @@ def update_fund_position(timestamp, images, ocr_type: OcrType):
             else:
                 df = pd.concat([df, df0], ignore_index=True)
 
-    if df is not None:
+    if df is None:
+        logging.warning("no fund position is parsed!")
+    else:
         # df[col_fund_id] = df[col_fund_id].astype('str')
         print(df)
 
