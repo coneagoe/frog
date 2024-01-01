@@ -9,7 +9,7 @@ from .access_general_info import (
     get_etf_name,
     is_stock,
     is_etf,
-    get_stock_or_etf_name
+    get_security_name
 )
 from .download_general_info import (
     download_general_info_stock,

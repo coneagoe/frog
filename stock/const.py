@@ -42,4 +42,3 @@ col_pc = 'pc'
 
 # database
 database_name = 'frog.db'
-monitor_stock_table_name = 'monitor_stock'
