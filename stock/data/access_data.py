@@ -64,6 +64,16 @@ def load_stock_history_data(stock_id: str, start_date: str, end_date: str):
 
 @retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
 def load_history_data(security_id: str, start_date: str, end_date: str, adjust="qfq") -> pd.DataFrame | None:
+    """
+    :param security_id:
+        ".IXIC": NASDAQ Composite
+        ".DJI": Dow Jones Industrial Average
+        ".INX": S&P 500
+    :param start_date:
+    :param end_date:
+    :param adjust:
+    :return:
+    """
     if is_stock(security_id):
         df = ak.stock_zh_a_hist(symbol=security_id, period="daily",
                                 start_date=start_date, end_date=end_date,
@@ -89,6 +99,11 @@ def load_history_data(security_id: str, start_date: str, end_date: str, adjust="
             df = df.reset_index()
 
             return df
+
+    if security_id in [".IXIC", ".DJI", ".INX"]:
+        df = ak.index_us_stock_sina(symbol=security_id)
+        df = df.rename(columns={'date': col_date, 'close': col_close})
+        return df
 
     logging.warning(f"wrong stock id({security_id}), please check.")
     return None

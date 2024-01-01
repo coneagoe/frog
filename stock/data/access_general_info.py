@@ -96,8 +96,14 @@ def get_etf_name(etf_id: str):
         return None
 
 
-def get_stock_or_etf_name(security_id: str) -> str:
-    if is_stock(security_id):
+def get_security_name(security_id: str) -> str:
+    if security_id == '.IXIC':
+        return 'NASDAQ Composite'
+    elif security_id == '.DJI':
+        return 'Dow Jones Industrial Average'
+    elif security_id == '.INX':
+        return 'S&P 500'
+    elif is_stock(security_id):
         return get_stock_name(security_id)
     else:
         return get_etf_name(security_id)
