@@ -28,11 +28,11 @@ def get_stock_position_path() -> Path:
 
 
 def get_stock_general_info_path() -> str:
-    return join(_get_stock_data_path('info'), stock_general_info_file_name)
+    return join(_get_stock_data_path('info'), STOCK_GENERAL_INFO_FILE_NAME)
 
 
 def get_etf_general_info_path() -> str:
-    return join(_get_stock_data_path('info'), etf_general_info_file_name)
+    return join(_get_stock_data_path('info'), ETF_GENERAL_INFO_FILE_NAME)
 
 
 def get_stock_history_path() -> Path:
@@ -49,7 +49,7 @@ def get_stock_1d_path():
 
 
 def get_trading_book_path():
-    trading_book_path = join(get_stock_data_path(), trading_book_name)
+    trading_book_path = join(get_stock_data_path(), TRADING_BOOK_NAME)
     if not exists(trading_book_path):
         logging.warning(f"{trading_book_path} does not exist.")
         exit()
@@ -57,7 +57,18 @@ def get_trading_book_path():
     return trading_book_path
 
 
+def is_testing():
+    if os.getenv('TEST') in ['true', 'on', '1'] or \
+            os.getenv('FROG_SERVER_CONFIG') in ['development', 'testing']:
+        return True
+
+    return False
+
+
 def is_market_open():
+    if is_testing():
+        return True
+
     if date.today().weekday() >= 5:
         return False
 

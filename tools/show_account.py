@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-import os.path
-from datetime import date
 import argparse
-import pandas as pd
-import plotly.express as px
-import conf
+from datetime import date
+import os.path
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pandas as pd             # noqa: E402
+import plotly.express as px     # noqa: E402
+
+import conf                     # noqa: E402
 
 
 col_date = u'日期'

@@ -44,7 +44,7 @@ def import_stocks(images: list, ocr_type):
                     stock_name = get_etf_name(stock_id)
                 stock_names.append(stock_name)
 
-    df = pd.DataFrame({col_stock_id: stock_ids, col_stock_name: stock_names})
+    df = pd.DataFrame({COL_STOCK_ID: stock_ids, COL_STOCK_NAME: stock_names})
 
     if df is not None:
         # df[col_fund_id] = df[col_fund_id].astype('str')

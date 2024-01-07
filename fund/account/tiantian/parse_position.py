@@ -17,7 +17,7 @@ pattern_date = re.compile(r'\d+-\d+')
 def is_valid_fund_id(fund_id: str) -> bool:
     df = load_all_fund_general_info()
     return pattern_valid_fund_id.match(fund_id) and \
-        fund_id in df[col_fund_id].values
+        fund_id in df[COL_FUND_ID].values
 
 
 def is_fund_name_stick_with_fund_id(word):
@@ -61,20 +61,20 @@ class TiantianParser:
         self.asset, self.yesterday_earning, \
             self.position_income, self.position_yield = \
             (0, 0, 0, 0)
-        self.data = {col_fund_id: [],
-                     col_fund_name: [],
-                     col_asset: [],
-                     col_yesterday_earning: [],
-                     col_profit: [],
-                     col_profit_rate: []}
+        self.data = {COL_FUND_ID: [],
+                     COL_FUND_NAME: [],
+                     COL_ASSET: [],
+                     COL_YESTERDAY_EARNING: [],
+                     COL_PROFIT: [],
+                     COL_PROFIT_RATE: []}
 
     def save_data(self):
-        self.data[col_fund_id].append(self.fund_id)
-        self.data[col_fund_name].append(pattern_tailing_number.sub('', self.fund_name))
-        self.data[col_asset].append(self.asset)
-        self.data[col_yesterday_earning].append(self.yesterday_earning)
-        self.data[col_profit].append(self.position_income)
-        self.data[col_profit_rate].append(self.position_yield)
+        self.data[COL_FUND_ID].append(self.fund_id)
+        self.data[COL_FUND_NAME].append(pattern_tailing_number.sub('', self.fund_name))
+        self.data[COL_ASSET].append(self.asset)
+        self.data[COL_YESTERDAY_EARNING].append(self.yesterday_earning)
+        self.data[COL_PROFIT].append(self.position_income)
+        self.data[COL_PROFIT_RATE].append(self.position_yield)
         self.fund_id, self.fund_name = (None, None)
         self.asset, self.yesterday_earning, \
             self.position_income, self.position_yield = \
@@ -122,7 +122,7 @@ class TiantianParser:
 
                 self.save_data()
 
-            if len(self.data[col_fund_id]) != 0:
+            if len(self.data[COL_FUND_ID]) != 0:
                 df = pd.DataFrame(self.data)
                 self.reset()
                 return df

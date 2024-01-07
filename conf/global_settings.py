@@ -10,12 +10,12 @@ def parse_email_config(config: dict):
     try:
         os.environ['MAIL_SERVER'] = config['email']['smtp_server']
     except KeyError:
-        logging.warning("email server is not configured")
+        logging.warning("email app is not configured")
 
     try:
         os.environ['MAIL_PORT'] = config['email']['smtp_port']
     except KeyError:
-        logging.warning("email server port is not configured")
+        logging.warning("email app port is not configured")
 
     try:
         os.environ['MAIL_SENDER'] = config['email']['sender_email']
@@ -46,6 +46,11 @@ def parse_common_config(config: dict):
 
     try:
         os.environ['https_proxy'] = config['common']['https_proxy']
+    except KeyError:
+        pass
+
+    try:
+        os.environ['TEST'] = config['common']['test']
     except KeyError:
         pass
 
@@ -80,19 +85,24 @@ def parse_account_config(config: dict):
     try:
         os.environ['account_data_path'] = config['account']['data_path']
     except KeyError:
-        logging.warning("account data path is not configured")
+        pass
 
 
 def parse_frog_server(config: dict):
     try:
-        os.environ['FROG_SERVER'] = config['frog']['server']
+        os.environ['FROG_SERVER'] = config['frog_server']['ip']
     except KeyError:
         os.environ['FROG_SERVER'] = 'localhost'
 
     try:
-        os.environ['FROG_PORT'] = config['frog']['port']
+        os.environ['FROG_PORT'] = config['frog_server']['port']
     except KeyError:
         os.environ['FROG_PORT'] = '5000'
+
+    try:
+        os.environ['FROG_SERVER_CONFIG'] = config['frog_server']['config']
+    except KeyError:
+        os.environ['FROG_SERVER_CONFIG'] = 'default'
 
 
 def parse_config():

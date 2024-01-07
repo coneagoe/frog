@@ -1,7 +1,7 @@
 import akshare as ak
 from stock.common import (
-    col_stock_id,
-    col_stock_name,
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
     get_stock_general_info_path,
     get_etf_general_info_path
 )
@@ -18,7 +18,7 @@ def is_st(stock_id: str):
 def download_general_info_stock():
     df = ak.stock_info_a_code_name()
     df = df.loc[df['code'].str.match(pattern_stock_id)]
-    df = df.rename(columns={'code': col_stock_id, 'name': col_stock_name})
+    df = df.rename(columns={'code': COL_STOCK_ID, 'name': COL_STOCK_NAME})
     df.to_csv(get_stock_general_info_path(), encoding='utf_8_sig', index=False)
 
 
