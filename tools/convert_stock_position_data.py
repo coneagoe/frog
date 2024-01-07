@@ -9,8 +9,8 @@ from os.path import join
 from fund import get_fund_name
 from stock import (
     get_stock_name,
-    col_stock_id,
-    col_stock_name,
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
     get_stock_position_path,
     load_history_position
 )
@@ -21,15 +21,15 @@ conf.parse_config()
 
 
 def fetch_name(df):
-    name = get_stock_name(df[col_stock_id])
+    name = get_stock_name(df[COL_STOCK_ID])
     if name:
         return name
 
-    name = get_fund_name(df[col_stock_id])
+    name = get_fund_name(df[COL_STOCK_ID])
     if name:
         return name
 
-    return df[col_stock_name]
+    return df[COL_STOCK_NAME]
 
 
 if __name__ == "__main__":

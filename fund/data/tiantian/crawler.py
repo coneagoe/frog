@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 import motor.motor_asyncio
 from conf import *
 # from proxy import get_proxy
-from fund import col_fund_id, col_pinyin_abbreviation, col_fund_name, col_fund_type, col_pinyin, \
+from fund import COL_FUND_ID, COL_PINYIN_ABBREVIATION, COL_FUND_NAME, COL_FUND_TYPE, COL_PINYIN, \
                 get_fund_general_info_path, get_fund_history_path
 from utility import *
 
@@ -91,8 +91,8 @@ class TianTianCrawler(object):
                     tmp = re.sub(r'^var\s*r\s*=\s*', '', await resp.text()).strip(';')
                     tmp = json.loads(tmp)
                     df = pd.DataFrame(tmp,
-                                      columns=[col_fund_id, col_pinyin_abbreviation,
-                                               col_fund_name, col_fund_type, col_pinyin])
+                                      columns=[COL_FUND_ID, COL_PINYIN_ABBREVIATION,
+                                               COL_FUND_NAME, COL_FUND_TYPE, COL_PINYIN])
                     df.to_csv(get_fund_general_info_path(), encoding='utf_8_sig', index=False)
                 else:
                     logging.warning(f"status: {resp.status}")

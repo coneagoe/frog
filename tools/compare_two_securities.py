@@ -1,15 +1,19 @@
-from os.path import basename
 import argparse
 from datetime import date
-import pandas as pd
-import plotly.graph_objs as go
-import conf
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pandas as pd  # noqa: E402
+import plotly.graph_objs as go  # noqa: E402
+
+import conf     # noqa: E402
 from stock import (
     get_security_name,
-    col_date,
-    col_close,
+    COL_DATE,
+    COL_CLOSE,
     load_history_data
-)
+)   # noqa: E402
 
 
 conf.parse_config()
@@ -21,8 +25,8 @@ def show_two_securities(stock_id_0: str, df0: pd.DataFrame, stock_id_1: str, df1
 
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(x=df0[col_date], y=df0[col_close], mode='lines', name=stock_name_0, yaxis='y'))
-    fig.add_trace(go.Scatter(x=df1[col_date], y=df1[col_close], mode='lines', name=stock_name_1, yaxis='y2'))
+    fig.add_trace(go.Scatter(x=df0[COL_DATE], y=df0[COL_CLOSE], mode='lines', name=stock_name_0, yaxis='y'))
+    fig.add_trace(go.Scatter(x=df1[COL_DATE], y=df1[COL_CLOSE], mode='lines', name=stock_name_1, yaxis='y2'))
     fig.update_layout(yaxis=dict(title=stock_name_0),
                       yaxis2=dict(title=stock_name_1, overlaying='y', side='right'))
 

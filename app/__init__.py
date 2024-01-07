@@ -1,7 +1,8 @@
-from flask import Flask, render_template
+from flask import Flask
 from flask_mail import Mail
 from flask_sqlalchemy import SQLAlchemy
 from config import config
+from .email import send_email
 
 
 mail = Mail()

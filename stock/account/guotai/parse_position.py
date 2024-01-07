@@ -79,26 +79,26 @@ class GuotaiParser:
         self.position, self.position_available, self.position_market_value,\
             self.current_price, self.cost, self.profit_loss, self.profit_loss_percent,  = \
             (None, None, None, None, None, None, None)
-        self.data = {col_stock_id: [],
-                     col_stock_name: [],
-                     col_market_value: [],
-                     col_position: [],
-                     col_position_available: [],
-                     col_current_price: [],
-                     col_cost: [],
-                     col_profit: [],
-                     col_profit_rate: []}
+        self.data = {COL_STOCK_ID: [],
+                     COL_STOCK_NAME: [],
+                     COL_MARKET_VALUE: [],
+                     COL_POSITION: [],
+                     COL_POSITION_AVAILABLE: [],
+                     COL_CURRENT_PRICE: [],
+                     COL_COST: [],
+                     COL_PROFIT: [],
+                     COL_PROFIT_RATE: []}
 
     def save_data(self):
-        self.data[col_stock_id].append(self.stock_id)
-        self.data[col_stock_name].append(pattern_tailing_number.sub('', self.stock_name))
-        self.data[col_market_value].append(self.position_market_value)
-        self.data[col_position].append(self.position)
-        self.data[col_position_available].append(self.position_available)
-        self.data[col_current_price].append(self.current_price)
-        self.data[col_cost].append(self.cost)
-        self.data[col_profit].append(self.profit_loss)
-        self.data[col_profit_rate].append(self.profit_loss_percent)
+        self.data[COL_STOCK_ID].append(self.stock_id)
+        self.data[COL_STOCK_NAME].append(pattern_tailing_number.sub('', self.stock_name))
+        self.data[COL_MARKET_VALUE].append(self.position_market_value)
+        self.data[COL_POSITION].append(self.position)
+        self.data[COL_POSITION_AVAILABLE].append(self.position_available)
+        self.data[COL_CURRENT_PRICE].append(self.current_price)
+        self.data[COL_COST].append(self.cost)
+        self.data[COL_PROFIT].append(self.profit_loss)
+        self.data[COL_PROFIT_RATE].append(self.profit_loss_percent)
 
         self.stock_id, self.stock_name = (None, None)
         self.position, self.position_available, self.position_market_value,\
@@ -155,7 +155,7 @@ class GuotaiParser:
                 # # 不如通过fund_name反查，等fund db建立起来
                 # i += 1
 
-            if len(self.data[col_stock_id]) != 0:
+            if len(self.data[COL_STOCK_ID]) != 0:
                 df = pd.DataFrame(self.data)
                 self.reset()
                 return df

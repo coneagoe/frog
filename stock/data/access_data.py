@@ -18,36 +18,36 @@ def load_stock_history_data(stock_id: str, start_date: str, end_date: str):
         start_date_ts0 = pd.Timestamp(start_date)
         end_date_ts0 = pd.Timestamp(end_date)
         df = pd.read_csv(data_path, encoding='utf_8_sig')
-        df[col_date] = pd.to_datetime(df[col_date])
+        df[COL_DATE] = pd.to_datetime(df[COL_DATE])
 
-        if df[col_date].iloc[0] <= start_date_ts0 and df[col_date].iloc[-1] >= end_date_ts0:
-            df = df[(df[col_date] >= start_date_ts0) & (df[col_date] <= end_date_ts0)]
-            df[col_close] = df[col_close].astype(float)
+        if df[COL_DATE].iloc[0] <= start_date_ts0 and df[COL_DATE].iloc[-1] >= end_date_ts0:
+            df = df[(df[COL_DATE] >= start_date_ts0) & (df[COL_DATE] <= end_date_ts0)]
+            df[COL_CLOSE] = df[COL_CLOSE].astype(float)
             return df
 
-        if start_date_ts0 < df[col_date].iloc[0]:
-            end_date_ts1 = df[col_date].iloc[0] - pd.Timedelta(days=1)
+        if start_date_ts0 < df[COL_DATE].iloc[0]:
+            end_date_ts1 = df[COL_DATE].iloc[0] - pd.Timedelta(days=1)
             df0 = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
                                      start_date=start_date, end_date=end_date_ts1.strftime('%Y%m%d'),
                                      adjust="")
-            df0[col_date] = pd.to_datetime(df0[col_date])
+            df0[COL_DATE] = pd.to_datetime(df0[COL_DATE])
             df = pd.concat([df, df0], ignore_index=True)
 
-        if end_date_ts0 > df[col_date].iloc[-1]:
-            start_date_ts1 = df[col_date].iloc[-1] + pd.Timedelta(days=1)
+        if end_date_ts0 > df[COL_DATE].iloc[-1]:
+            start_date_ts1 = df[COL_DATE].iloc[-1] + pd.Timedelta(days=1)
             df0 = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
                                      start_date=start_date_ts1.strftime('%Y%m%d'), end_date=end_date,
                                      adjust="")
-            df0[col_date] = pd.to_datetime(df0[col_date])
+            df0[COL_DATE] = pd.to_datetime(df0[COL_DATE])
             df = pd.concat([df, df0], ignore_index=True)
 
-        df = df.sort_values(by=[col_date], ascending=True)
-        df = df.drop_duplicates(subset=[col_date])
+        df = df.sort_values(by=[COL_DATE], ascending=True)
+        df = df.drop_duplicates(subset=[COL_DATE])
 
         df.to_csv(data_path, encoding='utf_8_sig', index=False)
 
-        df = df[(df[col_date] >= start_date_ts0) & (df[col_date] <= end_date_ts0)]
-        df[col_close] = df[col_close].astype(float)
+        df = df[(df[COL_DATE] >= start_date_ts0) & (df[COL_DATE] <= end_date_ts0)]
+        df[COL_CLOSE] = df[COL_CLOSE].astype(float)
         return df
     else:
         df = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
@@ -92,9 +92,9 @@ def load_history_data(security_id: str, start_date: str, end_date: str, adjust="
             df = ak.fund_money_fund_info_em(security_id)
             df[u'净值日期'] = pd.to_datetime(df[u'净值日期'])
             df = df[(df[u'净值日期'] >= start_timestamp) & (df[u'净值日期'] <= end_timestamp)]
-            df = df.rename(columns={'净值日期': col_date, '每万份收益': col_close})
-            df[col_close] = df[col_close].astype(float)
-            df = df.set_index(col_date)
+            df = df.rename(columns={'净值日期': COL_DATE, '每万份收益': COL_CLOSE})
+            df[COL_CLOSE] = df[COL_CLOSE].astype(float)
+            df = df.set_index(COL_DATE)
             df = df.sort_index(ascending=True)
             df = df.reset_index()
 
@@ -102,7 +102,7 @@ def load_history_data(security_id: str, start_date: str, end_date: str, adjust="
 
     if security_id in [".IXIC", ".DJI", ".INX"]:
         df = ak.index_us_stock_sina(symbol=security_id)
-        df = df.rename(columns={'date': col_date, 'close': col_close})
+        df = df.rename(columns={'date': COL_DATE, 'close': COL_CLOSE})
         return df
 
     logging.warning(f"wrong stock id({security_id}), please check.")

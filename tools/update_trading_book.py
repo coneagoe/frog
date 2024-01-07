@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
-import logging
+# import logging
 from datetime import date
-import pandas as pd
-import swifter
-import conf
-from stock import *
+import os.path
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pandas as pd           # noqa: E402
+import swifter                # noqa: E402
+
+import conf                # noqa: E402
+from stock import *        # noqa: E402
 
 
-col_ma_20 = u"20日均线"
+COL_MA_20 = u"20日均线"
 
 
 conf.parse_config()
@@ -28,7 +33,7 @@ excel_writer = pd.ExcelWriter(output_file_name, engine='xlsxwriter')
 
 
 def update_support_resistance(df: pd.DataFrame):
-    df[[col_support, col_resistance]] = \
+    df[[COL_SUPPORT, COL_RESISTANCE]] = \
         df.swifter.apply(calculate_support_resistance, args=(start_date_ts, end_date_ts),
                          axis=1, result_type='expand')
 
@@ -36,31 +41,31 @@ def update_support_resistance(df: pd.DataFrame):
 
 
 def update_stoploss(df: pd.DataFrame):
-    df[col_current_price] = df[col_stock_id].swifter.apply(fetch_close_price)
-    df[col_ma_20] = df[col_stock_id].swifter.apply(get_yesterday_ma, period=20)
+    df[COL_CURRENT_PRICE] = df[COL_STOCK_ID].swifter.apply(fetch_close_price)
+    df[COL_MA_20] = df[COL_STOCK_ID].swifter.apply(get_yesterday_ma, period=20)
 
     return df
 
 
 def update_current_price(df: pd.DataFrame):
-    df[col_current_price] = df[col_stock_id].swifter.apply(fetch_close_price)
+    df[COL_CURRENT_PRICE] = df[COL_STOCK_ID].swifter.apply(fetch_close_price)
 
-    filter_na = df[col_buy_count].isna()
-    df.loc[filter_na, col_buying_price] = df.loc[filter_na, col_current_price]
+    filter_na = df[COL_BUY_COUNT].isna()
+    df.loc[filter_na, COL_BUYING_PRICE] = df.loc[filter_na, COL_CURRENT_PRICE]
 
     return df
 
 
-df = pd.read_excel(trading_book_path, sheet_name=sheet_name_etf, dtype={col_stock_id: str})
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_etf, dtype={COL_STOCK_ID: str})
 df = update_current_price(df)
 df.to_excel(excel_writer, sheet_name=sheet_name_etf)
 
-df = pd.read_excel(trading_book_path, sheet_name=sheet_name_stock, dtype={col_stock_id: str})
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_stock, dtype={COL_STOCK_ID: str})
 df = update_current_price(df)
 df = update_support_resistance(df)
 df.to_excel(excel_writer, sheet_name=sheet_name_stock)
 
-df = pd.read_excel(trading_book_path, sheet_name=sheet_name_position, dtype={col_stock_id: str})
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_position, dtype={COL_STOCK_ID: str})
 df = update_stoploss(df)
 df.to_excel(excel_writer, sheet_name=sheet_name_position)
 

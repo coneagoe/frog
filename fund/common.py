@@ -7,16 +7,16 @@ from os.path import join
 fund_general_info_file_name = 'fund_general_info.csv'
 
 # column name
-col_fund_id = u'基金代号'
-col_fund_name = u'基金名'
-col_asset = u'资产'
-col_yesterday_earning = u'昨日收益'
-col_profit = u'持仓收益'
-col_profit_rate = u'持仓收益率(%)'
-col_pinyin = u'拼音'
-col_pinyin_abbreviation = u'拼音缩写'
-col_fund_type = u'基金类型'
-col_date = u'日期'
+COL_FUND_ID = u'基金代号'
+COL_FUND_NAME = u'基金名'
+COL_ASSET = u'资产'
+COL_YESTERDAY_EARNING = u'昨日收益'
+COL_PROFIT = u'持仓收益'
+COL_PROFIT_RATE = u'持仓收益率(%)'
+COL_PINYIN = u'拼音'
+COL_PINYIN_ABBREVIATION = u'拼音缩写'
+COL_FUND_TYPE = u'基金类型'
+COL_DATE = u'日期'
 
 
 def get_fund_data_path(subdir: str) -> str:

@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 import pandas as pd
-from stock import col_stock_id
+from stock import COL_STOCK_ID
 
 
 if __name__ == '__main__':
@@ -23,8 +23,8 @@ if __name__ == '__main__':
     df0 = pd.read_excel(stock_list_0)
     df1 = pd.read_excel(stock_list_1)
 
-    df2 = df0[~df0[col_stock_id].isin(df1[col_stock_id])]
-    df3 = df1[~df1[col_stock_id].isin(df0[col_stock_id])]
+    df2 = df0[~df0[COL_STOCK_ID].isin(df1[COL_STOCK_ID])]
+    df3 = df1[~df1[COL_STOCK_ID].isin(df0[COL_STOCK_ID])]
 
     print(f'stocks in only in {stock_list_0}:')
     print(f'{df2}\n')

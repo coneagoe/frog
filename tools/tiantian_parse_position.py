@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
-import os
-import sys
 from datetime import date
-import re
-import pandas as pd
-from tqdm import tqdm
-from ocr import *
-from fund import *
-import conf
-
 import logging
+import os
+import re
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pandas as pd   # noqa: E402
+from tqdm import tqdm   # noqa: E402
+
+from ocr import *   # noqa: E402
+from fund import *  # noqa: E402
+import conf        # noqa: E402
+
 # logging.getLogger().setLevel(logging.DEBUG)
 
 conf.parse_config()

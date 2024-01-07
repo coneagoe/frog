@@ -12,34 +12,34 @@ pd.set_option('display.max_rows', None)
 
 
 # def check_stock_id(df):
-#     if not pattern_valid_stock_id.match(df[col_stock_id]):
-#         logging.error(f"Invalid stock id: {df[col_stock_id]}")
+#     if not pattern_valid_stock_id.match(df[COL_STOCK_ID]):
+#         logging.error(f"Invalid stock id: {df[COL_STOCK_ID]}")
 #         exit(-1)
 
 
 def fetch_name(df: pd.DataFrame) -> str:
-    name = get_stock_name(df[col_stock_id])
+    name = get_stock_name(df[COL_STOCK_ID])
     if name:
         return name
 
-    name = get_fund_name(df[col_stock_id])
+    name = get_fund_name(df[COL_STOCK_ID])
     if name:
         return name
 
-    return df[col_stock_name]
+    return df[COL_STOCK_NAME]
 
 
 def convert_data(df: pd.DataFrame) -> pd.DataFrame:
-    # df[col_stock_name] = df.apply(fetch_name, axis=1)
-    # df = df.set_index(col_stock_name)
-    # df = df.drop(columns=[col_stock_id])
+    # df[COL_STOCK_NAME] = df.apply(fetch_name, axis=1)
+    # df = df.set_index(COL_STOCK_NAME)
+    # df = df.drop(columns=[COL_STOCK_ID])
 
     df = df.sort_index()
     df = df.T
     logging.debug(df)
     # df.columns = df.iloc[0]
     # df = df.drop(df.index[0])
-    df.rename_axis(col_date, inplace=True)
+    df.rename_axis(COL_DATE, inplace=True)
     df.index = pd.to_datetime(df.index)
     df = df.astype(float)
 
@@ -56,9 +56,9 @@ def load_history_position(position_path: str) -> pd.DataFrame | None:
     df = pd.read_csv(position_path)
     df = df.drop_duplicates()
     # df.apply(check_stock_id, axis=1)
-    df[col_stock_id] = df[col_stock_id].astype(str)
-    df[col_stock_id] = df[col_stock_id].str.zfill(6)
-    df[col_stock_name] = df.apply(fetch_name, axis=1)
+    df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
+    df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
+    df[COL_STOCK_NAME] = df.apply(fetch_name, axis=1)
     df = df.replace('--', np.nan)
     return df
 
@@ -84,18 +84,18 @@ def load_history_positions(start_date: str, end_date: str, stock_ids=tuple) \
             continue
 
         if stock_ids:
-            df = df[df[col_stock_id].isin(stock_ids)]
+            df = df[df[COL_STOCK_ID].isin(stock_ids)]
 
-        df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_market_value]})
-        df0 = df0.set_index(col_stock_name)
+        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_MARKET_VALUE]})
+        df0 = df0.set_index(COL_STOCK_NAME)
         assets.append(df0)
 
-        df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_profit]})
-        df0 = df0.set_index(col_stock_name)
+        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT]})
+        df0 = df0.set_index(COL_STOCK_NAME)
         profits.append(df0)
 
-        df0 = pd.DataFrame({col_stock_name: df[col_stock_name], date_stamp: df[col_profit_rate]})
-        df0 = df0.set_index(col_stock_name)
+        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT_RATE]})
+        df0 = df0.set_index(COL_STOCK_NAME)
         profit_rates.append(df0)
 
     df_asset = pd.concat(assets, axis=1)

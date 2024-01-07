@@ -8,12 +8,12 @@ import numpy as np
 
 
 def fetch_fund_name(df):
-    return get_fund_name(df[col_fund_id])
+    return get_fund_name(df[COL_FUND_ID])
 
 
 def convert_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.T
-    df.rename_axis(col_date, inplace=True)
+    df.rename_axis(COL_DATE, inplace=True)
     df.index = pd.to_datetime(df.index)
     df = df.astype(float)
     return df
@@ -26,9 +26,9 @@ def load_history_position(position_path: str):
 
     df = pd.read_csv(position_path)
     df = df.drop_duplicates()
-    df[col_fund_id] = df[col_fund_id].astype(str)
-    df[col_fund_id] = df[col_fund_id].str.zfill(6)
-    df[col_fund_name] = df.apply(fetch_fund_name, axis=1)
+    df[COL_FUND_ID] = df[COL_FUND_ID].astype(str)
+    df[COL_FUND_ID] = df[COL_FUND_ID].str.zfill(6)
+    df[COL_FUND_NAME] = df.apply(fetch_fund_name, axis=1)
     df = df.replace('--', np.nan)
     return df
 
@@ -53,18 +53,18 @@ def load_history_positions(start_date: str, end_date: str, fund_ids=tuple) -> (p
             continue
 
         if fund_ids:
-            df = df[df[col_fund_id].isin(fund_ids)]
+            df = df[df[COL_FUND_ID].isin(fund_ids)]
 
-        df0 = pd.DataFrame({col_fund_name: df[col_fund_name], date_stamp: df[col_asset]})
-        df0 = df0.set_index(col_fund_name)
+        df0 = pd.DataFrame({COL_FUND_NAME: df[COL_FUND_NAME], date_stamp: df[COL_ASSET]})
+        df0 = df0.set_index(COL_FUND_NAME)
         assets.append(df0)
 
-        df0 = pd.DataFrame({col_fund_name: df[col_fund_name], date_stamp: df[col_profit]})
-        df0 = df0.set_index(col_fund_name)
+        df0 = pd.DataFrame({COL_FUND_NAME: df[COL_FUND_NAME], date_stamp: df[COL_PROFIT]})
+        df0 = df0.set_index(COL_FUND_NAME)
         profits.append(df0)
 
-        df0 = pd.DataFrame({col_fund_name: df[col_fund_name], date_stamp: df[col_profit_rate]})
-        df0 = df0.set_index(col_fund_name)
+        df0 = pd.DataFrame({COL_FUND_NAME: df[COL_FUND_NAME], date_stamp: df[COL_PROFIT_RATE]})
+        df0 = df0.set_index(COL_FUND_NAME)
         profit_rates.append(df0)
 
     df_asset = pd.concat(assets, axis=1)
