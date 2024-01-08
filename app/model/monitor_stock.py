@@ -9,11 +9,11 @@ from stock import (
 from . import db
 
 
-table_name_monitor_stock = 'monitor_stock'
+TABLE_NAME_MONITOR_STOCK = 'monitor_stock'
 
 
 class MonitorStock(db.Model):
-    __tablename__ = table_name_monitor_stock
+    __tablename__ = TABLE_NAME_MONITOR_STOCK
 
     id: Mapped[int] = Column(Integer, primary_key=True)
     stock_id: Mapped[str] = Column(String(6), name=COL_STOCK_ID, nullable=False)
