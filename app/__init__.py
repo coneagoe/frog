@@ -1,12 +1,8 @@
 from flask import Flask
-from flask_mail import Mail
-from flask_sqlalchemy import SQLAlchemy
 from config import config
-from .email import send_email
-
-
-mail = Mail()
-db = SQLAlchemy()
+from .email import mail, send_email
+from .model import db
+from .strategy import *
 
 
 def create_app(config_name):
@@ -16,5 +12,8 @@ def create_app(config_name):
 
     mail.init_app(app)
     db.init_app(app)
+    scheduler.init_app(app)
+
+    app.register_blueprint(bp_monitor_stock)
 
     return app

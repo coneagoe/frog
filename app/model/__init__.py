@@ -1,9 +1,11 @@
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 
 
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
+
+
 db = SQLAlchemy(model_class=Base)
 
-
-from .monitor_stock import MonitorStock, table_name_monitor_stock # noqa
+from .monitor_stock import MonitorStock, TABLE_NAME_MONITOR_STOCK  # noqa

@@ -33,7 +33,7 @@ def parse_email_config(config: dict):
         logging.warning("email password is not configured")
 
     try:
-        os.environ['MAIL_RECEIVER'] = config['email']['receiver_email']
+        os.environ['MAIL_RECEIVERS'] = config['email']['email_receivers']
     except KeyError:
         logging.warning("email receiver is not configured")
 
