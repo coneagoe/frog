@@ -76,7 +76,11 @@ def add_job_monitor_stock():
                           id='test_monitor_stock',
                           seconds=5)
     else:
-        scheduler.add_job(monitor_stock, 'cron', day_of_week='mon-fri', minute='*/5')
+        scheduler.add_job(func=monitor_stock,
+                          trigger='cron',
+                          id='monitor_stock',
+                          day_of_week='mon-fri',
+                          minute='*/5')
 
 
 # curl -X POST -F file=@<stock_cvs_path> 'http://localhost:5000/monitor_stock/upload'

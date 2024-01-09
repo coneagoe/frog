@@ -17,7 +17,7 @@ def monitor_stock_upload(csv_path: str, ip: str, port: int):
     with open(csv_path, 'rb') as f:
         stocks_base64 = base64.b64encode(f.read())
         r = requests.post(f"http://{ip}:{port}/monitor_stock/upload", files={'file': stocks_base64})
-        print(r.text)
+        logging.info(r.text)
 
 
 def monitor_stock_download(csv_path: str, ip: str, port: int):
@@ -25,6 +25,7 @@ def monitor_stock_download(csv_path: str, ip: str, port: int):
     if r.status_code == 200:
         with open(csv_path, 'wb') as f:
             f.write(base64.b64decode(r.content))
+        logging.info("Success")
     else:
         logging.error(f"status: {r.status_code}")
 
