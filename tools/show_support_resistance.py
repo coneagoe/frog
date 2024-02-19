@@ -1,10 +1,12 @@
-from os.path import basename
 import argparse
 from datetime import date
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import plotly.graph_objs as go
-from stock import *
 import conf
+from stock import *
 
 
 conf.parse_config()
@@ -107,8 +109,8 @@ def draw_support_resistance(stock_id: str, df: pd.DataFrame,
 
 
 def usage():
-    print(f"{basename(__file__)} [-n days] [-s start_date] [-e end_date] <stock_id>")
-    print(f"{basename(__file__)} -h")
+    print(f"{os.path.basename(__file__)} [-n days] [-s start_date] [-e end_date] <stock_id>")
+    print(f"{os.path.basename(__file__)} -h")
     print("-n days: since how many days ago, cannot be used together with -s and -e. default is 120")
     print("start_date/end_date: YYYY-MM-DD")
 
