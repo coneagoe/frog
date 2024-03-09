@@ -1,11 +1,34 @@
 import logging
 import os
-import retrying
 import akshare as ak
 import pandas as pd
-from stock.common import *
-from stock.data.access_general_info import is_etf, is_stock
-from stock.data.download_history_stock import download_history_stock_1d
+from stock.common import (
+    get_stock_1d_path,
+    COL_DATE,
+    COL_CLOSE,
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
+    COL_ETF_ID,
+    COL_ETF_NAME,
+    get_stock_general_info_path,
+    get_etf_general_info_path
+)
+from stock.data.download_data import (
+    download_general_info_stock,
+    download_general_info_etf,
+    download_history_data_stock,
+    download_history_data_etf,
+    download_history_data_us_index,
+    download_history_stock_1d
+)
+from utility import (
+    is_older_than_a_month,
+    is_older_than_a_week
+)
+
+
+g_df_stocks = None
+g_df_etfs = None
 
 
 def load_stock_history_data(stock_id: str, start_date: str, end_date: str):
@@ -62,48 +85,115 @@ def load_stock_history_data(stock_id: str, start_date: str, end_date: str):
         return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
 def load_history_data(security_id: str, start_date: str, end_date: str, adjust="qfq") -> pd.DataFrame | None:
-    """
-    :param security_id:
-        ".IXIC": NASDAQ Composite
-        ".DJI": Dow Jones Industrial Average
-        ".INX": S&P 500
-    :param start_date:
-    :param end_date:
-    :param adjust:
-    :return:
-    """
     if is_stock(security_id):
-        df = ak.stock_zh_a_hist(symbol=security_id, period="daily",
-                                start_date=start_date, end_date=end_date,
-                                adjust=adjust)
-        return df
+        return download_history_data_stock(security_id, "daily", start_date, end_date, adjust)
 
     if is_etf(security_id):
-        try:
-            df = ak.fund_etf_hist_em(symbol=security_id, period="daily",
-                                     start_date=start_date, end_date=end_date,
-                                     adjust=adjust)
-            return df
-        except KeyError:
-            start_timestamp = pd.Timestamp(start_date)
-            end_timestamp = pd.Timestamp(end_date)
-            df = ak.fund_money_fund_info_em(security_id)
-            df[u'净值日期'] = pd.to_datetime(df[u'净值日期'])
-            df = df[(df[u'净值日期'] >= start_timestamp) & (df[u'净值日期'] <= end_timestamp)]
-            df = df.rename(columns={'净值日期': COL_DATE, '每万份收益': COL_CLOSE})
-            df[COL_CLOSE] = df[COL_CLOSE].astype(float)
-            df = df.set_index(COL_DATE)
-            df = df.sort_index(ascending=True)
-            df = df.reset_index()
+        return download_history_data_etf(security_id, "daily", start_date, end_date, adjust)
 
-            return df
-
-    if security_id in [".IXIC", ".DJI", ".INX"]:
-        df = ak.index_us_stock_sina(symbol=security_id)
-        df = df.rename(columns={'date': COL_DATE, 'close': COL_CLOSE})
+    if is_us_index(security_id):
+        df = download_history_data_us_index(security_id)
+        df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+        df = df.loc[(df[COL_DATE] >= start_date) & (df[COL_DATE] <= end_date)]
         return df
 
     logging.warning(f"wrong stock id({security_id}), please check.")
     return None
+
+
+def load_all_stock_general_info():
+    global g_df_stocks
+
+    if g_df_stocks is not None:
+        return g_df_stocks
+
+    stock_general_info_path = get_stock_general_info_path()
+    if not os.path.exists(stock_general_info_path) or \
+            is_older_than_a_month(stock_general_info_path):
+        download_general_info_stock()
+
+    g_df_stocks = pd.read_csv(stock_general_info_path)
+    g_df_stocks[COL_STOCK_ID] = g_df_stocks[COL_STOCK_ID].astype(str)
+    g_df_stocks[COL_STOCK_ID] = g_df_stocks[COL_STOCK_ID].str.zfill(6)
+    return g_df_stocks
+
+
+def load_all_etf_general_info():
+    global g_df_etfs
+
+    if g_df_etfs is not None:
+        return g_df_etfs
+
+    etf_general_info_path = get_etf_general_info_path()
+    if not os.path.exists(etf_general_info_path) or \
+            is_older_than_a_week(etf_general_info_path):
+        download_general_info_etf()
+
+    g_df_etfs = pd.read_csv(etf_general_info_path)
+    g_df_etfs[COL_ETF_ID] = g_df_etfs[COL_ETF_ID].astype(str)
+    g_df_etfs[COL_ETF_ID] = g_df_etfs[COL_ETF_ID].str.zfill(6)
+    return g_df_etfs
+
+
+def is_stock(stock_id: str):
+    global g_df_stocks
+
+    if g_df_stocks is None:
+        g_df_stocks = load_all_stock_general_info()
+
+    try:
+        return stock_id in g_df_stocks[COL_STOCK_ID].values
+    except KeyError:
+        logging.error(f"haha stock_id: {stock_id}")
+        return False
+
+
+def get_stock_name(stock_id: str):
+    global g_df_stocks
+
+    if g_df_stocks is None:
+        g_df_stocks = load_all_stock_general_info()
+
+    try:
+        return g_df_stocks.loc[g_df_stocks[COL_STOCK_ID] == stock_id][COL_STOCK_NAME].iloc[0]
+    except IndexError:
+        return None
+
+
+def is_etf(etf_id: str):
+    global g_df_etfs
+
+    if g_df_etfs is None:
+        g_df_etfs = load_all_etf_general_info()
+
+    return etf_id in g_df_etfs[COL_ETF_ID].values
+
+
+def get_etf_name(etf_id: str):
+    global g_df_etfs
+
+    if g_df_etfs is None:
+        g_df_etfs = load_all_etf_general_info()
+
+    try:
+        return g_df_etfs.loc[g_df_etfs[COL_ETF_ID] == etf_id][COL_ETF_NAME].iloc[0]
+    except IndexError:
+        return None
+
+
+def is_us_index(security_id: str):
+    return security_id in [".IXIC", ".DJI", ".INX"]
+
+
+def get_security_name(security_id: str) -> str:
+    if security_id == '.IXIC':
+        return 'NASDAQ Composite'
+    elif security_id == '.DJI':
+        return 'Dow Jones Industrial Average'
+    elif security_id == '.INX':
+        return 'S&P 500'
+    elif is_stock(security_id):
+        return get_stock_name(security_id)
+    else:
+        return get_etf_name(security_id)

@@ -4,8 +4,16 @@ import numpy as np
 import logging
 import pandas_market_calendars as mcal
 from fund import get_fund_name
-from stock.common import *
-from stock.data.access_general_info import get_stock_name
+from stock.data import get_stock_name
+from stock.common import (
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
+    COL_DATE,
+    COL_MARKET_VALUE,
+    COL_PROFIT,
+    COL_PROFIT_RATE,
+    get_stock_position_path,
+)
 
 
 pd.set_option('display.max_rows', None)
