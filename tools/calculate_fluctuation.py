@@ -2,6 +2,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 import swifter
+import conf
 from stock import *
 
 
@@ -37,7 +38,8 @@ def _calculate_fluctuation(df: pd.DataFrame):
     start_date_ts = start_date.strftime('%Y%m%d')
     end_date_ts = end_date.strftime('%Y%m%d')
 
-    df_history_data = load_history_data(df[COL_STOCK_ID], start_date_ts, end_date_ts)
+    df_history_data = load_history_data(security_id=df[COL_STOCK_ID], period='daily',
+                                        start_date=start_date_ts, end_date=end_date_ts)
     if df_history_data is not None:
         df_history_data[COL_CLOSE] = df_history_data[COL_CLOSE].shift(1)
         positive_fluctuation = \

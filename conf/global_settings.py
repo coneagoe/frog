@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 import logging
 import configparser
@@ -74,9 +75,33 @@ def parse_fund_config(config: dict):
         logging.warning("fund data path is not configured")
 
 
+def create_dir_if_not_exist(path: str):
+    if not os.path.exists(path):
+        Path(path).mkdir(parents=True)
+
+
 def parse_stock_config(config: dict):
     try:
-        os.environ['stock_data_path'] = config['stock']['data_path']
+        stock_data_path = config['stock']['data_path']
+        stock_data_path_1d = os.path.join(stock_data_path, '1d')
+        stock_data_path_1w = os.path.join(stock_data_path, '1w')
+        stock_data_path_1M = os.path.join(stock_data_path, '1M')
+        stock_data_path_position = os.path.join(stock_data_path, 'position')
+        stock_data_path_info = os.path.join(stock_data_path, 'info')
+
+        create_dir_if_not_exist(stock_data_path)
+        create_dir_if_not_exist(stock_data_path_1d)
+        create_dir_if_not_exist(stock_data_path_1w)
+        create_dir_if_not_exist(stock_data_path_1M)
+        create_dir_if_not_exist(stock_data_path_position)
+        create_dir_if_not_exist(stock_data_path_info)
+
+        os.environ['stock_data_path'] = stock_data_path
+        os.environ['stock_data_path_1d'] = stock_data_path_1d
+        os.environ['stock_data_path_1w'] = stock_data_path_1w
+        os.environ['stock_data_path_1M'] = stock_data_path_1M
+        os.environ['stock_data_path_position'] = stock_data_path_position
+        os.environ['stock_data_path_info'] = stock_data_path_info
     except KeyError:
         logging.warning("stock data path is not configured")
 

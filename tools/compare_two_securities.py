@@ -66,7 +66,9 @@ if __name__ == "__main__":
         start_date = start_date.strftime('%Y%m%d')
         end_date = end_date.strftime('%Y%m%d')
 
-    df0 = stock.load_history_data(security_id_0, start_date, end_date)
-    df1 = stock.load_history_data(security_id_1, start_date, end_date)
+    df0 = stock.load_history_data(security_id=security_id_0, period='daily',
+                                  start_date=start_date, end_date=end_date)
+    df1 = stock.load_history_data(security_id=security_id_1, period='daily',
+                                  start_date=start_date, end_date=end_date)
 
     show_two_securities(security_id_0, df0, security_id_1, df1)

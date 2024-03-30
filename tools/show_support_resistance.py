@@ -138,7 +138,7 @@ if __name__ == "__main__":
         start_date = start_date.strftime('%Y%m%d')
         end_date = end_date.strftime('%Y%m%d')
 
-    df = load_history_data(stock_id, start_date, end_date)
+    df = load_history_data(security_id=stock_id, period='daily', start_date=start_date, end_date=end_date)
     turning_points, support_point, resistance_point = get_support_resistance(df)
     cost, tp0, tp1, tp2 = get_target_prices(stock_id)
     draw_support_resistance(stock_id, df,
