@@ -1,9 +1,3 @@
-STOCK_GENERAL_INFO_FILE_NAME = 'stock_general_info.csv'
-ETF_GENERAL_INFO_FILE_NAME = 'etf_general_info.csv'
-
-TRADING_BOOK_NAME = 'trading book.xlsm'
-
-
 COL_STOCK_ID = u'股票代码'
 COL_STOCK_NAME = u'股票名称'
 COL_ETF_ID = u'基金代码'
@@ -20,6 +14,7 @@ COL_OPEN = u'开盘'
 COL_CLOSE = u'收盘'
 COL_HIGH = u'最高'
 COL_LOW = u'最低'
+COL_VOLUME = u'成交量'
 COL_BUY_COUNT = u'买入数量'
 COL_BUYING_PRICE = u'买入价格'
 COL_SUPPORT = u'支撑'

@@ -1,6 +1,6 @@
 from .access_data import (
     load_history_data,
-    load_stock_history_data,
+    load_history_data_stock,
     load_all_stock_general_info,
     get_stock_name,
     load_all_etf_general_info,

@@ -1,17 +1,20 @@
 import logging
 import os
-import akshare as ak
 import pandas as pd
-from stock.common import (
-    get_stock_1d_path,
+from stock.const import (
     COL_DATE,
     COL_CLOSE,
     COL_STOCK_ID,
     COL_STOCK_NAME,
     COL_ETF_ID,
     COL_ETF_NAME,
+)
+from stock.common import (
     get_stock_general_info_path,
-    get_etf_general_info_path
+    get_etf_general_info_path,
+    get_stock_data_path_1d,
+    get_stock_data_path_1w,
+    get_stock_data_path_1M,
 )
 from stock.data.download_data import (
     download_general_info_stock,
@@ -19,7 +22,6 @@ from stock.data.download_data import (
     download_history_data_stock,
     download_history_data_etf,
     download_history_data_us_index,
-    download_history_stock_1d
 )
 from utility import (
     is_older_than_a_month,
@@ -31,75 +33,88 @@ g_df_stocks = None
 g_df_etfs = None
 
 
-def load_stock_history_data(stock_id: str, start_date: str, end_date: str):
-    data_path = os.path.join(get_stock_1d_path(), f"{stock_id}.csv")
-    if not os.path.exists(data_path):
-        download_history_stock_1d(stock_id, start_date, end_date)
-        pass
+def load_history_data_stock(stock_id: str, period: str, start_date: str,
+                            end_date: str, adjust: str) -> pd.DataFrame:
+    download_history_data_stock(stock_id, period, start_date, end_date, adjust)
 
-    if os.path.exists(data_path):
-        start_date_ts0 = pd.Timestamp(start_date)
-        end_date_ts0 = pd.Timestamp(end_date)
-        df = pd.read_csv(data_path, encoding='utf_8_sig')
-        df[COL_DATE] = pd.to_datetime(df[COL_DATE])
-
-        if df[COL_DATE].iloc[0] <= start_date_ts0 and df[COL_DATE].iloc[-1] >= end_date_ts0:
-            df = df[(df[COL_DATE] >= start_date_ts0) & (df[COL_DATE] <= end_date_ts0)]
-            df[COL_CLOSE] = df[COL_CLOSE].astype(float)
-            return df
-
-        if start_date_ts0 < df[COL_DATE].iloc[0]:
-            end_date_ts1 = df[COL_DATE].iloc[0] - pd.Timedelta(days=1)
-            df0 = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
-                                     start_date=start_date, end_date=end_date_ts1.strftime('%Y%m%d'),
-                                     adjust="")
-            df0[COL_DATE] = pd.to_datetime(df0[COL_DATE])
-            df = pd.concat([df, df0], ignore_index=True)
-
-        if end_date_ts0 > df[COL_DATE].iloc[-1]:
-            start_date_ts1 = df[COL_DATE].iloc[-1] + pd.Timedelta(days=1)
-            df0 = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
-                                     start_date=start_date_ts1.strftime('%Y%m%d'), end_date=end_date,
-                                     adjust="")
-            df0[COL_DATE] = pd.to_datetime(df0[COL_DATE])
-            df = pd.concat([df, df0], ignore_index=True)
-
-        df = df.sort_values(by=[COL_DATE], ascending=True)
-        df = df.drop_duplicates(subset=[COL_DATE])
-
-        df.to_csv(data_path, encoding='utf_8_sig', index=False)
-
-        df = df[(df[COL_DATE] >= start_date_ts0) & (df[COL_DATE] <= end_date_ts0)]
-        df[COL_CLOSE] = df[COL_CLOSE].astype(float)
-        return df
+    data_file_name = f"{stock_id}_{adjust}.csv"
+    if period == 'daily':
+        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    elif period == 'weekly':
+        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
     else:
-        df = ak.stock_zh_a_hist(symbol=stock_id, period="daily",
-                                start_date=start_date, end_date=end_date,
-                                adjust="")
-        if df.empty:
-            logging.warning(f"No data available for stock({stock_id}) from {start_date} to {end_date}.")
-            return None
+        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
 
-        df.to_csv(data_path, encoding='utf_8_sig', index=False)
+    start_date_ts0 = pd.Timestamp(start_date)
+    end_date_ts0 = pd.Timestamp(end_date)
+    df = pd.read_csv(data_path, encoding='utf_8_sig')
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
 
-        return df
+    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    df[COL_CLOSE] = df[COL_CLOSE].astype(float)
+    return df
 
 
-def load_history_data(security_id: str, start_date: str, end_date: str, adjust="qfq") -> pd.DataFrame | None:
+def load_history_data_etf(etf_id: str, period: str, start_date: str,
+                          end_date: str, adjust: str) -> pd.DataFrame:
+    download_history_data_etf(etf_id, period, start_date, end_date, adjust)
+
+    data_file_name = f"{etf_id}_{adjust}.csv"
+    if period == 'daily':
+        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    elif period == 'weekly':
+        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    else:
+        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+
+    start_date_ts0 = pd.Timestamp(start_date)
+    end_date_ts0 = pd.Timestamp(end_date)
+    df = pd.read_csv(data_path, encoding='utf_8_sig')
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+
+    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    df[COL_CLOSE] = df[COL_CLOSE].astype(float)
+    return df
+
+
+def load_history_data_us_index(index: str, period: str, start_date: str,
+                               end_date: str) -> pd.DataFrame:
+    download_history_data_us_index(index=index, period=period,
+                                   start_date=start_date, end_date=end_date)
+
+    data_file_name = f"{index}.csv"
+    if period == 'daily':
+        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    elif period == 'weekly':
+        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    else:
+        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+
+    start_date_ts0 = pd.Timestamp(start_date)
+    end_date_ts0 = pd.Timestamp(end_date)
+    df = pd.read_csv(data_path, encoding='utf_8_sig')
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+
+    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    df[COL_CLOSE] = df[COL_CLOSE].astype(float)
+    return df
+
+
+def load_history_data(security_id: str, period: str, start_date: str, end_date: str,
+                      adjust="qfq") -> pd.DataFrame:
     if is_stock(security_id):
-        return download_history_data_stock(security_id, "daily", start_date, end_date, adjust)
+        return load_history_data_stock(stock_id=security_id, period=period,
+                                       start_date=start_date, end_date=end_date,
+                                       adjust=adjust)
 
     if is_etf(security_id):
-        return download_history_data_etf(security_id, "daily", start_date, end_date, adjust)
+        return load_history_data_etf(etf_id=security_id, period=period,
+                                     start_date=start_date, end_date=end_date,
+                                     adjust=adjust)
 
     if is_us_index(security_id):
-        df = download_history_data_us_index(security_id)
-        df[COL_DATE] = pd.to_datetime(df[COL_DATE])
-        df = df.loc[(df[COL_DATE] >= start_date) & (df[COL_DATE] <= end_date)]
-        return df
-
-    logging.warning(f"wrong stock id({security_id}), please check.")
-    return None
+        return load_history_data_us_index(index=security_id, period=period,
+                                          start_date=start_date, end_date=end_date)
 
 
 def load_all_stock_general_info():

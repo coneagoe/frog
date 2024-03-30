@@ -49,7 +49,8 @@ def get_turning_points(df: pd.DataFrame):
 
 
 def calculate_support_resistance(df: pd.DataFrame, start_date_ts: str, end_date_ts: str):
-    df_history_data = load_history_data(df[COL_STOCK_ID], start_date_ts, end_date_ts)
+    df_history_data = load_history_data(security_id=df[COL_STOCK_ID], period='daily',
+                                        start_date=start_date_ts, end_date=end_date_ts)
     if df_history_data is not None:
         turning_points, support_point, resistance_point = get_support_resistance(df_history_data)
         if support_point:

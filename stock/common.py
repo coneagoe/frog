@@ -1,60 +1,61 @@
 # -*- coding: utf-8 -*-
-from pathlib import Path
+from datetime import date, datetime
+import functools
+import logging
 import os
 from os.path import join, exists
-import logging
-from datetime import date, datetime
-from .const import *
+from pathlib import Path
 
 
-def get_stock_data_path() -> Path:
-    path = Path(os.environ['stock_data_path'])
-    if not path.exists():
-        path.mkdir(parents=True)
-
-    return path
+STOCK_GENERAL_INFO_FILE_NAME = 'stock_general_info.csv'
+ETF_GENERAL_INFO_FILE_NAME = 'etf_general_info.csv'
+TRADING_BOOK_NAME = 'trading book.xlsm'
 
 
-def _get_stock_data_path(subdir: str) -> Path:
-    path = Path(join(os.environ['stock_data_path'], subdir))
-    if not path.exists():
-        path.mkdir(parents=True)
+def check_path_exists(func):
+    @functools.wraps(func)
+    def wrapper_check_path_exists(*args, **kwargs):
+        path = func(*args, **kwargs)
+        if not os.path.exists(path):
+            logging.warning(f"{path} does not exist.")
+            exit()
+        return path
+    return wrapper_check_path_exists
 
-    return path
+
+def get_stock_data_path() -> str:
+    return os.environ['stock_data_path']
 
 
-def get_stock_position_path() -> Path:
-    return _get_stock_data_path('position')
+def get_stock_position_path() -> str:
+    return os.environ['stock_data_path_position']
 
 
+@check_path_exists
 def get_stock_general_info_path() -> str:
-    return join(_get_stock_data_path('info'), STOCK_GENERAL_INFO_FILE_NAME)
+    return join(os.environ['stock_data_path_info'], STOCK_GENERAL_INFO_FILE_NAME)
 
 
+@check_path_exists
 def get_etf_general_info_path() -> str:
-    return join(_get_stock_data_path('info'), ETF_GENERAL_INFO_FILE_NAME)
+    return join(os.environ['stock_data_path_info'], ETF_GENERAL_INFO_FILE_NAME)
 
 
-def get_stock_history_path() -> Path:
-    return _get_stock_data_path('history')
+def get_stock_data_path_1d() -> str:
+    return os.environ['stock_data_path_1d']
 
 
-def get_stock_1d_path():
-    history_path = get_stock_history_path()
-    _1d_path = join(history_path, '1d')
-    if not exists(_1d_path):
-        Path(_1d_path).mkdir(parents=True)
-
-    return _1d_path
+def get_stock_data_path_1w() -> str:
+    return os.environ['stock_data_path_1w']
 
 
+def get_stock_data_path_1M() -> str:
+    return os.environ['stock_data_path_1M']
+
+
+@check_path_exists
 def get_trading_book_path():
-    trading_book_path = join(get_stock_data_path(), TRADING_BOOK_NAME)
-    if not exists(trading_book_path):
-        logging.warning(f"{trading_book_path} does not exist.")
-        exit()
-
-    return trading_book_path
+    return join(os.environ['stock_data_path'], TRADING_BOOK_NAME)
 
 
 def is_testing():
