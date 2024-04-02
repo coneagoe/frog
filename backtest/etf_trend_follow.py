@@ -1,110 +1,178 @@
-from datetime import datetime
-
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import backtrader as bt
-# from btplotting import BacktraderPlottingLive
-# from btplotting.tabs import MetadataTab
-import matplotlib.pyplot as plt
-import akshare as ak
+from btplotting import (
+    BacktraderPlotting,
+)
 import pandas as pd
+import conf
+from common import (
+    set_stocks,
+    add_analyzer,
+    show_analysis,
+)
 
 
-# symbol = '512100' # 中证1000
-# symbol = '513100' # 纳指
-# symbol = '159985' # 豆粕
-# symbol = '513550' # 港股通50
-symbol = '512690' # 酒ETF
-short_period = 20
-long_period = 60
-init_stoploss_rate = 0.05
+conf.parse_config()
 
-start_cash = 100000
-start_date = datetime(1991, 1, 1)  # 回测开始时间
-end_date = datetime(2023, 10, 1)  # 回测结束时间
-fee_rate = 0.0003
 
-# plt.rcParams["font.sans-serif"] = ["SimHei"]
-# plt.rcParams["axes.unicode_minus"] = False
+start_date="20210101"
+end_date="20240402"
 
-# 利用 AKShare 获取股票的后复权数据，这里只获取前 6 列
-stock_hfq_df = ak.fund_etf_hist_em(symbol=symbol, adjust="hfq").iloc[:, :6]
+# 股票池
+stocks = [
+    "513100", # 纳指ETF
+    "159985", # 豆粕ETF
+    "159866", # 日经ETF
+    "518880", # 黄金ETF
+    "162411", # 华宝油气ETF
+    "512690", # 酒ETF
+    "159915", # 创业板ETF
+    "510310", # 沪深300ETF
+    "515220", # 煤炭ETF
+    "159869", # 游戏ETF
+    "512480", # 半导体ETF
+#    "159819", # 人工智能ETF
+#    "562500", # 机器人ETF
+#    "516510", # 云计算ETF
+#    "159667", # 工业母机ETF
+#    "512660", # 军工ETF
+#    "159647", # 中药ETF
+#    "159766", # 旅游ETF
+#    "516150", # 稀土ETF
+#    "159786", # VRETF
+#    "515250", # 智能汽车ETF
+#    "512670", # 国防ETF
+#    "159790", # 碳中和ETF
+#    "159781", # 科创创业ETF
+#    "159755", # 电池ETF
+#    "588000", # 科创50ETF
+#    "515790", # 光伏ETF
+#    "512400", # 有色金属ETF
+#    "512290", # 生物医药ETF
+#    "159992", # 创新药ETF
+#    "515700", # 新能车ETF
+    ]
 
-# print(stock_hfq_df.head())
 
-# 处理字段命名，以符合 Backtrader 的要求
-stock_hfq_df.columns = [
-    'date',
-    'open',
-    'close',
-    'high',
-    'low',
-    'volume',
-]
-# 把 date 作为日期索引，以符合 Backtrader 的要求
-stock_hfq_df.index = pd.to_datetime(stock_hfq_df['date'])
-stock_hfq_df.index.name = 'date'
+class Context:
+    def __init__(self):
+        self.order = None
+        self.stop_price = None
+        self.is_candidator = False
+
+
+gContext = [Context() for i in range(len(stocks))]
 
 
 class TrendFollowingStrategy(bt.Strategy):
+    params = (
+            ('ema_period', 12),
+            ('printlog', False),
+        )
+
+
     def __init__(self):
-        self.data_close = self.datas[0].close
-        self.order = None
-        self.stop_price = None
+        # 分别生成根据close、high、low生成EMA
+        self.ema_middle = {i: bt.indicators.EMA(self.datas[i].close, 
+                                                period=self.params.ema_period) 
+                                                for i in range(len(self.datas))}
+        # self.ema_high = {i: bt.indicators.EMA(self.datas[i].high, 
+        #                                       period=self.params.ema_period) 
+        #                                       for i in range(len(self.datas))}
+        self.ema_low = {i: bt.indicators.EMA(self.datas[i].low, 
+                                             period=self.params.ema_period) 
+                                             for i in range(len(self.datas))}
 
-        # Create the short and long term Simple Moving Averages
-        self.sma_short = bt.indicators.SimpleMovingAverage(
-            self.datas[0], period=short_period
-        )
-        self.sma_long = bt.indicators.SimpleMovingAverage(
-            self.datas[0], period=long_period
-        )
+        # 生成MACD(12, 26, 9)
+        self.macd = {i: bt.indicators.MACD(self.datas[i].close, 
+                                           period_me1=12, 
+                                           period_me2=26, 
+                                           period_signal=9) 
+                                           for i in range(len(self.datas))}
 
-        # Create a CrossOver Signal
-        self.crossover = bt.indicators.CrossOver(self.sma_short, self.sma_long)
+        # 根据MACD macd和signal是否金叉，生成交叉信号
+        self.cross_signal = {i: bt.indicators.CrossOver(self.macd[i].macd, 
+                                                        self.macd[i].signal) 
+                                                        for i in range(len(self.datas))}
+
+
+    def log(self, txt, dt=None, doprint=False):
+        ''' Logging function fot this strategy'''
+        if self.params.printlog or doprint:
+            dt = dt or self.datas[0].datetime.date(0)
+            print('%s, %s' % (dt.isoformat(), txt))
+
 
     def next(self):
-        if not self.position:
-            if self.crossover > 0:
-                # if all(self.data_close[i] > self.sma_short[i] for i in range(-5, 0)):
-                self.order = self.buy()
-                self.buy_price = self.data_close[0]
-                self.stop_price = self.buy_price * (1 - init_stoploss_rate)
-        else:
-            # If profit exceeds 5%, move stop loss to 20-day moving average
-            if self.data_close[0] > self.buy_price * 1.05:
-                self.stop_price = max(self.stop_price, self.sma_short[0], self.buy_price)
+        # 遍历所有的股票
+        for i in range(len(self.datas)):
+            is_candidator = gContext[i].is_candidator
+            is_order = gContext[i].order is not None
+            if not is_order:
+                if not is_candidator:
+                    # 如果MACD金叉
+                    if self.cross_signal[i] > 0:
+                        gContext[i].is_candidator = True
+                        continue
+                else:
+                    # 如果MACD死叉或MACD.macd曲线不光滑
+                    if self.cross_signal[i] < 0 or self.macd[i].macd[0] - self.macd[i].macd[-1] <= 0:
+                        gContext[i].is_candidator = False
+                        continue
+                    else:
+                        # 如果MACD.signal和MACD.macd都>0
+                        if self.macd[i].signal[0] > 0 and self.macd[i].macd[0] > 0:
+                            # size = self.broker.getcash() / len(self.datas) / self.datas[i].close[0] / 100 * 100
+                            # gContext[i].order = self.buy(data=self.datas[i])
+                            gContext[i].order = self.order_target_percent(self.datas[i], target=0.1)
+                            # 设置stop_price为ema_low
+                            gContext[i].stop_price = self.ema_low[i][0]
+                            # 从候选股票中移除
+                            gContext[i].is_candidator = False
+            else:
+                # 如果stop_price < ema_low，则stop_price = ema_low
+                if gContext[i].stop_price < self.ema_low[i][-1]:
+                    gContext[i].stop_price = self.ema_low[i][-1]
 
-            if self.data_close[0] <= self.stop_price:  # check if stop loss price has been hit
-                self.order = self.sell()  # close long position
-                self.stop_price = None
-                self.buy_price = None
-
-    def notify_trade(self, trade):
-        if trade.isclosed:
-            print('---------------------------- TRADE ---------------------------------')
-            print('Size: ', trade.size)
-            print('Price: ', trade.price)
-            print('Value: ', trade.value)
-            print('Commission: ', trade.commission)
-            print('Profit, Gross: ', trade.pnl, ', Net: ', trade.pnlcomm)
-            print('--------------------------------------------------------------------\n')
+                # 如果close < stop_price，平仓
+                if self.datas[i].close[0] < gContext[i].stop_price:
+                    self.order_target_percent(self.datas[i], target=0.0)  # sell if hold days exceed limit
+                    gContext[i].order = None
 
 
-cerebro = bt.Cerebro()  # 初始化回测系统
-data = bt.feeds.PandasData(dataname=stock_hfq_df, fromdate=start_date, todate=end_date)  # 加载数据
-cerebro.adddata(data)  # 将数据传入回测系统
-cerebro.addstrategy(TrendFollowingStrategy)  # 将交易策略加载到回测系统中
-cerebro.broker.setcash(start_cash)  # 设置初始资本为 100000
-cerebro.broker.setcommission(commission=fee_rate)  # 设置交易手续费
+    # def notify_trade(self, trade):
+    #     # if trade.isclosed:
+    #     print('\n---------------------------- TRADE ---------------------------------')
+    #     print('Size: ', trade.size)
+    #     print('Price: ', trade.price)
+    #     print('Value: ', trade.value)
+    #     print('Commission: ', trade.commission)
+    #     print('Profit, Gross: ', trade.pnl, ', Net: ', trade.pnlcomm)
+    #     print('--------------------------------------------------------------------\n')
 
-# cerebro.addanalyzer(BacktraderPlottingLive)
-cerebro.addanalyzer(bt.analyzers.TradeAnalyzer)
-results = cerebro.run()  # 运行回测系统
 
-port_value = cerebro.broker.getvalue()  # 获取回测结束后的总资金
-pnl = port_value - start_cash  # 盈亏统计
+    def stop(self):
+        # self.log('Ending Value %.2f' % self.broker.getvalue(), doprint=True)
+        self.log('(ema_period %d) Ending Value %.2f' %
+                  (self.params.ema_period, self.broker.getvalue()), doprint=True)
 
-print(f"初始资金: {start_cash}\n回测期间：{start_date.strftime('%Y%m%d')}:{end_date.strftime('%Y%m%d')}")
-print(f"总资金: {round(port_value, 2)}")
-print(f"净收益: {round(pnl, 2)}")
 
-cerebro.plot()
+cerebro = bt.Cerebro()
+
+cerebro.addstrategy(TrendFollowingStrategy)
+# strats = cerebro.optstrategy(TrendFollowingStrategy, 
+#                              ema_period=range(5, 30))
+
+set_stocks(stocks, start_date, end_date, cerebro)
+
+add_analyzer(cerebro)
+
+results = cerebro.run()
+# results = cerebro.run(maxcpus=1)
+
+show_analysis(results)
+
+p = BacktraderPlotting(style='bar', multiple_tabs=True)
+cerebro.plot(p)
