@@ -1,38 +1,33 @@
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import backtrader as bt
-from btplotting import (
-    BacktraderPlotting,
-)
-import pandas as pd
-import conf
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import conf     # noqa: E402
 from common import (
-    set_stocks,
-    add_analyzer,
-    show_analysis,
-)
+    enable_optimize,
+    run,
+)   # noqa: E402
 
 
 conf.parse_config()
 
 
-start_date="20210101"
-end_date="20240402"
+start_date = "20210101"
+end_date = "20240402"
 
 # 股票池
 stocks = [
-    "513100", # 纳指ETF
-    "159985", # 豆粕ETF
-    "159866", # 日经ETF
-    "518880", # 黄金ETF
-    "162411", # 华宝油气ETF
-    "512690", # 酒ETF
-    "159915", # 创业板ETF
-    "510310", # 沪深300ETF
-    "515220", # 煤炭ETF
-    "159869", # 游戏ETF
-    "512480", # 半导体ETF
+    "513100",   # 纳指ETF
+    "159985",   # 豆粕ETF
+    "518880",   # 黄金ETF
+    "162411",   # 华宝油气ETF
+    "512690",   # 酒ETF
+    "159915",   # 创业板ETF
+    "510310",   # 沪深300ETF
+    "515220",   # 煤炭ETF
+    "159869",   # 游戏ETF
+#    "512480", # 半导体ETF
+#    "159866", # 日经ETF
 #    "159819", # 人工智能ETF
 #    "562500", # 机器人ETF
 #    "516510", # 云计算ETF
@@ -64,6 +59,9 @@ class Context:
 
 
 gContext = [Context() for i in range(len(stocks))]
+
+
+# enable_optimize()
 
 
 class TrendFollowingStrategy(bt.Strategy):
@@ -99,7 +97,6 @@ class TrendFollowingStrategy(bt.Strategy):
 
 
     def log(self, txt, dt=None, doprint=False):
-        ''' Logging function fot this strategy'''
         if self.params.printlog or doprint:
             dt = dt or self.datas[0].datetime.date(0)
             print('%s, %s' % (dt.isoformat(), txt))
@@ -165,14 +162,4 @@ cerebro.addstrategy(TrendFollowingStrategy)
 # strats = cerebro.optstrategy(TrendFollowingStrategy, 
 #                              ema_period=range(5, 30))
 
-set_stocks(stocks, start_date, end_date, cerebro)
-
-add_analyzer(cerebro)
-
-results = cerebro.run()
-# results = cerebro.run(maxcpus=1)
-
-show_analysis(results)
-
-p = BacktraderPlotting(style='bar', multiple_tabs=True)
-cerebro.plot(p)
+run(cerebro, stocks, start_date, end_date)

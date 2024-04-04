@@ -1,20 +1,24 @@
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pandas as pd
+from btplotting import BacktraderPlotting
 import backtrader as bt
+import pandas as pd
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from btplotting.analyzers import RecorderAnalyzer
 from stock import (
     load_history_data,
-    COL_DATE,
-)
+)  # noqa: E402
 
 
 start_cash = 100000
 fee_rate = 0.0003
 
 
-def set_stocks(stocks: dict, start_date: str, end_date: str, cerebro):
+def enable_optimize():
+    os.environ['OPTIMIZER'] = 'True'
+
+
+def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
     for stock in stocks:
         # 获取数据
         df = load_history_data(security_id=stock, period="daily",
@@ -57,6 +61,9 @@ def set_stocks(stocks: dict, start_date: str, end_date: str, cerebro):
 
 
 def add_analyzer(cerebro):
+    if os.getenv('OPTIMIZER'):
+        return
+
     cerebro.broker.setcash(start_cash)  # 设置初始资本为 100000
     cerebro.broker.setcommission(commission=fee_rate)  # 设置交易手续费
 
@@ -73,8 +80,10 @@ def add_analyzer(cerebro):
     # cerebro.addanalyzer(RecorderAnalyzer)
 
 
-def show_analysis(results):
-    # 打印分析器结果
+def show_result(cerebro, results):
+    if os.getenv('OPTIMIZER'):
+        return
+
     strat = results[0]
     
     print('Sharpe Ratio:')
@@ -125,3 +134,19 @@ def show_analysis(results):
     # transactions_df = pd.DataFrame(transactions).T
     # transactions_df.columns = ['id', 'price', 'amount', 'name', 'value']
     # print(transactions_df)
+
+    p = BacktraderPlotting(style='bar', multiple_tabs=True)
+    cerebro.plot(p)
+
+
+def run(cerebro, stocks: list, start_date: str, end_date: str):
+    set_stocks(cerebro, stocks, start_date, end_date)
+
+    add_analyzer(cerebro)
+
+    if os.environ.get('OPTIMIZER'):
+        results = cerebro.run(maxcpus=1)
+    else:
+        results = cerebro.run()
+
+    show_result(cerebro, results)
