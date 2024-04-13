@@ -3,11 +3,9 @@
 from datetime import date
 import os.path
 import sys
+import pandas as pd
+import swifter
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import pandas as pd           # noqa: E402
-import swifter                # noqa: E402
-
 import conf                # noqa: E402
 from stock import *        # noqa: E402
 
