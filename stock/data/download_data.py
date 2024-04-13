@@ -1,8 +1,10 @@
 from datetime import datetime
-# import logging
+import logging
 import os
 import akshare as ak
+from bs4 import BeautifulSoup
 import pandas as pd
+import requests
 import retrying
 from stock.const import (
     COL_DATE,
@@ -41,6 +43,30 @@ def download_general_info_stock():
 def download_general_info_etf():
     df = ak.fund_name_em()
     df.to_csv(get_etf_general_info_path(), encoding='utf_8_sig', index=False)
+
+
+@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+def download_general_info_index():
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:107.0) Gecko/20100101 Firefox/107.0"
+    }
+
+    url = 'http://quote.eastmoney.com/center/gridlist.html#index_sh'
+
+    try:
+        resp = requests.get(url, headers=headers)
+    except requests.exceptions.ConnectionError as e:
+        logging.error(e.args)
+        raise e
+
+    if resp.status_code != requests.codes.ok:
+        logging.error(f"download index fail: {resp.status_code}")
+        return False
+
+    bs = BeautifulSoup(resp.content, 'lxml')
+    print(bs.prettify())
+
+    # df.to_csv(get_stock_general_info_path(), encoding='utf_8_sig', index=False)
 
 
 @retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
@@ -112,7 +138,12 @@ def download_history_data_etf(etf_id: str, period: str, start_date: str, end_dat
                 df[COL_LOW] = df[COL_CLOSE]
                 df[COL_VOLUME] = 0
                 df = df[[COL_DATE, COL_CLOSE, COL_OPEN, COL_HIGH, COL_LOW, COL_VOLUME] +
-                        [x for x in df.columns if x not in [COL_DATE, COL_CLOSE, COL_OPEN, COL_HIGH, COL_LOW, COL_VOLUME]]]
+                        [x for x in df.columns if x not in [COL_DATE,
+                                                            COL_CLOSE,
+                                                            COL_OPEN,
+                                                            COL_HIGH,
+                                                            COL_LOW,
+                                                            COL_VOLUME]]]
 
                 df.to_csv(data_path, encoding='utf_8_sig', index=False)
 
@@ -130,13 +161,13 @@ def download_history_data_us_index(index: str, period: str,
     assert index in [".IXIC", ".DJI", ".INX"]
     assert period in ['daily', 'week', 'month']
 
-    index_file_name = f"{index}.csv"
+    file_name = f"{index}.csv"
     if period == 'daily':
-        data_path = os.path.join(get_stock_data_path_1d(), index_file_name)
+        data_path = os.path.join(get_stock_data_path_1d(), file_name)
     elif period == 'week':
-        data_path = os.path.join(get_stock_data_path_1w(), index_file_name)
+        data_path = os.path.join(get_stock_data_path_1w(), file_name)
     else:
-        data_path = os.path.join(get_stock_data_path_1M(), index_file_name)
+        data_path = os.path.join(get_stock_data_path_1M(), file_name)
 
     if not os.path.exists(data_path):
         df = ak.index_us_stock_sina(symbol=index)
@@ -167,13 +198,13 @@ def download_history_data_stock(stock_id: str, period: str, start_date: str, end
     assert period in ['daily', 'week', 'month']
     assert adjust in ['', 'qfq', 'hfq']
 
-    stock_file_name = f"{stock_id}_{adjust}.csv"
+    file_name = f"{stock_id}_{adjust}.csv"
     if period == 'daily':
-        data_path = os.path.join(get_stock_data_path_1d(), stock_file_name)
+        data_path = os.path.join(get_stock_data_path_1d(), file_name)
     elif period == 'week':
-        data_path = os.path.join(get_stock_data_path_1w(), stock_file_name)
+        data_path = os.path.join(get_stock_data_path_1w(), file_name)
     else:
-        data_path = os.path.join(get_stock_data_path_1M(), stock_file_name)
+        data_path = os.path.join(get_stock_data_path_1M(), file_name)
 
     if not os.path.exists(data_path):
         df = ak.stock_zh_a_hist(symbol=stock_id, period=period,
@@ -194,13 +225,49 @@ def download_history_data_stock(stock_id: str, period: str, start_date: str, end
         start_date_ts1 = df[COL_DATE].iloc[-1] + pd.Timedelta(days=1)
         end_date_ts1 = pd.Timestamp(datetime.today().strftime('%Y-%m-%d'))
         df0 = ak.stock_zh_a_hist(symbol=stock_id, period=period,
-                                start_date=start_date_ts1.strftime('%Y%m%d'),
-                                end_date=end_date_ts1.strftime('%Y%m%d'),
-                                adjust=adjust)
+                                 start_date=start_date_ts1.strftime('%Y%m%d'),
+                                 end_date=end_date_ts1.strftime('%Y%m%d'),
+                                 adjust=adjust)
         assert not df0.empty, f"download history data {stock_id} fail, please check"
 
         df0[COL_DATE] = pd.to_datetime(df0[COL_DATE])
         df = pd.concat([df, df0], ignore_index=True)
         df = df.sort_values(by=[COL_DATE], ascending=True)
         df = df.drop_duplicates(subset=[COL_DATE])
+        df.to_csv(data_path, encoding='utf_8_sig', index=False)
+
+
+@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+def download_history_data_a_index(index: str, period: str, start_date: str, end_date: str):
+    assert period in ['daily', 'week', 'month']
+
+    file_name = f"{index}.csv"
+    if period == 'daily':
+        data_path = os.path.join(get_stock_data_path_1d(), file_name)
+    elif period == 'week':
+        data_path = os.path.join(get_stock_data_path_1w(), file_name)
+    else:
+        data_path = os.path.join(get_stock_data_path_1M(), file_name)
+
+    if not os.path.exists(data_path):
+        df = ak.stock_zh_index_daily_em(symbol=index)
+        assert not df.empty, f"download history data {index} fail, please check"
+
+        df = df.iloc[:, :6]
+        df.columns = [COL_DATE, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME]
+        df.to_csv(data_path, encoding='utf_8_sig', index=False)
+        return
+
+    end_date_ts0 = pd.Timestamp(end_date)
+    df = pd.read_csv(data_path, encoding='utf_8_sig')
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+
+    if end_date_ts0 <= df[COL_DATE].iloc[-1]:
+        return
+    else:
+        df = ak.stock_zh_index_daily_em(symbol=index)
+        assert not df.empty, f"download history data {index} fail, please check"
+
+        df = df.iloc[:, :6]
+        df.columns = [COL_DATE, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME]
         df.to_csv(data_path, encoding='utf_8_sig', index=False)

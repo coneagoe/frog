@@ -12,20 +12,24 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20210101"
-end_date = "20240402"
+start_date = "20180101"
+end_date = "20240412"
 
 # 股票池
 stocks = [
     "513100",   # 纳指ETF
-    "159985",   # 豆粕ETF
-    "518880",   # 黄金ETF
+    # "159985",   # 豆粕ETF
+    # "518880",   # 黄金ETF
     "162411",   # 华宝油气ETF
-    "512690",   # 酒ETF
+    # "512690",   # 酒ETF
+    "sz399987",   # 中证酒
     "159915",   # 创业板ETF
     "510310",   # 沪深300ETF
-    "515220",   # 煤炭ETF
-    "159869",   # 游戏ETF
+    # "515220",   # 煤炭ETF
+    "sz399998",   # 中证煤炭
+    # "159869",   # 游戏ETF
+    # "csi930901",   # 动漫游戏
+    'sh000813',   # 细分化工
 #    "512480", # 半导体ETF
 #    "159866", # 日经ETF
 #    "159819", # 人工智能ETF
@@ -73,15 +77,18 @@ class TrendFollowingStrategy(bt.Strategy):
 
     def __init__(self):
         # 分别生成根据close、high、low生成EMA
-        self.ema_middle = {i: bt.indicators.EMA(self.datas[i].close, 
-                                                period=self.params.ema_period) 
-                                                for i in range(len(self.datas))}
+        # self.ema_middle = {i: bt.indicators.EMA(self.datas[i].close, 
+        #                                         period=self.params.ema_period) 
+        #                                         for i in range(len(self.datas))}
         # self.ema_high = {i: bt.indicators.EMA(self.datas[i].high, 
         #                                       period=self.params.ema_period) 
         #                                       for i in range(len(self.datas))}
         self.ema_low = {i: bt.indicators.EMA(self.datas[i].low, 
                                              period=self.params.ema_period) 
                                              for i in range(len(self.datas))}
+        # self.ema_low = {i: bt.indicators.EMA(self.datas[i].close, 
+        #                                      period=self.params.ema_period) 
+        #                                      for i in range(len(self.datas))}
 
         # 生成MACD(12, 26, 9)
         self.macd = {i: bt.indicators.MACD(self.datas[i].close, 

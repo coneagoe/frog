@@ -6,6 +6,11 @@ import pandas as pd
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from btplotting.analyzers import RecorderAnalyzer
 from stock import (
+    COL_OPEN,
+    COL_CLOSE,
+    COL_HIGH,
+    COL_LOW,
+    is_a_index,
     load_history_data,
 )  # noqa: E402
 
@@ -18,12 +23,36 @@ def enable_optimize():
     os.environ['OPTIMIZER'] = 'True'
 
 
+def load_test_data(security_id: str, period: str, start_date: str, end_date: str,
+                   adjust="qfq") -> pd.DataFrame:
+    df = load_history_data(security_id=security_id, period=period,
+                           start_date=start_date, end_date=end_date,
+                           adjust=adjust)
+    if is_a_index(security_id):
+        df[COL_OPEN]    = df[COL_OPEN].astype(float)
+        df[COL_CLOSE]   = df[COL_CLOSE].astype(float)
+        df[COL_HIGH]    = df[COL_HIGH].astype(float)
+        df[COL_LOW]     = df[COL_LOW].astype(float)
+
+        df[COL_OPEN]    = df[COL_OPEN]  / df[COL_OPEN].iloc[0]
+        df[COL_CLOSE]   = df[COL_CLOSE] / df[COL_CLOSE].iloc[0]
+        df[COL_HIGH]    = df[COL_HIGH]  / df[COL_HIGH].iloc[0]
+        df[COL_LOW]     = df[COL_LOW]   / df[COL_LOW].iloc[0]
+
+        df[COL_OPEN]    = df[COL_OPEN].apply(lambda x: round(x, 2))
+        df[COL_CLOSE]   = df[COL_CLOSE].apply(lambda x: round(x, 2))
+        df[COL_HIGH]    = df[COL_HIGH].apply(lambda x: round(x, 2))
+        df[COL_LOW]     = df[COL_LOW].apply(lambda x: round(x, 2))
+
+    return df
+
+
 def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
     for stock in stocks:
         # 获取数据
-        df = load_history_data(security_id=stock, period="daily",
-                               start_date=start_date, end_date=end_date, 
-                               adjust="hfq").iloc[:, :6]
+        df = load_test_data(security_id=stock, period="daily",
+                            start_date=start_date, end_date=end_date, 
+                            adjust="hfq").iloc[:, :6]
         df.columns = [
             'date',
             'open',
@@ -73,9 +102,9 @@ def add_analyzer(cerebro):
     cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name="annual_return")
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
     cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
-    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="time_return")
     cerebro.addanalyzer(bt.analyzers.VWR, _name="vwr")
     cerebro.addanalyzer(bt.analyzers.SQN, _name="sqn")
+    # cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="time_return")
     # cerebro.addanalyzer(BacktraderPlottingLive)
     # cerebro.addanalyzer(RecorderAnalyzer)
 
@@ -112,10 +141,6 @@ def show_result(cerebro, results):
     print(f"ravg(平均每天回报%): {returns['ravg']*100:.4f}")
     print(f"rnorm100(年化回报%): {returns['rnorm100']:.2f}")
 
-    time_return = pd.DataFrame([strat.analyzers.time_return.get_analysis()], index=[''])
-    print('\nTime Return:')
-    print(time_return)
-
     vwr = strat.analyzers.vwr.get_analysis()['vwr']
     print('\nVWR(Variable Weighted Return):')
     print(f"{vwr:.2f}")
@@ -123,6 +148,10 @@ def show_result(cerebro, results):
     sqn = strat.analyzers.sqn.get_analysis()['sqn']
     print('\nSQN(System Quality Number):')
     print(f"{sqn:.2f}")
+
+    # time_return = pd.DataFrame([strat.analyzers.time_return.get_analysis()], index=[''])
+    # print('\nTime Return:')
+    # print(time_return)
 
     # print('\nTrade Analysis:')
     # trade_analysis = strat.analyzers.trade_analysis.get_analysis()
