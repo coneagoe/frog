@@ -191,7 +191,6 @@ def is_stock(stock_id: str):
     try:
         return stock_id in g_df_stocks[COL_STOCK_ID].values
     except KeyError:
-        logging.error(f"haha stock_id: {stock_id}")
         return False
 
 
