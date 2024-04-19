@@ -12,8 +12,8 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20190101"
-end_date = "20240412"
+start_date = "20200101"
+end_date = "20240417"
 
 # 股票池
 stocks = [
@@ -30,6 +30,9 @@ stocks = [
     'sh000813',   # 细分化工
     "csi930901",   # 动漫游戏
     # "159869",   # 游戏ETF
+    "512890",   # 红利低波ETF
+    # "csi990001",    # 中华半导体芯片
+    "512480", # 半导体ETF
     # "515700",   # 新能车ETF
     # "512400", # 有色金属ETF
     # "516510", # 云计算ETF
@@ -37,7 +40,6 @@ stocks = [
     # "159866", # 日经ETF
     # "516150", # 稀土ETF
     # "159992", # 创新药ETF
-    # "512480", # 半导体ETF
     # "588000", # 科创50ETF
     # "159819", # 人工智能ETF
     # "562500", # 机器人ETF
@@ -68,27 +70,21 @@ gContext = [Context() for i in range(len(stocks))]
 
 class MyStrategy(bt.Strategy):
     params = (
-            ('n_day_increase', 20), # n天内涨幅
-            ('num_positions', 3),   # 最大持仓股票数
-            ('hold_days', 10),      # 持仓天数
-            ('printlog', False),
+            ('n_day_increase', 20),     # n天内涨幅
+            ('num_positions', 3),       # 最大持仓股票数
+            ('hold_days', 10),          # 持仓天数
         )
 
 
-    def __init__(self):
+    def __init__(self):     # noqa: E303
         self.pct_change = {i: bt.indicators.PercentChange(self.datas[i].close, 
-                                                          period=self.params.n_day_increase) 
-                                                          for i in range(len(self.datas))}
-        self.target = round(1 / len(self.datas), 2)
+                                                          period=self.params.n_day_increase)
+                           for i in range(len(self.datas))}
+        # self.target = round(1 / len(self.datas), 2)
+        self.target = round(1 / (self.params.num_positions * 2), 2)
 
 
-    def log(self, txt, dt=None, doprint=False):
-        if self.params.printlog or doprint:
-            dt = dt or self.datas[0].datetime.date(0)
-            print('%s, %s' % (dt.isoformat(), txt))
-
-
-    def next(self):
+    def next(self):    # noqa: E303
         # 计算所有股票的涨幅
         performance = {i: self.pct_change[i][0] for i in range(len(self.datas))}
 
@@ -131,14 +127,14 @@ class MyStrategy(bt.Strategy):
 #                    self.hold_days[i] = 0  # reset hold days
 
 
-    def stop(self):
-        self.log('(n_day_increase %d, num_positions %d, hold_days %d) Ending Value %.2f' %
-                  (self.params.n_day_increase, self.params.num_positions, 
-                   self.params.hold_days, self.broker.getvalue()), doprint=True)
+    def stop(self):     # noqa: E303
+        print('(n_day_increase %d, num_positions %d, hold_days %d) Ending Value %.2f' %
+                     (self.params.n_day_increase, self.params.num_positions,
+                      self.params.hold_days, self.broker.getvalue()))
 
         for data, position in self.positions.items():
             if position:
-                self.log(f'current position(当前持仓): {data._name}, size(数量): {position.size}')
+                print(f'current position(当前持仓): {data._name}, size(数量): {"%.2f" % position.size}')
 
 
 # 创建Cerebro实例

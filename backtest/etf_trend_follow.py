@@ -12,14 +12,14 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20180101"
-end_date = "20240412"
+start_date = "20200101"
+end_date = "20240418"
 
 # 股票池
 stocks = [
     "513100",   # 纳指ETF
-    # "159985",   # 豆粕ETF
-    # "518880",   # 黄金ETF
+    "159985",   # 豆粕ETF
+    "518880",   # 黄金ETF
     "162411",   # 华宝油气ETF
     # "512690",   # 酒ETF
     "sz399987",   # 中证酒
@@ -28,9 +28,10 @@ stocks = [
     # "515220",   # 煤炭ETF
     "sz399998",   # 中证煤炭
     # "159869",   # 游戏ETF
-    # "csi930901",   # 动漫游戏
+    "csi930901",   # 动漫游戏
     'sh000813',   # 细分化工
-#    "512480", # 半导体ETF
+    "512890",   # 红利低波ETF
+    "512480", # 半导体ETF
 #    "159866", # 日经ETF
 #    "159819", # 人工智能ETF
 #    "562500", # 机器人ETF
@@ -71,11 +72,12 @@ gContext = [Context() for i in range(len(stocks))]
 class TrendFollowingStrategy(bt.Strategy):
     params = (
             ('ema_period', 12),
-            ('printlog', False),
+            ('num_positions', 3),       # 最大持仓股票数
         )
 
 
     def __init__(self):
+        self.target = round(1 / (self.params.num_positions * 2), 2)
         # 分别生成根据close、high、low生成EMA
         # self.ema_middle = {i: bt.indicators.EMA(self.datas[i].close, 
         #                                         period=self.params.ema_period) 
@@ -103,12 +105,6 @@ class TrendFollowingStrategy(bt.Strategy):
                                                         for i in range(len(self.datas))}
 
 
-    def log(self, txt, dt=None, doprint=False):
-        if self.params.printlog or doprint:
-            dt = dt or self.datas[0].datetime.date(0)
-            print('%s, %s' % (dt.isoformat(), txt))
-
-
     def next(self):
         # 遍历所有的股票
         for i in range(len(self.datas)):
@@ -130,7 +126,8 @@ class TrendFollowingStrategy(bt.Strategy):
                         if self.macd[i].signal[0] > 0 and self.macd[i].macd[0] > 0:
                             # size = self.broker.getcash() / len(self.datas) / self.datas[i].close[0] / 100 * 100
                             # gContext[i].order = self.buy(data=self.datas[i])
-                            gContext[i].order = self.order_target_percent(self.datas[i], target=0.1)
+                            # gContext[i].order = self.order_target_percent(self.datas[i], target=0.1)
+                            gContext[i].order = self.order_target_percent(self.datas[i], target=self.target)
                             # 设置stop_price为ema_low
                             gContext[i].stop_price = self.ema_low[i][0]
                             # 从候选股票中移除
@@ -158,9 +155,8 @@ class TrendFollowingStrategy(bt.Strategy):
 
 
     def stop(self):
-        # self.log('Ending Value %.2f' % self.broker.getvalue(), doprint=True)
-        self.log('(ema_period %d) Ending Value %.2f' %
-                  (self.params.ema_period, self.broker.getvalue()), doprint=True)
+        print('(ema_period %d) Ending Value %.2f' %
+              (self.params.ema_period, self.broker.getvalue()))
 
 
 cerebro = bt.Cerebro()

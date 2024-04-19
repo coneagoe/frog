@@ -29,20 +29,20 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
                            start_date=start_date, end_date=end_date,
                            adjust=adjust)
     if is_a_index(security_id):
-        df[COL_OPEN]    = df[COL_OPEN].astype(float)
-        df[COL_CLOSE]   = df[COL_CLOSE].astype(float)
-        df[COL_HIGH]    = df[COL_HIGH].astype(float)
-        df[COL_LOW]     = df[COL_LOW].astype(float)
+        df[COL_OPEN]    = df[COL_OPEN].astype(float)    # noqa: E221
+        df[COL_CLOSE]   = df[COL_CLOSE].astype(float)   # noqa: E221
+        df[COL_HIGH]    = df[COL_HIGH].astype(float)    # noqa: E221
+        df[COL_LOW]     = df[COL_LOW].astype(float)     # noqa: E221
 
-        df[COL_OPEN]    = df[COL_OPEN]  / df[COL_OPEN].iloc[0]
-        df[COL_CLOSE]   = df[COL_CLOSE] / df[COL_CLOSE].iloc[0]
-        df[COL_HIGH]    = df[COL_HIGH]  / df[COL_HIGH].iloc[0]
-        df[COL_LOW]     = df[COL_LOW]   / df[COL_LOW].iloc[0]
+        df[COL_OPEN]    = df[COL_OPEN]  / df[COL_OPEN].iloc[0]      # noqa: E221
+        df[COL_CLOSE]   = df[COL_CLOSE] / df[COL_CLOSE].iloc[0]     # noqa: E221
+        df[COL_HIGH]    = df[COL_HIGH]  / df[COL_HIGH].iloc[0]      # noqa: E221
+        df[COL_LOW]     = df[COL_LOW]   / df[COL_LOW].iloc[0]       # noqa: E221
 
-        df[COL_OPEN]    = df[COL_OPEN].apply(lambda x: round(x, 2))
-        df[COL_CLOSE]   = df[COL_CLOSE].apply(lambda x: round(x, 2))
-        df[COL_HIGH]    = df[COL_HIGH].apply(lambda x: round(x, 2))
-        df[COL_LOW]     = df[COL_LOW].apply(lambda x: round(x, 2))
+        df[COL_OPEN]    = df[COL_OPEN].apply(lambda x: round(x, 2))     # noqa: E221
+        df[COL_CLOSE]   = df[COL_CLOSE].apply(lambda x: round(x, 2))    # noqa: E221
+        df[COL_HIGH]    = df[COL_HIGH].apply(lambda x: round(x, 2))     # noqa: E221
+        df[COL_LOW]     = df[COL_LOW].apply(lambda x: round(x, 2))      # noqa: E221
 
     return df
 
@@ -128,8 +128,8 @@ def show_result(cerebro, results):
     drawdown = strat.analyzers.drawdown.get_analysis()
     print('\nDrawdown:')
     print(f"len(最长回撤期): {drawdown['len']}")
-    print(f"drawdown(最大回撤%): {drawdown['drawdown']:.2f}")
-    print(f"moneydown(最大回撤金额): {drawdown['moneydown']:.2f}")
+    print(f"\tdrawdown(最大回撤%): {drawdown['drawdown']:.2f}")
+    print(f"\tmoneydown(最大回撤金额): {drawdown['moneydown']:.2f}")
     print("max(最大回撤详细):")
     print(f"\tlen(最长回撤期): {drawdown['max']['len']}")
     print(f"\tdrawdown(最大回撤%): {drawdown['max']['drawdown']:.2f}")
