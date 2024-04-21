@@ -3,6 +3,7 @@ import sys
 from btplotting import BacktraderPlotting
 import backtrader as bt
 import pandas as pd
+from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from btplotting.analyzers import RecorderAnalyzer
 from stock import (
@@ -48,7 +49,7 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
 
 
 def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
-    for stock in stocks:
+    for stock in tqdm(stocks):
         # 获取数据
         df = load_test_data(security_id=stock, period="daily",
                             start_date=start_date, end_date=end_date, 
@@ -62,22 +63,6 @@ def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
             'volume',
         ]
 
-        # start_date_st = pd.Timestamp(start_date)
-        # df['date'] = pd.to_datetime(df['date'])
-
-        # # 用第一行的数据填充缺失的数据
-        # if df['date'].iloc[0] > start_date_st:
-        #     date_range = pd.date_range(start=start_date_st, end=df['date'].iloc[0])
-        #     # 创建一个DateFrame，columns为df.columns
-        #     df_new = pd.DataFrame(columns=df.columns)
-        #     df_new['date'] = date_range
-        #     df_new = df_new.fillna(df.iloc[0])
-        #     df = pd.concat([df_new, df])
-        #     print(f"fill {stock}:")
-        #     print(df.head(10))
-
-        # df.index = pd.to_datetime(df['date'])
-        # 设置index为column 'date'
         df.set_index('date', inplace=True)
 
         df.index.name = 'date'

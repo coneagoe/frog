@@ -13,7 +13,7 @@ conf.parse_config()
 
 
 start_date = "20200101"
-end_date = "20240417"
+end_date = "20240418"
 
 # 股票池
 stocks = [
@@ -60,6 +60,7 @@ stocks = [
 class Context:
     def __init__(self):
         self.order = None
+        self.stop_price = None
         self.hold_days = 0
 
 
@@ -70,6 +71,7 @@ gContext = [Context() for i in range(len(stocks))]
 
 class MyStrategy(bt.Strategy):
     params = (
+            ('ema_period', 12),
             ('n_day_increase', 20),     # n天内涨幅
             ('num_positions', 3),       # 最大持仓股票数
             ('hold_days', 10),          # 持仓天数
@@ -82,6 +84,9 @@ class MyStrategy(bt.Strategy):
                            for i in range(len(self.datas))}
         # self.target = round(1 / len(self.datas), 2)
         self.target = round(1 / (self.params.num_positions * 2), 2)
+        self.ema_low = {i: bt.indicators.EMA(self.datas[i].low, 
+                                             period=self.params.ema_period) 
+                                             for i in range(len(self.datas))}
 
 
     def next(self):    # noqa: E303
@@ -103,28 +108,23 @@ class MyStrategy(bt.Strategy):
                     self.order_target_percent(self.datas[i], target=0.0)
                     gContext[i].order = None
             else:
-                if i in selected:
-                    # size = self.broker.getvalue() / self.target / self.datas[i].close[0]
-                    # size = int(size / 100) * 100
-                    # gContext[i].order = self.buy(self.datas[i], size=size)
+                if i in selected and self.ema_low[i][0] < self.datas[i].close[0]:
                     gContext[i].order = self.order_target_percent(self.datas[i], target=self.target)
                     gContext[i].hold_days = 0
 
-#        # 如果没有股票的涨幅大于0，卖出所有股票
-#        if not selected:
-#            for i in range(len(self.datas)):
-#                self.order_target_percent(self.datas[i], target=0.0)
-#                self.hold_days[i] = 0  # reset hold days
-#        else:
-#            # 平均分配仓位
-#            target_percent = 1.0 / len(selected)
-#            for i in selected:
-#                if self.hold_days[i] < self.params.hold_days:
-#                    self.order_target_percent(self.datas[i], target=0.3)
-#                    self.hold_days[i] += 1  # increase hold days
-#                else:
-#                    self.order_target_percent(self.datas[i], target=0.0)  # sell if hold days exceed limit
-#                    self.hold_days[i] = 0  # reset hold days
+
+    # def notify_trade(self, trade):
+    #     if trade.isopen:
+    #         pass
+
+    #     # if trade.isclosed:
+    #     print('\n---------------------------- TRADE ---------------------------------')
+    #     print('Size: ', trade.size)
+    #     print('Price: ', trade.price)
+    #     print('Value: ', trade.value)
+    #     print('Commission: ', trade.commission)
+    #     print('Profit, Gross: ', trade.pnl, ', Net: ', trade.pnlcomm)
+    #     print('--------------------------------------------------------------------\n')
 
 
     def stop(self):     # noqa: E303
