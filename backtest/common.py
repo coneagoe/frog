@@ -71,7 +71,7 @@ def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
         data = bt.feeds.PandasData(dataname=df)
 
         # 添加数据源
-        cerebro.adddata(data)
+        cerebro.adddata(data, name=stock)
 
 
 def add_analyzer(cerebro):
