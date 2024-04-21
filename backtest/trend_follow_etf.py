@@ -122,8 +122,8 @@ class TrendFollowingStrategy(bt.Strategy):
                         gContext[i].is_candidator = False
                         continue
                     else:
-                        # 如果MACD.signal和MACD.macd都>0
-                        if self.macd[i].signal[0] > 0 and self.macd[i].macd[0] > 0:
+                        if self.datas[i].close[0] > self.ema_low[i][0] \
+                            and self.macd[i].signal[0] > 0 and self.macd[i].macd[0] > 0:
                             # size = self.broker.getcash() / len(self.datas) / self.datas[i].close[0] / 100 * 100
                             # gContext[i].order = self.buy(data=self.datas[i])
                             # gContext[i].order = self.order_target_percent(self.datas[i], target=0.1)
