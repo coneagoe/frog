@@ -12,7 +12,7 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20200101"
+start_date = "20220101"
 end_date = "20240418"
 
 # 股票池
@@ -43,9 +43,9 @@ stocks = [
     # "588000", # 科创50ETF
     # "159819", # 人工智能ETF
     # "562500", # 机器人ETF
-    # "159667", # 工业母机ETF
+    # # "159667", # 工业母机ETF
     # "512660", # 军工ETF
-    # "159647", # 中药ETF
+    # # "159647", # 中药ETF
     # "159766", # 旅游ETF
     # "159786", # VRETF
     # "515250", # 智能汽车ETF
@@ -141,10 +141,12 @@ class MyStrategy(bt.Strategy):
 cerebro = bt.Cerebro()
 
 # 添加策略
-cerebro.addstrategy(MyStrategy)
-# strats = cerebro.optstrategy(MyStrategy, 
-#                              # n_day_increase=range(5, 30))
-#                              # num_positions=range(1, 9))
-#                              hold_days=range(1, 20))
+if os.environ.get('OPTIMIZER') == 'True':
+    strats = cerebro.optstrategy(MyStrategy, 
+                                # n_day_increase=range(5, 30))
+                                num_positions=range(1, len(stocks)))
+                                # hold_days=range(1, 20))
+else:
+    cerebro.addstrategy(MyStrategy)
 
 run(cerebro, stocks, start_date, end_date)
