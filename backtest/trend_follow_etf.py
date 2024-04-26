@@ -12,8 +12,8 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20200101"
-end_date = "20240418"
+start_date = "20220101"
+end_date = "20240426"
 
 # 股票池
 stocks = [
@@ -32,6 +32,8 @@ stocks = [
     'sh000813',   # 细分化工
     "512890",   # 红利低波ETF
     "512480", # 半导体ETF
+    "513050", # 中概互联网ETF
+    "513010", # 恒生科技30ETF
 #    "159866", # 日经ETF
 #    "159819", # 人工智能ETF
 #    "562500", # 机器人ETF
@@ -72,36 +74,38 @@ gContext = [Context() for i in range(len(stocks))]
 class TrendFollowingStrategy(bt.Strategy):
     params = (
             ('ema_period', 12),
-            ('num_positions', 3),       # 最大持仓股票数
+            ('num_positions', 6),       # 最大持仓股票数
+            # ('num_positions', 2),       # 最大持仓股票数
         )
 
 
     def __init__(self):
-        self.target = round(1 / (self.params.num_positions * 2), 2)
+        # self.target = round(1 / (self.params.num_positions * 2), 2)
+        self.target = round(1 / (self.params.num_positions), 2)
         # 分别生成根据close、high、low生成EMA
-        # self.ema_middle = {i: bt.indicators.EMA(self.datas[i].close, 
-        #                                         period=self.params.ema_period) 
+        # self.ema_middle = {i: bt.indicators.EMA(self.datas[i].close,
+        #                                         period=self.params.ema_period)
         #                                         for i in range(len(self.datas))}
-        # self.ema_high = {i: bt.indicators.EMA(self.datas[i].high, 
-        #                                       period=self.params.ema_period) 
+        # self.ema_high = {i: bt.indicators.EMA(self.datas[i].high,
+        #                                       period=self.params.ema_period)
         #                                       for i in range(len(self.datas))}
-        self.ema_low = {i: bt.indicators.EMA(self.datas[i].low, 
-                                             period=self.params.ema_period) 
+        self.ema_low = {i: bt.indicators.EMA(self.datas[i].low,
+                                             period=self.params.ema_period)
                                              for i in range(len(self.datas))}
-        # self.ema_low = {i: bt.indicators.EMA(self.datas[i].close, 
-        #                                      period=self.params.ema_period) 
+        # self.ema_low = {i: bt.indicators.EMA(self.datas[i].close,
+        #                                      period=self.params.ema_period)
         #                                      for i in range(len(self.datas))}
 
         # 生成MACD(12, 26, 9)
-        self.macd = {i: bt.indicators.MACD(self.datas[i].close, 
-                                           period_me1=12, 
-                                           period_me2=26, 
-                                           period_signal=9) 
+        self.macd = {i: bt.indicators.MACD(self.datas[i].close,
+                                           period_me1=12,
+                                           period_me2=26,
+                                           period_signal=9)
                                            for i in range(len(self.datas))}
 
         # 根据MACD macd和signal是否金叉，生成交叉信号
-        self.cross_signal = {i: bt.indicators.CrossOver(self.macd[i].macd, 
-                                                        self.macd[i].signal) 
+        self.cross_signal = {i: bt.indicators.CrossOver(self.macd[i].macd,
+                                                        self.macd[i].signal)
                                                         for i in range(len(self.datas))}
 
 
@@ -155,14 +159,17 @@ class TrendFollowingStrategy(bt.Strategy):
 
 
     def stop(self):
-        print('(ema_period %d) Ending Value %.2f' %
-              (self.params.ema_period, self.broker.getvalue()))
+        print('(ema_period %d, num_positions %d) Ending Value %.2f' %
+              (self.params.ema_period, self.params.num_positions, self.broker.getvalue()))
 
 
 cerebro = bt.Cerebro()
 
-cerebro.addstrategy(TrendFollowingStrategy)
-# strats = cerebro.optstrategy(TrendFollowingStrategy, 
-#                              ema_period=range(5, 30))
+if os.environ.get('OPTIMIZER') == 'True':
+    strats = cerebro.optstrategy(TrendFollowingStrategy,
+                                 # ema_period=range(5, 30))
+                                 num_positions=range(1, len(stocks)))
+else:
+    cerebro.addstrategy(TrendFollowingStrategy)
 
 run(cerebro, stocks, start_date, end_date)
