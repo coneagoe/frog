@@ -149,7 +149,9 @@ def show_result(cerebro, results):
     # transactions_df.columns = ['id', 'price', 'amount', 'name', 'value']
     # print(transactions_df)
 
-    p = BacktraderPlotting(style='bar', multiple_tabs=True)
+    # p = BacktraderPlotting(style='bar', multiple_tabs=True)
+    p = BacktraderPlotting(style='bar')
+
     cerebro.plot(p)
 
 
