@@ -12,8 +12,8 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20220101"
-end_date = "20240426"
+start_date = "20231201"
+end_date = "20240430"
 
 # 股票池
 stocks = [
@@ -25,16 +25,17 @@ stocks = [
     "sz399987",   # 中证酒
     # "515220",   # 煤炭ETF
     "sz399998",   # 中证煤炭
-    "159915",   # 创业板ETF
     "510310",   # 沪深300ETF
+    "512100",   # 中证1000ETF
+    "159915",   # 创业板ETF
     'sh000813',   # 细分化工
     "csi930901",   # 动漫游戏
-    "159869",   # 游戏ETF
+    # "159869",   # 游戏ETF
     "512890",   # 红利低波ETF
     # "csi990001",    # 中华半导体芯片
     "512480", # 半导体ETF
     "513050", # 中概互联网ETF
-    "513010", # 恒生科技30ETF
+    # "513010", # 恒生科技30ETF
 
     # "515700",   # 新能车ETF
     # "512400", # 有色金属ETF
@@ -76,7 +77,8 @@ class MyStrategy(bt.Strategy):
     params = (
             ('ema_period', 12),
             ('n_day_increase', 20),     # n天内涨幅
-            ('num_positions', 3),       # 最大持仓股票数
+            # ('num_positions', 3),       # 最大持仓股票数
+            ('num_positions', 6),       # 最大持仓股票数
             ('hold_days', 10),          # 持仓天数
         )
 
@@ -85,10 +87,10 @@ class MyStrategy(bt.Strategy):
         self.pct_change = {i: bt.indicators.PercentChange(self.datas[i].close, 
                                                           period=self.params.n_day_increase)
                            for i in range(len(self.datas))}
-        # self.target = round(1 / len(self.datas), 2)
-        self.target = round(1 / (self.params.num_positions * 2), 2)
-        self.ema_low = {i: bt.indicators.EMA(self.datas[i].low, 
-                                             period=self.params.ema_period) 
+        # self.target = round(1 / len(stocks), 2)
+        self.target = round(1 / self.params.num_positions, 2)
+        self.ema_low = {i: bt.indicators.EMA(self.datas[i].low,
+                                             period=self.params.ema_period)
                                              for i in range(len(self.datas))}
 
 
