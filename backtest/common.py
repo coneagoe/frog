@@ -150,7 +150,9 @@ def show_result(cerebro, results):
     # print(transactions_df)
 
     # p = BacktraderPlotting(style='bar', multiple_tabs=True)
-    p = BacktraderPlotting(style='bar')
+
+    programe_name = os.path.basename(sys.argv[0])
+    p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
 
     cerebro.plot(p)
 
@@ -166,3 +168,9 @@ def run(cerebro, stocks: list, start_date: str, end_date: str):
         results = cerebro.run()
 
     show_result(cerebro, results)
+
+
+def show_position(positions):
+    for data, position in positions.items():
+        if position:
+            print(f'current position(当前持仓): {data._name}, size(数量): {"%.2f" % position.size}')
