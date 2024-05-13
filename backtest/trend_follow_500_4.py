@@ -13,8 +13,8 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20240101"
-end_date = "20240508"
+start_date = "20231101"
+end_date = "20240513"
 
 # 股票池
 stocks = [
@@ -673,4 +673,4 @@ if os.environ.get('OPTIMIZER') == 'True':
 else:
     cerebro.addstrategy(TrendFollowingStrategy)
 
-run(cerebro, stocks, start_date, end_date)
+results = run(cerebro, stocks, start_date, end_date)
