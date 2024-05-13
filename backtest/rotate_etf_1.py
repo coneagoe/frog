@@ -6,6 +6,7 @@ import conf                 # noqa: E402
 from common import (
     enable_optimize,
     run,
+    show_position,
 )   # noqa: E402
 
 
@@ -93,6 +94,10 @@ class MyStrategy(bt.Strategy):
                                              period=self.params.ema_period)
                                              for i in range(len(self.datas))}
 
+        self.ema_20 = {i: bt.indicators.EMA(self.datas[i].close,
+                                            period=20)
+                                            for i in range(len(self.datas))}
+
 
     def next(self):    # noqa: E303
         # 计算所有股票的涨幅
@@ -108,13 +113,18 @@ class MyStrategy(bt.Strategy):
             if gContext[i].order is not None:
                 gContext[i].hold_days += 1
 
-                if (i not in selected) and (gContext[i].hold_days >= self.params.hold_days):
+                if gContext[i].stop_price < self.ema_20[i][-1]:
+                    gContext[i].stop_price = self.ema_20[i][-1]
+
+                if (i not in selected) and \
+                    (gContext[i].hold_days >= self.params.hold_days or self.datas[i].close[0] < gContext[i].stop_price):
                     self.order_target_percent(self.datas[i], target=0.0)
                     gContext[i].order = None
             else:
                 if i in selected and self.ema_low[i][0] < self.datas[i].close[0]:
                     gContext[i].order = self.order_target_percent(self.datas[i], target=self.target)
                     gContext[i].hold_days = 0
+                    gContext[i].stop_price = self.ema_20[i][-1]
 
 
     # def notify_trade(self, trade):
@@ -136,9 +146,7 @@ class MyStrategy(bt.Strategy):
                      (self.params.n_day_increase, self.params.num_positions,
                       self.params.hold_days, self.broker.getvalue()))
 
-        for data, position in self.positions.items():
-            if position:
-                print(f'current position(当前持仓): {data._name}, size(数量): {"%.2f" % position.size}')
+        show_position(self.positions)
 
 
 # 创建Cerebro实例

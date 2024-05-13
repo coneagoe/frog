@@ -14,7 +14,7 @@ conf.parse_config()
 
 
 start_date = "20200101"
-end_date = "20240508"
+end_date = "20240513"
 
 # 股票池
 stocks = [

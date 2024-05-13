@@ -3,7 +3,9 @@ import sys
 from btplotting import BacktraderPlotting
 import backtrader as bt
 import pandas as pd
+import plotly.graph_objs as go
 from tqdm import tqdm
+from cash_flow_analyzer import MyAnalyzer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from btplotting.analyzers import RecorderAnalyzer
 from stock import (
@@ -89,6 +91,7 @@ def add_analyzer(cerebro):
     cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
     cerebro.addanalyzer(bt.analyzers.VWR, _name="vwr")
     cerebro.addanalyzer(bt.analyzers.SQN, _name="sqn")
+    cerebro.addanalyzer(MyAnalyzer, _name="my_analyzer")
     # cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="time_return")
     # cerebro.addanalyzer(BacktraderPlottingLive)
     # cerebro.addanalyzer(RecorderAnalyzer)
@@ -98,19 +101,19 @@ def show_result(cerebro, results):
     if os.getenv('OPTIMIZER'):
         return
 
-    strat = results[0]
+    strategy = results[0]
     
     print('Sharpe Ratio:')
-    sharpe_ratio = pd.DataFrame([strat.analyzers.sharpe_ratio.get_analysis()], index=[''])
+    sharpe_ratio = pd.DataFrame([strategy.analyzers.sharpe_ratio.get_analysis()], index=[''])
     print(sharpe_ratio)
 
-    annual_return = strat.analyzers.annual_return.get_analysis()
+    annual_return = strategy.analyzers.annual_return.get_analysis()
     annual_return_df = pd.DataFrame(list(annual_return.items()), columns=['Year', 'Return(%)'])
     annual_return_df['Return(%)'] = annual_return_df['Return(%)'].apply(lambda x: '{:.2f}'.format(x*100))
     print('\nAnnual Return:')
     print(annual_return_df)
 
-    drawdown = strat.analyzers.drawdown.get_analysis()
+    drawdown = strategy.analyzers.drawdown.get_analysis()
     print('\nDrawdown:')
     print(f"len(最长回撤期): {drawdown['len']}")
     print(f"\tdrawdown(最大回撤%): {drawdown['drawdown']:.2f}")
@@ -120,17 +123,17 @@ def show_result(cerebro, results):
     print(f"\tdrawdown(最大回撤%): {drawdown['max']['drawdown']:.2f}")
     print(f"\tmoneydown(最大回撤金额): {drawdown['max']['moneydown']:.2f}")
 
-    returns = strat.analyzers.returns.get_analysis()
+    returns = strategy.analyzers.returns.get_analysis()
     print('\nReturns:')
     print(f"rtot(总回报%): {returns['rtot']*100:.2f}")
     print(f"ravg(平均每天回报%): {returns['ravg']*100:.4f}")
     print(f"rnorm100(年化回报%): {returns['rnorm100']:.2f}")
 
-    vwr = strat.analyzers.vwr.get_analysis()['vwr']
+    vwr = strategy.analyzers.vwr.get_analysis()['vwr']
     print('\nVWR(Variable Weighted Return):')
     print(f"{vwr:.2f}")
 
-    sqn = strat.analyzers.sqn.get_analysis()['sqn']
+    sqn = strategy.analyzers.sqn.get_analysis()['sqn']
     print('\nSQN(System Quality Number):')
     print(f"{sqn:.2f}")
 
@@ -151,10 +154,11 @@ def show_result(cerebro, results):
 
     # p = BacktraderPlotting(style='bar', multiple_tabs=True)
 
-    programe_name = os.path.basename(sys.argv[0])
-    p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
+    # programe_name = os.path.basename(sys.argv[0])
+    # p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
 
-    cerebro.plot(p)
+    # cerebro.plot(p)
+    plot(strategy)
 
 
 def run(cerebro, stocks: list, start_date: str, end_date: str):
@@ -174,3 +178,25 @@ def show_position(positions):
     for data, position in positions.items():
         if position:
             print(f'current position(当前持仓): {data._name}, size(数量): {"%.2f" % position.size}')
+
+
+def plot(strategy: bt.Strategy):
+    analyzer = strategy.analyzers.my_analyzer.get_analysis()
+    data = strategy.datas[0]
+
+    df_cashflow = pd.DataFrame(analyzer.cashflow, columns=['total'])
+    df_value = pd.DataFrame(analyzer.values, columns=['value'])
+
+    fig = go.Figure()
+
+    x_axis = [bt.num2date(x) for x in data.datetime.get(size=len(data))]
+
+    fig.add_trace(go.Scatter(x=x_axis, y=df_value['value'], name='Value', yaxis='y1'))
+    fig.add_trace(go.Scatter(x=x_axis, y=df_cashflow['total'], name='Cashflow', yaxis='y2'))
+
+    fig.update_layout(
+        yaxis1=dict(title='Value', side='left'),
+        yaxis2=dict(title='Cashflow', side='right', overlaying='y1')
+    )
+
+    fig.show()
