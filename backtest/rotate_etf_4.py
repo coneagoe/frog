@@ -92,8 +92,7 @@ class RotateStrategy(bt.Strategy):
         self.pct_change = {i: bt.indicators.PercentChange(self.datas[i].close,
                                                           period=self.params.n_day_increase)
                            for i in range(len(self.datas))}
-        # self.target = round(1 / len(stocks), 2)
-        self.target = round(1 / self.params.num_positions, 2)
+        self.target = round(3 / len(stocks), 2)
         self.ema_low = {i: bt.indicators.EMA(self.datas[i].low,
                                              period=self.params.ema_period)
                                              for i in range(len(self.datas))}
@@ -110,7 +109,7 @@ class RotateStrategy(bt.Strategy):
         selected = [stock for stock, change in performance[:self.params.num_positions] if change > 0]
 
         for i in range(len(self.datas)):
-            if gContext[i].order:
+            if gContext[i].order is False:
                 gContext[i].hold_days += 1
 
                 if (i not in selected) and (gContext[i].hold_days >= self.params.hold_days):
