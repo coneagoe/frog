@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import backtrader as bt
@@ -13,8 +14,8 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20200101"
-end_date = "20240508"
+# start_date = "20200101"
+# end_date = "20240513"
 
 # 股票池
 stocks = [
@@ -33,6 +34,7 @@ stocks = [
     "csi930901",   # 动漫游戏
     'sh000813',   # 细分化工
     "512890",   # 红利低波ETF
+    # "csi990001",    # 中华半导体芯片
     "512480",   # 半导体ETF
     "513050",   # 中概互联网ETF
     # "513010",   # 恒生科技30ETF
@@ -57,18 +59,17 @@ stocks = [
 #    "512290", # 生物医药ETF
 #    "159992", # 创新药ETF
 #    "515700", # 新能车ETF
+    # "512290", # 生物医药ETF
     ]
 
 
 class Context:
     def __init__(self):
-        self.order = None
-        self.open_price = None
-        self.stop_price = None
-        self.is_candidator = False
+        self.reset()
+
 
     def reset(self):
-        self.order = None
+        self.order = False
         self.open_price = None
         self.stop_price = None
         self.is_candidator = False
@@ -137,7 +138,7 @@ class TrendFollowingStrategy(bt.Strategy):
     def next(self):
         # 遍历所有的股票
         for i in range(len(self.datas)):
-            if gContext[i].order is None:
+            if gContext[i].order is False:
                 if gContext[i].is_candidator is False:
                     # 如果MACD金叉
                     if self.cross_signal_1[i] > 0:
@@ -169,9 +170,8 @@ class TrendFollowingStrategy(bt.Strategy):
                 if gContext[i].stop_price < ema[i][-1]:
                     gContext[i].stop_price = ema[i][-1]
 
-                # 如果close < stop_price，平仓
                 if self.datas[i].close[0] < gContext[i].stop_price:
-                    self.order_target_percent(self.datas[i], target=0.0)  # sell if hold days exceed limit
+                    self.order_target_percent(self.datas[i], target=0.0)
                     # gContext[i].reset()
 
 
@@ -204,13 +204,21 @@ class TrendFollowingStrategy(bt.Strategy):
         show_position(self.positions)
 
 
-cerebro = bt.Cerebro()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
+    parser.add_argument('-d', '--end', required=True, help='End date in YYYY-MM-DD format')
+    args = parser.parse_args()
 
-if os.environ.get('OPTIMIZER') == 'True':
-    strats = cerebro.optstrategy(TrendFollowingStrategy,
+    cerebro = bt.Cerebro()
+
+    if os.environ.get('OPTIMIZER') == 'True':
+        strats = cerebro.optstrategy(TrendFollowingStrategy,
                                  # ema_period=range(5, 30))
                                  num_positions=range(1, len(stocks)))
-else:
-    cerebro.addstrategy(TrendFollowingStrategy)
+                                # hold_days=range(1, 20))
+    else:
+        cerebro.addstrategy(TrendFollowingStrategy)
 
-run(cerebro, stocks, start_date, end_date)
+    run(cerebro, stocks, args.start, args.end)
+

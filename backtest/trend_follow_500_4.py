@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import backtrader as bt
@@ -13,8 +14,8 @@ from common import (
 conf.parse_config()
 
 
-start_date = "20231101"
-end_date = "20240513"
+# start_date = "20200101"
+# end_date = "20240513"
 
 # 股票池
 stocks = [
@@ -523,13 +524,11 @@ stocks = [
 
 class Context:
     def __init__(self):
-        self.order = None
-        self.open_price = None
-        self.stop_price = None
-        self.is_candidator = False
+        self.reset()
+
 
     def reset(self):
-        self.order = None
+        self.order = False
         self.open_price = None
         self.stop_price = None
         self.is_candidator = False
@@ -598,7 +597,7 @@ class TrendFollowingStrategy(bt.Strategy):
     def next(self):
         # 遍历所有的股票
         for i in range(len(self.datas)):
-            if gContext[i].order is None:
+            if gContext[i].order is False:
                 if gContext[i].is_candidator is False:
                     # 如果MACD金叉
                     if self.cross_signal_1[i] > 0:
@@ -664,13 +663,21 @@ class TrendFollowingStrategy(bt.Strategy):
         show_position(self.positions)
 
 
-cerebro = bt.Cerebro()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
+    parser.add_argument('-d', '--end', required=True, help='End date in YYYY-MM-DD format')
+    args = parser.parse_args()
 
-if os.environ.get('OPTIMIZER') == 'True':
-    strats = cerebro.optstrategy(TrendFollowingStrategy,
+    cerebro = bt.Cerebro()
+
+    if os.environ.get('OPTIMIZER') == 'True':
+        strats = cerebro.optstrategy(TrendFollowingStrategy,
                                  # ema_period=range(5, 30))
                                  num_positions=range(1, len(stocks)))
-else:
-    cerebro.addstrategy(TrendFollowingStrategy)
+                                # hold_days=range(1, 20))
+    else:
+        cerebro.addstrategy(TrendFollowingStrategy)
 
-results = run(cerebro, stocks, start_date, end_date)
+    run(cerebro, stocks, args.start, args.end)
+
