@@ -4,10 +4,11 @@ from btplotting import BacktraderPlotting
 import backtrader as bt
 import pandas as pd
 import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 from tqdm import tqdm
-from cash_flow_analyzer import MyAnalyzer
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from btplotting.analyzers import RecorderAnalyzer
+from backtest.my_analyzer import MyAnalyzer
 from stock import (
     COL_OPEN,
     COL_CLOSE,
@@ -182,21 +183,47 @@ def show_position(positions):
 
 def plot(strategy: bt.Strategy):
     analyzer = strategy.analyzers.my_analyzer.get_analysis()
-    data = strategy.datas[0]
+
+    # fig = make_subplots(rows=len(strategy.datas) + 1, cols=1)
+    fig = make_subplots(rows=1, cols=1)
+
+    # fig.update_layout(height=10000)
 
     df_cashflow = pd.DataFrame(analyzer.cashflow, columns=['total'])
     df_value = pd.DataFrame(analyzer.values, columns=['value'])
 
-    fig = go.Figure()
+    x_axis = [bt.num2date(x) for x in strategy.datas[0].datetime.array]
 
-    x_axis = [bt.num2date(x) for x in data.datetime.get(size=len(data))]
-
-    fig.add_trace(go.Scatter(x=x_axis, y=df_value['value'], name='Value', yaxis='y1'))
-    fig.add_trace(go.Scatter(x=x_axis, y=df_cashflow['total'], name='Cashflow', yaxis='y2'))
+    # 'Value' 和 'Cashflow' 在同一个子图中，位于顶部
+    fig.add_trace(go.Scatter(x=x_axis, y=df_value['value'], name='Value', yaxis='y1'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=x_axis, y=df_cashflow['total'], name='Cashflow', yaxis='y2'), row=1, col=1)
 
     fig.update_layout(
         yaxis1=dict(title='Value', side='left'),
         yaxis2=dict(title='Cashflow', side='right', overlaying='y1')
     )
+
+    for i, data in enumerate(strategy.datas):
+        break
+        df = pd.DataFrame({
+            'open': data.open.array,
+            'high': data.high.array,
+            'low': data.low.array,
+            'close': data.close.array
+        })
+        x_axis = [bt.num2date(x) for x in data.datetime.array]
+
+        # 创建 K线图
+        fig.add_trace(go.Candlestick(x=x_axis,
+                                     open=df['open'],
+                                     high=df['high'],
+                                     low=df['low'],
+                                     close=df['close'],
+                                     name=data._name,
+                                     yaxis='y{}'.format(i+3)),  # 指定 y 轴
+                      row=i+2, col=1)  # 指定子图的位置，从第二行开始
+
+        # 添加 y 轴配置
+        fig.update_layout(**{'yaxis{}'.format(i+3): dict(overlaying='y1', side='right')})
 
     fig.show()
