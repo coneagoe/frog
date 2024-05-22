@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import backtrader as bt
@@ -8,68 +9,19 @@ from common import (
     run,
     show_position,
 )   # noqa: E402
+from trend_follow_etf_pool import etf_pool as stocks   # noqa: E402
 
 
 conf.parse_config()
 
 
-start_date = "20200101"
-end_date = "20240508"
-
-# 股票池
-stocks = [
-    "513100",   # 纳指ETF
-    "159985",   # 豆粕ETF
-    "518880",   # 黄金ETF
-    "162411",   # 华宝油气ETF
-    # "512690",   # 酒ETF
-    "sz399987",   # 中证酒
-    "510310",   # 沪深300ETF
-    "512100",   # 中证1000ETF
-    "159915",   # 创业板ETF
-    # "515220",   # 煤炭ETF
-    "sz399998",   # 中证煤炭
-    # "159869",   # 游戏ETF
-    "csi930901",   # 动漫游戏
-    'sh000813',   # 细分化工
-    "512890",   # 红利低波ETF
-    "512480",   # 半导体ETF
-    "513050",   # 中概互联网ETF
-    # "513010",   # 恒生科技30ETF
-#    "159866", # 日经ETF
-#    "159819", # 人工智能ETF
-#    "562500", # 机器人ETF
-#    "516510", # 云计算ETF
-#    "159667", # 工业母机ETF
-#    "512660", # 军工ETF
-#    "159647", # 中药ETF
-#    "159766", # 旅游ETF
-#    "516150", # 稀土ETF
-#    "159786", # VRETF
-#    "515250", # 智能汽车ETF
-#    "512670", # 国防ETF
-#    "159790", # 碳中和ETF
-#    "159781", # 科创创业ETF
-#    "159755", # 电池ETF
-#    "588000", # 科创50ETF
-#    "515790", # 光伏ETF
-#    "512400", # 有色金属ETF
-#    "512290", # 生物医药ETF
-#    "159992", # 创新药ETF
-#    "515700", # 新能车ETF
-    ]
-
-
 class Context:
     def __init__(self):
-        self.order = None
-        self.open_price = None
-        self.stop_price = None
-        self.is_candidator = False
+        self.reset()
+
 
     def reset(self):
-        self.order = None
-        self.open_price = None
+        self.order = False
         self.stop_price = None
         self.is_candidator = False
 
@@ -96,7 +48,6 @@ class TrendFollowingStrategy(bt.Strategy):
 
     def __init__(self):
         self.target = round(1 / (self.params.num_positions), 2)
-        # self.target = round(1 / len(stocks), 2)
 
         self.ema_low = {i: bt.indicators.EMA(self.datas[i].close,
                                              period=self.params.ema_period)
@@ -129,7 +80,7 @@ class TrendFollowingStrategy(bt.Strategy):
     def next(self):
         # 遍历所有的股票
         for i in range(len(self.datas)):
-            if gContext[i].order is None:
+            if gContext[i].order is False:
                 if gContext[i].is_candidator is False:
                     # 如果MACD金叉
                     if self.cross_signal_1[i] > 0:
@@ -149,18 +100,14 @@ class TrendFollowingStrategy(bt.Strategy):
                 if gContext[i].stop_price < self.ema_low[i][-1]:
                     gContext[i].stop_price = self.ema_low[i][-1]
 
-                # 如果close < stop_price，平仓
                 if self.datas[i].close[0] < gContext[i].stop_price:
-                    self.order_target_percent(self.datas[i], target=0.0)  # sell if hold days exceed limit
-                    # gContext[i].reset()
+                    self.order_target_percent(self.datas[i], target=0.0)
 
 
     def notify_trade(self, trade):
         i = stocks.index(trade.getdataname())
         if trade.isopen:
-            # print(f"foo: {trade.getdataname()}, price: {trade.price}, index: {i}")
             gContext[i].order = True
-            gContext[i].open_price = trade.price
             gContext[i].stop_price = self.ema_low[i][-1]
             gContext[i].is_candidator = False
             return
@@ -168,13 +115,13 @@ class TrendFollowingStrategy(bt.Strategy):
         if trade.isclosed:
             gContext[i].reset()
 
-    #     print('\n---------------------------- TRADE ---------------------------------')
-    #     print('Size: ', trade.size)
-    #     print('Price: ', trade.price)
-    #     print('Value: ', trade.value)
-    #     print('Commission: ', trade.commission)
-    #     print('Profit, Gross: ', trade.pnl, ', Net: ', trade.pnlcomm)
-    #     print('--------------------------------------------------------------------\n')
+        # print('\n---------------------------- TRADE ---------------------------------')
+        # print('Size: ', trade.size)
+        # print('Price: ', trade.price)
+        # print('Value: ', trade.value)
+        # print('Commission: ', trade.commission)
+        # print('Profit, Gross: ', trade.pnl, ', Net: ', trade.pnlcomm)
+        # print('--------------------------------------------------------------------\n')
 
 
     def stop(self):
@@ -184,13 +131,21 @@ class TrendFollowingStrategy(bt.Strategy):
         show_position(self.positions)
 
 
-cerebro = bt.Cerebro()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
+    parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
+    args = parser.parse_args()
 
-if os.environ.get('OPTIMIZER') == 'True':
-    strats = cerebro.optstrategy(TrendFollowingStrategy,
+    cerebro = bt.Cerebro()
+
+    if os.environ.get('OPTIMIZER') == 'True':
+        strats = cerebro.optstrategy(TrendFollowingStrategy,
                                  # ema_period=range(5, 30))
                                  num_positions=range(1, len(stocks)))
-else:
-    cerebro.addstrategy(TrendFollowingStrategy)
+                                # hold_days=range(1, 20))
+    else:
+        cerebro.addstrategy(TrendFollowingStrategy)
 
-run(cerebro, stocks, start_date, end_date)
+    run(cerebro, stocks, args.start, args.end)
+

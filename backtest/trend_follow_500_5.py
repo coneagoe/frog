@@ -9,7 +9,7 @@ from common import (
     run,
     show_position,
 )   # noqa: E402
-from trend_follow_etf_pool import etf_pool as stocks   # noqa: E402
+from trend_follow_500_pool import stocks   # noqa: E402
 
 
 conf.parse_config()
@@ -36,7 +36,7 @@ gContext = [Context() for i in range(len(stocks))]
 class TrendFollowingStrategy(bt.Strategy):
     params = (
             ('ema_period', 20),
-            ('num_positions', 6),       # 最大持仓股票数
+            ('num_positions', 30),       # 最大持仓股票数
             # ('num_positions', 2),       # 最大持仓股票数
             ('p_macd_1_dif', 6),
             ('p_macd_1_dea', 12),
@@ -48,7 +48,7 @@ class TrendFollowingStrategy(bt.Strategy):
 
 
     def __init__(self):
-        self.target = round(1 / (self.params.num_positions), 2)
+        self.target = round(3 / len(stocks), 2)
 
         self.ema30 = {i: bt.indicators.EMA(self.datas[i].close, period=30)
                       for i in range(len(self.datas))}
