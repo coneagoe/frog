@@ -63,14 +63,16 @@ def calculate_support_resistance(df: pd.DataFrame, start_date_ts: str, end_date_
     resistance_point = np.nan
 
     df = load_history_data(security_id=df[COL_STOCK_ID], period='daily',
-                           start_date=start_date_ts, end_date=end_date_ts)
+                           start_date=start_date_ts, end_date=end_date_ts, adjust="qfq")
     if df is not None:
         turning_points = get_turning_points(df)
         support_index, resistance_index = get_support_resistance(df, turning_points)
-        if support_index is int:
+        if support_index is not None:
             support_point = df[COL_CLOSE].iloc[support_index]
 
-        if resistance_index is int:
+        if resistance_index is not None:
             resistance_point = df[COL_CLOSE].iloc[resistance_index]
+
+    # print(f"support_index: {support_index}, resistance_index: {resistance_index}, support_point: {support_point}, resistance_point: {resistance_point}")
 
     return support_point, resistance_point
