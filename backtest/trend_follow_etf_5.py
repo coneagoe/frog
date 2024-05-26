@@ -8,11 +8,14 @@ from common import (
     enable_optimize,
     run,
     show_position,
+    disable_plotly,
 )   # noqa: E402
 from trend_follow_etf_pool import etf_pool as stocks   # noqa: E402
 
 
 conf.parse_config()
+
+# disable_plotly()
 
 
 class Context:
@@ -122,8 +125,9 @@ class TrendFollowingStrategy(bt.Strategy):
                     if gContext[i].stop_price < self.datas[i].low[-1]:
                         gContext[i].stop_price = self.datas[i].low[-1]
 
-                if ema is not None and gContext[i].stop_price < ema[i][-1]:
-                    gContext[i].stop_price = ema[i][-1]
+                if ema is not None and gContext[i].stop_price < round(ema[i][-1], 3):
+                    gContext[i].stop_price = round(ema[i][-1], 3)
+                    # print(f"{self.datas[i]._name}: 更新止损价: {gContext[i].stop_price}")
 
                 if self.datas[i].close[0] < gContext[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
@@ -133,9 +137,10 @@ class TrendFollowingStrategy(bt.Strategy):
         i = stocks.index(trade.getdataname())
         if trade.isopen:
             gContext[i].order = True
-            gContext[i].open_price = trade.price
-            gContext[i].stop_price = self.ema20[i][-1]
+            gContext[i].open_price = round(trade.price, 3)
+            gContext[i].stop_price = round(self.ema20[i][-1], 3)
             gContext[i].is_candidator = False
+            # print(f"{trade.getdataname()}: 开仓价: {gContext[i].open_price}, 止损: {gContext[i].stop_price}")
             return
 
         if trade.isclosed:
@@ -154,7 +159,10 @@ class TrendFollowingStrategy(bt.Strategy):
         print('(ema_period %d, num_positions %d) Ending Value %.2f' %
               (self.params.ema_period, self.params.num_positions, self.broker.getvalue()))
 
-        show_position(self.positions)
+        for data, position in self.positions.items():
+            if position:
+                i = stocks.index(data._name)
+                print(f'{data._name}: 持仓: {"%.2f" % position.size}, 成本: {gContext[i].open_price}, 止损: {gContext[i].stop_price}')
 
 
 if __name__ == "__main__":

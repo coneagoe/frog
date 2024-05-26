@@ -23,6 +23,14 @@ start_cash = 100000
 fee_rate = 0.0003
 
 
+use_plotly = True
+
+
+def disable_plotly():
+    global use_plotly
+    use_plotly = False
+
+
 def enable_optimize():
     os.environ['OPTIMIZER'] = 'True'
 
@@ -52,11 +60,17 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
 
 
 def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
+    if pd.to_datetime(end_date) - pd.to_datetime(start_date) < pd.Timedelta(days=365):
+        adjust = ""
+    else:
+        adjust = "hfq"
+
+    # 添加数据
     for stock in tqdm(stocks):
         # 获取数据
         df = load_test_data(security_id=stock, period="daily",
                             start_date=start_date, end_date=end_date, 
-                            adjust="hfq").iloc[:, :6]
+                            adjust=adjust).iloc[:, :6]
         df.columns = [
             'date',
             'open',
@@ -153,13 +167,15 @@ def show_result(cerebro, results):
     # transactions_df.columns = ['id', 'price', 'amount', 'name', 'value']
     # print(transactions_df)
 
-    # p = BacktraderPlotting(style='bar', multiple_tabs=True)
+    if use_plotly:
+        plot(strategy)
+    else:
+        p = BacktraderPlotting(style='bar', multiple_tabs=True)
 
-    # programe_name = os.path.basename(sys.argv[0])
-    # p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
+        # programe_name = os.path.basename(sys.argv[0])
+        # p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
 
-    # cerebro.plot(p)
-    plot(strategy)
+        cerebro.plot(p)
 
 
 def run(cerebro, stocks: list, start_date: str, end_date: str):
