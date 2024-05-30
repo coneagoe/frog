@@ -1,31 +1,57 @@
 import backtrader as bt
 
 
+class Context:
+    def __init__(self):
+        self.reset()
+
+
+    def reset(self):
+        self.order = False
+        self.open_time = None
+        self.open_price = None
+        self.stop_price = None
+        self.close_time = None
+        self.close_price = None
+        self.is_candidator = False
+        self.hold_days = 0
+
+
 class MyStrategy(bt.Strategy):
     def __init__(self):
         self.trades = []
-        self.current_trade = None
+        self.context = None
+        self.stocks = None
 
-    def next(self):
-        # Your trading logic here
 
-        # If a trade is opened, record the open time
-        if self.order and self.order.status == self.order.Completed and self.order.isbuy():
-            self.current_trade = {
-                'open_time': self.datas[0].datetime.date(0),
-                'open_price': self.order.executed.price,
-            }
+    def set_context(self, stocks):
+        self.stocks = stocks
+        self.context = [Context() for i in range(len(stocks))]
 
-        # If a trade is closed, record the close time
-        if self.order and self.order.status == self.order.Completed and self.order.issell():
-            self.current_trade.update({
-                'close_time': self.datas[0].datetime.date(0),
-                'close_price': self.order.executed.price,
-            })
-            self.trades.append(self.current_trade)
 
     def notify_trade(self, trade):
+        i = self.stocks.index(trade.getdataname())
+        if trade.isopen:
+            self.context[i].order = True
+            self.context[i].open_time = trade.data.datetime.datetime()
+            self.context[i].open_price = round(trade.price, 3)
+            self.context[i].is_candidator = False
+            # print(f"{trade.getdataname()}: 开仓价: {self.context[i].open_price}, 止损: {self.context[i].stop_price}")
+            return
+
         if trade.isclosed:
-            self.current_trade.update({
-                'profit': trade.pnl,
+            self.context[i].close_time = trade.data.datetime.datetime()
+            self.context[i].close_price = round(trade.price, 3)
+            self.trades.append({
+                'open_price': self.context[i].open_price,
+                'close_price': self.context[i].close_price,
+                'profit_rate': round((self.context[i].close_price - self.context[i].open_price) / self.context[i].open_price, 4),
+                'open_time': self.context[i].open_time,
+                'holding_time': self.context[i].close_time - self.context[i].open_time,
             })
+            self.context[i].reset()
+
+        # if trade.isclosed:
+        #     self.current_trade.update({
+        #         'profit': trade.pnl,
+        #     })

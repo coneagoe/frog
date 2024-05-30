@@ -10,27 +10,17 @@ from common import (
     show_position,
 )   # noqa: E402
 from rotate_etf_pool import etf_pool as stocks   # noqa: E402
+from my_strategy import MyStrategy  # noqa: E402
 
 
 conf.parse_config()
 
-
-class Context:
-    def __init__(self):
-        self.reset()
-
-
-    def reset(self):
-        self.order = False
-        self.hold_days = 0
-
-
-gContext = [Context() for i in range(len(stocks))]
-
-
 # enable_optimize()
 
-class RotateStrategy(bt.Strategy):
+# disable_plotly()
+
+
+class RotateStrategy(MyStrategy):
     params = (
             ('ema_period', 12),
             ('n_day_increase', 20),     # n天内涨幅
@@ -41,6 +31,10 @@ class RotateStrategy(bt.Strategy):
 
 
     def __init__(self):     # noqa: E303
+        super(RotateStrategy, self).__init__()
+
+        self.set_context(stocks)
+
         self.pct_change = {i: bt.indicators.PercentChange(self.datas[i].close,
                                                           period=self.params.n_day_increase)
                            for i in range(len(self.datas))}
@@ -61,32 +55,15 @@ class RotateStrategy(bt.Strategy):
         selected = [stock for stock, change in performance[:self.params.num_positions] if change > 0]
 
         for i in range(len(self.datas)):
-            if gContext[i].order:
-                gContext[i].hold_days += 1
+            if self.context[i].order:
+                self.context[i].hold_days += 1
 
-                if (i not in selected) and (gContext[i].hold_days >= self.params.hold_days):
+                if (i not in selected) and (self.context[i].hold_days >= self.params.hold_days):
                     self.order_target_percent(self.datas[i], target=0.0)
             else:
                 if i in selected and self.ema_low[i][0] < self.datas[i].close[0]:
                     self.order_target_percent(self.datas[i], target=self.target)
 
-
-    def notify_trade(self, trade):
-        i = stocks.index(trade.getdataname())
-        if trade.isopen:
-            gContext[i].order = True
-            return
-
-        if trade.isclosed:
-            gContext[i].reset()
-
-        # print('\n---------------------------- TRADE ---------------------------------')
-        # print('Size: ', trade.size)
-        # print('Price: ', trade.price)
-        # print('Value: ', trade.value)
-        # print('Commission: ', trade.commission)
-        # print('Profit, Gross: ', trade.pnl, ', Net: ', trade.pnlcomm)
-        # print('--------------------------------------------------------------------\n')
 
 
     def stop(self):     # noqa: E303
