@@ -19,7 +19,7 @@ from stock import (
 )  # noqa: E402
 
 
-start_cash = 100000
+start_cash = 1000000
 fee_rate = 0.0003
 
 
@@ -33,6 +33,11 @@ def disable_plotly():
 
 def enable_optimize():
     os.environ['OPTIMIZER'] = 'True'
+
+
+def set_start_cash(cash: float):
+    global start_cash
+    start_cash = cash
 
 
 def load_test_data(security_id: str, period: str, start_date: str, end_date: str,
@@ -170,10 +175,10 @@ def show_result(cerebro, results):
     if use_plotly:
         plot(strategy)
     else:
-        p = BacktraderPlotting(style='bar', multiple_tabs=True)
+        # p = BacktraderPlotting(style='bar', multiple_tabs=True)
 
-        # programe_name = os.path.basename(sys.argv[0])
-        # p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
+        programe_name = os.path.basename(sys.argv[0])
+        p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
 
         cerebro.plot(p)
 
@@ -200,46 +205,91 @@ def show_position(positions):
 def plot(strategy: bt.Strategy):
     analyzer = strategy.analyzers.my_analyzer.get_analysis()
 
-    # fig = make_subplots(rows=len(strategy.datas) + 1, cols=1)
-    fig = make_subplots(rows=1, cols=1)
-
-    # fig.update_layout(height=10000)
-
     df_cashflow = pd.DataFrame(analyzer.cashflow, columns=['total'])
     df_value = pd.DataFrame(analyzer.values, columns=['value'])
 
+    df_trades = pd.DataFrame(strategy.trades)
+    df_trades['holding_time'] = df_trades['holding_time'].dt.days  # convert holding_time to days
+    holding_time_counts = df_trades['holding_time'].value_counts().sort_index()
+
+    df_trades['open_time'] = pd.to_datetime(df_trades['open_time'])  # ensure open_time is datetime
+    monthly_trades = df_trades.groupby(df_trades['open_time'].dt.to_period('M')).size()
+    # monthly_avg_profit = df_trades.groupby(df_trades['open_time'].dt.to_period('M'))['profit_rate'].mean()
+
+    fig = make_subplots(rows=4, cols=1)
+
+    fig.update_layout(height=2000)
+
     x_axis = [bt.num2date(x) for x in strategy.datas[0].datetime.array]
 
-    # 'Value' 和 'Cashflow' 在同一个子图中，位于顶部
-    fig.add_trace(go.Scatter(x=x_axis, y=df_value['value'], name='Value', yaxis='y1'), row=1, col=1)
-    fig.add_trace(go.Scatter(x=x_axis, y=df_cashflow['total'], name='Cashflow', yaxis='y2'), row=1, col=1)
+    row = 1
+    fig.add_trace(go.Scatter(x=x_axis, y=df_value['value'], name='Value', yaxis='y1'), row=row, col=1)
+    fig.add_trace(go.Scatter(x=x_axis, y=df_cashflow['total'], name='Cashflow', yaxis='y2'), row=row, col=1)
+
+    row += 2
+    fig.add_trace(go.Bar(x=holding_time_counts.index, y=holding_time_counts.values, 
+                         name='Holding Time Counts'), row=row, col=1)
+
+    row += 1
+    fig.add_trace(go.Bar(x=monthly_trades.index.astype(str), y=monthly_trades.values, 
+                         name='Monthly Trades'), row=row, col=1)
+    # fig.add_trace(go.Bar(x=monthly_avg_profit.index.astype(str), y=monthly_avg_profit.values, 
+    #                      name='Monthly Trades'), row=5, col=1)
 
     fig.update_layout(
         yaxis1=dict(title='Value', side='left'),
-        yaxis2=dict(title='Cashflow', side='right', overlaying='y1')
+        yaxis2=dict(title='Cashflow', side='right', overlaying='y1'),
+        yaxis3=dict(title='Hold Time'),
+        yaxis4=dict(title='Monthly Trades', side='right'),
+        # yaxis5=dict(title='Average Monthly Profit')
     )
 
-    for i, data in enumerate(strategy.datas):
-        break
-        df = pd.DataFrame({
-            'open': data.open.array,
-            'high': data.high.array,
-            'low': data.low.array,
-            'close': data.close.array
-        })
-        x_axis = [bt.num2date(x) for x in data.datetime.array]
-
-        # 创建 K线图
-        fig.add_trace(go.Candlestick(x=x_axis,
-                                     open=df['open'],
-                                     high=df['high'],
-                                     low=df['low'],
-                                     close=df['close'],
-                                     name=data._name,
-                                     yaxis='y{}'.format(i+3)),  # 指定 y 轴
-                      row=i+2, col=1)  # 指定子图的位置，从第二行开始
-
-        # 添加 y 轴配置
-        fig.update_layout(**{'yaxis{}'.format(i+3): dict(overlaying='y1', side='right')})
-
     fig.show()
+
+
+# def plot(strategy: bt.Strategy):
+#     analyzer = strategy.analyzers.my_analyzer.get_analysis()
+# 
+#     # fig = make_subplots(rows=len(strategy.datas) + 1, cols=1)
+#     fig = make_subplots(rows=1, cols=1)
+# 
+#     # fig.update_layout(height=10000)
+# 
+#     df_cashflow = pd.DataFrame(analyzer.cashflow, columns=['total'])
+#     df_value = pd.DataFrame(analyzer.values, columns=['value'])
+# 
+#     x_axis = [bt.num2date(x) for x in strategy.datas[0].datetime.array]
+# 
+#     # 'Value' 和 'Cashflow' 在同一个子图中，位于顶部
+#     fig.add_trace(go.Scatter(x=x_axis, y=df_value['value'], name='Value', yaxis='y1'), row=1, col=1)
+#     fig.add_trace(go.Scatter(x=x_axis, y=df_cashflow['total'], name='Cashflow', yaxis='y2'), row=1, col=1)
+# 
+#     fig.update_layout(
+#         yaxis1=dict(title='Value', side='left'),
+#         yaxis2=dict(title='Cashflow', side='right', overlaying='y1')
+#     )
+# 
+#     for i, data in enumerate(strategy.datas):
+#         break
+#         df = pd.DataFrame({
+#             'open': data.open.array,
+#             'high': data.high.array,
+#             'low': data.low.array,
+#             'close': data.close.array
+#         })
+#         x_axis = [bt.num2date(x) for x in data.datetime.array]
+# 
+#         # 创建 K线图
+#         fig.add_trace(go.Candlestick(x=x_axis,
+#                                      open=df['open'],
+#                                      high=df['high'],
+#                                      low=df['low'],
+#                                      close=df['close'],
+#                                      name=data._name,
+#                                      yaxis='y{}'.format(i+3)),  # 指定 y 轴
+#                       row=i+2, col=1)  # 指定子图的位置，从第二行开始
+# 
+#         # 添加 y 轴配置
+#         fig.update_layout(**{'yaxis{}'.format(i+3): dict(overlaying='y1', side='right')})
+# 
+#     fig.show()
