@@ -8,11 +8,16 @@ from common import (
     enable_optimize,
     run,
     show_position,
+    disable_plotly,
 )   # noqa: E402
 from trend_follow_etf_pool import etf_pool as stocks   # noqa: E402
 
 
 conf.parse_config()
+
+# enable_optimize()
+
+# disable_plotly()
 
 
 class Context:
@@ -22,21 +27,23 @@ class Context:
 
     def reset(self):
         self.order = False
+        self.open_time = None
+        self.open_price = None
         self.stop_price = None
+        self.close_time = None
+        self.close_price = None
         self.is_candidator = False
 
 
 gContext = [Context() for i in range(len(stocks))]
 
 
-# enable_optimize()
-
-
 class TrendFollowingStrategy(bt.Strategy):
     params = (
             ('ema_period', 20),
-            ('num_positions', 6),       # 最大持仓股票数
+            # ('num_positions', 6),       # 最大持仓股票数
             # ('num_positions', 2),       # 最大持仓股票数
+            ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
             ('p_macd_1_dif', 6),
             ('p_macd_1_dea', 12),
             ('p_macd_1_signal', 5),
@@ -47,11 +54,19 @@ class TrendFollowingStrategy(bt.Strategy):
 
 
     def __init__(self):
-        self.target = round(3 / len(stocks), 2)
+        self.target = round(self.params.n_portion / len(stocks), 2)
 
-        self.ema_low = {i: bt.indicators.EMA(self.datas[i].close,
-                                             period=self.params.ema_period)
-                                             for i in range(len(self.datas))}
+        self.ema30 = {i: bt.indicators.EMA(self.datas[i].close, period=30)
+                      for i in range(len(self.datas))}
+
+        self.ema20 = {i: bt.indicators.EMA(self.datas[i].close, period=20)
+                      for i in range(len(self.datas))}
+
+        self.ema10 = {i: bt.indicators.EMA(self.datas[i].close, period=10)
+                      for i in range(len(self.datas))}
+
+        self.ema5 = {i: bt.indicators.EMA(self.datas[i].close, period=5)
+                      for i in range(len(self.datas))}
 
         self.macd_1 = {i: bt.indicators.MACD(self.datas[i].close,
                                              period_me1=self.params.p_macd_1_dif,
@@ -63,18 +78,7 @@ class TrendFollowingStrategy(bt.Strategy):
                                                         self.macd_1[i].signal)
                                                         for i in range(len(self.datas))}
 
-        # self.middle = {i: (self.datas[i].high + self.datas[i].low) / 2.0
-        #                                             for i in range(len(self.datas))}
-
-        # self.macd_2 = {i: bt.indicators.MACD(self.middle[i],
-        #                                      period_me1=self.params.p_macd_2_dif,
-        #                                      period_me2=self.params.p_macd_2_dea,
-        #                                      period_signal=self.params.p_macd_2_signal)
-        #                                      for i in range(len(self.datas))}
-
-        # self.cross_signal_2 = {i: bt.indicators.CrossOver(self.macd_2[i].macd,
-        #                                                 self.macd_2[i].signal)
-        #                                                 for i in range(len(self.datas))}
+        self.trades = []
 
 
     def next(self):
@@ -92,13 +96,30 @@ class TrendFollowingStrategy(bt.Strategy):
                         gContext[i].is_candidator = False
                         continue
                     else:
-                        if self.datas[i].close[0] > self.ema_low[i][0] \
+                        if self.datas[i].close[0] > self.ema20[i][0] \
                             and self.macd_1[i].signal[0] > 0 and self.macd_1[i].macd[0] > 0:
                             self.order_target_percent(self.datas[i], target=self.target)
             else:
-                # 如果stop_price < ema_low，则stop_price = ema_low
-                if gContext[i].stop_price < self.ema_low[i][-1]:
-                    gContext[i].stop_price = self.ema_low[i][-1]
+                # 计算当前收益率
+                # print(f"foo: {i}, price: {self.datas[i].close[0]}, open_price: {gContext[i].open_price}")
+                open_price = gContext[i].open_price
+                profit_rate = round((self.datas[i].close[0] - open_price) / open_price, 4)
+                ema = None
+                if profit_rate < 0.2:
+                    ema = self.ema30
+                elif profit_rate < 0.4:
+                    ema = self.ema20
+                elif profit_rate < 0.6:
+                    ema = self.ema10
+                elif profit_rate < 0.8:
+                    ema = self.ema5
+                else:
+                    if gContext[i].stop_price < self.datas[i].low[-1]:
+                        gContext[i].stop_price = self.datas[i].low[-1]
+
+                if ema is not None and gContext[i].stop_price < round(ema[i][-1], 3):
+                    gContext[i].stop_price = round(ema[i][-1], 3)
+                    # print(f"{self.datas[i]._name}: 更新止损价: {gContext[i].stop_price}")
 
                 if self.datas[i].close[0] < gContext[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
@@ -108,11 +129,23 @@ class TrendFollowingStrategy(bt.Strategy):
         i = stocks.index(trade.getdataname())
         if trade.isopen:
             gContext[i].order = True
-            gContext[i].stop_price = self.ema_low[i][-1]
+            gContext[i].open_time = trade.data.datetime.datetime()
+            gContext[i].open_price = round(trade.price, 3)
+            gContext[i].stop_price = round(self.ema20[i][-1], 3)
             gContext[i].is_candidator = False
+            # print(f"{trade.getdataname()}: 开仓价: {gContext[i].open_price}, 止损: {gContext[i].stop_price}")
             return
 
         if trade.isclosed:
+            gContext[i].close_time = trade.data.datetime.datetime()
+            gContext[i].close_price = round(trade.price, 3)
+            self.trades.append({
+                'open_price': gContext[i].open_price,
+                'close_price': gContext[i].close_price,
+                'profit_rate': round((gContext[i].close_price - gContext[i].open_price) / gContext[i].open_price, 4),
+                'open_time': gContext[i].open_time,
+                'holding_time': gContext[i].close_time - gContext[i].open_time,
+            })
             gContext[i].reset()
 
         # print('\n---------------------------- TRADE ---------------------------------')
@@ -125,10 +158,13 @@ class TrendFollowingStrategy(bt.Strategy):
 
 
     def stop(self):
-        print('(ema_period %d, num_positions %d) Ending Value %.2f' %
-              (self.params.ema_period, self.params.num_positions, self.broker.getvalue()))
+        print('(ema_period %d, n_positions %d) Ending Value %.2f' %
+              (self.params.ema_period, self.params.n_portion, self.broker.getvalue()))
 
-        show_position(self.positions)
+        for data, position in self.positions.items():
+            if position:
+                i = stocks.index(data._name)
+                print(f'{data._name}: 持仓股数: {"%.2f" % position.size}, 成本: {gContext[i].open_price}, 止损: {gContext[i].stop_price}')
 
 
 if __name__ == "__main__":
@@ -142,8 +178,9 @@ if __name__ == "__main__":
     if os.environ.get('OPTIMIZER') == 'True':
         strats = cerebro.optstrategy(TrendFollowingStrategy,
                                  # ema_period=range(5, 30))
-                                 num_positions=range(1, len(stocks)))
-                                # hold_days=range(1, 20))
+                                 # num_positions=range(1, len(stocks)))
+                                 # hold_days=range(1, 20))
+                                 n_portion=range(1, 10))
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 

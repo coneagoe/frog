@@ -15,6 +15,8 @@ from trend_follow_etf_pool import etf_pool as stocks   # noqa: E402
 
 conf.parse_config()
 
+# enable_optimize()
+
 # disable_plotly()
 
 
@@ -33,14 +35,10 @@ class Context:
 gContext = [Context() for i in range(len(stocks))]
 
 
-# enable_optimize()
-
-
 class TrendFollowingStrategy(bt.Strategy):
     params = (
             ('ema_period', 20),
-            ('num_positions', 6),       # 最大持仓股票数
-            # ('num_positions', 2),       # 最大持仓股票数
+            ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
             ('p_macd_1_dif', 6),
             ('p_macd_1_dea', 12),
             ('p_macd_1_signal', 5),
@@ -156,8 +154,8 @@ class TrendFollowingStrategy(bt.Strategy):
 
 
     def stop(self):
-        print('(ema_period %d, num_positions %d) Ending Value %.2f' %
-              (self.params.ema_period, self.params.num_positions, self.broker.getvalue()))
+        print('(ema_period %d, n_positions %d) Ending Value %.2f' %
+              (self.params.ema_period, self.params.n_portion, self.broker.getvalue()))
 
         for data, position in self.positions.items():
             if position:
@@ -176,8 +174,7 @@ if __name__ == "__main__":
     if os.environ.get('OPTIMIZER') == 'True':
         strats = cerebro.optstrategy(TrendFollowingStrategy,
                                  # ema_period=range(5, 30))
-                                 num_positions=range(1, len(stocks)))
-                                # hold_days=range(1, 20))
+                                 n_portion=range(1, 10))
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 
