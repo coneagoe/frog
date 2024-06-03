@@ -228,7 +228,7 @@ def plot(strategy: bt.Strategy):
 
     row += 2
     fig.add_trace(go.Bar(x=holding_time_counts.index, y=holding_time_counts.values, 
-                         name='Holding Time Counts'), row=row, col=1)
+                         name='Holding Time'), row=row, col=1)
 
     row += 1
     fig.add_trace(go.Bar(x=monthly_trades.index.astype(str), y=monthly_trades.values, 
@@ -239,8 +239,10 @@ def plot(strategy: bt.Strategy):
     fig.update_layout(
         yaxis1=dict(title='Value', side='left'),
         yaxis2=dict(title='Cashflow', side='right', overlaying='y1'),
-        yaxis3=dict(title='Hold Time'),
-        yaxis4=dict(title='Monthly Trades', side='right'),
+        xaxis3=dict(title=u'持仓时间'),
+        yaxis3=dict(title=u'交易次数'),
+        xaxis4=dict(title=u'月份'),
+        yaxis4=dict(title=u'交易次数'),
         # yaxis5=dict(title='Average Monthly Profit')
     )
 
