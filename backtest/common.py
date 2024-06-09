@@ -26,6 +26,9 @@ fee_rate = 0.0003
 use_plotly = True
 
 
+df_data = []
+
+
 def disable_plotly():
     global use_plotly
     use_plotly = False
@@ -65,16 +68,18 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
 
 
 def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
+    global df_data
+
     if pd.to_datetime(end_date) - pd.to_datetime(start_date) < pd.Timedelta(days=365):
         adjust = ""
     else:
-        adjust = "hfq"
+        adjust = "qfq"
 
     # 添加数据
     for stock in tqdm(stocks):
         # 获取数据
         df = load_test_data(security_id=stock, period="daily",
-                            start_date=start_date, end_date=end_date, 
+                            start_date=start_date, end_date=end_date,
                             adjust=adjust).iloc[:, :6]
         df.columns = [
             'date',
@@ -88,6 +93,8 @@ def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
         df.set_index('date', inplace=True)
 
         df.index.name = 'date'
+
+        df_data.append(df)
 
         # 创建数据源
         data = bt.feeds.PandasData(dataname=df)
@@ -122,7 +129,7 @@ def show_result(cerebro, results):
         return
 
     strategy = results[0]
-    
+
     print('Sharpe Ratio:')
     sharpe_ratio = pd.DataFrame([strategy.analyzers.sharpe_ratio.get_analysis()], index=[''])
     print(sharpe_ratio)
@@ -216,82 +223,82 @@ def plot(strategy: bt.Strategy):
     monthly_trades = df_trades.groupby(df_trades['open_time'].dt.to_period('M')).size()
     # monthly_avg_profit = df_trades.groupby(df_trades['open_time'].dt.to_period('M'))['profit_rate'].mean()
 
-    fig = make_subplots(rows=4, cols=1)
+    #num_subplots = 4 + 2 * len(strategy.datas)
+    #num_subplots = 4 + len(strategy.datas)
+    num_subplots = 4
+    #secondary_y = [True if i % 2 == 0 else False for i in range(num_subplots)]
+    #secondary_y[3] = True
+    #row_heights = [1 for _ in range(num_subplots)]
+    #row_heights[1] = 0.1
+    ## num_subplots = 4 + 2 * len(strategy.datas)
+    ## row_heights = [1, 0.1, 1, 1]
+    ## k_row_heights = [1 if i % 2 == 0 else 0.1 for i in range(len(strategy.datas) * 2)]
+    ## row_heights.extend(k_row_heights)
 
-    fig.update_layout(height=2000)
+    subplot_titles = ['Value & Cashflow', '', 'Holding Time', 'Monthly Trades']
+    #k_subplot_titles = [data._name for data in strategy.datas]
+    #subplot_titles.extend(k_subplot_titles)
 
-    x_axis = [bt.num2date(x) for x in strategy.datas[0].datetime.array]
+    fig = make_subplots(rows=num_subplots, cols=1,
+                        #row_heights=row_heights,
+                        #row_heights=[0.1 for _ in range(num_subplots)],
+                        #vertical_spacing=0.4,
+                        # k线下的滑块会和下面一张图覆盖，vertical_spacing=0.4可以解决问题。
+                        # 但是subplot数会限制vertual_spacing大小，暂时不知道怎么解决。
+                        ##vertical_spacing=0.05,
+                        # subplot_titles=subplot_titles,
+                        specs=[[{"secondary_y": True}] for _ in range(num_subplots)])
+
+    fig.update_layout(height=500*num_subplots)
+    # fig.update_layout(height=800)
+
+    #x_axis = [bt.num2date(x) for x in strategy.datas[0].datetime.array]
+    x_axis = df_data[0].index
 
     row = 1
     fig.add_trace(go.Scatter(x=x_axis, y=df_value['value'], name='Value', yaxis='y1'), row=row, col=1)
     fig.add_trace(go.Scatter(x=x_axis, y=df_cashflow['total'], name='Cashflow', yaxis='y2'), row=row, col=1)
 
     row += 2
-    fig.add_trace(go.Bar(x=holding_time_counts.index, y=holding_time_counts.values, 
+    fig.add_trace(go.Bar(x=holding_time_counts.index, y=holding_time_counts.values,
                          name='Holding Time'), row=row, col=1)
 
     row += 1
-    fig.add_trace(go.Bar(x=monthly_trades.index.astype(str), y=monthly_trades.values, 
+    fig.add_trace(go.Bar(x=monthly_trades.index.astype(str), y=monthly_trades.values,
                          name='Monthly Trades'), row=row, col=1)
-    # fig.add_trace(go.Bar(x=monthly_avg_profit.index.astype(str), y=monthly_avg_profit.values, 
-    #                      name='Monthly Trades'), row=5, col=1)
 
-    fig.update_layout(
-        yaxis1=dict(title='Value', side='left'),
-        yaxis2=dict(title='Cashflow', side='right', overlaying='y1'),
-        xaxis3=dict(title=u'持仓时间'),
-        yaxis3=dict(title=u'交易次数'),
-        xaxis4=dict(title=u'月份'),
-        yaxis4=dict(title=u'交易次数'),
-        # yaxis5=dict(title='Average Monthly Profit')
-    )
+    yaxis_dict = {
+        'yaxis1': dict(title='Value', side='left'),
+        'yaxis2': dict(title='Cashflow', side='right', overlaying='y1'),
+        'xaxis3': dict(title=u'持仓时间'),
+        'yaxis3': dict(title=u'交易次数'),
+        'xaxis4': dict(title=u'月份'),
+        'yaxis4': dict(title=u'交易次数'),
+    }
+
+    k_start_row = row
+    for i, data in enumerate(strategy.datas):
+        break
+
+        if i >= 2:
+            break
+
+        df = df_data[i]
+
+        #row = 2 * i + k_start_row
+        row = i + k_start_row
+
+        fig.add_trace(go.Candlestick(x=df.index,
+                                     open=df['open'],
+                                     high=df['high'],
+                                     low=df['low'],
+                                     close=df['close'],
+                                     name=data._name,
+                                     yaxis='y{}'.format(row)),  # 指定 y 轴
+                      row=row, col=1)  # 指定子图的位置，从第二行开始
+
+        # yaxis_dict['yaxis{}'.format(row)] = dict(side='left')
+
+    fig.update_layout(yaxis_dict)
 
     fig.show()
-
-
-# def plot(strategy: bt.Strategy):
-#     analyzer = strategy.analyzers.my_analyzer.get_analysis()
-# 
-#     # fig = make_subplots(rows=len(strategy.datas) + 1, cols=1)
-#     fig = make_subplots(rows=1, cols=1)
-# 
-#     # fig.update_layout(height=10000)
-# 
-#     df_cashflow = pd.DataFrame(analyzer.cashflow, columns=['total'])
-#     df_value = pd.DataFrame(analyzer.values, columns=['value'])
-# 
-#     x_axis = [bt.num2date(x) for x in strategy.datas[0].datetime.array]
-# 
-#     # 'Value' 和 'Cashflow' 在同一个子图中，位于顶部
-#     fig.add_trace(go.Scatter(x=x_axis, y=df_value['value'], name='Value', yaxis='y1'), row=1, col=1)
-#     fig.add_trace(go.Scatter(x=x_axis, y=df_cashflow['total'], name='Cashflow', yaxis='y2'), row=1, col=1)
-# 
-#     fig.update_layout(
-#         yaxis1=dict(title='Value', side='left'),
-#         yaxis2=dict(title='Cashflow', side='right', overlaying='y1')
-#     )
-# 
-#     for i, data in enumerate(strategy.datas):
-#         break
-#         df = pd.DataFrame({
-#             'open': data.open.array,
-#             'high': data.high.array,
-#             'low': data.low.array,
-#             'close': data.close.array
-#         })
-#         x_axis = [bt.num2date(x) for x in data.datetime.array]
-# 
-#         # 创建 K线图
-#         fig.add_trace(go.Candlestick(x=x_axis,
-#                                      open=df['open'],
-#                                      high=df['high'],
-#                                      low=df['low'],
-#                                      close=df['close'],
-#                                      name=data._name,
-#                                      yaxis='y{}'.format(i+3)),  # 指定 y 轴
-#                       row=i+2, col=1)  # 指定子图的位置，从第二行开始
-# 
-#         # 添加 y 轴配置
-#         fig.update_layout(**{'yaxis{}'.format(i+3): dict(overlaying='y1', side='right')})
-# 
-#     fig.show()
