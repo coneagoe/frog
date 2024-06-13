@@ -22,12 +22,18 @@ def show_two_securities(stock_id_0: str, df0: pd.DataFrame, stock_id_1: str, df1
     stock_name_0 = get_security_name(stock_id_0)
     stock_name_1 = get_security_name(stock_id_1)
 
+    df = pd.merge(df0, df1, on=COL_DATE, suffixes=('_0', '_1'))
+    avg_close = (df[COL_CLOSE + '_0'] + df[COL_CLOSE + '_1']) / 2
+
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(x=df0[COL_DATE], y=df0[COL_CLOSE], mode='lines', name=stock_name_0, yaxis='y'))
     fig.add_trace(go.Scatter(x=df1[COL_DATE], y=df1[COL_CLOSE], mode='lines', name=stock_name_1, yaxis='y2'))
+    fig.add_trace(go.Scatter(x=df[COL_DATE], y=avg_close, mode='lines', name='Average', yaxis='y3'))
+
     fig.update_layout(yaxis=dict(title=stock_name_0),
-                      yaxis2=dict(title=stock_name_1, overlaying='y', side='right'))
+                      yaxis2=dict(title=stock_name_1, overlaying='y', side='right'),
+                      yaxis3=dict(title='Average', overlaying='y', side='left'))
 
     fig.show()
 
