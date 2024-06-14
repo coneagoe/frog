@@ -246,8 +246,8 @@ def plot(strategy: bt.Strategy):
                         # k线下的滑块会和下面一张图覆盖，vertical_spacing=0.4可以解决问题。
                         # 但是subplot数会限制vertual_spacing大小，暂时不知道怎么解决。
                         ##vertical_spacing=0.05,
-                        # subplot_titles=subplot_titles,
-                        specs=[[{"secondary_y": True}] for _ in range(num_subplots)])
+                        subplot_titles=subplot_titles,)
+                        # specs=[[{"secondary_y": True}] for _ in range(num_subplots)])
 
     fig.update_layout(height=500*num_subplots)
     # fig.update_layout(height=800)
@@ -261,20 +261,34 @@ def plot(strategy: bt.Strategy):
 
     row += 2
     fig.add_trace(go.Bar(x=holding_time_counts.index, y=holding_time_counts.values,
-                         name='Holding Time'), row=row, col=1)
+                         name='Holding Time', xaxis='x3', yaxis='y3'), row=row, col=1)
 
     row += 1
     fig.add_trace(go.Bar(x=monthly_trades.index.astype(str), y=monthly_trades.values,
-                         name='Monthly Trades'), row=row, col=1)
+                         name='Monthly Trades', xaxis='x4', yaxis='y4'), row=row, col=1)
 
-    yaxis_dict = {
-        'yaxis1': dict(title='Value', side='left'),
-        'yaxis2': dict(title='Cashflow', side='right', overlaying='y1'),
-        'xaxis3': dict(title=u'持仓时间'),
-        'yaxis3': dict(title=u'交易次数'),
-        'xaxis4': dict(title=u'月份'),
-        'yaxis4': dict(title=u'交易次数'),
-    }
+    # yaxis_dict = {
+    #     'yaxis1': dict(title='Value', side='left'),
+    #     'yaxis2': dict(title='Cashflow', side='right', overlaying='y1'),
+    #     'xaxis3': dict(title=u'持仓时间'),
+    #     'yaxis3': dict(title=u'交易次数'),
+    #     'xaxis4': dict(title=u'月份'),
+    #     'yaxis4': dict(title=u'交易次数'),
+    # }
+
+    fig.update_layout(
+        yaxis1=dict(title='Value', side='left'),
+        yaxis2=dict(title='Cashflow', side='right', overlaying='y1'),
+        xaxis3=dict(title=u'持仓时间'),
+        yaxis3=dict(title=u'交易次数'),
+        xaxis4=dict(title=u'月份'),
+        yaxis4=dict(title=u'交易次数'),
+        # yaxis5=dict(title='Average Monthly Profit')
+    )
+
+    fig.show()
+
+    return
 
     k_start_row = row
     for i, data in enumerate(strategy.datas):
