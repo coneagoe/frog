@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 import backtrader as bt
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import conf     # noqa: E402
 from common import (
     enable_optimize,

@@ -8,6 +8,7 @@ class Context:
 
     def reset(self):
         self.order = False
+        self.current_price = None
         self.open_time = None
         self.open_price = None
         self.stop_price = None
