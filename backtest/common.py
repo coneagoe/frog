@@ -1,10 +1,12 @@
 import os
 import sys
+import webbrowser
 from btplotting import BacktraderPlotting
 import backtrader as bt
 import pandas as pd
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
+import quantstats as qs
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from btplotting.analyzers import RecorderAnalyzer
@@ -27,6 +29,18 @@ use_plotly = True
 
 
 df_data = []
+
+
+g_start_date = '2020-01-01'
+g_end_date = '2020-12-31'
+g_strategy_name = None
+
+
+def config(strategy_name: str, start_date: str, end_date: str):
+    global g_strategy_name, g_start_date, g_end_date
+    g_strategy_name = strategy_name
+    g_start_date = start_date
+    g_end_date = end_date
 
 
 def disable_plotly():
@@ -110,14 +124,15 @@ def add_analyzer(cerebro):
     cerebro.broker.setcash(start_cash)  # 设置初始资本为 100000
     cerebro.broker.setcommission(commission=fee_rate)  # 设置交易手续费
 
-    cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trade_analysis")
-    cerebro.addanalyzer(bt.analyzers.Transactions, _name="transactions")
-    cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe_ratio")
-    cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name="annual_return")
-    cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
-    cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
-    cerebro.addanalyzer(bt.analyzers.VWR, _name="vwr")
-    cerebro.addanalyzer(bt.analyzers.SQN, _name="sqn")
+    # cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trade_analysis")
+    # cerebro.addanalyzer(bt.analyzers.Transactions, _name="transactions")
+    # cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe_ratio")
+    # cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name="annual_return")
+    # cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
+    # cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
+    # cerebro.addanalyzer(bt.analyzers.VWR, _name="vwr")
+    # cerebro.addanalyzer(bt.analyzers.SQN, _name="sqn")
+    cerebro.addanalyzer(bt.analyzers.PyFolio, _name='pyfolio')
     cerebro.addanalyzer(MyAnalyzer, _name="my_analyzer")
     # cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="time_return")
     # cerebro.addanalyzer(BacktraderPlottingLive)
@@ -130,39 +145,43 @@ def show_result(cerebro, results):
 
     strategy = results[0]
 
-    print('Sharpe Ratio:')
-    sharpe_ratio = pd.DataFrame([strategy.analyzers.sharpe_ratio.get_analysis()], index=[''])
-    print(sharpe_ratio)
+    pyfolio = strategy.analyzers.getbyname('pyfolio')
+    returns, positions, transactions, gross_lev = pyfolio.get_pf_items()
+    qs.reports.metrics(returns)
 
-    annual_return = strategy.analyzers.annual_return.get_analysis()
-    annual_return_df = pd.DataFrame(list(annual_return.items()), columns=['Year', 'Return(%)'])
-    annual_return_df['Return(%)'] = annual_return_df['Return(%)'].apply(lambda x: '{:.2f}'.format(x*100))
-    print('\nAnnual Return:')
-    print(annual_return_df)
+    # print('Sharpe Ratio:')
+    # sharpe_ratio = pd.DataFrame([strategy.analyzers.sharpe_ratio.get_analysis()], index=[''])
+    # print(sharpe_ratio)
 
-    drawdown = strategy.analyzers.drawdown.get_analysis()
-    print('\nDrawdown:')
-    print(f"len(最长回撤期): {drawdown['len']}")
-    print(f"\tdrawdown(最大回撤%): {drawdown['drawdown']:.2f}")
-    print(f"\tmoneydown(最大回撤金额): {drawdown['moneydown']:.2f}")
-    print("max(最大回撤详细):")
-    print(f"\tlen(最长回撤期): {drawdown['max']['len']}")
-    print(f"\tdrawdown(最大回撤%): {drawdown['max']['drawdown']:.2f}")
-    print(f"\tmoneydown(最大回撤金额): {drawdown['max']['moneydown']:.2f}")
+    # annual_return = strategy.analyzers.annual_return.get_analysis()
+    # annual_return_df = pd.DataFrame(list(annual_return.items()), columns=['Year', 'Return(%)'])
+    # annual_return_df['Return(%)'] = annual_return_df['Return(%)'].apply(lambda x: '{:.2f}'.format(x*100))
+    # print('\nAnnual Return:')
+    # print(annual_return_df)
 
-    returns = strategy.analyzers.returns.get_analysis()
-    print('\nReturns:')
-    print(f"rtot(总回报%): {returns['rtot']*100:.2f}")
-    print(f"ravg(平均每天回报%): {returns['ravg']*100:.4f}")
-    print(f"rnorm100(年化回报%): {returns['rnorm100']:.2f}")
+    # drawdown = strategy.analyzers.drawdown.get_analysis()
+    # print('\nDrawdown:')
+    # print(f"len(最长回撤期): {drawdown['len']}")
+    # print(f"\tdrawdown(最大回撤%): {drawdown['drawdown']:.2f}")
+    # print(f"\tmoneydown(最大回撤金额): {drawdown['moneydown']:.2f}")
+    # print("max(最大回撤详细):")
+    # print(f"\tlen(最长回撤期): {drawdown['max']['len']}")
+    # print(f"\tdrawdown(最大回撤%): {drawdown['max']['drawdown']:.2f}")
+    # print(f"\tmoneydown(最大回撤金额): {drawdown['max']['moneydown']:.2f}")
 
-    vwr = strategy.analyzers.vwr.get_analysis()['vwr']
-    print('\nVWR(Variable Weighted Return):')
-    print(f"{vwr:.2f}")
+    # returns = strategy.analyzers.returns.get_analysis()
+    # print('\nReturns:')
+    # print(f"rtot(总回报%): {returns['rtot']*100:.2f}")
+    # print(f"ravg(平均每天回报%): {returns['ravg']*100:.4f}")
+    # print(f"rnorm100(年化回报%): {returns['rnorm100']:.2f}")
 
-    sqn = strategy.analyzers.sqn.get_analysis()['sqn']
-    print('\nSQN(System Quality Number):')
-    print(f"{sqn:.2f}")
+    # vwr = strategy.analyzers.vwr.get_analysis()['vwr']
+    # print('\nVWR(Variable Weighted Return):')
+    # print(f"{vwr:.2f}")
+
+    # sqn = strategy.analyzers.sqn.get_analysis()['sqn']
+    # print('\nSQN(System Quality Number):')
+    # print(f"{sqn:.2f}")
 
     # time_return = pd.DataFrame([strat.analyzers.time_return.get_analysis()], index=[''])
     # print('\nTime Return:')
@@ -180,6 +199,11 @@ def show_result(cerebro, results):
     # print(transactions_df)
 
     if use_plotly:
+        report_file_name = f'report_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
+        qs.reports.html(returns=returns, positions=positions,
+                        transactions=transactions, gross_lev=gross_lev,
+                        output=report_file_name)
+        webbrowser.open('file://' + os.path.realpath(report_file_name))
         plot(strategy)
     else:
         # p = BacktraderPlotting(style='bar', multiple_tabs=True)
@@ -190,7 +214,9 @@ def show_result(cerebro, results):
         cerebro.plot(p)
 
 
-def run(cerebro, stocks: list, start_date: str, end_date: str):
+def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: str):
+    config(strategy_name, start_date, end_date)
+
     set_stocks(cerebro, stocks, start_date, end_date)
 
     add_analyzer(cerebro)

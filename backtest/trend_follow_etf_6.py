@@ -2,13 +2,13 @@ import argparse
 import os
 import sys
 import backtrader as bt
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import conf     # noqa: E402
 from common import (
+    disable_plotly,
     enable_optimize,
     run,
     show_position,
-    disable_plotly,
 )   # noqa: E402
 from trend_follow_etf_pool import etf_pool as stocks   # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
@@ -104,6 +104,8 @@ class TrendFollowingStrategy(MyStrategy):
                     self.context[i].stop_price = round(ema[i][-1], 3)
                     # print(f"{self.datas[i]._name}: 更新止损价: {self.context[i].stop_price}")
 
+                self.context[i].current_price = self.datas[i].close[0]
+
                 if self.datas[i].close[0] < self.context[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
 
@@ -123,7 +125,7 @@ class TrendFollowingStrategy(MyStrategy):
         for data, position in self.positions.items():
             if position:
                 i = stocks.index(data._name)
-                print(f'{data._name}: 持仓股数: {"%.2f" % position.size}, 成本: {self.context[i].open_price}, 止损: {self.context[i].stop_price}')
+                print(f'{data._name}: 持仓股数: {"%.2f" % position.size}, 成本: {self.context[i].open_price}, 止损: {self.context[i].stop_price}, 现价: {self.context[i].current_price}')
 
 
 if __name__ == "__main__":
@@ -143,5 +145,5 @@ if __name__ == "__main__":
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 
-    run(cerebro, stocks, args.start, args.end)
-
+    run(strategy_name='trend_follow_etf_6', cerebro=cerebro, stocks=stocks,
+        start_date=args.start, end_date=args.end)

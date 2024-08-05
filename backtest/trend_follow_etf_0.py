@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 import backtrader as bt
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import conf     # noqa: E402
 from common import (
     enable_optimize,
@@ -135,5 +135,5 @@ if __name__ == "__main__":
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 
-    run(cerebro, stocks, args.start, args.end)
-
+    run(strategy_name='trend_follow_etf_0', cerebro=cerebro, stocks=stocks,
+        start_date=args.start, end_date=args.end)
