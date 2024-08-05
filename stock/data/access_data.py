@@ -19,6 +19,7 @@ from stock.common import (
     get_stock_data_path_1d,
     get_stock_data_path_1w,
     get_stock_data_path_1M,
+    get_hk_ggt_stock_general_info_path,
 )
 from stock.data.download_data import (
     download_general_info_stock,
@@ -27,6 +28,7 @@ from stock.data.download_data import (
     download_history_data_etf,
     download_history_data_us_index,
     download_history_data_a_index,
+    download_general_info_hk_ggt_stock,
 )
 from utility import (
     is_older_than_a_month,
@@ -36,6 +38,7 @@ from utility import (
 
 g_df_stocks = None
 g_df_etfs = None
+g_df_hk_ggt_stocks = None
 
 
 def load_history_data_stock(stock_id: str, period: str, start_date: str,
@@ -252,3 +255,35 @@ def get_security_name(security_id: str) -> str:
         return get_stock_name(security_id)
     else:
         return get_etf_name(security_id)
+
+
+def is_hk_ggt_stock(stock_id: str):
+    '''
+    是否是港股通股票
+    '''
+    global g_df_hk_ggt_stocks
+
+    if g_df_hk_ggt_stocks is None:
+        g_df_hk_ggt_stocks = load_all_hk_ggt_stock_general_info()
+
+    try:
+        return stock_id in g_df_hk_ggt_stocks[COL_STOCK_ID].values
+    except KeyError:
+        return False
+
+
+def load_all_hk_ggt_stock_general_info():
+    global g_df_hk_ggt_stocks
+
+    if g_df_hk_ggt_stocks is not None:
+        return g_df_hk_ggt_stocks
+
+    stock_general_info_path = get_hk_ggt_stock_general_info_path()
+    if not os.path.exists(stock_general_info_path) or \
+            is_older_than_a_month(stock_general_info_path):
+        download_general_info_hk_ggt_stock()
+
+    g_df_hk_ggt_stocks = pd.read_csv(stock_general_info_path)
+    g_df_hk_ggt_stocks[COL_STOCK_ID] = g_df_hk_ggt_stocks[COL_STOCK_ID].astype(str)
+    g_df_hk_ggt_stocks[COL_STOCK_ID] = g_df_hk_ggt_stocks[COL_STOCK_ID].str.zfill(5)
+    return g_df_hk_ggt_stocks
