@@ -13,10 +13,12 @@ from .access_data import (
     is_etf,
     is_us_index,
     is_a_index,
+    is_hk_ggt_stock,
 )
 from .download_data import (
     download_general_info_stock,
     download_general_info_etf,
+    download_general_info_hk_ggt_stock,
     download_history_data_etf,
     download_history_data_us_index,
     download_history_data_stock,

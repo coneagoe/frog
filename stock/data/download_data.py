@@ -22,6 +22,7 @@ from stock.common import (
     get_stock_data_path_1d,
     get_stock_data_path_1w,
     get_stock_data_path_1M,
+    get_hk_ggt_stock_general_info_path,
 )
 
 
@@ -38,6 +39,13 @@ def download_general_info_stock():
     df = df.loc[df['code'].str.match(pattern_stock_id)]
     df = df.rename(columns={'code': COL_STOCK_ID, 'name': COL_STOCK_NAME})
     df.to_csv(get_stock_general_info_path(), encoding='utf_8_sig', index=False)
+
+
+def download_general_info_hk_ggt_stock():
+    df = ak.stock_hk_ggt_components_em()
+    df = df.loc[:, [u'代码', u'名称']]
+    df = df.rename(columns={u'代码': COL_STOCK_ID, u'名称': COL_STOCK_NAME})
+    df.to_csv(get_hk_ggt_stock_general_info_path(), encoding='utf_8_sig', index=False)
 
 
 def download_general_info_etf():
