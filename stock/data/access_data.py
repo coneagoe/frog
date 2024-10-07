@@ -287,3 +287,27 @@ def load_all_hk_ggt_stock_general_info():
     g_df_hk_ggt_stocks[COL_STOCK_ID] = g_df_hk_ggt_stocks[COL_STOCK_ID].astype(str)
     g_df_hk_ggt_stocks[COL_STOCK_ID] = g_df_hk_ggt_stocks[COL_STOCK_ID].str.zfill(5)
     return g_df_hk_ggt_stocks
+
+
+def is_st(stock_id: str):
+    df = load_all_stock_general_info()
+    return ((df[COL_STOCK_ID] == stock_id) & \
+            (df[COL_STOCK_NAME].str.startswith('ST') | df[COL_STOCK_NAME].str.startswith('*ST'))).any()
+
+
+def drop_st(df: pd.DataFrame) -> pd.DataFrame:
+    df_gen_info = load_all_stock_general_info()
+    df_tmp = pd.merge(df, df_gen_info[[COL_STOCK_ID, COL_STOCK_NAME]], on=COL_STOCK_ID, how='inner')
+    df_tmp = df_tmp[~df_tmp[COL_STOCK_NAME].str.startswith(('ST', '*ST'))]
+    return df_tmp
+
+
+def drop_low_price_stocks(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+    def _get_first_price(stock_id: str, start_date: str, end_date: str) -> float:
+        df_stock = load_history_data_stock(stock_id=stock_id, period='daily', start_date=start_date,
+                                           end_date=end_date, adjust='')
+        return df_stock[COL_CLOSE].iloc[0]
+
+    df[COL_OPEN] = df[COL_STOCK_ID].apply(lambda stock_id: _get_first_price(stock_id, start_date, end_date))
+    df = df[df[COL_OPEN] > 3]
+    return df
