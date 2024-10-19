@@ -38,6 +38,10 @@ def get_stock_general_info_path() -> str:
     return join(os.environ['stock_data_path_info'], STOCK_GENERAL_INFO_FILE_NAME)
 
 
+def get_stock_300_ingredients_path() -> str:
+    return os.environ['stock_data_path_300_ingredients']
+
+
 def get_hk_ggt_stock_general_info_path() -> str:
     return join(os.environ['stock_data_path_info'], HK_GGT_STOCK_GENERAL_INFO_FILE_NAME)
 
