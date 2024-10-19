@@ -18,6 +18,10 @@ from stock import (
     COL_LOW,
     is_a_index,
     load_history_data,
+    load_history_data_a_index,
+    load_history_data_us_index,
+    load_history_data_etf,
+    load_history_data_stock,
 )  # noqa: E402
 
 
@@ -34,6 +38,8 @@ df_data = []
 g_start_date = '2020-01-01'
 g_end_date = '2020-12-31'
 g_strategy_name = None
+
+g_filter_st = False
 
 
 def config(strategy_name: str, start_date: str, end_date: str):
@@ -58,10 +64,10 @@ def set_start_cash(cash: float):
 
 
 def load_test_data(security_id: str, period: str, start_date: str, end_date: str,
-                   adjust="qfq") -> pd.DataFrame:
+                   adjust="qfq", security_type="auto") -> pd.DataFrame:
     df = load_history_data(security_id=security_id, period=period,
                            start_date=start_date, end_date=end_date,
-                           adjust=adjust)
+                           adjust=adjust, security_type=security_type)
     if is_a_index(security_id):
         df[COL_OPEN]    = df[COL_OPEN].astype(float)    # noqa: E221
         df[COL_CLOSE]   = df[COL_CLOSE].astype(float)   # noqa: E221
@@ -81,7 +87,7 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
     return df
 
 
-def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
+def set_stocks(cerebro, stocks: list, start_date: str, end_date: str, security_type: str):
     global df_data
 
     if pd.to_datetime(end_date) - pd.to_datetime(start_date) < pd.Timedelta(days=365):
@@ -92,9 +98,11 @@ def set_stocks(cerebro, stocks: list, start_date: str, end_date: str):
     # 添加数据
     for stock in tqdm(stocks):
         # 获取数据
-        df = load_test_data(security_id=stock, period="daily",
+        tmp = load_test_data(security_id=stock, period="daily",
                             start_date=start_date, end_date=end_date,
-                            adjust=adjust).iloc[:, :6]
+                            adjust=adjust, security_type=security_type)
+        df = tmp.iloc[:, :6]
+
         df.columns = [
             'date',
             'open',
@@ -149,55 +157,6 @@ def show_result(cerebro, results):
     returns, positions, transactions, gross_lev = pyfolio.get_pf_items()
     qs.reports.metrics(returns)
 
-    # print('Sharpe Ratio:')
-    # sharpe_ratio = pd.DataFrame([strategy.analyzers.sharpe_ratio.get_analysis()], index=[''])
-    # print(sharpe_ratio)
-
-    # annual_return = strategy.analyzers.annual_return.get_analysis()
-    # annual_return_df = pd.DataFrame(list(annual_return.items()), columns=['Year', 'Return(%)'])
-    # annual_return_df['Return(%)'] = annual_return_df['Return(%)'].apply(lambda x: '{:.2f}'.format(x*100))
-    # print('\nAnnual Return:')
-    # print(annual_return_df)
-
-    # drawdown = strategy.analyzers.drawdown.get_analysis()
-    # print('\nDrawdown:')
-    # print(f"len(最长回撤期): {drawdown['len']}")
-    # print(f"\tdrawdown(最大回撤%): {drawdown['drawdown']:.2f}")
-    # print(f"\tmoneydown(最大回撤金额): {drawdown['moneydown']:.2f}")
-    # print("max(最大回撤详细):")
-    # print(f"\tlen(最长回撤期): {drawdown['max']['len']}")
-    # print(f"\tdrawdown(最大回撤%): {drawdown['max']['drawdown']:.2f}")
-    # print(f"\tmoneydown(最大回撤金额): {drawdown['max']['moneydown']:.2f}")
-
-    # returns = strategy.analyzers.returns.get_analysis()
-    # print('\nReturns:')
-    # print(f"rtot(总回报%): {returns['rtot']*100:.2f}")
-    # print(f"ravg(平均每天回报%): {returns['ravg']*100:.4f}")
-    # print(f"rnorm100(年化回报%): {returns['rnorm100']:.2f}")
-
-    # vwr = strategy.analyzers.vwr.get_analysis()['vwr']
-    # print('\nVWR(Variable Weighted Return):')
-    # print(f"{vwr:.2f}")
-
-    # sqn = strategy.analyzers.sqn.get_analysis()['sqn']
-    # print('\nSQN(System Quality Number):')
-    # print(f"{sqn:.2f}")
-
-    # time_return = pd.DataFrame([strat.analyzers.time_return.get_analysis()], index=[''])
-    # print('\nTime Return:')
-    # print(time_return)
-
-    # print('\nTrade Analysis:')
-    # trade_analysis = strat.analyzers.trade_analysis.get_analysis()
-    # print(trade_analysis)
-
-    # print('\nTransaction Records:')
-    # transactions = strat.analyzers.transactions.get_analysis()
-    # print(transactions)
-    # transactions_df = pd.DataFrame(transactions).T
-    # transactions_df.columns = ['id', 'price', 'amount', 'name', 'value']
-    # print(transactions_df)
-
     if use_plotly:
         report_file_name = f'report_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
         qs.reports.html(returns=returns, positions=positions,
@@ -214,10 +173,10 @@ def show_result(cerebro, results):
         cerebro.plot(p)
 
 
-def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: str):
+def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: str, security_type: str):
     config(strategy_name, start_date, end_date)
 
-    set_stocks(cerebro, stocks, start_date, end_date)
+    set_stocks(cerebro, stocks, start_date, end_date, security_type)
 
     add_analyzer(cerebro)
 
@@ -254,7 +213,7 @@ def plot(strategy: bt.Strategy):
     num_subplots = 4
     #secondary_y = [True if i % 2 == 0 else False for i in range(num_subplots)]
     #secondary_y[3] = True
-    #row_heights = [1 for _ in range(num_subplots)]
+    #row_heights = [1/(4 + len(strategy.datas)) for _ in range(num_subplots)]
     #row_heights[1] = 0.1
     ## num_subplots = 4 + 2 * len(strategy.datas)
     ## row_heights = [1, 0.1, 1, 1]
@@ -265,13 +224,14 @@ def plot(strategy: bt.Strategy):
     #k_subplot_titles = [data._name for data in strategy.datas]
     #subplot_titles.extend(k_subplot_titles)
 
+    # FIXME
     fig = make_subplots(rows=num_subplots, cols=1,
                         #row_heights=row_heights,
                         #row_heights=[0.1 for _ in range(num_subplots)],
-                        #vertical_spacing=0.4,
+                        # vertical_spacing=0.4,
                         # k线下的滑块会和下面一张图覆盖，vertical_spacing=0.4可以解决问题。
                         # 但是subplot数会限制vertual_spacing大小，暂时不知道怎么解决。
-                        ##vertical_spacing=0.05,
+                        #vertical_spacing=0.05,
                         subplot_titles=subplot_titles,)
                         # specs=[[{"secondary_y": True}] for _ in range(num_subplots)])
 
@@ -313,19 +273,18 @@ def plot(strategy: bt.Strategy):
     )
 
     fig.show()
-
     return
 
-    k_start_row = row
+    k_start_row = row + 1
     for i, data in enumerate(strategy.datas):
-        break
+        # break
 
-        if i >= 2:
-            break
+        # if i >= 2:
+        #     break
 
         df = df_data[i]
 
-        #row = 2 * i + k_start_row
+        # row = 2 * i + k_start_row
         row = i + k_start_row
 
         fig.add_trace(go.Candlestick(x=df.index,
@@ -339,6 +298,6 @@ def plot(strategy: bt.Strategy):
 
         # yaxis_dict['yaxis{}'.format(row)] = dict(side='left')
 
-    fig.update_layout(yaxis_dict)
+    # fig.update_layout(yaxis_dict)
 
     fig.show()

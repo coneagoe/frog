@@ -3,6 +3,7 @@ from .common import (
     get_stock_data_path,
     get_stock_position_path,
     get_stock_general_info_path,
+    get_stock_300_ingredients_path,
     get_hk_ggt_stock_general_info_path,
     get_etf_general_info_path,
     get_stock_data_path_1d,

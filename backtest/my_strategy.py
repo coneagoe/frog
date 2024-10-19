@@ -19,15 +19,12 @@ class Context:
 
 
 class MyStrategy(bt.Strategy):
+    stocks = []
+
     def __init__(self):
+        assert len(self.stocks) > 0, "stocks is empty"
         self.trades = []
-        self.context = None
-        self.stocks = None
-
-
-    def set_context(self, stocks):
-        self.stocks = stocks
-        self.context = [Context() for i in range(len(stocks))]
+        self.context = [Context() for i in range(len(self.stocks))]
 
 
     def notify_trade(self, trade):
