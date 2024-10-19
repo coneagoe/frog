@@ -37,9 +37,7 @@ class TrendFollowingStrategy(MyStrategy):
     def __init__(self):
         super(TrendFollowingStrategy, self).__init__()
 
-        self.set_context(stocks)
-
-        self.target = round(self.params.n_portion / len(stocks), 2)
+        self.target = round(self.params.n_portion / len(self.stocks), 2)
 
         self.ema30 = {i: bt.indicators.EMA(self.datas[i].close, period=30)
                       for i in range(len(self.datas))}
@@ -124,7 +122,7 @@ class TrendFollowingStrategy(MyStrategy):
 
         for data, position in self.positions.items():
             if position:
-                i = stocks.index(data._name)
+                i = self.stocks.index(data._name)
                 print(f'{data._name}: 持仓股数: {"%.2f" % position.size}, 成本: {self.context[i].open_price}, 止损: {self.context[i].stop_price}, 现价: {self.context[i].current_price}')
 
 
@@ -133,6 +131,8 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
     args = parser.parse_args()
+
+    TrendFollowingStrategy.stocks = stocks
 
     cerebro = bt.Cerebro()
 
@@ -145,5 +145,5 @@ if __name__ == "__main__":
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 
-    run(strategy_name='trend_follow_etf_6', cerebro=cerebro, stocks=stocks,
-        start_date=args.start, end_date=args.end)
+    run(strategy_name='trend_follow_etf_6', cerebro=cerebro, stocks=TrendFollowingStrategy.stocks,
+        start_date=args.start, end_date=args.end, security_type='auto')
