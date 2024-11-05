@@ -9,6 +9,7 @@ from .access_data import (
     load_all_stock_general_info,
     load_all_etf_general_info,
     load_300_ingredients,
+    load_500_ingredients,
     get_stock_name,
     get_etf_name,
     get_security_name,
@@ -29,6 +30,7 @@ from .download_data import (
     download_history_data_stock,
     download_history_data_a_index,
     download_300_ingredients,
+    download_500_ingredients,
 )
 
 from .eastmoney import *

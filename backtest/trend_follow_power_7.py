@@ -1,5 +1,4 @@
 import argparse
-import logging
 import os
 import sys
 import backtrader as bt
@@ -15,9 +14,9 @@ from common import (
 from stock import (
     COL_STOCK_ID,
     drop_low_price_stocks,
-    load_300_ingredients,
 )   # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
+from stock_pool_power import stocks   # noqa: E402
 
 
 conf.parse_config()
@@ -41,6 +40,8 @@ class TrendFollowingStrategy(MyStrategy):
         super(TrendFollowingStrategy, self).__init__()
 
         self.target = round(self.params.n_portion / len(self.stocks), 2)
+        # self.target = 1
+
         if self.target < 0.02:
             self.target = 0.02
 
@@ -138,7 +139,7 @@ if __name__ == "__main__":
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
     args = parser.parse_args()
 
-    TrendFollowingStrategy.stocks = load_300_ingredients(args.start)
+    TrendFollowingStrategy.stocks = stocks
 
     cerebro = bt.Cerebro()
 
@@ -153,6 +154,5 @@ if __name__ == "__main__":
 
     df_stocks = pd.DataFrame(TrendFollowingStrategy.stocks, columns=[COL_STOCK_ID])
 
-    strategy_name = os.path.splitext(os.path.basename(__file__))[0]
-    run(strategy_name=strategy_name, cerebro=cerebro, stocks=TrendFollowingStrategy.stocks,
+    run(strategy_name='trend_follow_power_7', cerebro=cerebro, stocks=TrendFollowingStrategy.stocks,
         start_date=args.start, end_date=args.end, security_type='stock')

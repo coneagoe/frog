@@ -83,7 +83,7 @@ def create_dir_if_not_exist(path: str):
 def parse_stock_config(config: dict):
     try:
         stock_data_path = config['stock']['data_path']
-        sub_dirs = ['1d', '1w', '1M', 'position', 'info', '300_ingredients']
+        sub_dirs = ['1d', '1w', '1M', 'position', 'info', '300_ingredients', '500_ingredients']
         paths = {sub_dir: os.path.join(stock_data_path, sub_dir) for sub_dir in sub_dirs}
 
         for path in paths.values():

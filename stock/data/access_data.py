@@ -20,6 +20,7 @@ from stock.common import (
     get_stock_data_path_1M,
     get_hk_ggt_stock_general_info_path,
     get_stock_300_ingredients_path,
+    get_stock_500_ingredients_path,
 )
 from stock.data.download_data import (
     download_general_info_stock,
@@ -30,6 +31,7 @@ from stock.data.download_data import (
     download_history_data_a_index,
     download_general_info_hk_ggt_stock,
     download_300_ingredients,
+    download_500_ingredients,
 )
 from utility import (
     is_older_than_a_month,
@@ -338,6 +340,31 @@ def load_300_ingredients(date: str) -> list:
     file_path = os.path.join(get_stock_300_ingredients_path(), f'{converted_date}.csv')
     if not os.path.exists(file_path):
         download_300_ingredients()
+
+    df = pd.read_csv(file_path, encoding='utf_8_sig')
+    df = df[~df[COL_STOCK_NAME].str.startswith(('ST', '*ST'))]
+    df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
+    df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
+    ingredients = df[COL_STOCK_ID].tolist()
+
+    return ingredients
+
+
+def load_500_ingredients(date: str) -> list:
+    assert re.match(r'^\d{4}-\d{2}-\d{2}$', date), "Date must be in the format YYYY-MM-DD"
+    
+    dt = datetime.strptime(date, '%Y-%m-%d')
+    if 1 <= dt.month < 7:
+        dt = dt.replace(month=1, day=1)
+    else:
+        dt = dt.replace(month=7, day=1)
+    converted_date = dt.strftime('%Y-%m-%d')
+    
+    ingredients = []
+
+    file_path = os.path.join(get_stock_500_ingredients_path(), f'{converted_date}.csv')
+    if not os.path.exists(file_path):
+        download_500_ingredients()
 
     df = pd.read_csv(file_path, encoding='utf_8_sig')
     df = df[~df[COL_STOCK_NAME].str.startswith(('ST', '*ST'))]

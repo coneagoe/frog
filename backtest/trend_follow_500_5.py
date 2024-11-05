@@ -173,5 +173,5 @@ if __name__ == "__main__":
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 
-    run(cerebro, stocks, args.start, args.end)
+    run('trend_follow_500_5', cerebro, stocks, args.start, args.end)
 

@@ -1,5 +1,4 @@
 import argparse
-import logging
 import os
 import sys
 import backtrader as bt
@@ -15,7 +14,7 @@ from common import (
 from stock import (
     COL_STOCK_ID,
     drop_low_price_stocks,
-    load_300_ingredients,
+    load_500_ingredients,
 )   # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
 
@@ -41,6 +40,8 @@ class TrendFollowingStrategy(MyStrategy):
         super(TrendFollowingStrategy, self).__init__()
 
         self.target = round(self.params.n_portion / len(self.stocks), 2)
+        # self.target = 1
+
         if self.target < 0.02:
             self.target = 0.02
 
@@ -138,7 +139,7 @@ if __name__ == "__main__":
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
     args = parser.parse_args()
 
-    TrendFollowingStrategy.stocks = load_300_ingredients(args.start)
+    TrendFollowingStrategy.stocks = load_500_ingredients(args.start)
 
     cerebro = bt.Cerebro()
 

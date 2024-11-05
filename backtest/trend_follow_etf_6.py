@@ -145,5 +145,6 @@ if __name__ == "__main__":
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 
-    run(strategy_name='trend_follow_etf_6', cerebro=cerebro, stocks=TrendFollowingStrategy.stocks,
+    strategy_name = os.path.splitext(os.path.basename(__file__))[0]
+    run(strategy_name=strategy_name, cerebro=cerebro, stocks=TrendFollowingStrategy.stocks,
         start_date=args.start, end_date=args.end, security_type='auto')
