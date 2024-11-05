@@ -3,7 +3,6 @@ from datetime import date, datetime
 import functools
 import logging
 import os
-from os.path import join, exists
 from pathlib import Path
 
 
@@ -35,19 +34,23 @@ def get_stock_position_path() -> str:
 
 
 def get_stock_general_info_path() -> str:
-    return join(os.environ['stock_data_path_info'], STOCK_GENERAL_INFO_FILE_NAME)
+    return os.path.join(os.environ['stock_data_path_info'], STOCK_GENERAL_INFO_FILE_NAME)
 
 
 def get_stock_300_ingredients_path() -> str:
     return os.environ['stock_data_path_300_ingredients']
 
 
+def get_stock_500_ingredients_path() -> str:
+    return os.environ['stock_data_path_500_ingredients']
+
+
 def get_hk_ggt_stock_general_info_path() -> str:
-    return join(os.environ['stock_data_path_info'], HK_GGT_STOCK_GENERAL_INFO_FILE_NAME)
+    return os.path.join(os.environ['stock_data_path_info'], HK_GGT_STOCK_GENERAL_INFO_FILE_NAME)
 
 
 def get_etf_general_info_path() -> str:
-    return join(os.environ['stock_data_path_info'], ETF_GENERAL_INFO_FILE_NAME)
+    return os.path.join(os.environ['stock_data_path_info'], ETF_GENERAL_INFO_FILE_NAME)
 
 
 @check_path_exists
@@ -67,7 +70,7 @@ def get_stock_data_path_1M() -> str:
 
 @check_path_exists
 def get_trading_book_path():
-    return join(os.environ['stock_data_path'], TRADING_BOOK_NAME)
+    return os.path.join(os.environ['stock_data_path'], TRADING_BOOK_NAME)
 
 
 def is_testing():

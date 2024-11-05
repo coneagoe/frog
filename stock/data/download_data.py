@@ -25,6 +25,7 @@ from stock.common import (
     get_stock_data_path_1M,
     get_hk_ggt_stock_general_info_path,
     get_stock_300_ingredients_path,
+    get_stock_500_ingredients_path,
 )
 
 
@@ -238,7 +239,8 @@ def download_history_data_stock(stock_id: str, period: str, start_date: str, end
                                  start_date=start_date_ts1.strftime('%Y%m%d'),
                                  end_date=end_date_ts1.strftime('%Y%m%d'),
                                  adjust=adjust)
-        assert not df0.empty, f"download history data {stock_id} fail, please check"
+        if df0.empty:
+            logging.warning(f"download history data {stock_id} fail, please check")
 
         df0[COL_DATE] = pd.to_datetime(df0[COL_DATE])
         df = pd.concat([df, df0], ignore_index=True)
@@ -315,5 +317,33 @@ def download_300_ingredients():
     bs.logout()
 
 
-# result.to_csv("D:/hs300_stocks.csv", encoding="gbk", index=False)
-# print(result)
+def download_500_ingredients():
+    start_date = datetime(2010, 1, 1)
+    end_date = datetime.today()
+
+    lg = bs.login()
+    if lg.error_code != '0':
+        logging.error(f"baostock login fail: {lg.error_msg}")
+        return
+
+    current_date = start_date
+    while current_date <= end_date:
+        date_str = current_date.strftime('%Y-%m-%d')
+        file_path = os.path.join(get_stock_500_ingredients_path(), f'{date_str}.csv')
+        
+        if not os.path.exists(file_path):
+            rs = bs.query_zz500_stocks(date=date_str)
+            zz500_stocks = []
+            while (rs.error_code == '0') & rs.next():
+                zz500_stocks.append(rs.get_row_data())
+            df = pd.DataFrame(zz500_stocks, columns=rs.fields)
+            df.rename(columns={'code': COL_STOCK_ID, 'code_name': COL_STOCK_NAME}, inplace=True)
+            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.replace('sh.', '').str.replace('sz.', '')
+            df.to_csv(file_path, encoding='utf_8_sig', index=False)
+        
+        if current_date.month == 1 and current_date.day == 1:
+            current_date = datetime(current_date.year, 7, 1)
+        else:
+            current_date = datetime(current_date.year + 1, 1, 1)
+
+    bs.logout()

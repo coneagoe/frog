@@ -65,7 +65,6 @@ class RotateStrategy(MyStrategy):
                     self.order_target_percent(self.datas[i], target=self.target)
 
 
-
     def stop(self):     # noqa: E303
         print('(n_day_increase %d, num_positions %d, hold_days %d) Ending Value %.2f' %
                      (self.params.n_day_increase, self.params.num_positions,
@@ -92,4 +91,3 @@ if __name__ == "__main__":
 
     run(strategy_name='rotate_etf_4', cerebro=cerebro, stocks=stocks,
         start_date=args.start, end_date=args.end)
-

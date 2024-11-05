@@ -1,8 +1,8 @@
 import argparse
-import pandas as pd
 import os
 import sys
 import backtrader as bt
+import pandas as pd
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import conf     # noqa: E402
 from common import (
@@ -81,7 +81,6 @@ class TrendFollowingStrategy(MyStrategy):
         self.cross_signal_1 = {i: bt.indicators.CrossOver(self.macd_1[i].macd,
                                                         self.macd_1[i].signal)
                                                         for i in range(len(self.datas))}
-
 
 
     def next(self):
@@ -171,12 +170,11 @@ if __name__ == "__main__":
 
     df_tmp = drop_st(df_stocks)
 
-    df_tmp = drop_low_price_stocks(df_tmp, args.start, args.end)
+    # df_tmp = drop_low_price_stocks(df_tmp, args.start, args.end)
 
     stocks = df_tmp[COL_STOCK_ID].tolist()
 
 
     run(strategy_name='trend_follow_500_6', cerebro=cerebro, stocks=stocks,
-
         start_date=args.start, end_date=args.end)
 

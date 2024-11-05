@@ -4,12 +4,16 @@ import unittest
 # from unittest.mock import patch
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 import conf     # noqa: E402
-from stock.common import get_stock_300_ingredients_path # noqa: E402
+from stock.common import (
+    get_stock_300_ingredients_path,
+    get_stock_500_ingredients_path,
+)   # noqa: E402
 from stock.data.download_data import (
     download_300_ingredients,
+    download_500_ingredients,
     download_history_data_a_index,
     get_stock_data_path_1d,
-) # noqa: E402
+)   # noqa: E402
 
 
 conf.parse_config()
@@ -30,6 +34,14 @@ class TestDownloadData(unittest.TestCase):
             os.remove(file_path)
 
         download_300_ingredients()
+        self.assertTrue(os.path.exists(file_path))
+
+    def test_download_500_ingredients(self):
+        file_path = os.path.join(get_stock_500_ingredients_path(), '2010-01-01.csv')
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        download_500_ingredients()
         self.assertTrue(os.path.exists(file_path))
 
 
