@@ -1,4 +1,5 @@
 import backtrader as bt
+import pandas as pd
 
 
 class Context:
@@ -53,3 +54,32 @@ class MyStrategy(bt.Strategy):
         #     self.current_trade.update({
         #         'profit': trade.pnl,
         #     })
+
+
+    def stop(self):
+        holding = []
+        closing = []
+
+        for data, position in self.positions.items():
+            if position:
+                i = self.stocks.index(data._name)
+                stock_info = {
+                    '代码': data._name,
+                    '持仓数': "%.2f" % position.size,
+                    '成本': self.context[i].open_price,
+                    '止损': self.context[i].stop_price,
+                    '现价': self.context[i].current_price
+                }
+                if self.context[i].current_price > self.context[i].stop_price:
+                    holding.append(stock_info)
+                else:
+                    closing.append(stock_info)
+
+        holding_df = pd.DataFrame(holding)
+        closing_df = pd.DataFrame(closing)
+
+        print("Holding:")
+        print(holding_df.to_string(index=False))
+
+        print("Closing:")
+        print(closing_df.to_string(index=False))

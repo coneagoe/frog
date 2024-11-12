@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-# from unittest.mock import patch
+from unittest.mock import patch
 import pandas as pd
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 import conf     # noqa: E402
@@ -19,6 +19,7 @@ from stock.data.access_data import (
     is_stock,
     drop_st,
     drop_low_price_stocks,
+    drop_suspended_stocks,
 )   # noqa: E402
 
 from stock.const import (
@@ -135,6 +136,23 @@ class TestAccessData(unittest.TestCase):
         # Test with an invalid date format
         with self.assertRaises(AssertionError):
             load_500_ingredients('2023/01/01')
+
+
+    @patch('stock.data.access_data.ak.stock_tfp_em')
+    def test_drop_suspended_stocks(self, mock_stock_tfp_em):
+        mock_data = pd.DataFrame({
+            '代码': ['000001', '000002', '000003']
+        })
+        mock_stock_tfp_em.return_value = mock_data
+
+        stocks = ['000001', '000004', '000005']
+        date = '2023-01-01'
+
+        result = drop_suspended_stocks(stocks, date)
+
+        self.assertEqual(result, ['000004', '000005'])
+
+        mock_stock_tfp_em.assert_called_once_with(date)
 
 
 if __name__ == '__main__':

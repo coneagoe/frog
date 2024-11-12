@@ -118,19 +118,19 @@ class TrendFollowingStrategy(MyStrategy):
 
     def stop(self):
         print('(ema_period %d, n_positions %d) Ending Value %.2f' %
-              (self.params.ema_period, self.params.n_portion, self.broker.getvalue()))
+            (self.params.ema_period, self.params.n_portion, self.broker.getvalue()))
 
-        for data, position in self.positions.items():
-            if position:
-                i = self.stocks.index(data._name)
-                print(f'{data._name}: 持仓股数: {"%.2f" % position.size}, 成本: {self.context[i].open_price}, 止损: {self.context[i].stop_price}, 现价: {self.context[i].current_price}')
+        super().stop()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
+    parser.add_argument('-c', '--cash', required=False, type=float, default=1000000, help='Initial cash amount')
     args = parser.parse_args()
+
+    os.environ['INIT_CASH'] = str(args.cash)
 
     TrendFollowingStrategy.stocks = stocks
 
