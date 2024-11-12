@@ -10,10 +10,12 @@ from common import (
     enable_optimize,
     run,
     show_position,
+    drop_suspended,
 )   # noqa: E402
 from stock import (
     COL_STOCK_ID,
     drop_low_price_stocks,
+    drop_suspended_stocks,
     load_500_ingredients,
 )   # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
@@ -40,8 +42,6 @@ class TrendFollowingStrategy(MyStrategy):
         super(TrendFollowingStrategy, self).__init__()
 
         self.target = round(self.params.n_portion / len(self.stocks), 2)
-        # self.target = 1
-
         if self.target < 0.02:
             self.target = 0.02
 
@@ -101,7 +101,6 @@ class TrendFollowingStrategy(MyStrategy):
                 elif profit_rate < 0.8:
                     ema = self.ema5
                 else:
-
                     if self.context[i].stop_price < self.datas[i].low[-1]:
                         self.context[i].stop_price = self.datas[i].low[-1]
 
@@ -127,19 +126,26 @@ class TrendFollowingStrategy(MyStrategy):
         print('(ema_period %d, n_positions %d) Ending Value %.2f' %
               (self.params.ema_period, self.params.n_portion, self.broker.getvalue()))
 
-        for data, position in self.positions.items():
-            if position:
-                i = self.stocks.index(data._name)
-                print(f'{data._name}: 持仓股数: {"%.2f" % position.size}, 成本: {self.context[i].open_price}, 止损: {self.context[i].stop_price}, 现价: {self.context[i].current_price}')
+        super().stop()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
+    parser.add_argument('-f', '--filter', required=False, help='Space-separated list of stock IDs to filter out')
+    parser.add_argument('-c', '--cash', required=False, type=float, default=1000000, help='Initial cash amount')
     args = parser.parse_args()
 
-    TrendFollowingStrategy.stocks = load_500_ingredients(args.start)
+    os.environ['INIT_CASH'] = str(args.cash)
+
+    stocks = load_500_ingredients(args.start)
+    if args.filter:
+        filter_list = args.filter.split()
+        stocks = [stock for stock in stocks if stock not in filter_list]
+
+    TrendFollowingStrategy.stocks = drop_suspended(stocks, args.start, args.end, 10)
+    # TrendFollowingStrategy.stocks = drop_suspended_stocks(stocks, args.end)
 
     cerebro = bt.Cerebro()
 

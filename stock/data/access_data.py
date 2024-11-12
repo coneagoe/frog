@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 import os
 import re
+import akshare as ak
 import pandas as pd
 from stock.const import (
     COL_DATE,
@@ -323,6 +324,14 @@ def drop_low_price_stocks(df: pd.DataFrame, start_date: str, end_date: str) -> p
     df[COL_OPEN] = df[COL_STOCK_ID].apply(lambda stock_id: _get_first_price(stock_id, start_date, end_date))
     df = df[df[COL_OPEN] > 3]
     return df
+
+
+def drop_suspended_stocks(stocks: list, date: str) -> list:
+    date = date.replace('-', '')
+    df_suspended = ak.stock_tfp_em(date)
+    suspended_stocks = df_suspended[u'代码'].tolist()
+    filtered_stocks = [stock for stock in stocks if stock not in suspended_stocks]
+    return filtered_stocks
 
 
 def load_300_ingredients(date: str) -> list:

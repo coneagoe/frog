@@ -1,6 +1,7 @@
 from .access_data import (
     drop_low_price_stocks,
     drop_st,
+    drop_suspended_stocks,
     load_history_data,
     load_history_data_stock,
     load_history_data_etf,

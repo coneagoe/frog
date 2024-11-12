@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import sys
 import webbrowser
@@ -22,6 +23,7 @@ from stock import (
     load_history_data_us_index,
     load_history_data_etf,
     load_history_data_stock,
+    drop_suspended_stocks,
 )  # noqa: E402
 
 
@@ -58,11 +60,6 @@ def enable_optimize():
     os.environ['OPTIMIZER'] = 'True'
 
 
-def set_start_cash(cash: float):
-    global start_cash
-    start_cash = cash
-
-
 def load_test_data(security_id: str, period: str, start_date: str, end_date: str,
                    adjust="qfq", security_type="auto") -> pd.DataFrame:
     df = load_history_data(security_id=security_id, period=period,
@@ -85,6 +82,19 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
         df[COL_LOW]     = df[COL_LOW].apply(lambda x: round(x, 2))      # noqa: E221
 
     return df
+
+
+def drop_suspended(stocks: list, start_date: str, end_date: str,
+                          num_points: int) -> list:
+    start = datetime.strptime(start_date, '%Y-%m-%d')
+    end = datetime.strptime(end_date, '%Y-%m-%d')
+    delta = (end - start) / (num_points - 1)
+    dates = [(start + i * delta).strftime('%Y-%m-%d') for i in range(num_points)]
+
+    for date in dates:
+        stocks = drop_suspended_stocks(stocks, date)
+
+    return stocks
 
 
 def set_stocks(cerebro, stocks: list, start_date: str, end_date: str, security_type: str):
@@ -126,10 +136,16 @@ def set_stocks(cerebro, stocks: list, start_date: str, end_date: str, security_t
 
 
 def add_analyzer(cerebro):
+    global start_cash
+
     if os.getenv('OPTIMIZER'):
         return
 
-    cerebro.broker.setcash(start_cash)  # 设置初始资本为 100000
+    # 设置起始资金
+    if os.getenv('INIT_CASH'):
+        start_cash = float(os.getenv('INIT_CASH'))
+    cerebro.broker.setcash(start_cash)
+
     cerebro.broker.setcommission(commission=fee_rate)  # 设置交易手续费
 
     # cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trade_analysis")

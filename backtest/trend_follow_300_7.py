@@ -1,5 +1,4 @@
 import argparse
-import logging
 import os
 import sys
 import backtrader as bt
@@ -11,10 +10,12 @@ from common import (
     enable_optimize,
     run,
     show_position,
+    drop_suspended,
 )   # noqa: E402
 from stock import (
     COL_STOCK_ID,
     drop_low_price_stocks,
+    drop_suspended_stocks,
     load_300_ingredients,
 )   # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
@@ -136,9 +137,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
+    parser.add_argument('-f', '--filter', required=False, help='Space-separated list of stock IDs to filter out')
     args = parser.parse_args()
 
-    TrendFollowingStrategy.stocks = load_300_ingredients(args.start)
+    stocks = load_300_ingredients(args.start)
+    if args.filter:
+        filter_list = args.filter.split()
+        stocks = [stock for stock in stocks if stock not in filter_list]
+
+    TrendFollowingStrategy.stocks = drop_suspended(stocks, args.start, args.end, 10)
+    # TrendFollowingStrategy.stocks = drop_suspended_stocks(stocks, args.end)
 
     cerebro = bt.Cerebro()
 

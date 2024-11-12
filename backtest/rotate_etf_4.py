@@ -33,12 +33,11 @@ class RotateStrategy(MyStrategy):
     def __init__(self):     # noqa: E303
         super(RotateStrategy, self).__init__()
 
-        self.set_context(stocks)
+        self.target = round(3 / len(self.stocks), 2)
 
         self.pct_change = {i: bt.indicators.PercentChange(self.datas[i].close,
                                                           period=self.params.n_day_increase)
                            for i in range(len(self.datas))}
-        self.target = round(3 / len(stocks), 2)
         self.ema_low = {i: bt.indicators.EMA(self.datas[i].low,
                                              period=self.params.ema_period)
                                              for i in range(len(self.datas))}
@@ -89,5 +88,6 @@ if __name__ == "__main__":
     else:
         cerebro.addstrategy(RotateStrategy)
 
-    run(strategy_name='rotate_etf_4', cerebro=cerebro, stocks=stocks,
+    strategy_name = os.path.splitext(os.path.basename(__file__))[0]
+    run(strategy_name=strategy_name, cerebro=cerebro, stocks=stocks,
         start_date=args.start, end_date=args.end)
