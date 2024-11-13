@@ -1,5 +1,8 @@
 import backtrader as bt
 import pandas as pd
+from stock import (
+    get_security_name,
+)
 
 
 class Context:
@@ -65,6 +68,7 @@ class MyStrategy(bt.Strategy):
                 i = self.stocks.index(data._name)
                 stock_info = {
                     '代码': data._name,
+                    '名称': get_security_name(data._name),
                     '持仓数': "%.2f" % position.size,
                     '成本': self.context[i].open_price,
                     '止损': self.context[i].stop_price,
@@ -78,8 +82,10 @@ class MyStrategy(bt.Strategy):
         holding_df = pd.DataFrame(holding)
         closing_df = pd.DataFrame(closing)
 
-        print("Holding:")
-        print(holding_df.to_string(index=False))
+        if len(holding) > 0:
+            print("Holding:")
+            print(holding_df.to_string(index=False))
 
-        print("Closing:")
-        print(closing_df.to_string(index=False))
+        if len(closing) > 0:
+            print("Closing:")
+            print(closing_df.to_string(index=False))
