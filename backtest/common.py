@@ -19,10 +19,6 @@ from stock import (
     COL_LOW,
     is_a_index,
     load_history_data,
-    load_history_data_a_index,
-    load_history_data_us_index,
-    load_history_data_etf,
-    load_history_data_stock,
     drop_suspended_stocks,
 )  # noqa: E402
 
@@ -216,45 +212,24 @@ def plot(strategy: bt.Strategy):
     df_cashflow = pd.DataFrame(analyzer.cashflow, columns=['total'])
     df_value = pd.DataFrame(analyzer.values, columns=['value'])
 
-    df_trades = pd.DataFrame(strategy.trades)
-    df_trades['holding_time'] = df_trades['holding_time'].dt.days  # convert holding_time to days
+    trades_list = []
+    for stock, trades in strategy.trades.items():
+        trades_list.extend(trades)
+    df_trades = pd.DataFrame(trades_list)
     holding_time_counts = df_trades['holding_time'].value_counts().sort_index()
 
     df_trades['open_time'] = pd.to_datetime(df_trades['open_time'])  # ensure open_time is datetime
     monthly_trades = df_trades.groupby(df_trades['open_time'].dt.to_period('M')).size()
-    # monthly_avg_profit = df_trades.groupby(df_trades['open_time'].dt.to_period('M'))['profit_rate'].mean()
 
-    #num_subplots = 4 + 2 * len(strategy.datas)
-    #num_subplots = 4 + len(strategy.datas)
     num_subplots = 4
-    #secondary_y = [True if i % 2 == 0 else False for i in range(num_subplots)]
-    #secondary_y[3] = True
-    #row_heights = [1/(4 + len(strategy.datas)) for _ in range(num_subplots)]
-    #row_heights[1] = 0.1
-    ## num_subplots = 4 + 2 * len(strategy.datas)
-    ## row_heights = [1, 0.1, 1, 1]
-    ## k_row_heights = [1 if i % 2 == 0 else 0.1 for i in range(len(strategy.datas) * 2)]
-    ## row_heights.extend(k_row_heights)
 
     subplot_titles = ['Value & Cashflow', '', 'Holding Time', 'Monthly Trades']
-    #k_subplot_titles = [data._name for data in strategy.datas]
-    #subplot_titles.extend(k_subplot_titles)
 
-    # FIXME
     fig = make_subplots(rows=num_subplots, cols=1,
-                        #row_heights=row_heights,
-                        #row_heights=[0.1 for _ in range(num_subplots)],
-                        # vertical_spacing=0.4,
-                        # k线下的滑块会和下面一张图覆盖，vertical_spacing=0.4可以解决问题。
-                        # 但是subplot数会限制vertual_spacing大小，暂时不知道怎么解决。
-                        #vertical_spacing=0.05,
                         subplot_titles=subplot_titles,)
-                        # specs=[[{"secondary_y": True}] for _ in range(num_subplots)])
 
     fig.update_layout(height=500*num_subplots)
-    # fig.update_layout(height=800)
 
-    #x_axis = [bt.num2date(x) for x in strategy.datas[0].datetime.array]
     x_axis = df_data[0].index
 
     row = 1
@@ -269,15 +244,6 @@ def plot(strategy: bt.Strategy):
     fig.add_trace(go.Bar(x=monthly_trades.index.astype(str), y=monthly_trades.values,
                          name='Monthly Trades', xaxis='x4', yaxis='y4'), row=row, col=1)
 
-    # yaxis_dict = {
-    #     'yaxis1': dict(title='Value', side='left'),
-    #     'yaxis2': dict(title='Cashflow', side='right', overlaying='y1'),
-    #     'xaxis3': dict(title=u'持仓时间'),
-    #     'yaxis3': dict(title=u'交易次数'),
-    #     'xaxis4': dict(title=u'月份'),
-    #     'yaxis4': dict(title=u'交易次数'),
-    # }
-
     fig.update_layout(
         yaxis1=dict(title='Value', side='left'),
         yaxis2=dict(title='Cashflow', side='right', overlaying='y1'),
@@ -289,31 +255,59 @@ def plot(strategy: bt.Strategy):
     )
 
     fig.show()
-    return
 
-    k_start_row = row + 1
+    # plot_detail(strategy)
+
+
+def plot_detail(strategy: bt.Strategy):
+    if os.environ.get('DRAW_DETAIL', 'false').lower() != 'true':
+        return
+
     for i, data in enumerate(strategy.datas):
-        # break
-
-        # if i >= 2:
-        #     break
-
         df = df_data[i]
-
-        # row = 2 * i + k_start_row
-        row = i + k_start_row
+        fig = go.Figure()
 
         fig.add_trace(go.Candlestick(x=df.index,
                                      open=df['open'],
                                      high=df['high'],
                                      low=df['low'],
                                      close=df['close'],
-                                     name=data._name,
-                                     yaxis='y{}'.format(row)),  # 指定 y 轴
-                      row=row, col=1)  # 指定子图的位置，从第二行开始
+                                     name=data._name))
 
-        # yaxis_dict['yaxis{}'.format(row)] = dict(side='left')
+        trades = strategy.trades[data._name]
+        buy_markers = []
+        sell_markers = []
+        for trade in trades:
+            buy_markers.append(dict(
+                x=trade['open_time'],
+                y=trade['open_price'],
+                marker=dict(symbol='triangle-up', color='red', size=10),
+                mode='markers',
+                name='Buy'
+            ))
+            sell_markers.append(dict(
+                x=trade['close_time'],
+                y=trade['close_price'],
+                marker=dict(symbol='triangle-down', color='green', size=10),
+                mode='markers',
+                name='Sell'
+            ))
 
-    # fig.update_layout(yaxis_dict)
+        for marker in buy_markers:
+            fig.add_trace(go.Scatter(x=[marker['x']], y=[marker['y']],
+                                     mode=marker['mode'],
+                                     marker=marker['marker'],
+                                     name=marker['name']))
 
-    fig.show()
+        for marker in sell_markers:
+            fig.add_trace(go.Scatter(x=[marker['x']], y=[marker['y']],
+                                     mode=marker['mode'],
+                                     marker=marker['marker'],
+                                     name=marker['name']))
+
+        fig.update_layout(title=data._name,
+                          yaxis_title='Price',
+                          xaxis_title='Date')
+
+        fig.show()
+        return

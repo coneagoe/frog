@@ -107,6 +107,8 @@ class TrendFollowingStrategy(MyStrategy):
                 if self.datas[i].close[0] < self.context[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
 
+        super().next()
+
 
     def notify_trade(self, trade):
         super().notify_trade(trade)
@@ -140,7 +142,7 @@ if __name__ == "__main__":
         strats = cerebro.optstrategy(TrendFollowingStrategy,
                                  # ema_period=range(5, 30))
                                  # num_positions=range(1, len(stocks)))
-                                 # hold_days=range(1, 20))
+                                 # holding_bars=range(1, 20))
                                  n_portion=range(1, 10))
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
