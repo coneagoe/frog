@@ -120,6 +120,13 @@ def parse_frog_server(config: dict):
         os.environ['FROG_SERVER_CONFIG'] = 'default'
 
 
+def parse_backtest_config(config: dict):
+    try:
+        os.environ['DRAW_DETAIL'] = str(config['backtest']['draw_detail']).lower()
+    except KeyError:
+        pass
+
+
 def parse_config():
     if not os.path.exists(config_file_name):
         logging.error(f"{config_file_name} does not exist!")
@@ -135,3 +142,4 @@ def parse_config():
     parse_stock_config(config)
     parse_account_config(config)
     parse_frog_server(config)
+    parse_backtest_config(config)

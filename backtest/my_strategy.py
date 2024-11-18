@@ -14,12 +14,14 @@ class Context:
         self.order = False
         self.current_price = None
         self.open_time = None
+        self.open_bar = None
         self.open_price = None
         self.stop_price = None
         self.close_time = None
+        self.close_bar = None
         self.close_price = None
         self.is_candidator = False
-        self.hold_days = 0
+        self.holding_bars = 0
 
 
 class MyStrategy(bt.Strategy):
@@ -27,36 +29,36 @@ class MyStrategy(bt.Strategy):
 
     def __init__(self):
         assert len(self.stocks) > 0, "stocks is empty"
-        self.trades = []
         self.context = [Context() for i in range(len(self.stocks))]
+        self.trades = {stock: [] for stock in self.stocks}
 
 
     def notify_trade(self, trade):
-        i = self.stocks.index(trade.getdataname())
+        stock_name = trade.getdataname()
+        i = self.stocks.index(stock_name)
         if trade.isopen:
             self.context[i].order = True
-            self.context[i].open_time = trade.data.datetime.datetime()
+            self.context[i].open_time = trade.open_datetime()
+            self.context[i].open_bar = trade.baropen
             self.context[i].open_price = round(trade.price, 3)
             self.context[i].is_candidator = False
-            # print(f"{trade.getdataname()}: 开仓价: {self.context[i].open_price}, 止损: {self.context[i].stop_price}")
             return
 
         if trade.isclosed:
-            self.context[i].close_time = trade.data.datetime.datetime()
+            self.context[i].close_time = trade.close_datetime()
+            self.context[i].close_bar = trade.barclose
             self.context[i].close_price = round(trade.price, 3)
-            self.trades.append({
+            self.trades[stock_name].append({
                 'open_price': self.context[i].open_price,
                 'close_price': self.context[i].close_price,
                 'profit_rate': round((self.context[i].close_price - self.context[i].open_price) / self.context[i].open_price, 4),
                 'open_time': self.context[i].open_time,
-                'holding_time': self.context[i].close_time - self.context[i].open_time,
+                'open_bar': self.context[i].open_bar,
+                'close_time': trade.close_datetime(),
+                'close_bar': trade.barclose,
+                'holding_time': trade.barlen,
             })
             self.context[i].reset()
-
-        # if trade.isclosed:
-        #     self.current_trade.update({
-        #         'profit': trade.pnl,
-        #     })
 
 
     def stop(self):

@@ -529,7 +529,7 @@ class Context:
     def __init__(self):
         self.order = None
         self.stop_price = None
-        self.hold_days = 0
+        self.holding_bars = 0
 
 
 gContext = [Context() for i in range(len(stocks))]
@@ -542,7 +542,7 @@ class MyStrategy(bt.Strategy):
             ('ema_period', 12),
             ('n_day_increase', 20),     # n天内涨幅
             ('num_positions', 20),       # 最大持仓股票数
-            ('hold_days', 10),          # 持仓天数
+            ('holding_bars', 10),          # 持仓天数
         )
 
 
@@ -570,21 +570,21 @@ class MyStrategy(bt.Strategy):
         for i in range(len(self.datas)):
             is_order = gContext[i].order is not None
             if is_order:
-                gContext[i].hold_days += 1
+                gContext[i].holding_bars += 1
 
-                if (i not in selected) and (gContext[i].hold_days >= self.params.hold_days):
+                if (i not in selected) and (gContext[i].holding_bars >= self.params.holding_bars):
                     self.order_target_percent(self.datas[i], target=0.0)
                     gContext[i].order = None
             else:
                 if i in selected and self.ema_low[i][0] < self.datas[i].close[0]:
                     gContext[i].order = self.order_target_percent(self.datas[i], target=self.target)
-                    gContext[i].hold_days = 0
+                    gContext[i].holding_bars = 0
 
 
     def stop(self):     # noqa: E303
-        print('(n_day_increase %d, num_positions %d, hold_days %d) Ending Value %.2f' %
+        print('(n_day_increase %d, num_positions %d, holding_bars %d) Ending Value %.2f' %
                      (self.params.n_day_increase, self.params.num_positions,
-                      self.params.hold_days, self.broker.getvalue()))
+                      self.params.holding_bars, self.broker.getvalue()))
 
         for data, position in self.positions.items():
             if position:
@@ -599,7 +599,7 @@ if os.environ.get('OPTIMIZER') == 'True':
     strats = cerebro.optstrategy(MyStrategy,
                                 # n_day_increase=range(5, 30))
                                 num_positions=range(1, len(stocks)))
-                                # hold_days=range(1, 20))
+                                # holding_bars=range(1, 20))
 else:
     cerebro.addstrategy(MyStrategy)
 

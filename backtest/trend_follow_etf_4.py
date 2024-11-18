@@ -169,7 +169,7 @@ if __name__ == "__main__":
         strats = cerebro.optstrategy(TrendFollowingStrategy,
                                  # ema_period=range(5, 30))
                                  num_positions=range(1, len(stocks)))
-                                # hold_days=range(1, 20))
+                                # holding_bars=range(1, 20))
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 
