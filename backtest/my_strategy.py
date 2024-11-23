@@ -33,6 +33,10 @@ class MyStrategy(bt.Strategy):
         self.trades = {stock: [] for stock in self.stocks}
 
 
+    def open_position(self, i, percent):
+        self.order_target_percent(self.datas[i], target=percent)
+
+
     def notify_trade(self, trade):
         stock_name = trade.getdataname()
         i = self.stocks.index(stock_name)
@@ -47,7 +51,8 @@ class MyStrategy(bt.Strategy):
         if trade.isclosed:
             self.context[i].close_time = trade.close_datetime()
             self.context[i].close_bar = trade.barclose
-            self.context[i].close_price = round(trade.price, 3)
+            # self.context[i].close_price = round(trade.price, 3)
+            self.context[i].close_price = round(self.datas[i].open[0], 3)
             self.trades[stock_name].append({
                 'open_price': self.context[i].open_price,
                 'close_price': self.context[i].close_price,
@@ -74,20 +79,20 @@ class MyStrategy(bt.Strategy):
                     '持仓数': "%.2f" % position.size,
                     '成本': self.context[i].open_price,
                     '止损': self.context[i].stop_price,
-                    '现价': self.context[i].current_price
+                    '现价': self.context[i].current_price,
+                    '开仓时间': self.context[i].open_time,
                 }
                 if self.context[i].current_price > self.context[i].stop_price:
                     holding.append(stock_info)
                 else:
                     closing.append(stock_info)
 
-        holding_df = pd.DataFrame(holding)
-        closing_df = pd.DataFrame(closing)
-
         if len(holding) > 0:
+            holding_df = pd.DataFrame(holding).sort_values(by=u'开仓时间', ascending=False)
             print("Holding:")
             print(holding_df.to_string(index=False))
 
         if len(closing) > 0:
+            closing_df = pd.DataFrame(closing).sort_values(by=u'开仓时间', ascending=False)
             print("Closing:")
             print(closing_df.to_string(index=False))
