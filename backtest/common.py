@@ -281,14 +281,14 @@ def plot_detail(strategy: bt.Strategy):
             buy_markers.append(dict(
                 x=trade['open_time'],
                 y=trade['open_price'],
-                marker=dict(symbol='triangle-up', color='red', size=10),
+                marker=dict(symbol='triangle-up', color='yellow', size=10),
                 mode='markers',
                 name='Buy'
             ))
             sell_markers.append(dict(
                 x=trade['close_time'],
                 y=trade['close_price'],
-                marker=dict(symbol='triangle-down', color='green', size=10),
+                marker=dict(symbol='triangle-down', color='blue', size=10),
                 mode='markers',
                 name='Sell'
             ))
@@ -310,4 +310,3 @@ def plot_detail(strategy: bt.Strategy):
                           xaxis_title='Date')
 
         fig.show()
-        return
