@@ -20,6 +20,7 @@ from stock.data.access_data import (
     drop_st,
     drop_low_price_stocks,
     drop_suspended_stocks,
+    drop_delisted_stocks,
 )   # noqa: E402
 
 from stock.const import (
@@ -153,6 +154,12 @@ class TestAccessData(unittest.TestCase):
         self.assertEqual(result, ['000004', '000005'])
 
         mock_stock_tfp_em.assert_called_once_with(date)
+
+
+    def test_drop_delisted_stocks(self):
+        stocks = ['600240', '000001', '000003']
+        result = drop_delisted_stocks(stocks, '2023-01-01', '2024-01-01')
+        self.assertEqual(result, ['000001'])
 
 
 if __name__ == '__main__':

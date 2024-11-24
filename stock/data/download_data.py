@@ -16,9 +16,12 @@ from stock.const import (
     COL_VOLUME,
     COL_STOCK_ID,
     COL_STOCK_NAME,
+    COL_IPO_DATE,
+    COL_DELISTING_DATE,
 )
 from stock.common import (
     get_stock_general_info_path,
+    get_stock_delisting_info_path,
     get_etf_general_info_path,
     get_stock_data_path_1d,
     get_stock_data_path_1w,
@@ -42,6 +45,17 @@ def download_general_info_stock():
     df = df.loc[df['code'].str.match(pattern_stock_id)]
     df = df.rename(columns={'code': COL_STOCK_ID, 'name': COL_STOCK_NAME})
     df.to_csv(get_stock_general_info_path(), encoding='utf_8_sig', index=False)
+
+
+def download_delisted_stock_info():
+    df = ak.stock_info_sh_delist(symbol="全部")
+    df.columns = [COL_STOCK_ID, COL_STOCK_NAME, COL_IPO_DATE, COL_DELISTING_DATE]
+
+    df0 = ak.stock_info_sz_delist(symbol="终止上市公司")
+    df0.columns = [COL_STOCK_ID, COL_STOCK_NAME, COL_IPO_DATE, COL_DELISTING_DATE]
+
+    df = pd.concat([df, df0])
+    df.to_csv(get_stock_delisting_info_path(), encoding='utf_8_sig', index=False)
 
 
 def download_general_info_hk_ggt_stock():
