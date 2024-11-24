@@ -15,7 +15,7 @@ from common import (
 from stock import (
     COL_STOCK_ID,
     drop_low_price_stocks,
-    drop_suspended_stocks,
+    drop_delisted_stocks,
     load_500_ingredients,
 )   # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
@@ -144,8 +144,8 @@ if __name__ == "__main__":
         filter_list = args.filter.split()
         stocks = [stock for stock in stocks if stock not in filter_list]
 
+    stocks = drop_delisted_stocks(stocks, args.start, args.end)
     TrendFollowingStrategy.stocks = drop_suspended(stocks, args.start, args.end, 10)
-    # TrendFollowingStrategy.stocks = drop_suspended_stocks(stocks, args.end)
 
     cerebro = bt.Cerebro()
 

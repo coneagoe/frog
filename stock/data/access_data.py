@@ -12,9 +12,12 @@ from stock.const import (
     COL_STOCK_NAME,
     COL_ETF_ID,
     COL_ETF_NAME,
+    COL_IPO_DATE,
+    COL_DELISTING_DATE,
 )
 from stock.common import (
     get_stock_general_info_path,
+    get_stock_delisting_info_path,
     get_etf_general_info_path,
     get_stock_data_path_1d,
     get_stock_data_path_1w,
@@ -26,6 +29,7 @@ from stock.common import (
 from stock.data.download_data import (
     download_general_info_stock,
     download_general_info_etf,
+    download_delisted_stock_info,
     download_history_data_stock,
     download_history_data_etf,
     download_history_data_us_index,
@@ -36,7 +40,8 @@ from stock.data.download_data import (
 )
 from utility import (
     is_older_than_a_month,
-    is_older_than_a_week
+    is_older_than_a_week,
+    is_older_than_n_days,
 )
 
 
@@ -331,6 +336,20 @@ def drop_suspended_stocks(stocks: list, date: str) -> list:
     df_suspended = ak.stock_tfp_em(date)
     suspended_stocks = df_suspended[u'代码'].tolist()
     filtered_stocks = [stock for stock in stocks if stock not in suspended_stocks]
+    return filtered_stocks
+
+
+def drop_delisted_stocks(stocks: list, start_date: str, end_date: str) -> list:
+    data_path = get_stock_delisting_info_path()
+    if not os.path.exists(data_path) or is_older_than_n_days(data_path, 1):
+        download_delisted_stock_info()
+
+    df = pd.read_csv(data_path, encoding='utf_8_sig')
+    df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
+    df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
+    df = df[(start_date <= df[COL_IPO_DATE]) | (df[COL_DELISTING_DATE] <= end_date)]
+    delisted_stocks = df[COL_STOCK_ID].tolist()
+    filtered_stocks = [stock for stock in stocks if stock not in delisted_stocks]
     return filtered_stocks
 
 

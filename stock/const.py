@@ -26,6 +26,8 @@ COL_TAKE_PROFIT_PERCENT = u'止盈(%)'
 COL_PROFIT_STOPLOSS_RATE = u'盈亏比'
 COL_TIME = u'时间'
 COL_BUY_AMOUNT = u'买入金额'
+COL_IPO_DATE = u'上市日期'
+COL_DELISTING_DATE = u'退市日期'
 
 COL_MONITOR_PRICE = u'监控价格'
 COL_COMMENT = 'comment'
