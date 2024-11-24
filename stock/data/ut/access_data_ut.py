@@ -25,6 +25,7 @@ from stock.data.access_data import (
 
 from stock.const import (
     COL_STOCK_ID,
+    COL_STOCK_NAME,
 )
 
 
@@ -97,7 +98,7 @@ class TestAccessData(unittest.TestCase):
     def test_drop_st(self):
         df_stocks = pd.DataFrame(stocks, columns=[COL_STOCK_ID])
         df = drop_st(df_stocks)
-        print(df)
+        self.assertTrue(all(not ('ST' in str(name).upper()) for name in df[COL_STOCK_NAME]))
 
 
     def test_drop_low_stocks(self):
@@ -147,7 +148,7 @@ class TestAccessData(unittest.TestCase):
         mock_stock_tfp_em.return_value = mock_data
 
         stocks = ['000001', '000004', '000005']
-        date = '2023-01-01'
+        date = '20230101'
 
         result = drop_suspended_stocks(stocks, date)
 
@@ -157,7 +158,7 @@ class TestAccessData(unittest.TestCase):
 
 
     def test_drop_delisted_stocks(self):
-        stocks = ['600240', '000001', '000003']
+        stocks = ['600240', '000001', '000003', '002147']
         result = drop_delisted_stocks(stocks, '2023-01-01', '2024-01-01')
         self.assertEqual(result, ['000001'])
 
