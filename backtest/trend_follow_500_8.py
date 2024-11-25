@@ -85,7 +85,8 @@ class TrendFollowingStrategy(MyStrategy):
                     else:
                         if (self.datas[i].close[0] > self.ema20[i][0]
                             and self.macd_1[i].signal[0] > 0
-                            and self.macd_1[i].macd[0] > 0):
+                            and self.macd_1[i].macd[0] > 0
+                            and self.datas[i].volume[0] > self.datas[i].volume[-1]):
                             self.order_target_percent(self.datas[i], target=self.target)
             else:
                 # 计算当前收益率
