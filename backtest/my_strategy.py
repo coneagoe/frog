@@ -37,6 +37,11 @@ class MyStrategy(bt.Strategy):
         self.order_target_percent(self.datas[i], target=percent)
 
 
+    def next(self):
+        for i in range(len(self.datas)):
+            self.context[i].current_price = self.datas[i].close[0]
+
+
     def notify_trade(self, trade):
         stock_name = trade.getdataname()
         i = self.stocks.index(stock_name)
@@ -81,8 +86,11 @@ class MyStrategy(bt.Strategy):
                     '止损': self.context[i].stop_price,
                     '现价': self.context[i].current_price,
                     '开仓时间': self.context[i].open_time,
+                    '盈亏': "%.2f" % ((self.context[i].current_price - self.context[i].open_price) * position.size),
+                    '收益率': "%.2f%%" % ((self.context[i].current_price - self.context[i].open_price) / self.context[i].open_price * 100),
                 }
-                if self.context[i].current_price > self.context[i].stop_price:
+                if ((self.context[i].stop_price is None) 
+                    or (self.context[i].current_price > self.context[i].stop_price)):
                     holding.append(stock_info)
                 else:
                     closing.append(stock_info)

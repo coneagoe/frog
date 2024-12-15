@@ -17,6 +17,7 @@ from stock import (
     drop_low_price_stocks,
     drop_delisted_stocks,
     load_300_ingredients,
+    load_500_ingredients,
 )   # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
 
@@ -141,6 +142,8 @@ if __name__ == "__main__":
     os.environ['INIT_CASH'] = str(args.cash)
 
     stocks = load_300_ingredients(args.start)
+    tmp = load_500_ingredients(args.start)
+    stocks.extend(tmp)
     if args.filter:
         filter_list = args.filter.split()
         stocks = [stock for stock in stocks if stock not in filter_list]

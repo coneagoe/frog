@@ -63,7 +63,8 @@ class TrendFollowingStrategy(MyStrategy):
 
 
     def next(self):
-        # 遍历所有的股票
+        super().next()
+
         for i in range(len(self.datas)):
             if self.context[i].order is False:
                 if self.context[i].is_candidator is False:
@@ -82,7 +83,6 @@ class TrendFollowingStrategy(MyStrategy):
                             self.order_target_percent(self.datas[i], target=self.target)
             else:
                 # 计算当前收益率
-                # print(f"foo: {i}, price: {self.datas[i].close[0]}, open_price: {self.context[i].open_price}")
                 open_price = self.context[i].open_price
                 profit_rate = round((self.datas[i].close[0] - open_price) / open_price, 4)
                 ema = None
@@ -102,12 +102,8 @@ class TrendFollowingStrategy(MyStrategy):
                     self.context[i].stop_price = round(ema[i][-1], 3)
                     # print(f"{self.datas[i]._name}: 更新止损价: {self.context[i].stop_price}")
 
-                self.context[i].current_price = self.datas[i].close[0]
-
-                if self.datas[i].close[0] < self.context[i].stop_price:
+                if self.context[i].current_price < self.context[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
-
-        super().next()
 
 
     def notify_trade(self, trade):
