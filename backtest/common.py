@@ -61,21 +61,24 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
     df = load_history_data(security_id=security_id, period=period,
                            start_date=start_date, end_date=end_date,
                            adjust=adjust, security_type=security_type)
-    if is_a_index(security_id):
-        df[COL_OPEN]    = df[COL_OPEN].astype(float)    # noqa: E221
-        df[COL_CLOSE]   = df[COL_CLOSE].astype(float)   # noqa: E221
-        df[COL_HIGH]    = df[COL_HIGH].astype(float)    # noqa: E221
-        df[COL_LOW]     = df[COL_LOW].astype(float)     # noqa: E221
+    # 打印df length
+    # print(f"security_id: {security_id}, df length: {df.size}")
 
-        df[COL_OPEN]    = df[COL_OPEN]  / df[COL_OPEN].iloc[0]      # noqa: E221
-        df[COL_CLOSE]   = df[COL_CLOSE] / df[COL_CLOSE].iloc[0]     # noqa: E221
-        df[COL_HIGH]    = df[COL_HIGH]  / df[COL_HIGH].iloc[0]      # noqa: E221
-        df[COL_LOW]     = df[COL_LOW]   / df[COL_LOW].iloc[0]       # noqa: E221
+    # if is_a_index(security_id):
+    #     df[COL_OPEN]    = df[COL_OPEN].astype(float)    # noqa: E221
+    #     df[COL_CLOSE]   = df[COL_CLOSE].astype(float)   # noqa: E221
+    #     df[COL_HIGH]    = df[COL_HIGH].astype(float)    # noqa: E221
+    #     df[COL_LOW]     = df[COL_LOW].astype(float)     # noqa: E221
 
-        df[COL_OPEN]    = df[COL_OPEN].apply(lambda x: round(x, 2))     # noqa: E221
-        df[COL_CLOSE]   = df[COL_CLOSE].apply(lambda x: round(x, 2))    # noqa: E221
-        df[COL_HIGH]    = df[COL_HIGH].apply(lambda x: round(x, 2))     # noqa: E221
-        df[COL_LOW]     = df[COL_LOW].apply(lambda x: round(x, 2))      # noqa: E221
+    #     df[COL_OPEN]    = df[COL_OPEN]  / df[COL_OPEN].iloc[0]      # noqa: E221
+    #     df[COL_CLOSE]   = df[COL_CLOSE] / df[COL_CLOSE].iloc[0]     # noqa: E221
+    #     df[COL_HIGH]    = df[COL_HIGH]  / df[COL_HIGH].iloc[0]      # noqa: E221
+    #     df[COL_LOW]     = df[COL_LOW]   / df[COL_LOW].iloc[0]       # noqa: E221
+
+    #     df[COL_OPEN]    = df[COL_OPEN].apply(lambda x: round(x, 2))     # noqa: E221
+    #     df[COL_CLOSE]   = df[COL_CLOSE].apply(lambda x: round(x, 2))    # noqa: E221
+    #     df[COL_HIGH]    = df[COL_HIGH].apply(lambda x: round(x, 2))     # noqa: E221
+    #     df[COL_LOW]     = df[COL_LOW].apply(lambda x: round(x, 2))      # noqa: E221
 
     return df
 
@@ -256,7 +259,7 @@ def plot(strategy: bt.Strategy):
 
     fig.show()
 
-    # plot_detail(strategy)
+    plot_detail(strategy)
 
 
 def plot_detail(strategy: bt.Strategy):
