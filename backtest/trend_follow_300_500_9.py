@@ -39,6 +39,8 @@ class TrendFollowingStrategy(MyStrategy):
             ('p_macd_1_dif', 6),
             ('p_macd_1_dea', 12),
             ('p_macd_1_signal', 5),
+            ('holding_bars', 10),
+            ('profit_rate', 0.05),
         )
 
 
@@ -99,6 +101,13 @@ class TrendFollowingStrategy(MyStrategy):
                 # 计算当前收益率
                 open_price = self.context[i].open_price
                 profit_rate = round((self.context[i].current_price - open_price) / open_price, 4)
+
+                if (self.context[i].holding_bars > self.params.holding_bars
+                    and profit_rate < self.params.profit_rate):
+                    self.order_target_percent(self.datas[i], target=0.0)
+                    self.context[i].order_state = OrderState.ORDER_CLOSING
+                    continue
+
                 ema = None
                 if profit_rate < 0.2:
                     ema = self.ema30
