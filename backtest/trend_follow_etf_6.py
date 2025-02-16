@@ -11,7 +11,10 @@ from common import (
     show_position,
 )   # noqa: E402
 from trend_follow_etf_pool import etf_pool as stocks   # noqa: E402
-from my_strategy import MyStrategy  # noqa: E402
+from my_strategy import (
+    OrderState,
+    MyStrategy,
+)   # noqa: E402
 
 
 conf.parse_config()
@@ -28,16 +31,15 @@ class TrendFollowingStrategy(MyStrategy):
             ('p_macd_1_dif', 6),
             ('p_macd_1_dea', 12),
             ('p_macd_1_signal', 5),
-            ('p_macd_2_dif', 6),
-            ('p_macd_2_dea', 12),
-            ('p_macd_2_signal', 5),
         )
 
 
     def __init__(self):
-        super(TrendFollowingStrategy, self).__init__()
+        super().__init__()
 
         self.target = round(self.params.n_portion / len(self.stocks), 2)
+        if self.target < 0.02:
+            self.target = 0.02
 
         self.ema30 = {i: bt.indicators.EMA(self.datas[i].close, period=30)
                       for i in range(len(self.datas))}
@@ -66,7 +68,7 @@ class TrendFollowingStrategy(MyStrategy):
         super().next()
 
         for i in range(len(self.datas)):
-            if self.context[i].order is False:
+            if self.context[i].order_state == OrderState.ORDER_IDLE:
                 if self.context[i].is_candidator is False:
                     # 如果MACD金叉
                     if self.cross_signal_1[i] > 0:
@@ -74,17 +76,20 @@ class TrendFollowingStrategy(MyStrategy):
                         continue
                 else:
                     # 如果MACD死叉或MACD.macd曲线不光滑
-                    if self.cross_signal_1[i] < 0 or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0:
+                    if (self.cross_signal_1[i] < 0
+                        or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0):
                         self.context[i].is_candidator = False
                         continue
                     else:
-                        if self.datas[i].close[0] > self.ema20[i][0] \
-                            and self.macd_1[i].signal[0] > 0 and self.macd_1[i].macd[0] > 0:
+                        if (self.context[i].current_price > self.ema20[i][0]
+                            and self.macd_1[i].signal[0] > 0
+                            and self.macd_1[i].macd[0] > 0):
                             self.order_target_percent(self.datas[i], target=self.target)
-            else:
-                # 计算当前收益率
-                open_price = self.context[i].open_price
-                profit_rate = round((self.datas[i].close[0] - open_price) / open_price, 4)
+                            self.context[i].order_state = OrderState.ORDER_OPENING
+                            self.context[i].stop_price = round(self.ema20[i][-1], 3)
+            elif self.context[i].order_state == OrderState.ORDER_HOLDING:
+                profit_rate = self.context[i].profit_rate
+
                 ema = None
                 if profit_rate < 0.2:
                     ema = self.ema30
@@ -95,15 +100,14 @@ class TrendFollowingStrategy(MyStrategy):
                 elif profit_rate < 0.8:
                     ema = self.ema5
                 else:
-                    if self.context[i].stop_price < self.datas[i].low[-1]:
-                        self.context[i].stop_price = self.datas[i].low[-1]
+                    self.context[i].stop_price = max(self.context[i].stop_price, self.datas[i].low[-1])
 
-                if ema is not None and self.context[i].stop_price < round(ema[i][-1], 3):
-                    self.context[i].stop_price = round(ema[i][-1], 3)
-                    # print(f"{self.datas[i]._name}: 更新止损价: {self.context[i].stop_price}")
+                if ema is not None:
+                    self.context[i].stop_price = max(self.context[i].stop_price, ema[i][-1])
 
                 if self.context[i].current_price < self.context[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
+                    self.context[i].order_state = OrderState.ORDER_CLOSING
 
 
     def notify_trade(self, trade):
@@ -115,9 +119,8 @@ class TrendFollowingStrategy(MyStrategy):
 
 
     def stop(self):
-        print('(ema_period %d, n_positions %d) Ending Value %.2f' %
-            (self.params.ema_period, self.params.n_portion, self.broker.getvalue()))
-
+        print('ema_period: %d, n_positions: %d' %
+            (self.params.ema_period, self.params.n_portion))
         super().stop()
 
 
@@ -125,12 +128,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
+    parser.add_argument('-f', '--filter', required=False, help='Space-separated list of stock IDs to filter out')
     parser.add_argument('-c', '--cash', required=False, type=float, default=1000000, help='Initial cash amount')
+    parser.add_argument('-p', '--plot', required=False, default='', help='Plot trade')
     args = parser.parse_args()
 
+    os.environ['PLOT_TRADE'] = args.plot
     os.environ['INIT_CASH'] = str(args.cash)
 
     TrendFollowingStrategy.stocks = stocks
+    # TrendFollowingStrategy.stocks = ['510310', ]
 
     cerebro = bt.Cerebro()
 

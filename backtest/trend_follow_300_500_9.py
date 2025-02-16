@@ -77,6 +77,8 @@ class TrendFollowingStrategy(MyStrategy):
     def next(self):
         super().next()
 
+        is_affordable = True
+
         for i in range(len(self.datas)):
             if self.context[i].order_state == OrderState.ORDER_IDLE:
                 if self.context[i].is_candidator is False:
@@ -91,20 +93,33 @@ class TrendFollowingStrategy(MyStrategy):
                         self.context[i].is_candidator = False
                         continue
                     else:
+                        if is_affordable is False:
+                            continue
+
                         if (self.context[i].current_price > self.ema20[i][0]
                             and self.macd_1[i].signal[0] > 0
                             and self.macd_1[i].macd[0] > 0):
-                            self.order_target_percent(self.datas[i], target=self.target)
-                            self.context[i].order_state = OrderState.ORDER_OPENING
-                            self.context[i].stop_price = round(self.ema20[i][-1], 3)
+                            available_cash = self.broker.get_cash()
+                            portion_value = self.calculate_portion_value()
+                            if available_cash < portion_value:
+                                is_affordable = False
+                                # self.close_3_smallest_score_holdings()
+                                continue
+
+                            # recompute available_cash here if needed
+                            size = int((portion_value / self.context[i].current_price) // 100 * 100)
+                            if size > 0:
+                                self.buy(data=self.datas[i], size=size, valid=0)
+                                self.context[i].size = size
+                                self.context[i].order_state = OrderState.ORDER_OPENING
+                                self.context[i].stop_price = round(self.ema20[i][-1], 3)
+
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
-                # 计算当前收益率
-                open_price = self.context[i].open_price
-                profit_rate = round((self.context[i].current_price - open_price) / open_price, 4)
+                profit_rate = self.context[i].profit_rate
 
                 if (self.context[i].holding_bars > self.params.holding_bars
                     and profit_rate < self.params.profit_rate):
-                    self.order_target_percent(self.datas[i], target=0.0)
+                    self.close(data=self.datas[i])
                     self.context[i].order_state = OrderState.ORDER_CLOSING
                     continue
 
@@ -124,21 +139,21 @@ class TrendFollowingStrategy(MyStrategy):
                     self.context[i].stop_price = max(self.context[i].stop_price, ema[i][-1])
 
                 if self.context[i].current_price < self.context[i].stop_price:
-                    self.order_target_percent(self.datas[i], target=0.0)
+                    self.close(data=self.datas[i])
                     self.context[i].order_state = OrderState.ORDER_CLOSING
 
 
-    # def notify_order(self, order):
-    #     super().notify_order(order)
+    def calculate_portion_value(self):
+        return self.broker.get_value() * self.target
 
-    #     if order.status in [order.Completed]:
-    #         i = self.stocks.index(order.data._name)
-    #         if self.context[i].order_state == ORDER_OPENING:
-    #             self.context[i].order_state = ORDER_HOLDING
-    #             self.context[i].open_price = order.executed.price
-    #             self.context[i].open_time = self.datas[i].datetime.datetime()
-    #             self.context[i].open_bar = len(self.datas[i])
-    #             self.context[i].current_price = order.executed.price
+
+    def close_3_smallest_score_holdings(self):
+        holdings = [(i, c.score) for i, c in enumerate(self.context)
+                    if (c.order_state == OrderState.ORDER_HOLDING and c.score < -10)]
+        holdings.sort(key=lambda x: x[1])
+        # for i, _ in holdings[:3]:
+        for i, _ in holdings:
+            self.close(data=self.datas[i])
 
 
     def notify_trade(self, trade):
@@ -152,18 +167,6 @@ class TrendFollowingStrategy(MyStrategy):
     def stop(self):
         print('ema_period: %d, n_positions: %d' %
             (self.params.ema_period, self.params.n_portion))
-
-        # for i in range(len(self.stocks)):
-        #     if self.stocks[i] == '300033':
-        #         print(f'order_state: {self.context[i].order_state}')
-        #         print(f'stoploss = {self.context[i].stop_price}, low = {self.datas[i].low[-1]}')
-        #         print(f'{self.context[i].stop_price < self.datas[i].low[-1]}')
-        #         print(f'{max(self.context[i].stop_price, self.datas[i].low[-1])}')
-        #         open_price = self.context[i].open_price
-        #         profit_rate = round((self.context[i].current_price - open_price) / open_price, 4)
-        #         print(f'profit_rate = {profit_rate}')
-        #         # print(f'{self.ema5[i][0]}')
-
         super().stop()
 
 
@@ -173,8 +176,10 @@ if __name__ == "__main__":
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
     parser.add_argument('-f', '--filter', required=False, help='Space-separated list of stock IDs to filter out')
     parser.add_argument('-c', '--cash', required=False, type=float, default=1000000, help='Initial cash amount')
+    parser.add_argument('-p', '--plot', required=False, default='', help='Plot trade')
     args = parser.parse_args()
 
+    os.environ['PLOT_TRADE'] = args.plot
     os.environ['INIT_CASH'] = str(args.cash)
 
     stocks = load_300_ingredients(args.start)

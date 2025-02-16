@@ -35,10 +35,11 @@ conf.parse_config()
 class TrendFollowingStrategy(MyStrategy):
     params = (
             ('ema_period', 20),
-            ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
+            ('n_portion', 2),   # 每支股票允许持有的n倍最小仓位
             ('p_macd_1_dif', 6),
             ('p_macd_1_dea', 12),
             ('p_macd_1_signal', 5),
+            ('holding_bars', 5),          # 最少持仓天数
         )
 
 
@@ -99,13 +100,13 @@ class TrendFollowingStrategy(MyStrategy):
                 profit_rate = self.context[i].profit_rate
 
                 ema = None
-                if profit_rate < 0.2:
+                if profit_rate < 0.1:
                     ema = self.ema30
-                elif profit_rate < 0.4:
+                elif profit_rate < 0.2:
                     ema = self.ema20
-                elif profit_rate < 0.6:
+                elif profit_rate < 0.3:
                     ema = self.ema10
-                elif profit_rate < 0.8:
+                elif profit_rate < 0.4:
                     ema = self.ema5
                 else:
                     self.context[i].stop_price = max(self.context[i].stop_price, self.datas[i].low[-1])
@@ -113,7 +114,9 @@ class TrendFollowingStrategy(MyStrategy):
                 if ema is not None:
                     self.context[i].stop_price = max(self.context[i].stop_price, ema[i][-1])
 
-                if self.context[i].current_price < self.context[i].stop_price:
+                if ((self.context[i].current_price < self.context[i].stop_price)
+                    or ((self.context[i].open_price > self.context[i].current_price)
+                        and (self.context[i].holding_bars >= self.params.holding_bars))):
                     self.order_target_percent(self.datas[i], target=0.0)
                     self.context[i].order_state = OrderState.ORDER_CLOSING
 
@@ -123,7 +126,8 @@ class TrendFollowingStrategy(MyStrategy):
 
         if trade.isopen:
             i = self.stocks.index(trade.getdataname())
-            self.context[i].stop_price = round(self.ema20[i][-1], 3)
+            self.context[i].stop_price = round(self.context[i].open_price * 0.95, 3)
+            # self.context[i].stop_price = round(self.ema20[i][-1], 3)
 
 
     def stop(self):
