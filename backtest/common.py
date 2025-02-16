@@ -218,6 +218,10 @@ def plot(strategy: bt.Strategy):
     trades_list = []
     for stock, trades in strategy.trades.items():
         trades_list.extend(trades)
+
+    if len(trades_list) == 0:
+        return
+
     df_trades = pd.DataFrame(trades_list)
     holding_time_counts = df_trades['holding_time'].value_counts().sort_index()
 
@@ -259,57 +263,70 @@ def plot(strategy: bt.Strategy):
 
     fig.show()
 
-    plot_detail(strategy)
+    plot_trade(strategy)
 
 
-def plot_detail(strategy: bt.Strategy):
-    if os.environ.get('DRAW_DETAIL', 'false').lower() != 'true':
+def plot_trade(strategy: bt.Strategy):
+    if not os.getenv('PLOT_TRADE'):
         return
 
+    stock_ids = os.getenv('PLOT_TRADE').split()
+
     for i, data in enumerate(strategy.datas):
-        df = df_data[i]
-        fig = go.Figure()
+        if data._name in stock_ids:
+            df = df_data[i]
+            fig = go.Figure()
 
-        fig.add_trace(go.Candlestick(x=df.index,
-                                     open=df['open'],
-                                     high=df['high'],
-                                     low=df['low'],
-                                     close=df['close'],
-                                     name=data._name))
-
-        trades = strategy.trades[data._name]
-        buy_markers = []
-        sell_markers = []
-        for trade in trades:
-            buy_markers.append(dict(
-                x=trade['open_time'],
-                y=trade['open_price'],
-                marker=dict(symbol='triangle-up', color='yellow', size=10),
-                mode='markers',
-                name='Buy'
-            ))
-            sell_markers.append(dict(
-                x=trade['close_time'],
-                y=trade['close_price'],
-                marker=dict(symbol='triangle-down', color='blue', size=10),
-                mode='markers',
-                name='Sell'
+            fig.add_trace(go.Candlestick(
+                x=df.index,
+                open=df['open'],
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                name=data._name
             ))
 
-        for marker in buy_markers:
-            fig.add_trace(go.Scatter(x=[marker['x']], y=[marker['y']],
-                                     mode=marker['mode'],
-                                     marker=marker['marker'],
-                                     name=marker['name']))
+            trades = strategy.trades[data._name]
+            buy_markers = []
+            sell_markers = []
+            for t in trades:
+                buy_markers.append(dict(
+                    x=t.open_time,
+                    y=t.open_price,
+                    marker=dict(symbol='triangle-up', color='yellow', size=10),
+                    mode='markers',
+                    name='Buy'
+                ))
+                sell_markers.append(dict(
+                    x=t.close_time,
+                    y=t.close_price,
+                    marker=dict(symbol='triangle-down', color='blue', size=10),
+                    mode='markers',
+                    name='Sell'
+                ))
 
-        for marker in sell_markers:
-            fig.add_trace(go.Scatter(x=[marker['x']], y=[marker['y']],
-                                     mode=marker['mode'],
-                                     marker=marker['marker'],
-                                     name=marker['name']))
+            for marker in buy_markers:
+                fig.add_trace(go.Scatter(x=[marker['x']], y=[marker['y']],
+                                         mode=marker['mode'],
+                                         marker=marker['marker'],
+                                         name=marker['name']))
 
-        fig.update_layout(title=data._name,
-                          yaxis_title='Price',
-                          xaxis_title='Date')
+            for marker in sell_markers:
+                fig.add_trace(go.Scatter(x=[marker['x']], y=[marker['y']],
+                                         mode=marker['mode'],
+                                         marker=marker['marker'],
+                                         name=marker['name']))
 
-        fig.show()
+            # ema20_values = [strategy.ema20[i][idx] for idx in range(len(df))]
+            # fig.add_trace(go.Scatter(
+            #     x=df.index,
+            #     y=ema20_values,
+            #     mode='lines',
+            #     name='EMA20'
+            # ))
+
+            fig.update_layout(title=data._name,
+                              yaxis_title='Price',
+                              xaxis_title='Date')
+
+            fig.show()

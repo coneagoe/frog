@@ -58,6 +58,8 @@ class Context:
         self.is_candidator = False
         self.holding_bars = 0
         self.size = 0
+        self.profit_rate = 0
+        self.score = 0
 
 
 class MyStrategy(bt.Strategy):
@@ -69,15 +71,14 @@ class MyStrategy(bt.Strategy):
         self.trades = {stock: [] for stock in self.stocks}
 
 
-    def open_position(self, i, percent):
-        self.order_target_percent(self.datas[i], target=percent)
-
-
     def next(self):
         for i in range(len(self.datas)):
             self.context[i].current_price = self.datas[i].close[0]
             if self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.context[i].holding_bars += 1
+                self.context[i].profit_rate = \
+                    round((self.context[i].current_price - self.context[i].open_price) / self.context[i].open_price, 4)
+                self.context[i].score = self.context[i].profit_rate * 100 + self.context[i].holding_bars
 
 
     def notify_order(self, order):
@@ -118,8 +119,11 @@ class MyStrategy(bt.Strategy):
                 except TypeError:
                     print(f"open_price: {self.context[i].open_price}, close_price: {self.context[i].close_price}")
 
-        elif order.status in [order.Canceled, order.Margin, order.Rejected]:
-            logging.warning(order)
+        elif order.status == order.Margin:
+            # logging.warning(order)
+            self.cancel(order)
+
+        elif order.status in [order.Canceled, order.Rejected]:
             self.context[i].reset()
 
 
@@ -208,29 +212,79 @@ class MyStrategy(bt.Strategy):
 
 
     def show_positions(self):
+        openings = []
         holdings = []
-        for i, data in enumerate(self.datas):
-            position = self.getposition(data)
-            if position.size != 0:
-                context = self.context[i]
-                open_time_str = context.open_time.strftime('%Y-%m-%d') if context.open_time else '-'
+        closings = []
+
+        for context in self.context:
+            if context.order_state == OrderState.ORDER_OPENING:
                 stock_info = {
-                    '代码': data._name,
-                    '名称': get_security_name(data._name),
-                    '持仓数': f"{position.size:.2f}",
-                    '成本': f"{context.open_price:.3f}" if context.open_price else '-',
-                    '止损': f"{context.stop_price:.3f}" if context.stop_price else '-',
-                    '现价': f"{context.current_price:.3f}" if context.current_price else '-',
-                    '开仓时间': open_time_str,
-                    '开仓价格': f"{context.open_price:.3f}" if context.open_price else '-',
-                    '盈亏': f"{(context.current_price - context.open_price) * position.size:.2f}"
-                            if (context.current_price and context.open_price) else '-',
-                    '收益率': f"{((context.current_price - context.open_price) / context.open_price * 100):.2f}%"
-                             if (context.current_price and context.open_price) else '-',
+                    '代码': context.name,
+                    '名称': get_security_name(context.name),
+                    '持仓数': f"{context.size:.2f}",
+                    '止损': f"{context.stop_price:.3f}",
+                }
+                openings.append(stock_info)
+            elif context.order_state == OrderState.ORDER_HOLDING:
+                stock_info = {
+                    '代码': context.name,
+                    '名称': get_security_name(context.name),
+                    '持仓数': f"{context.size:.2f}",
+                    '成本': f"{context.open_price:.3f}",
+                    '止损': f"{context.stop_price:.3f}",
+                    '现价': f"{context.current_price:.3f}",
+                    '开仓时间': context.open_time.strftime('%Y-%m-%d'),
+                    '开仓价格': f"{context.open_price:.3f}",
+                    '盈亏': f"{(context.current_price - context.open_price) * context.size:.2f}",
+                    '收益率': f"{(context.profit_rate * 100):.2f}%",
                 }
                 holdings.append(stock_info)
+            elif context.order_state == OrderState.ORDER_CLOSING:
+                stock_info = {
+                    '代码': context.name,
+                    '名称': get_security_name(context.name),
+                    '持仓数': f"{context.size:.2f}",
+                    '成本': f"{context.open_price:.3f}",
+                    '止损': f"{context.stop_price:.3f}",
+                    '现价': f"{context.current_price:.3f}",
+                    '开仓时间': context.open_time.strftime('%Y-%m-%d'),
+                    '开仓价格': f"{context.open_price:.3f}",
+                    '盈亏': f"{(context.current_price - context.open_price) * context.size:.2f}",
+                    '收益率': f"{(context.profit_rate * 100):.2f}%",
+                }
+                closings.append(stock_info)
+
+        # for i, data in enumerate(self.datas):
+        #     position = self.getposition(data)
+        #     if position.size != 0:
+        #         context = self.context[i]
+        #         open_time_str = context.open_time.strftime('%Y-%m-%d') if context.open_time else '-'
+        #         stock_info = {
+        #             '代码': data._name,
+        #             '名称': get_security_name(data._name),
+        #             '持仓数': f"{position.size:.2f}",
+        #             '成本': f"{context.open_price:.3f}" if context.open_price else '-',
+        #             '止损': f"{context.stop_price:.3f}" if context.stop_price else '-',
+        #             '现价': f"{context.current_price:.3f}" if context.current_price else '-',
+        #             '开仓时间': open_time_str,
+        #             '开仓价格': f"{context.open_price:.3f}" if context.open_price else '-',
+        #             '盈亏': f"{(context.current_price - context.open_price) * position.size:.2f}"
+        #                     if (context.current_price and context.open_price) else '-',
+        #             '收益率': f"{(context.profit_rate * 100):.2f}%",
+        #         }
+        #         holdings.append(stock_info)
+
+        if openings:
+            df = pd.DataFrame(openings)
+            print("Opening Positions:")
+            print(df.to_string(index=False))
 
         if holdings:
             df = pd.DataFrame(holdings)
-            print("Current Positions:")
+            print("Holding Positions:")
+            print(df.to_string(index=False))
+
+        if closings:
+            df = pd.DataFrame(closings)
+            print("Closing Positions:")
             print(df.to_string(index=False))
