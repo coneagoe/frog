@@ -5,6 +5,7 @@ import webbrowser
 from btplotting import BacktraderPlotting
 import backtrader as bt
 import pandas as pd
+import pandas_market_calendars as mcal
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 import quantstats as qs
@@ -13,10 +14,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # from btplotting.analyzers import RecorderAnalyzer
 from backtest.my_analyzer import MyAnalyzer
 from stock import (
+    COL_DATE,
     COL_OPEN,
     COL_CLOSE,
     COL_HIGH,
     COL_LOW,
+    COL_VOLUME,
     is_a_index,
     load_history_data,
     drop_suspended_stocks,
@@ -61,24 +64,39 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
     df = load_history_data(security_id=security_id, period=period,
                            start_date=start_date, end_date=end_date,
                            adjust=adjust, security_type=security_type)
-    # 打印df length
-    # print(f"security_id: {security_id}, df length: {df.size}")
+    df = df.iloc[:, :6]
 
-    # if is_a_index(security_id):
-    #     df[COL_OPEN]    = df[COL_OPEN].astype(float)    # noqa: E221
-    #     df[COL_CLOSE]   = df[COL_CLOSE].astype(float)   # noqa: E221
-    #     df[COL_HIGH]    = df[COL_HIGH].astype(float)    # noqa: E221
-    #     df[COL_LOW]     = df[COL_LOW].astype(float)     # noqa: E221
+    df.columns = [
+        'date',
+        'open',
+        'close',
+        'high',
+        'low',
+        'volume',
+    ]
 
-    #     df[COL_OPEN]    = df[COL_OPEN]  / df[COL_OPEN].iloc[0]      # noqa: E221
-    #     df[COL_CLOSE]   = df[COL_CLOSE] / df[COL_CLOSE].iloc[0]     # noqa: E221
-    #     df[COL_HIGH]    = df[COL_HIGH]  / df[COL_HIGH].iloc[0]      # noqa: E221
-    #     df[COL_LOW]     = df[COL_LOW]   / df[COL_LOW].iloc[0]       # noqa: E221
+    start_date_dt = pd.to_datetime(start_date)
+    if start_date_dt < df.iloc[0]['date']:
+        cal = mcal.get_calendar('XSHG')
+        schedule = cal.schedule(start_date=start_date, end_date=df.iloc[0]['date'])
+        all_days = schedule.index
 
-    #     df[COL_OPEN]    = df[COL_OPEN].apply(lambda x: round(x, 2))     # noqa: E221
-    #     df[COL_CLOSE]   = df[COL_CLOSE].apply(lambda x: round(x, 2))    # noqa: E221
-    #     df[COL_HIGH]    = df[COL_HIGH].apply(lambda x: round(x, 2))     # noqa: E221
-    #     df[COL_LOW]     = df[COL_LOW].apply(lambda x: round(x, 2))      # noqa: E221
+        df_tmp = pd.DataFrame(columns=['date', 'open', 'close', 'high',
+                                    'low', 'volume'],
+                              index=range(len(all_days)))
+
+        df_tmp['date'] = all_days
+        df_tmp[['open', 'close', 'high', 'low', 'volume']] = 1.0
+        df_tmp.set_index('date', inplace=True)
+        df.set_index('date', inplace=True)
+
+        df = pd.concat([df_tmp, df], axis=0)
+        df.sort_index(inplace=True)
+
+    else:
+        df.set_index('date', inplace=True)
+
+    df.index.name = 'date'
 
     return df
 
@@ -99,31 +117,18 @@ def drop_suspended(stocks: list, start_date: str, end_date: str,
 def set_stocks(cerebro, stocks: list, start_date: str, end_date: str, security_type: str):
     global df_data
 
-    if pd.to_datetime(end_date) - pd.to_datetime(start_date) < pd.Timedelta(days=365):
-        adjust = ""
-    else:
-        adjust = "qfq"
+    # if pd.to_datetime(end_date) - pd.to_datetime(start_date) < pd.Timedelta(days=365):
+    #     adjust = ""
+    # else:
+    #     adjust = "qfq"
+    adjust = "qfq"
 
     # 添加数据
     for stock in tqdm(stocks):
         # 获取数据
-        tmp = load_test_data(security_id=stock, period="daily",
+        df = load_test_data(security_id=stock, period="daily",
                             start_date=start_date, end_date=end_date,
                             adjust=adjust, security_type=security_type)
-        df = tmp.iloc[:, :6]
-
-        df.columns = [
-            'date',
-            'open',
-            'close',
-            'high',
-            'low',
-            'volume',
-        ]
-
-        df.set_index('date', inplace=True)
-
-        df.index.name = 'date'
 
         df_data.append(df)
 
