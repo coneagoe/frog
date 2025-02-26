@@ -253,7 +253,9 @@ def download_history_data_stock(stock_id: str, period: str, start_date: str, end
                                  start_date=start_date_ts1.strftime('%Y%m%d'),
                                  end_date=end_date_ts1.strftime('%Y%m%d'),
                                  adjust=adjust)
-        assert not df0.empty, f"download history data {stock_id} fail, please check"
+        if df0.empty:
+            logging.warning(f"download history data {stock_id} fail, please check")
+            return
 
         df0[COL_DATE] = pd.to_datetime(df0[COL_DATE])
         df = pd.concat([df, df0], ignore_index=True)
