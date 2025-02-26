@@ -359,14 +359,14 @@ def drop_delisted_stocks(stocks: list, start_date: str, end_date: str) -> list:
 
 def load_300_ingredients(date: str) -> list:
     assert re.match(r'^\d{4}-\d{2}-\d{2}$', date), "Date must be in the format YYYY-MM-DD"
-    
+
     dt = datetime.strptime(date, '%Y-%m-%d')
     if 1 <= dt.month < 7:
         dt = dt.replace(month=1, day=1)
     else:
         dt = dt.replace(month=7, day=1)
     converted_date = dt.strftime('%Y-%m-%d')
-    
+
     ingredients = []
 
     file_path = os.path.join(get_stock_300_ingredients_path(), f'{converted_date}.csv')
@@ -384,14 +384,14 @@ def load_300_ingredients(date: str) -> list:
 
 def load_500_ingredients(date: str) -> list:
     assert re.match(r'^\d{4}-\d{2}-\d{2}$', date), "Date must be in the format YYYY-MM-DD"
-    
+
     dt = datetime.strptime(date, '%Y-%m-%d')
     if 1 <= dt.month < 7:
         dt = dt.replace(month=1, day=1)
     else:
         dt = dt.replace(month=7, day=1)
     converted_date = dt.strftime('%Y-%m-%d')
-    
+
     ingredients = []
 
     file_path = os.path.join(get_stock_500_ingredients_path(), f'{converted_date}.csv')
