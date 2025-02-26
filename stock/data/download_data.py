@@ -300,7 +300,7 @@ def download_history_data_a_index(index: str, period: str, start_date: str, end_
         df.to_csv(data_path, encoding='utf_8_sig', index=False)
 
 
-def download_300_ingredients():
+def download_baostock_ingredients(query_func, path_func):
     start_date = datetime(2010, 1, 1)
     end_date = datetime.today()
 
@@ -312,53 +312,28 @@ def download_300_ingredients():
     current_date = start_date
     while current_date <= end_date:
         date_str = current_date.strftime('%Y-%m-%d')
-        file_path = os.path.join(get_stock_300_ingredients_path(), f'{date_str}.csv')
-        
+        file_path = os.path.join(path_func(), f'{date_str}.csv')
         if not os.path.exists(file_path):
-            rs = bs.query_hs300_stocks(date=date_str)
-            hs300_stocks = []
+            rs = query_func(date=date_str)
+            rows = []
             while (rs.error_code == '0') & rs.next():
-                hs300_stocks.append(rs.get_row_data())
-            df = pd.DataFrame(hs300_stocks, columns=rs.fields)
+                rows.append(rs.get_row_data())
+            df = pd.DataFrame(rows, columns=rs.fields)
             df.rename(columns={'code': COL_STOCK_ID, 'code_name': COL_STOCK_NAME}, inplace=True)
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.replace('sh.', '').str.replace('sz.', '')
             df.to_csv(file_path, encoding='utf_8_sig', index=False)
-        
+
         if current_date.month == 1 and current_date.day == 1:
             current_date = datetime(current_date.year, 7, 1)
         else:
             current_date = datetime(current_date.year + 1, 1, 1)
 
     bs.logout()
+
+
+def download_300_ingredients():
+    download_baostock_ingredients(bs.query_hs300_stocks, get_stock_300_ingredients_path)
 
 
 def download_500_ingredients():
-    start_date = datetime(2010, 1, 1)
-    end_date = datetime.today()
-
-    lg = bs.login()
-    if lg.error_code != '0':
-        logging.error(f"baostock login fail: {lg.error_msg}")
-        return
-
-    current_date = start_date
-    while current_date <= end_date:
-        date_str = current_date.strftime('%Y-%m-%d')
-        file_path = os.path.join(get_stock_500_ingredients_path(), f'{date_str}.csv')
-        
-        if not os.path.exists(file_path):
-            rs = bs.query_zz500_stocks(date=date_str)
-            zz500_stocks = []
-            while (rs.error_code == '0') & rs.next():
-                zz500_stocks.append(rs.get_row_data())
-            df = pd.DataFrame(zz500_stocks, columns=rs.fields)
-            df.rename(columns={'code': COL_STOCK_ID, 'code_name': COL_STOCK_NAME}, inplace=True)
-            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.replace('sh.', '').str.replace('sz.', '')
-            df.to_csv(file_path, encoding='utf_8_sig', index=False)
-        
-        if current_date.month == 1 and current_date.day == 1:
-            current_date = datetime(current_date.year, 7, 1)
-        else:
-            current_date = datetime(current_date.year + 1, 1, 1)
-
-    bs.logout()
+    download_baostock_ingredients(bs.query_zz500_stocks, get_stock_500_ingredients_path)
