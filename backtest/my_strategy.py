@@ -222,7 +222,7 @@ class MyStrategy(bt.Strategy):
                     '代码': context.name,
                     '名称': get_security_name(context.name),
                     '持仓数': f"{context.size:.2f}",
-                    '止损': f"{context.stop_price:.3f}",
+                    '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
                 }
                 openings.append(stock_info)
             elif context.order_state == OrderState.ORDER_HOLDING:
@@ -231,7 +231,8 @@ class MyStrategy(bt.Strategy):
                     '名称': get_security_name(context.name),
                     '持仓数': f"{context.size:.2f}",
                     '成本': f"{context.open_price:.3f}",
-                    '止损': f"{context.stop_price:.3f}",
+                    '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
+                    # '止损': f"{context.stop_price}",
                     '现价': f"{context.current_price:.3f}",
                     '开仓时间': context.open_time.strftime('%Y-%m-%d'),
                     '开仓价格': f"{context.open_price:.3f}",
@@ -245,7 +246,7 @@ class MyStrategy(bt.Strategy):
                     '名称': get_security_name(context.name),
                     '持仓数': f"{context.size:.2f}",
                     '成本': f"{context.open_price:.3f}",
-                    '止损': f"{context.stop_price:.3f}",
+                    '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
                     '现价': f"{context.current_price:.3f}",
                     '开仓时间': context.open_time.strftime('%Y-%m-%d'),
                     '开仓价格': f"{context.open_price:.3f}",
