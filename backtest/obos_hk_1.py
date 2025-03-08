@@ -75,6 +75,10 @@ class ObosStrategy(MyStrategy):
                         self.context[i].stop_price = self.datas[i].low[-1]
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
+                # 如果OBOS超买
+                if self.obos[i] > OBOS_OVERBUY_THRESHOLD:
+                    self.context[i].stop_price = max(self.context[i].stop_price, self.datas[i].low[-1])
+
                 if self.context[i].current_price < self.context[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
                     self.context[i].order_state = OrderState.ORDER_CLOSING

@@ -166,40 +166,6 @@ class MyStrategy(bt.Strategy):
 
         self.show_trades()
 
-        # holding = []
-        # closing = []
-
-        # for data, position in self.positions.items():
-        #     if position:
-        #         i = self.stocks.index(data._name)
-        #         open_str = self.context[i].open_time.strftime('%Y-%m-%d') if self.context[i].open_time else '-'
-        #         stock_info = {
-        #             '代码': data._name,
-        #             '名称': get_security_name(data._name),
-        #             '持仓数': "%.2f" % position.size,
-        #             '成本': "%.3f" % self.context[i].open_price,
-        #             '止损': "%.3f" % self.context[i].stop_price,
-        #             '现价': "%.3f" % self.context[i].current_price,
-        #             '开仓时间': open_str,
-        #             '盈亏': "%.2f" % ((self.context[i].current_price - self.context[i].open_price) * position.size),
-        #             '收益率': "%.2f%%" % ((self.context[i].current_price - self.context[i].open_price) / self.context[i].open_price * 100),
-        #         }
-        #         if ((self.context[i].stop_price is None) 
-        #             or (self.context[i].current_price > self.context[i].stop_price)):
-        #             holding.append(stock_info)
-        #         else:
-        #             closing.append(stock_info)
-
-        # if len(holding) > 0:
-        #     holding_df = pd.DataFrame(holding).sort_values(by=u'开仓时间', ascending=False)
-        #     print("Holding:")
-        #     print(holding_df.to_string(index=False))
-
-        # if len(closing) > 0:
-        #     closing_df = pd.DataFrame(closing).sort_values(by=u'开仓时间', ascending=False)
-        #     print("Closing:")
-        #     print(closing_df.to_string(index=False))
-
 
     def show_trades(self):
         for stock_name, trade_list in self.trades.items():
@@ -232,7 +198,6 @@ class MyStrategy(bt.Strategy):
                     '持仓数': f"{context.size:.2f}",
                     '成本': f"{context.open_price:.3f}",
                     '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
-                    # '止损': f"{context.stop_price}",
                     '现价': f"{context.current_price:.3f}",
                     '开仓时间': context.open_time.strftime('%Y-%m-%d'),
                     '开仓价格': f"{context.open_price:.3f}",
@@ -254,26 +219,6 @@ class MyStrategy(bt.Strategy):
                     '收益率': f"{(context.profit_rate * 100):.2f}%",
                 }
                 closings.append(stock_info)
-
-        # for i, data in enumerate(self.datas):
-        #     position = self.getposition(data)
-        #     if position.size != 0:
-        #         context = self.context[i]
-        #         open_time_str = context.open_time.strftime('%Y-%m-%d') if context.open_time else '-'
-        #         stock_info = {
-        #             '代码': data._name,
-        #             '名称': get_security_name(data._name),
-        #             '持仓数': f"{position.size:.2f}",
-        #             '成本': f"{context.open_price:.3f}" if context.open_price else '-',
-        #             '止损': f"{context.stop_price:.3f}" if context.stop_price else '-',
-        #             '现价': f"{context.current_price:.3f}" if context.current_price else '-',
-        #             '开仓时间': open_time_str,
-        #             '开仓价格': f"{context.open_price:.3f}" if context.open_price else '-',
-        #             '盈亏': f"{(context.current_price - context.open_price) * position.size:.2f}"
-        #                     if (context.current_price and context.open_price) else '-',
-        #             '收益率': f"{(context.profit_rate * 100):.2f}%",
-        #         }
-        #         holdings.append(stock_info)
 
         if openings:
             df = pd.DataFrame(openings)
