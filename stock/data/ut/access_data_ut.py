@@ -8,6 +8,7 @@ import conf     # noqa: E402
 
 from stock.data.access_data import (
     load_history_data_stock,
+    load_history_data_stock_hk,
     load_history_data_etf,
     load_history_data_us_index,
     load_history_data_a_index,
@@ -62,6 +63,11 @@ stocks = (
 class TestAccessData(unittest.TestCase):
     def test_load_history_data_stock(self):
         df = load_history_data_stock('000001', 'daily', '2022-01-01', '2023-01-02', 'hfq')
+        self.assertIsInstance(df, pd.DataFrame)
+
+
+    def test_load_history_data_stock_hk(self):
+        df = load_history_data_stock_hk('00700', 'daily', '2022-01-01', '2023-01-02', 'hfq')
         self.assertIsInstance(df, pd.DataFrame)
 
 

@@ -8,6 +8,9 @@ from stock.const import (
     COL_DATE,
     COL_OPEN,
     COL_CLOSE,
+    COL_HIGH,
+    COL_LOW,
+    COL_VOLUME,
     COL_STOCK_ID,
     COL_STOCK_NAME,
     COL_ETF_ID,
@@ -31,6 +34,7 @@ from stock.data.download_data import (
     download_general_info_etf,
     download_delisted_stock_info,
     download_history_data_stock,
+    download_history_data_stock_hk,
     download_history_data_etf,
     download_history_data_us_index,
     download_history_data_a_index,
@@ -68,7 +72,6 @@ def load_history_data_stock(security_id: str, period: str, start_date: str,
     df[COL_DATE] = pd.to_datetime(df[COL_DATE])
 
     df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
-    df[COL_CLOSE] = df[COL_CLOSE].astype(float)
     return df
 
 
@@ -90,7 +93,6 @@ def load_history_data_etf(security_id: str, period: str, start_date: str,
     df[COL_DATE] = pd.to_datetime(df[COL_DATE])
 
     df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
-    df[COL_CLOSE] = df[COL_CLOSE].astype(float)
     return df
 
 
@@ -113,7 +115,6 @@ def load_history_data_us_index(security_id: str, period: str, start_date: str,
     df[COL_DATE] = pd.to_datetime(df[COL_DATE])
 
     df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
-    df[COL_CLOSE] = df[COL_CLOSE].astype(float)
     return df
 
 
@@ -139,9 +140,29 @@ def load_history_data_a_index(security_id: str, period: str, start_date: str,
     return df
 
 
+def load_history_data_stock_hk(security_id: str, period: str, start_date: str,
+                               end_date: str, adjust: str) -> pd.DataFrame:
+    download_history_data_stock_hk(security_id, period, start_date, end_date, adjust)
+
+    data_file_name = f"{security_id}_{adjust}.csv"
+    if period == 'daily':
+        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    elif period == 'weekly':
+        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    else:
+        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+
+    start_date_ts0 = pd.Timestamp(start_date)
+    end_date_ts0 = pd.Timestamp(end_date)
+    df = pd.read_csv(data_path, encoding='utf_8_sig')
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    return df
+
+
 def load_history_data(security_id: str, period: str, start_date: str, end_date: str,
                       adjust="qfq", security_type="auto") -> pd.DataFrame:
-    assert security_type in ['auto', 'stock', 'etf', 'us_index', 'a_index']
+    assert security_type in ['auto', 'stock', 'etf', 'us_index', 'a_index', 'hk_ggt_stock']
 
     if security_type == "auto":
         if is_stock(security_id):
@@ -152,6 +173,8 @@ def load_history_data(security_id: str, period: str, start_date: str, end_date: 
             loader = load_history_data_us_index
         elif is_a_index(security_id):
             loader = load_history_data_a_index
+        elif is_hk_ggt_stock(security_id):
+            loader = load_history_data_stock_hk
         else:
             logging.error(f"Invalid security id: {security_id}")
             exit(-1)
@@ -163,10 +186,19 @@ def load_history_data(security_id: str, period: str, start_date: str, end_date: 
         loader = load_history_data_us_index
     elif security_type == "a_index":
         loader = load_history_data_a_index
+    elif security_type == "hk_ggt_stock":
+        loader = load_history_data_stock_hk
 
-    return loader(security_id=security_id, period=period,
+    df = loader(security_id=security_id, period=period,
                   start_date=start_date, end_date=end_date,
                   adjust=adjust)
+
+    df[COL_OPEN] = df[COL_OPEN].astype(float)
+    df[COL_CLOSE] = df[COL_CLOSE].astype(float)
+    df[COL_HIGH] = df[COL_HIGH].astype(float)
+    df[COL_LOW] = df[COL_LOW].astype(float)
+    df[COL_VOLUME] = df[COL_VOLUME].astype(float)
+    return df
 
 
 def load_all_stock_general_info():
@@ -294,7 +326,7 @@ def is_hk_ggt_stock(stock_id: str):
         return False
 
 
-def load_all_hk_ggt_stock_general_info():
+def load_all_hk_ggt_stock_general_info() -> pd.DataFrame:
     global g_df_hk_ggt_stocks
 
     if g_df_hk_ggt_stocks is not None:
