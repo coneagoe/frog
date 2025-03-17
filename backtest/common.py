@@ -2,7 +2,8 @@ from datetime import datetime
 import os
 import sys
 import webbrowser
-from btplotting import BacktraderPlotting
+# from btplotting import BacktraderPlotting
+# from btplotting.analyzers import RecorderAnalyzer
 import backtrader as bt
 import pandas as pd
 import pandas_market_calendars as mcal
@@ -11,7 +12,6 @@ from plotly.subplots import make_subplots
 import quantstats as qs
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# from btplotting.analyzers import RecorderAnalyzer
 from backtest.my_analyzer import MyAnalyzer
 from stock import (
     COL_DATE,
@@ -167,7 +167,7 @@ def add_analyzer(cerebro):
     # cerebro.addanalyzer(RecorderAnalyzer)
 
 
-def show_result(cerebro, results):
+def generate_report(cerebro, results):
     if os.getenv('OPTIMIZER'):
         return
 
@@ -176,21 +176,21 @@ def show_result(cerebro, results):
     pyfolio = strategy.analyzers.getbyname('pyfolio')
     returns, positions, transactions, gross_lev = pyfolio.get_pf_items()
     qs.reports.metrics(returns)
+    report_file_name = f'report_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
+    qs.reports.html(returns=returns, positions=positions,
+                    transactions=transactions, gross_lev=gross_lev,
+                    output=report_file_name)
 
-    if use_plotly:
-        report_file_name = f'report_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
-        qs.reports.html(returns=returns, positions=positions,
-                        transactions=transactions, gross_lev=gross_lev,
-                        output=report_file_name)
+    if os.getenv('PLOT_REPORT') == 'true':
         webbrowser.open('file://' + os.path.realpath(report_file_name))
         plot(strategy)
-    else:
-        # p = BacktraderPlotting(style='bar', multiple_tabs=True)
+    # else:
+        # # p = BacktraderPlotting(style='bar', multiple_tabs=True)
 
-        programe_name = os.path.basename(sys.argv[0])
-        p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
+        # programe_name = os.path.basename(sys.argv[0])
+        # p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
 
-        cerebro.plot(p)
+    #     cerebro.plot(p)
 
 
 def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: str, security_type: str):
@@ -205,7 +205,7 @@ def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: st
     else:
         results = cerebro.run()
 
-    show_result(cerebro, results)
+    generate_report(cerebro, results)
 
 
 def show_position(positions):

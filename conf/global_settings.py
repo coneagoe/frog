@@ -122,7 +122,7 @@ def parse_frog_server(config: dict):
 
 def parse_backtest_config(config: dict):
     try:
-        os.environ['DRAW_DETAIL'] = str(config['backtest']['draw_detail']).lower()
+        os.environ['PLOT_REPORT'] = str(config['backtest']['plot_report']).lower()
     except KeyError:
         pass
 
