@@ -45,7 +45,6 @@ class Context:
 
 
     def reset(self):
-        self.name = None
         self.order_state = OrderState.ORDER_IDLE
         self.current_price = None
         self.open_time = None
@@ -69,6 +68,8 @@ class MyStrategy(bt.Strategy):
         assert len(self.stocks) > 0, "stocks is empty"
         self.context = [Context() for i in range(len(self.stocks))]
         self.trades = {stock: [] for stock in self.stocks}
+        for i in range(len(self.stocks)):
+            self.context[i].name = self.stocks[i]
 
 
     def next(self):
