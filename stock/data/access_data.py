@@ -307,6 +307,8 @@ def get_security_name(security_id: str) -> str:
         return 'S&P 500'
     elif is_stock(security_id):
         return get_stock_name(security_id)
+    elif is_hk_ggt_stock(security_id):
+        return get_hk_ggt_stock_name(security_id)
     else:
         return get_etf_name(security_id)
 
@@ -324,6 +326,18 @@ def is_hk_ggt_stock(stock_id: str):
         return stock_id in g_df_hk_ggt_stocks[COL_STOCK_ID].values
     except KeyError:
         return False
+
+
+def get_hk_ggt_stock_name(stock_id: str):
+    global g_df_hk_ggt_stocks
+
+    if g_df_hk_ggt_stocks is None:
+        g_df_hk_ggt_stocks = load_all_hk_ggt_stock_general_info()
+
+    try:
+        return g_df_hk_ggt_stocks.loc[g_df_hk_ggt_stocks[COL_STOCK_ID] == stock_id][COL_STOCK_NAME].iloc[0]
+    except IndexError:
+        return None
 
 
 def load_all_hk_ggt_stock_general_info() -> pd.DataFrame:
@@ -368,6 +382,8 @@ def drop_low_price_stocks(df: pd.DataFrame, start_date: str, end_date: str) -> p
 
 
 def drop_suspended_stocks(stocks: list, date: str) -> list:
+    return stocks
+
     date = date.replace('-', '')
     df_suspended = ak.stock_tfp_em(date)
     suspended_stocks = df_suspended[u'代码'].tolist()
