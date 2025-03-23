@@ -20,8 +20,6 @@ conf.parse_config()
 
 # enable_optimize()
 
-# disable_plotly()
-
 
 class RotateStrategy(MyStrategy):
     params = (
