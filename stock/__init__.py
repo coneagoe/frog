@@ -12,6 +12,7 @@ from .common import (
     get_stock_data_path_1w,
     get_stock_data_path_1M,
     get_trading_book_path,
+    get_last_trading_day,
     is_market_open,
     is_testing,
 )
