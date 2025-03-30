@@ -72,7 +72,8 @@ def parse_fund_config(config: dict):
     try:
         os.environ['fund_data_path'] = config['fund']['data_path']
     except KeyError:
-        logging.warning("fund data path is not configured")
+        fund_data_path = os.getcwd()
+        os.environ['fund_data_path'] = fund_data_path
 
 
 def create_dir_if_not_exist(path: str):
@@ -83,17 +84,18 @@ def create_dir_if_not_exist(path: str):
 def parse_stock_config(config: dict):
     try:
         stock_data_path = config['stock']['data_path']
-        sub_dirs = ['1d', '1w', '1M', 'position', 'info', '300_ingredients', '500_ingredients']
-        paths = {sub_dir: os.path.join(stock_data_path, sub_dir) for sub_dir in sub_dirs}
-
-        for path in paths.values():
-            create_dir_if_not_exist(path)
-
-        os.environ['stock_data_path'] = stock_data_path
-        for sub_dir, path in paths.items():
-            os.environ[f'stock_data_path_{sub_dir}'] = path
     except KeyError:
-        logging.warning("stock data path is not configured")
+        stock_data_path = os.getcwd()
+    
+    sub_dirs = ['1d', '1w', '1M', 'position', 'info', '300_ingredients', '500_ingredients']
+    paths = {sub_dir: os.path.join(stock_data_path, sub_dir) for sub_dir in sub_dirs}
+
+    for path in paths.values():
+        create_dir_if_not_exist(path)
+
+    os.environ['stock_data_path'] = stock_data_path
+    for sub_dir, path in paths.items():
+        os.environ[f'stock_data_path_{sub_dir}'] = path
 
 
 def parse_account_config(config: dict):
