@@ -3,7 +3,8 @@ from datetime import date, datetime
 import functools
 import logging
 import os
-from pathlib import Path
+import pandas as pd
+import pandas_market_calendars as mcal
 
 
 STOCK_GENERAL_INFO_FILE_NAME = 'stock_general_info.csv'
@@ -100,3 +101,33 @@ def is_market_open():
         return True
 
     return False
+
+
+def get_last_trading_day() -> str:
+    """
+    Get the last trading day.
+    If today is a trading day, return today.
+    Otherwise, return the most recent trading day.
+    
+    Returns:
+        str: Date in format 'YYYY-MM-DD'
+    """
+    cal = mcal.get_calendar('XSHG')
+    
+    today = datetime.now().strftime('%Y-%m-%d')
+    today_date = datetime.strptime(today, '%Y-%m-%d')
+    
+    start_date = (today_date - pd.Timedelta(days=10)).strftime('%Y-%m-%d')
+    
+    trading_days = cal.valid_days(start_date=start_date, end_date=today)
+    
+    trading_days_str = [d.strftime('%Y-%m-%d') for d in trading_days]
+    
+    if len(trading_days_str) == 0:
+        logging.error("No trading day found")
+        exit(1)
+
+    if today in trading_days_str:
+        return today
+    else:
+        return trading_days_str[-1]

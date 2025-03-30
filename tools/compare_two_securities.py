@@ -1,5 +1,9 @@
 import argparse
-from datetime import date
+from datetime import (
+    date,
+    datetime,
+    timedelta
+)
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -7,9 +11,10 @@ import pandas as pd  # noqa: E402
 import plotly.graph_objs as go  # noqa: E402
 
 import conf     # noqa: E402
-import stock    # noqa: E402
 from stock import (
     get_security_name,
+    get_last_trading_day,
+    load_history_data,
     COL_DATE,
     COL_CLOSE,
 )   # noqa: E402
@@ -42,8 +47,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', default=360, type=int,
                         help='since how many days ago to compare, cannot be used together with -s and -e')
-    parser.add_argument('-s', type=str, help='start date, YYYYMMDD')
-    parser.add_argument('-e', type=str, help='end date, YYYYMMDD')
+    parser.add_argument('-s', "--start", type=str, help='start date, YYYYMMDD')
+    parser.add_argument('-e', "--end", type=str, help='end date, YYYYMMDD')
     parser.add_argument('-t', '--template', help='The template file to read securities from.')
     parser.add_argument('security_id_0', nargs='?', type=str,
                         help='can be .IXIC(NASDAQ Composite), .DJI(Dow Jones Industrial Average) and .INX(S&P 500)')
@@ -63,18 +68,19 @@ if __name__ == "__main__":
 
     security_id_0 = args.security_id_0
     security_id_1 = args.security_id_1
-    start_date = args.s
-    end_date = args.e
+    start_date = args.start
+    end_date = args.end
 
-    if start_date is None or end_date is None:
-        end_date = date.today()
-        start_date = end_date - pd.Timedelta(days=args.n)
-        start_date = start_date.strftime('%Y%m%d')
-        end_date = end_date.strftime('%Y%m%d')
+    if end_date is None:
+        end_date = get_last_trading_day()
 
-    df0 = stock.load_history_data(security_id=security_id_0, period='daily',
+    if start_date is None:
+        end_date_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        start_date = (end_date_dt - timedelta(days=args.n)).strftime('%Y-%m-%d')
+
+    df0 = load_history_data(security_id=security_id_0, period='daily',
                                   start_date=start_date, end_date=end_date)
-    df1 = stock.load_history_data(security_id=security_id_1, period='daily',
+    df1 = load_history_data(security_id=security_id_1, period='daily',
                                   start_date=start_date, end_date=end_date)
 
     show_two_securities(security_id_0, df0, security_id_1, df1)
