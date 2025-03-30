@@ -115,7 +115,7 @@ if __name__ == "__main__":
     os.environ['PLOT_TRADE'] = args.plot
     os.environ['INIT_CASH'] = str(args.cash)
 
-    df = pd.read_csv(args.list)
+    df = pd.read_csv(args.list, encoding='utf_8_sig', dtype={COL_STOCK_ID: str})
     df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
     stocks = df[COL_STOCK_ID].tolist()
 
