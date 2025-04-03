@@ -72,7 +72,7 @@ def parse_fund_config(config: dict):
     try:
         os.environ['fund_data_path'] = config['fund']['data_path']
     except KeyError:
-        fund_data_path = os.getcwd()
+        fund_data_path = os.path.join(os.getcwd(), 'data', 'fund')
         os.environ['fund_data_path'] = fund_data_path
 
 
@@ -85,7 +85,7 @@ def parse_stock_config(config: dict):
     try:
         stock_data_path = config['stock']['data_path']
     except KeyError:
-        stock_data_path = os.getcwd()
+        stock_data_path = os.path.join(os.getcwd(), 'data', 'stock')
     
     sub_dirs = ['1d', '1w', '1M', 'position', 'info', '300_ingredients', '500_ingredients']
     paths = {sub_dir: os.path.join(stock_data_path, sub_dir) for sub_dir in sub_dirs}
