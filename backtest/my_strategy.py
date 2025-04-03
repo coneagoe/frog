@@ -173,7 +173,7 @@ class MyStrategy(bt.Strategy):
             if len(trade_list) == 0:
                 continue
 
-            print(f"Trades for {stock_name}:")
+            print(f"Trades for {stock_name}: {get_security_name(stock_name)}")
             for t in trade_list:
                 print(f"{t}")
 
@@ -228,6 +228,7 @@ class MyStrategy(bt.Strategy):
 
         if holdings:
             df = pd.DataFrame(holdings)
+            df.sort_values(by='开仓时间', ascending=False, inplace=True)
             print("Holding Positions:")
             print(df.to_string(index=False))
 
