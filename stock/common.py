@@ -131,3 +131,19 @@ def get_last_trading_day() -> str:
         return today
     else:
         return trading_days_str[-1]
+
+
+def is_trading_day(date_str: str) -> bool:
+    """
+    Check if the given date is a trading day.
+    
+    Args:
+        date_str (str): Date in format 'YYYY-MM-DD'
+        
+    Returns:
+        bool: True if the date is a trading day, False otherwise.
+    """
+    cal = mcal.get_calendar('XSHG')
+    date_timestamp = pd.Timestamp(date_str)
+    schedule = cal.schedule(start_date=date_str, end_date=date_str)
+    return not schedule.empty
