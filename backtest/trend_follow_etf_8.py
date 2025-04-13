@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import sys
 import backtrader as bt
@@ -97,8 +98,8 @@ class TrendFollowingStrategy(MyStrategy):
 
 
     def stop(self):
-        print('ema_period: %d, n_positions: %d' %
-            (self.params.ema_period, self.params.n_portion))
+        logging.info('ema_period: %d, n_positions: %d' % (self.params.ema_period, self.params.n_portion))
+        # print('ema_period: %d, n_positions: %d' % (self.params.ema_period, self.params.n_portion))
         super().stop()
 
 

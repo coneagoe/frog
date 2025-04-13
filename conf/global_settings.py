@@ -128,6 +128,11 @@ def parse_backtest_config(config: dict):
     except KeyError:
         pass
 
+    try:
+        os.environ['INIT_CASH'] = config['backtest']['init_cash']
+    except KeyError:
+        os.environ['INIT_CASH'] = '300000'
+
 
 def parse_config():
     if not os.path.exists(config_file_name):
