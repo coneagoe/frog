@@ -16,6 +16,9 @@ def send_email(subject: str, body: str, attachment_file_name: str | None = None)
     if not all([mail_server, mail_port, mail_sender,
                 mail_password, mail_receivers]):
         logging.error("Email configuration is missing.")
+        logging.error(f"mail_server: {mail_server}, mail_port: {mail_port}, "
+                      f"mail_sender: {mail_sender}, mail_password: {mail_password}, "
+                      f"mail_receivers: {mail_receivers}")
         return
 
     message = MIMEMultipart()

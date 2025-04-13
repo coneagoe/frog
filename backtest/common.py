@@ -1,14 +1,10 @@
 from datetime import datetime
+import logging
 import os
 import sys
-import webbrowser
-# from btplotting import BacktraderPlotting
-# from btplotting.analyzers import RecorderAnalyzer
 import backtrader as bt
 import pandas as pd
 import pandas_market_calendars as mcal
-import plotly.graph_objs as go
-from plotly.subplots import make_subplots
 import quantstats as qs
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -182,15 +178,17 @@ def generate_report(cerebro, results):
                     output=report_file_name)
 
     if os.getenv('PLOT_REPORT') == 'true':
+        import webbrowser
         webbrowser.open('file://' + os.path.realpath(report_file_name))
         plot(strategy)
     # else:
+        # from btplotting import BacktraderPlotting
+        # from btplotting.analyzers import RecorderAnalyzer
         # # p = BacktraderPlotting(style='bar', multiple_tabs=True)
 
         # programe_name = os.path.basename(sys.argv[0])
         # p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
-
-    #     cerebro.plot(p)
+        # cerebro.plot(p)
 
 
 def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: str, security_type: str):
@@ -211,10 +209,13 @@ def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: st
 def show_position(positions):
     for data, position in positions.items():
         if position:
-            print(f'current position(当前持仓): {data._name}, size(数量): {"%.2f" % position.size}')
+            logging.info(f'current position(当前持仓): {data._name}, size(数量): {"%.2f" % position.size}')
 
 
 def plot(strategy: bt.Strategy):
+    import plotly.graph_objs as go
+    from plotly.subplots import make_subplots
+
     analyzer = strategy.analyzers.my_analyzer.get_analysis()
 
     df_cashflow = pd.DataFrame(analyzer.cashflow, columns=['total'])

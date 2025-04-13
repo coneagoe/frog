@@ -118,7 +118,7 @@ class MyStrategy(bt.Strategy):
                     self.trades[stock_name].append(new_trade)
                     self.context[i].reset()
                 except TypeError:
-                    print(f"open_price: {self.context[i].open_price}, close_price: {self.context[i].close_price}")
+                    logging.error(f"open_price: {self.context[i].open_price}, close_price: {self.context[i].close_price}")
 
         elif order.status == order.Margin:
             # logging.warning(order)
@@ -161,7 +161,7 @@ class MyStrategy(bt.Strategy):
 
 
     def stop(self):
-        print(f"Ending Value: {self.broker.getvalue():.2f}")
+        logging.info(f"Ending Value: {self.broker.getvalue():.2f}")
 
         self.show_positions()
 
@@ -173,9 +173,9 @@ class MyStrategy(bt.Strategy):
             if len(trade_list) == 0:
                 continue
 
-            print(f"Trades for {stock_name}: {get_security_name(stock_name)}")
+            logging.info(f"Trades for {stock_name}: {get_security_name(stock_name)}")
             for t in trade_list:
-                print(f"{t}")
+                logging.info(f"{t}")
 
 
     def show_positions(self):
@@ -223,16 +223,16 @@ class MyStrategy(bt.Strategy):
 
         if openings:
             df = pd.DataFrame(openings)
-            print("Opening Positions:")
-            print(df.to_string(index=False))
+            logging.info("Opening Positions:")
+            logging.info(df.to_string(index=False))
 
         if holdings:
             df = pd.DataFrame(holdings)
             df.sort_values(by='开仓时间', ascending=False, inplace=True)
-            print("Holding Positions:")
-            print(df.to_string(index=False))
+            logging.info("Holding Positions:")
+            logging.info(df.to_string(index=False))
 
         if closings:
             df = pd.DataFrame(closings)
-            print("Closing Positions:")
-            print(df.to_string(index=False))
+            logging.info("Closing Positions:")
+            logging.info(df.to_string(index=False))
