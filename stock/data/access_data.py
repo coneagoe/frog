@@ -55,7 +55,7 @@ g_df_hk_ggt_stocks = None
 
 
 def load_history_data_stock(security_id: str, period: str, start_date: str,
-                            end_date: str, adjust: str) -> pd.DataFrame:
+                            end_date: str, adjust: str = 'hfq') -> pd.DataFrame:
     download_history_data_stock(security_id, period, start_date, end_date, adjust)
 
     data_file_name = f"{security_id}_{adjust}.csv"
@@ -76,7 +76,7 @@ def load_history_data_stock(security_id: str, period: str, start_date: str,
 
 
 def load_history_data_etf(security_id: str, period: str, start_date: str,
-                          end_date: str, adjust: str) -> pd.DataFrame:
+                          end_date: str, adjust: str = 'hfq') -> pd.DataFrame:
     download_history_data_etf(security_id, period, start_date, end_date, adjust)
 
     data_file_name = f"{security_id}_{adjust}.csv"
@@ -141,7 +141,7 @@ def load_history_data_a_index(security_id: str, period: str, start_date: str,
 
 
 def load_history_data_stock_hk(security_id: str, period: str, start_date: str,
-                               end_date: str, adjust: str) -> pd.DataFrame:
+                               end_date: str, adjust: str = 'hfq') -> pd.DataFrame:
     download_history_data_stock_hk(security_id, period, start_date, end_date, adjust)
 
     data_file_name = f"{security_id}_{adjust}.csv"
@@ -161,7 +161,7 @@ def load_history_data_stock_hk(security_id: str, period: str, start_date: str,
 
 
 def load_history_data(security_id: str, period: str, start_date: str, end_date: str,
-                      adjust="qfq", security_type="auto") -> pd.DataFrame:
+                      adjust: str = "qfq", security_type: str = "auto") -> pd.DataFrame:
     assert security_type in ['auto', 'stock', 'etf', 'us_index', 'a_index', 'hk_ggt_stock']
 
     if security_type == "auto":
@@ -198,6 +198,7 @@ def load_history_data(security_id: str, period: str, start_date: str, end_date: 
     df[COL_HIGH] = df[COL_HIGH].astype(float)
     df[COL_LOW] = df[COL_LOW].astype(float)
     df[COL_VOLUME] = df[COL_VOLUME].astype(float)
+
     return df
 
 

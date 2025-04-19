@@ -28,6 +28,10 @@ from stock.data.access_data import (
 from stock.const import (
     COL_STOCK_ID,
     COL_STOCK_NAME,
+    COL_OPEN,
+    COL_CLOSE,
+    COL_HIGH,
+    COL_LOW,
 )
 
 
@@ -65,6 +69,11 @@ class TestAccessData(unittest.TestCase):
     def test_load_history_data_stock(self):
         df = load_history_data_stock('000001', 'daily', '2022-01-01', '2023-01-02', 'hfq')
         self.assertIsInstance(df, pd.DataFrame)
+        df = load_history_data_stock('002683', 'daily', '2024-11-01', '2025-04-18', 'hfq')
+        self.assertFalse((df[COL_OPEN] >= 2683).any())
+        self.assertFalse((df[COL_CLOSE] >= 2683).any())
+        self.assertFalse((df[COL_HIGH] >= 2683).any())
+        self.assertFalse((df[COL_LOW] >= 2683).any())
 
 
     def test_load_history_data_stock_hk(self):
@@ -145,24 +154,6 @@ class TestAccessData(unittest.TestCase):
         # Test with an invalid date format
         with self.assertRaises(AssertionError):
             load_500_ingredients('2023/01/01')
-
-
-    @patch('stock.data.access_data.ak.stock_tfp_em')
-    def test_drop_suspended_stocks(self, mock_stock_tfp_em):
-        pass
-        # mock_data = pd.DataFrame({
-        #     '代码': ['000001', '000002', '000003']
-        # })
-        # mock_stock_tfp_em.return_value = mock_data
-
-        # stocks = ['000001', '000004', '000005']
-        # date = '20230101'
-
-        # result = drop_suspended_stocks(stocks, date)
-
-        # self.assertEqual(result, ['000004', '000005'])
-
-        # mock_stock_tfp_em.assert_called_once_with(date)
 
 
     def test_drop_delisted_stocks(self):
