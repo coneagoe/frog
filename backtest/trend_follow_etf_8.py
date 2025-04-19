@@ -1,5 +1,5 @@
 import argparse
-import logging
+# import logging
 import os
 import sys
 import backtrader as bt
@@ -18,6 +18,9 @@ from my_strategy import (
     MyStrategy,
 )   # noqa: E402
 from stop_price_manager_ema import EmaStopPriceManager as StopPriceManager
+
+
+# logging.basicConfig(level=logging.INFO)
 
 
 conf.parse_config()
@@ -98,8 +101,8 @@ class TrendFollowingStrategy(MyStrategy):
 
 
     def stop(self):
-        logging.info('ema_period: %d, n_positions: %d' % (self.params.ema_period, self.params.n_portion))
-        # print('ema_period: %d, n_positions: %d' % (self.params.ema_period, self.params.n_portion))
+        # logging.info('ema_period: %d, n_positions: %d' % (self.params.ema_period, self.params.n_portion))
+        print('ema_period: %d, n_positions: %d' % (self.params.ema_period, self.params.n_portion))
         super().stop()
 
 

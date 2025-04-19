@@ -97,6 +97,8 @@ class MyStrategy(bt.Strategy):
                 self.context[i].order_state = OrderState.ORDER_HOLDING
                 self.context[i].open_time = bt.num2date(order.executed.dt)
                 self.context[i].open_bar = len(self.datas[i])
+                # if order.executed.price == 2683.0:
+                    # logging.warning(f"order.executed.price: {order.executed.price}, order: {order}")
                 self.context[i].open_price = round(order.executed.price, 3)
                 self.context[i].size = order.executed.size
             elif order.issell():
@@ -161,7 +163,7 @@ class MyStrategy(bt.Strategy):
 
 
     def stop(self):
-        logging.info(f"Ending Value: {self.broker.getvalue():.2f}")
+        print(f"Ending Value: {self.broker.getvalue():.2f}")
 
         self.show_positions()
 
@@ -173,9 +175,9 @@ class MyStrategy(bt.Strategy):
             if len(trade_list) == 0:
                 continue
 
-            logging.info(f"Trades for {stock_name}: {get_security_name(stock_name)}")
+            print(f"Trades for {stock_name}: {get_security_name(stock_name)}")
             for t in trade_list:
-                logging.info(f"{t}")
+                print(f"{t}")
 
 
     def show_positions(self):
@@ -184,15 +186,16 @@ class MyStrategy(bt.Strategy):
         closings = []
 
         for context in self.context:
-            if context.order_state == OrderState.ORDER_OPENING:
-                stock_info = {
-                    '代码': context.name,
-                    '名称': get_security_name(context.name),
-                    '持仓数': f"{context.size:.2f}",
-                    '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
-                }
-                openings.append(stock_info)
-            elif context.order_state == OrderState.ORDER_HOLDING:
+            # if context.order_state == OrderState.ORDER_OPENING:
+            #     stock_info = {
+            #         '代码': context.name,
+            #         '名称': get_security_name(context.name),
+            #         '持仓数': f"{context.size:.2f}",
+            #         '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
+            #     }
+            #     openings.append(stock_info)
+            # elif context.order_state == OrderState.ORDER_HOLDING:
+            if context.order_state == OrderState.ORDER_HOLDING:
                 stock_info = {
                     '代码': context.name,
                     '名称': get_security_name(context.name),
@@ -223,16 +226,16 @@ class MyStrategy(bt.Strategy):
 
         if openings:
             df = pd.DataFrame(openings)
-            logging.info("Opening Positions:")
-            logging.info(df.to_string(index=False))
+            print("Opening Positions:")
+            print(df.to_string(index=False))
 
         if holdings:
             df = pd.DataFrame(holdings)
             df.sort_values(by='开仓时间', ascending=False, inplace=True)
-            logging.info("Holding Positions:")
-            logging.info(df.to_string(index=False))
+            print("Holding Positions:")
+            print(df.to_string(index=False))
 
         if closings:
             df = pd.DataFrame(closings)
-            logging.info("Closing Positions:")
-            logging.info(df.to_string(index=False))
+            print("Closing Positions:")
+            print(df.to_string(index=False))

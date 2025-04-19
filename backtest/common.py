@@ -5,6 +5,8 @@ import sys
 import backtrader as bt
 import pandas as pd
 import pandas_market_calendars as mcal
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 import quantstats as qs
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -60,8 +62,8 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
     df = load_history_data(security_id=security_id, period=period,
                            start_date=start_date, end_date=end_date,
                            adjust=adjust, security_type=security_type)
-    df = df.iloc[:, :6]
 
+    df = df[[COL_DATE, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME]]
     df.columns = [
         'date',
         'open',
@@ -94,6 +96,11 @@ def load_test_data(security_id: str, period: str, start_date: str, end_date: str
 
     df.index.name = 'date'
 
+    # assert not (df['open'] >= 2683.0).any(), f"Data error: {security_id} {start_date} {end_date}"
+    # assert not (df['close'] >= 2683.0).any(), f"Data error: {security_id} {start_date} {end_date}"
+    # assert not (df['high'] >= 2683.0).any(), f"Data error: {security_id} {start_date} {end_date}"
+    # assert not (df['low'] >= 2683.0).any(), f"Data error: {security_id} {start_date} {end_date}"
+
     return df
 
 
@@ -117,7 +124,7 @@ def set_stocks(cerebro, stocks: list, start_date: str, end_date: str, security_t
     #     adjust = ""
     # else:
     #     adjust = "qfq"
-    adjust = "qfq"
+    adjust = "hfq"
 
     # 添加数据
     for stock in tqdm(stocks):
@@ -209,13 +216,10 @@ def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: st
 def show_position(positions):
     for data, position in positions.items():
         if position:
-            logging.info(f'current position(当前持仓): {data._name}, size(数量): {"%.2f" % position.size}')
+            print(f'current position(当前持仓): {data._name}, size(数量): {"%.2f" % position.size}')
 
 
 def plot(strategy: bt.Strategy):
-    import plotly.graph_objs as go
-    from plotly.subplots import make_subplots
-
     analyzer = strategy.analyzers.my_analyzer.get_analysis()
 
     df_cashflow = pd.DataFrame(analyzer.cashflow, columns=['total'])
