@@ -9,7 +9,30 @@ import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 import quantstats as qs
 from tqdm import tqdm
+import webbrowser
+
+# Directly fix the problematic function in quantstats by monkey patching only the specific issue
+# The issue is in quantstats._plotting.core.plot_timeseries where it uses .sum(axis=0) on a resampler
+import types
+import quantstats._plotting.core as qscore
+
+# Save the original function
+original_sum = pd.core.resample.Resampler.sum
+
+# Patch the pandas resampler's sum method to handle the axis parameter correctly
+def patched_sum(self, *args, **kwargs):
+    # Drop the axis parameter which causes the error
+    if 'axis' in kwargs:
+        del kwargs['axis']
+    return original_sum(self, *args, **kwargs)
+
+# Apply the patch to the resampler's sum method
+pd.core.resample.Resampler.sum = patched_sum
+
+print("Pandas Resampler sum method patched successfully!")
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from backtest.my_analyzer import MyAnalyzer
 from stock import (
     COL_DATE,
@@ -24,7 +47,6 @@ from stock import (
 )  # noqa: E402
 
 
-start_cash = 1000000
 fee_rate = 0.0003
 
 
@@ -143,14 +165,11 @@ def set_stocks(cerebro, stocks: list, start_date: str, end_date: str, security_t
 
 
 def add_analyzer(cerebro):
-    global start_cash
-
     if os.getenv('OPTIMIZER'):
         return
 
     # 设置起始资金
-    if os.getenv('INIT_CASH'):
-        start_cash = float(os.getenv('INIT_CASH'))
+    start_cash = float(os.getenv('INIT_CASH'))
     cerebro.broker.setcash(start_cash)
 
     cerebro.broker.setcommission(commission=fee_rate)  # 设置交易手续费
@@ -178,24 +197,26 @@ def generate_report(cerebro, results):
 
     pyfolio = strategy.analyzers.getbyname('pyfolio')
     returns, positions, transactions, gross_lev = pyfolio.get_pf_items()
-    qs.reports.metrics(returns)
-    report_file_name = f'report_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
-    qs.reports.html(returns=returns, positions=positions,
-                    transactions=transactions, gross_lev=gross_lev,
-                    output=report_file_name)
+
+    qs.extend_pandas()
+    metrics = qs.reports.metrics(returns, mode='full', display=False)
+    # metrics = qs.reports.metrics(returns, display=False)
+    # 打印完整的metrics
+    print(metrics.to_string())
+    # print(metrics)
+    
+    # report_file_name = f'report_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
+    # qs.reports.html(returns=returns, positions=positions,
+    #                 transactions=transactions, gross_lev=gross_lev,
+    #                 output=report_file_name)
 
     if os.getenv('PLOT_REPORT') == 'true':
-        import webbrowser
+        # qs.plots.snapshot(returns, show=True)
+        report_file_name = f'report_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
+        # qs.reports.html(returns=returns, mode='full', output=report_file_name)
+        qs.reports.html(returns=returns, output=report_file_name)
         webbrowser.open('file://' + os.path.realpath(report_file_name))
         plot(strategy)
-    # else:
-        # from btplotting import BacktraderPlotting
-        # from btplotting.analyzers import RecorderAnalyzer
-        # # p = BacktraderPlotting(style='bar', multiple_tabs=True)
-
-        # programe_name = os.path.basename(sys.argv[0])
-        # p = BacktraderPlotting(style='bar', plotkwargs=dict(output_file=f'{programe_name}.html'))
-        # cerebro.plot(p)
 
 
 def run(strategy_name: str, cerebro, stocks: list, start_date: str, end_date: str, security_type: str):
