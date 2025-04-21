@@ -137,12 +137,13 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--start', required=True, help='Start date in YYYY-MM-DD format')
     parser.add_argument('-e', '--end', required=True, help='End date in YYYY-MM-DD format')
     parser.add_argument('-f', '--filter', required=False, help='Space-separated list of stock IDs to filter out')
-    parser.add_argument('-c', '--cash', required=False, type=float, default=1000000, help='Initial cash amount')
+    parser.add_argument('-c', '--cash', required=False, type=float, help='Initial cash amount')
     parser.add_argument('-p', '--plot', required=False, default='', help='Plot trade')
     args = parser.parse_args()
 
     os.environ['PLOT_TRADE'] = args.plot
-    os.environ['INIT_CASH'] = str(args.cash)
+    if args.cash:
+        os.environ['INIT_CASH'] = str(args.cash)
 
     stocks = load_300_ingredients(args.start)
     tmp = load_500_ingredients(args.start)
