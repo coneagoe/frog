@@ -186,16 +186,15 @@ class MyStrategy(bt.Strategy):
         closings = []
 
         for context in self.context:
-            # if context.order_state == OrderState.ORDER_OPENING:
-            #     stock_info = {
-            #         '代码': context.name,
-            #         '名称': get_security_name(context.name),
-            #         '持仓数': f"{context.size:.2f}",
-            #         '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
-            #     }
-            #     openings.append(stock_info)
-            # elif context.order_state == OrderState.ORDER_HOLDING:
-            if context.order_state == OrderState.ORDER_HOLDING:
+            if context.order_state == OrderState.ORDER_OPENING:
+                stock_info = {
+                    '代码': context.name,
+                    '名称': get_security_name(context.name),
+                    '持仓数': f"{context.size:.2f}",
+                    '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
+                }
+                openings.append(stock_info)
+            elif context.order_state == OrderState.ORDER_HOLDING:
                 stock_info = {
                     '代码': context.name,
                     '名称': get_security_name(context.name),
@@ -225,9 +224,10 @@ class MyStrategy(bt.Strategy):
                 closings.append(stock_info)
 
         if openings:
-            df = pd.DataFrame(openings)
-            print("Opening Positions:")
-            print(df.to_string(index=False))
+            if len(openings) <= 10:
+                df = pd.DataFrame(openings)
+                print("Opening Positions:")
+                print(df.to_string(index=False))
 
         if holdings:
             df = pd.DataFrame(holdings)
