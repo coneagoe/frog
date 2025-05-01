@@ -43,7 +43,6 @@ class Context:
     def __init__(self):
         self.reset()
 
-
     def reset(self):
         self.order_state = OrderState.ORDER_IDLE
         self.current_price = None
@@ -59,6 +58,8 @@ class Context:
         self.size = 0
         self.profit_rate = 0
         self.score = 0
+        self.order_submit_bar = None
+        self.order = None
 
 
 class MyStrategy(bt.Strategy):
@@ -75,6 +76,11 @@ class MyStrategy(bt.Strategy):
     def next(self):
         for i in range(len(self.datas)):
             self.context[i].current_price = self.datas[i].close[0]
+            # 如果订单处于OPENING状态且超过2个bar未成交，则取消
+            if self.context[i].order_state == OrderState.ORDER_OPENING:
+                if len(self.datas[i]) - self.context[i].order_submit_bar >= 2:
+                    self.cancel(self.context[i].order)
+                    self.context[i].reset()
             if self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.context[i].holding_bars += 1
                 self.context[i].profit_rate = \
@@ -88,6 +94,8 @@ class MyStrategy(bt.Strategy):
         if order.status in [order.Submitted, order.Accepted]:
             self.context[i].name = stock_name
             self.context[i].order_state = OrderState.ORDER_OPENING
+            self.context[i].order_submit_bar = len(self.datas[i])
+            self.context[i].order = order
         elif order.status == order.Completed:
             if order.executed.price is None:
                 self.context[i].reset()
