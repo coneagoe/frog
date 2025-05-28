@@ -82,7 +82,6 @@ class TrendFollowingStrategy(MyStrategy):
                             and self.macd_1[i].signal[0] > 0
                             and self.macd_1[i].macd[0] > 0):
                             self.order_target_percent(self.datas[i], target=self.target)
-                            self.context[i].order_state = OrderState.ORDER_OPENING
                             self.context[i].stop_price = round(self.stop_manager.ema20[i][-1], 3)
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
