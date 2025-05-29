@@ -376,8 +376,16 @@ def download_baostock_ingredients(query_func, path_func):
         if not os.path.exists(file_path):
             rs = query_func(date=date_str)
             rows = []
-            while (rs.error_code == '0') & rs.next():
+            while rs.next():
+                if rs.error_code != '0':
+                    logging.error(f"query fail({rs.error_code}): {rs.error_msg}")
+                    exit(1)
+
                 rows.append(rs.get_row_data())
+
+            # while (rs.error_code == '0') & rs.next():
+            #     rows.append(rs.get_row_data())
+
             df = pd.DataFrame(rows, columns=rs.fields)
             df.rename(columns={'code': COL_STOCK_ID, 'code_name': COL_STOCK_NAME}, inplace=True)
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.replace('sh.', '').str.replace('sz.', '')

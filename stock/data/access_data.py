@@ -399,6 +399,7 @@ def drop_delisted_stocks(stocks: list, start_date: str, end_date: str) -> list:
 
     df = pd.read_csv(data_path, encoding='utf_8_sig')
     df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
+    # FIXME: for hk stocks, the stock id is 5 digits
     df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
     df = df[(start_date <= df[COL_IPO_DATE]) | (df[COL_DELISTING_DATE] <= end_date)]
     delisted_stocks = df[COL_STOCK_ID].tolist()
