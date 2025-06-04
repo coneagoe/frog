@@ -24,7 +24,7 @@ from my_strategy import (
     MyStrategy,
 )   # noqa: E402
 from obos_indicator import OBOS
-from stop_price_manager_ema import EmaStopPriceManager as StopPriceManager
+from stop_price_manager import StopPriceManagerEma as StopPriceManager
 
 
 conf.parse_config()

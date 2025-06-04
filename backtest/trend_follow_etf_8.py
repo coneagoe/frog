@@ -17,7 +17,7 @@ from my_strategy import (
     OrderState,
     MyStrategy,
 )   # noqa: E402
-from stop_price_manager_ema import EmaStopPriceManager as StopPriceManager
+from stop_price_manager import StopPriceManagerEma as StopPriceManager
 
 
 # logging.basicConfig(level=logging.INFO)
