@@ -14,5 +14,5 @@ class StopPriceManagerKama:
         else:
             context[i].stop_price = max(
                 context[i].stop_price,
-                round(self.kama[i][-1], 3)
+                round(self.kama[i].kama[-1], 3)
             )
