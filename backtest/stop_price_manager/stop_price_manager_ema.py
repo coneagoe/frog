@@ -2,7 +2,7 @@ import backtrader as bt
 from my_strategy import Context
 
 
-class EmaStopPriceManager:
+class StopPriceManagerEma:
     def __init__(self, datas):
         self.ema5 = {i: bt.indicators.EMA(datas[i].close, period=5)
                       for i in range(len(datas))}
