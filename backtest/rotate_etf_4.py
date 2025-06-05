@@ -62,7 +62,6 @@ class RotateStrategy(MyStrategy):
                 if (i in selected and
                     self.ema_low[i][0] < self.context[i].current_price):
                     self.order_target_percent(self.datas[i], target=self.target)
-                    self.context[i].order_state = OrderState.ORDER_OPENING
                     self.context[i].stop_price = 0.0
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 if (i not in selected

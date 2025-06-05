@@ -111,7 +111,6 @@ class TrendFollowingStrategy(MyStrategy):
                             if size > 0:
                                 self.buy(data=self.datas[i], size=size, valid=0)
                                 self.context[i].size = size
-                                self.context[i].order_state = OrderState.ORDER_OPENING
                                 self.context[i].stop_price = round(self.ema20[i][-1], 3)
 
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:

@@ -70,7 +70,6 @@ class ObosStrategy(MyStrategy):
                     # 如果close > ema20
                     if self.context[i].current_price > self.stop_manager.ema20[i][0]:
                         self.order_target_percent(self.datas[i], target=self.target)
-                        self.context[i].order_state = OrderState.ORDER_OPENING
                         self.context[i].stop_price = min([self.datas[i].low[-j] for j in range(1, self.params.param_sp + 1)])
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
