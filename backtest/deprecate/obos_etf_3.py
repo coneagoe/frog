@@ -8,12 +8,10 @@ import conf     # noqa: E402
 from common import (
     enable_optimize,
     run,
-    drop_suspended,
 )   # noqa: E402
 from stock import (
     COL_STOCK_ID,
     drop_delisted_stocks,
-    load_all_hk_ggt_stock_general_info,
 )   # noqa: E402
 from indicator import (
     OBOS_OVERBUY_THRESHOLD,
@@ -51,7 +49,7 @@ class ObosStrategy(MyStrategy):
         # self.target = round(self.params.n_portion / len(self.stocks), 2)
         # if self.target < 0.02:
         #     self.target = 0.02
-        self.target = 0.01
+        self.target = 0.05
 
         self.obos = {i: OBOS(self.datas[i], n=self.params.param_n, m=self.params.param_m)
                      for i in range(len(self.datas))}
@@ -112,21 +110,22 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--filter', required=False, help='Space-separated list of stock IDs to filter out')
     parser.add_argument('-c', '--cash', required=False, type=float, help='Initial cash amount')
     parser.add_argument('-p', '--plot', required=False, default='', help='Plot trade')
+    parser.add_argument('-l', '--list', required=True, help='Path to CSV file containing stock list')
     args = parser.parse_args()
 
     os.environ['PLOT_TRADE'] = args.plot
     if args.cash:
         os.environ['INIT_CASH'] = str(args.cash)
 
-    hk_ggt_stocks_df = load_all_hk_ggt_stock_general_info()
+    df = pd.read_csv(args.list)
+    df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
+    stocks = df[COL_STOCK_ID].tolist()
 
-    stocks = hk_ggt_stocks_df[COL_STOCK_ID].tolist()
     if args.filter:
         filter_list = args.filter.split()
         stocks = [stock for stock in stocks if stock not in filter_list]
 
-    stocks = drop_delisted_stocks(stocks, args.start, args.end)
-    ObosStrategy.stocks = drop_suspended(stocks, args.start, args.end, 10)
+    ObosStrategy.stocks = stocks
 
     cerebro = bt.Cerebro()
 
@@ -140,4 +139,4 @@ if __name__ == "__main__":
 
     strategy_name = os.path.splitext(os.path.basename(__file__))[0]
     run(strategy_name=strategy_name, cerebro=cerebro, stocks=ObosStrategy.stocks,
-        start_date=args.start, end_date=args.end, security_type='hk_ggt_stock')
+        start_date=args.start, end_date=args.end, security_type='auto')
