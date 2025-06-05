@@ -134,4 +134,4 @@ if __name__ == "__main__":
 
     strategy_name = os.path.splitext(os.path.basename(__file__))[0]
     run(strategy_name=strategy_name, cerebro=cerebro, stocks=ObosStrategy.stocks,
-        start_date=args.start, end_date=args.end, security_type='auto')
+        start_date=args.start, end_date=args.end, security_type='hk_ggt_stock')
