@@ -78,9 +78,12 @@ class MyStrategy(bt.Strategy):
             self.context[i].current_price = self.datas[i].close[0]
             # 如果订单处于OPENING状态且超过2个bar未成交，则取消
             if self.context[i].order_state == OrderState.ORDER_OPENING:
-                if len(self.datas[i]) - self.context[i].order_submit_bar >= 2:
-                    self.cancel(self.context[i].order)
-                    self.context[i].reset()
+                try:
+                    if len(self.datas[i]) - self.context[i].order_submit_bar >= 2:
+                        self.cancel(self.context[i].order)
+                        self.context[i].reset()
+                except TypeError:
+                    logging.error(f"Error in order state for {self.stocks[i]}: {self.context[i].order_state}")
             if self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.context[i].holding_bars += 1
                 self.context[i].profit_rate = \

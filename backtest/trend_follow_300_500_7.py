@@ -6,10 +6,8 @@ import pandas as pd
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import conf     # noqa: E402
 from common import (
-    disable_plotly,
     enable_optimize,
     run,
-    show_position,
     drop_suspended,
 )   # noqa: E402
 from stock import (
@@ -28,8 +26,6 @@ from my_strategy import (
 conf.parse_config()
 
 # enable_optimize()
-
-# disable_plotly()
 
 
 class TrendFollowingStrategy(MyStrategy):
