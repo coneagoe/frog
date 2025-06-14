@@ -15,6 +15,7 @@ class OrderState(Enum):
     ORDER_OPENING = 1
     ORDER_HOLDING = 2
     ORDER_CLOSING = 3
+    ORDER_PRE_OPENING = 4
 
 
 @dataclass
@@ -197,11 +198,14 @@ class MyStrategy(bt.Strategy):
         closings = []
 
         for context in self.context:
-            if context.order_state == OrderState.ORDER_OPENING:
+            if context.order_state == OrderState.ORDER_PRE_OPENING or context.order_state == OrderState.ORDER_OPENING:
+                total_value = self.broker.getvalue()
+                price = context.current_price if context.current_price else 1
+                expected_shares = int((total_value * self.target) / price)
                 stock_info = {
                     '代码': context.name,
                     '名称': get_security_name(context.name),
-                    '持仓数': f"{context.size:.2f}",
+                    '预估持仓数': f"{expected_shares}",
                     '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
                 }
                 openings.append(stock_info)
@@ -235,10 +239,9 @@ class MyStrategy(bt.Strategy):
                 closings.append(stock_info)
 
         if openings:
-            if len(openings) <= 10:
-                df = pd.DataFrame(openings)
-                print("Opening Positions:")
-                print(df.to_string(index=False))
+            df = pd.DataFrame(openings)
+            print("Opening Positions:")
+            print(df.to_string(index=False))
 
         if holdings:
             df = pd.DataFrame(holdings)
