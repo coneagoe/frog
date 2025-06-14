@@ -44,9 +44,10 @@ class TrendFollowingStrategy(MyStrategy):
     def __init__(self):
         super().__init__()
 
-        self.target = round(self.params.n_portion / len(self.stocks), 2)
-        if self.target < 0.05:
-            self.target = 0.05
+#         self.target = round(self.params.n_portion / len(self.stocks), 2)
+        # if self.target < 0.05:
+#             self.target = 0.05
+        self.target = 0.1
 
         self.macd_1 = {i: bt.indicators.MACD(self.datas[i].close,
                                              period_me1=self.params.p_macd_1_dif,
