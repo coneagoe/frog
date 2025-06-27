@@ -2,6 +2,7 @@ import logging
 from datetime import date
 import os
 import sys
+import time
 from tqdm import tqdm
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import conf
@@ -32,20 +33,24 @@ conf.parse_config()
 #     return prev_day.strftime('%Y-%m-%d') if dist_prev <= dist_next else next_day.strftime('%Y-%m-%d')
 
 
-def download_all_hk_ggt_stock_data(period: str = 'daily', adjust: str = 'qfq'):
-    start_date = '2010-01-01'
+def download_all_hk_ggt_stock_data(period: str = 'daily', adjust: str = 'hfq',
+                                   batch_size: int = 50, sleep_seconds: int = 2):
+    start_date = '2025-01-16'
     end_date = date.today().strftime('%Y-%m-%d')
 
     hk_ggt_stocks_df = load_all_hk_ggt_stock_general_info()
     
     stock_ids = hk_ggt_stocks_df[COL_STOCK_ID].tolist()
     
-    for stock_id in tqdm(stock_ids, desc="Downloading HK GGT stock data"):
+    for i, stock_id in enumerate(tqdm(stock_ids, desc="Downloading HK GGT stock data")):
         try:
             download_history_data_stock_hk(stock_id, period, start_date, end_date, adjust)
         except Exception as e:
             logging.warning(f"Failed to download data for stock {stock_id}: {e}")
 
+        # if (i + 1) % batch_size == 0 and (i + 1) < len(stock_ids):
+        time.sleep(sleep_seconds)
+
 
 if __name__ == "__main__":
-    download_all_hk_ggt_stock_data(period='daily', adjust='qfq')
+    download_all_hk_ggt_stock_data()

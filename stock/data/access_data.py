@@ -360,6 +360,7 @@ def load_all_hk_ggt_stock_general_info() -> pd.DataFrame:
 
 def is_st(stock_id: str):
     df = load_all_stock_general_info()
+    # print(df[df[COL_STOCK_ID] == stock_id])
     return ((df[COL_STOCK_ID] == stock_id) & \
             (df[COL_STOCK_NAME].str.startswith('ST') | df[COL_STOCK_NAME].str.startswith('*ST'))).any()
 

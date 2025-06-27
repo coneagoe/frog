@@ -267,8 +267,8 @@ def download_history_data_stock(stock_id: str, period: str, start_date: str, end
         df.to_csv(data_path, encoding='utf_8_sig', index=False)
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
-def download_history_data_stock_hk(stock_id: str, period: str, start_date: str, end_date: str, adjust="qfq"):
+@retrying.retry(wait_fixed=5000, stop_max_attempt_number=5)
+def download_history_data_stock_hk(stock_id: str, period: str, start_date: str, end_date: str, adjust="hfq"):
     assert re.match(r'\d{5}', stock_id)
     assert period in ['daily', 'week', 'month']
     assert adjust in ['', 'qfq', 'hfq']
@@ -309,7 +309,7 @@ def download_history_data_stock_hk(stock_id: str, period: str, start_date: str, 
                                adjust=adjust)
     except Exception as e:
         logging.warning(f"stock_id: {stock_id}, {e}")
-        exit(1)
+        raise e
 
     if df0.empty:
         logging.warning(f"download history data {stock_id} fail, please check")
