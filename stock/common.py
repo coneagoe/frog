@@ -133,7 +133,7 @@ def get_last_trading_day() -> str:
         return trading_days_str[-1]
 
 
-def is_trading_day(date_str: str) -> bool:
+def is_a_market_open(date_str: str) -> bool:
     """
     Check if the given date is a trading day.
     
@@ -147,3 +147,40 @@ def is_trading_day(date_str: str) -> bool:
     date_timestamp = pd.Timestamp(date_str)
     schedule = cal.schedule(start_date=date_str, end_date=date_str)
     return not schedule.empty
+
+
+def is_a_market_open_today() -> bool:
+    """
+    Check if today is a trading day.
+
+    Returns:
+        bool: True if today is a trading day, False otherwise.
+    """
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    return is_a_market_open(today_str)
+
+
+def is_hk_market_open(date_str: str) -> bool:
+    """
+    Check if the given date is a trading day in Hong Kong market.
+    
+    Args:
+        date_str (str): Date in format 'YYYY-MM-DD'
+        
+    Returns:
+        bool: True if the date is a trading day, False otherwise.
+    """
+    cal = mcal.get_calendar('XHKG')
+    schedule = cal.schedule(start_date=date_str, end_date=date_str)
+    return not schedule.empty
+
+
+def is_hk_market_open_today() -> bool:
+    """
+    Check if today is a trading day in Hong Kong market.
+
+    Returns:
+        bool: True if today is a trading day, False otherwise.
+    """
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    return is_hk_market_open(today_str)
