@@ -12,7 +12,7 @@ from utility import send_email
 
 
 @app.task
-def trend_follow_etf():
+def obos_hk():
     import conf
     conf.parse_config()
 
@@ -24,15 +24,14 @@ def trend_follow_etf():
 
     # start_date_str = (end_date - timedelta(days=60)).strftime("%Y-%m-%d")
     start_date_str = "2024-11-01"
-    end_date_str = "2025-07-02"
-
-    stock_list_path = 'trend_follow_etf_pool.csv'
+    end_date_str = "2025-07-03"
 
     try:
-        subject = f"trend_follow_etf_{start_date_str}_{end_date_str}"
+        subject = f"obos_hk_{start_date_str}_{end_date_str}"
         command = [
-            "python", "backtest/trend_follow_etf_8.py",
-            "-s", start_date_str, "-e", end_date_str, "-l", stock_list_path,
+            "python", "backtest/obos_hk_2.py",
+            "-s", start_date_str, "-e", end_date_str,
+            "-f", "02362 02981",
             # "-c", os.environ.get('INIT_CASH', '300000'),
         ]
         process = subprocess.run(command, capture_output=True, text=True)
