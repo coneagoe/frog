@@ -15,7 +15,10 @@ from .common import (
     get_last_trading_day,
     is_market_open,
     is_testing,
-    is_trading_day,
+    is_a_market_open,
+    is_a_market_open_today,
+    is_hk_market_open,
+    is_hk_market_open_today,
 )
 from .const import *
 from .data import *
