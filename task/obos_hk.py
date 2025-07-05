@@ -32,7 +32,6 @@ def obos_hk():
         ]
         process = subprocess.run(command, capture_output=True, text=True)
         if process.returncode == 0:
-            # send report
             send_email(
                 subject=subject,
                 body=f"{process.stdout}",
