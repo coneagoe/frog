@@ -292,7 +292,10 @@ def plot(strategy: bt.Strategy):
         # yaxis5=dict(title='Average Monthly Profit')
     )
 
-    fig.show()
+    # fig.show()
+    plot_file_name = f'plot_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
+    fig.write_html(plot_file_name)
+    webbrowser.open('file://' + os.path.realpath(plot_file_name))
 
     plot_trade(strategy)
 
@@ -360,4 +363,7 @@ def plot_trade(strategy: bt.Strategy):
                               yaxis_title='Price',
                               xaxis_title='Date')
 
-            fig.show()
+            # fig.show()
+            plot_file_name = f'plot_trade_{data._name}_{g_strategy_name}_{g_start_date}_{g_end_date}.html'
+            fig.write_html(plot_file_name)
+            webbrowser.open('file://' + os.path.realpath(plot_file_name))
