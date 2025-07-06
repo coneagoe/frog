@@ -9,10 +9,7 @@ beat_schedule = {
         'task': 'task.trend_follow_etf.trend_follow_etf',
         'schedule': crontab(hour=15, minute=5, day_of_week='mon-fri'),
     },
-    # 'run-backtest-daily': {
-    #     'task': 'task.trend_follow_etf.trend_follow_etf',
-    #     'schedule': crontab(hour=15, minute=5),
-    # },
+
     'obos_hk': {
         'task': 'task.download_hk_stock_data.download_hk_stock_data',
         'schedule': crontab(hour=15, minute=0, day_of_week='mon-fri'),
