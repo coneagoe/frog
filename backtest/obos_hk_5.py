@@ -26,7 +26,7 @@ from my_strategy import (
     MyStrategy,
 )   # noqa: E402
 from obos_indicator import OBOS
-from stop_price_manager_ema import EmaStopPriceManager as StopPriceManager
+from stop_price_manager import StopPriceManagerEma as StopPriceManager
 
 
 conf.parse_config()
@@ -39,22 +39,27 @@ class ObosStrategy(MyStrategy):
     params = (
             ('param_n', OBOS_PARAM_N),
             ('param_m', OBOS_PARAM_M),
-            ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
+            # ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
             ('param_sp', 5), # 过去n天的最低价作为initial stop price
+            ('param_delay', 3), # 延迟开仓的bar数量
         )
 
 
     def __init__(self):
         super().__init__()
 
-        self.target = round(self.params.n_portion / len(self.stocks), 2)
-        if self.target < 0.02:
-            self.target = 0.02
+        # self.target = round(self.params.n_portion / len(self.stocks), 2)
+        # if self.target < 0.02:
+        #     self.target = 0.02
+        self.target = 0.01
 
         self.obos = {i: OBOS(self.datas[i], n=self.params.param_n, m=self.params.param_m)
                      for i in range(len(self.datas))}
 
         self.stop_manager = StopPriceManager(self.datas)
+
+        for i in range(len(self.datas)):
+            self.context[i].delay_open_bar = None
 
 
     def next(self):
@@ -70,9 +75,16 @@ class ObosStrategy(MyStrategy):
                 else:
                     # 如果close > ema20
                     if self.context[i].current_price > self.stop_manager.ema20[i][0]:
-                        self.order_target_percent(self.datas[i], target=self.target)
-                        self.context[i].stop_price = min([self.datas[i].low[-j] for j in range(1, self.params.param_sp + 1)])
-                        self.context[i].order_state = OrderState.ORDER_PRE_OPENING
+                        if self.context[i].delay_open_bar is None:
+                            self.context[i].delay_open_bar = len(self.datas[i])
+                        
+                        if len(self.datas[i]) - self.context[i].delay_open_bar >= self.params.param_delay:
+                            self.order_target_percent(self.datas[i], target=self.target)
+                            self.context[i].stop_price = min([self.datas[i].low[-j] for j in range(1, self.params.param_sp + 1)])
+                            self.context[i].order_state = OrderState.ORDER_PRE_OPENING
+                            self.context[i].delay_open_bar = None
+                    else:
+                        self.context[i].delay_open_bar = None
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
                 # 如果OBOS超买
@@ -125,7 +137,7 @@ if __name__ == "__main__":
 
     if os.environ.get('OPTIMIZER') == 'True':
         strats = cerebro.optstrategy(ObosStrategy,
-                                     n_portion=range(1, 10))
+                                     param_sp=range(1, 10))
     else:
         cerebro.addstrategy(ObosStrategy)
 
