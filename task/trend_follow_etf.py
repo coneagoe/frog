@@ -4,7 +4,7 @@ import sys
 import subprocess
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from celery_app import app, redis_client
-from stock import is_a_market_open
+from stock import is_a_market_open_today
 from utility import send_email
 
 
@@ -13,7 +13,7 @@ def trend_follow_etf():
     import conf
     conf.parse_config()
 
-    if not is_a_market_open():
+    if not is_a_market_open_today():
         return "Market is closed today."
 
     end_date = date.today()
