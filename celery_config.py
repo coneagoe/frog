@@ -15,8 +15,8 @@ beat_schedule = {
         'schedule': crontab(hour=15, minute=0, day_of_week='mon-fri'),
     },
 
-#     'run-monitor-hourly': {
-#         'task': 'task.foo.run_monitor',
-#         'schedule': crontab(minute=0),
-#     },
+    'monitor_fallback_stock': {
+        'task': 'task.monitor_fallback_stock.monitor_fallback_stock',
+        'schedule': crontab(minute='*/5', hour='9-14', day_of_week='mon-fri'),
+    },
 }
