@@ -3,7 +3,9 @@ from my_strategy import Context
 
 
 class StopPriceManagerEma:
-    def __init__(self, datas):
+    def __init__(self, datas, profit_rate_threshold: float = 0):
+        self.profit_rate_threshold = profit_rate_threshold
+
         self.ema5 = {i: bt.indicators.EMA(datas[i].close, period=5)
                       for i in range(len(datas))}
 
@@ -20,7 +22,7 @@ class StopPriceManagerEma:
     def update_stop_price(self, context: list[Context], datas, i: int):
         profit_rate = context[i].profit_rate
         ema = None
-        if profit_rate < 0:
+        if profit_rate < self.profit_rate_threshold:
             return
         elif profit_rate < 0.2:
             ema = self.ema30
