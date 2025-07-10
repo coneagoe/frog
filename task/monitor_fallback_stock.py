@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from datetime import date
+from datetime import date, datetime
 from celery_app import app
 import pandas as pd
 
@@ -22,9 +22,9 @@ def monitor_fallback_stock(test=False):
     if not test and not is_a_market_open_today():
         return "Not a market open day. Skipping."
 
-    current_time = date.today().strftime('%H:%M')
+    current_time = datetime.now().strftime('%H:%M')
     if not (current_time >= '09:30' and current_time <= '15:00'):
-        return "Current time is not within market hours. Skipping."
+        return f"{current_time} market is not open. Skipping."
 
     try:
         df = pd.read_csv(stock_csv, encoding='GBK')
