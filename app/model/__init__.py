@@ -8,4 +8,4 @@ class Base(DeclarativeBase):
 
 db = SQLAlchemy(model_class=Base)
 
-from .monitor_stock import MonitorStock, TABLE_NAME_MONITOR_STOCK  # noqa
+from .monitor_stock import TABLE_NAME_MONITOR_STOCK, MonitorStock  # noqa

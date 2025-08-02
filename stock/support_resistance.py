@@ -1,12 +1,9 @@
 import numpy as np
-from scipy.signal import argrelextrema
 import pandas as pd
-from . const import (
-    COL_CLOSE,
-    COL_STOCK_ID,
-)
-from . data import load_history_data
+from scipy.signal import argrelextrema
 
+from .const import COL_CLOSE, COL_STOCK_ID
+from .data import load_history_data
 
 percent = 0.05
 
@@ -15,7 +12,7 @@ def get_support_resistance(df: pd.DataFrame, turning_points: list) -> tuple:
     current_price = df[COL_CLOSE].iloc[-1]
     support_point = None
     resistance_point = None
-    for i in range(len(turning_points)-1, -1, -1):
+    for i in range(len(turning_points) - 1, -1, -1):
         tp = df[COL_CLOSE].iloc[turning_points[i]]
         if tp < current_price:
             if support_point is None:
@@ -58,12 +55,19 @@ def get_turning_points(df: pd.DataFrame):
     return turning_points
 
 
-def calculate_support_resistance(df: pd.DataFrame, start_date_ts: str, end_date_ts: str):
+def calculate_support_resistance(
+    df: pd.DataFrame, start_date_ts: str, end_date_ts: str
+):
     support_point = np.nan
     resistance_point = np.nan
 
-    df = load_history_data(security_id=df[COL_STOCK_ID], period='daily',
-                           start_date=start_date_ts, end_date=end_date_ts, adjust="qfq")
+    df = load_history_data(
+        security_id=df[COL_STOCK_ID],
+        period="daily",
+        start_date=start_date_ts,
+        end_date=end_date_ts,
+        adjust="qfq",
+    )
     if df is not None:
         turning_points = get_turning_points(df)
         support_index, resistance_index = get_support_resistance(df, turning_points)
@@ -72,7 +76,5 @@ def calculate_support_resistance(df: pd.DataFrame, start_date_ts: str, end_date_
 
         if resistance_index is not None:
             resistance_point = df[COL_CLOSE].iloc[resistance_index]
-
-    # print(f"support_index: {support_index}, resistance_index: {resistance_index}, support_point: {support_point}, resistance_point: {resistance_point}")
 
     return support_point, resistance_point

@@ -1,20 +1,22 @@
-import os
-import pandas as pd
-import numpy as np
 import logging
+import os
+
+import numpy as np
+import pandas as pd
 import pandas_market_calendars as mcal
-from fund import get_fund_name
+
+from fund.data import get_fund_name
 from stock.data import get_stock_name
-from .. const import (
-    COL_STOCK_ID,
-    COL_STOCK_NAME,
+
+from ..common import get_stock_position_path
+from ..const import (
     COL_DATE,
     COL_MARKET_VALUE,
     COL_PROFIT,
     COL_PROFIT_RATE,
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
 )
-from .. common import get_stock_position_path
-
 
 # pd.set_option('display.max_rows', None)
 
@@ -25,7 +27,7 @@ from .. common import get_stock_position_path
 #         exit(-1)
 
 
-def fetch_name(df: pd.DataFrame) -> str:
+def fetch_name(df: pd.DataFrame):
     name = get_stock_name(df[COL_STOCK_ID])
     if name:
         return name
@@ -67,16 +69,19 @@ def load_history_position(position_path: str) -> pd.DataFrame | None:
     df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
     df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
     df[COL_STOCK_NAME] = df.apply(fetch_name, axis=1)
-    df = df.replace('--', np.nan)
+    df = df.replace("--", np.nan)
     return df
 
 
-def load_history_positions(start_date: str, end_date: str, stock_ids=tuple) \
-    -> (pd.DataFrame, pd.DataFrame, pd.DataFrame):
+def load_history_positions(
+    start_date: str, end_date: str, stock_ids=tuple
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     assets, profits, profit_rates = ([], [], [])
 
-    market_calendar = mcal.get_calendar('XSHG')
-    date_range = mcal.date_range(market_calendar.schedule(start_date, end_date), frequency='1D')
+    market_calendar = mcal.get_calendar("XSHG")
+    date_range = mcal.date_range(
+        market_calendar.schedule(start_date, end_date), frequency="1D"
+    )
     j = 0
     for i in date_range:
         if j % 2 == 0:
@@ -94,15 +99,21 @@ def load_history_positions(start_date: str, end_date: str, stock_ids=tuple) \
         if stock_ids:
             df = df[df[COL_STOCK_ID].isin(stock_ids)]
 
-        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_MARKET_VALUE]})
+        df0 = pd.DataFrame(
+            {COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_MARKET_VALUE]}
+        )
         df0 = df0.set_index(COL_STOCK_NAME)
         assets.append(df0)
 
-        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT]})
+        df0 = pd.DataFrame(
+            {COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT]}
+        )
         df0 = df0.set_index(COL_STOCK_NAME)
         profits.append(df0)
 
-        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT_RATE]})
+        df0 = pd.DataFrame(
+            {COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT_RATE]}
+        )
         df0 = df0.set_index(COL_STOCK_NAME)
         profit_rates.append(df0)
 

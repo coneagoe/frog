@@ -22,9 +22,10 @@ dependencies = [
     "baostock (>=0.8.9,<0.9.0)",
     "retrying (>=1.4.0,<2.0.0)",
     "celery (>=5.5.3,<6.0.0)",
-    "redis (>=6.2.0,<7.0.0)"
+    "redis (>=6.2.0,<7.0.0)",
+    "requests (>=2.32.4,<3.0.0)",
+    "types-requests (>=2.32.4.20250611,<3.0.0.0)"
 ]
-
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -34,3 +35,54 @@ build-backend = "poetry.core.masonry.api"
 name = "frog"
 version = "0.1.0"
 package-mode = false
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.2.0"
+mypy = "^1.17.0"
+types-requests = "^2.32.4.20250611"
+flake8 = "^7.3.0"
+
+[tool.block]
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = false
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+
+# Exclude app directory
+[[tool.mypy.overrides]]
+module = "app.*"
+ignore_errors = true
+
+# Exclude frog_server.py
+[[tool.mypy.overrides]]
+module = "frog_server"
+ignore_errors = true
+
+# Exclude tools
+[[tool.mypy.overrides]]
+module = "tools"
+ignore_errors = true
+
+# Exclude stock
+[[tool.mypy.overrides]]
+module = "stock.*"
+ignore_errors = true
+
+# Exclude stock
+[[tool.mypy.overrides]]
+module = "fund.*"
+ignore_errors = true

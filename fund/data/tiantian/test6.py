@@ -1,5 +1,5 @@
-import functools
 import asyncio
+import functools
 
 
 def retry(times):
@@ -11,13 +11,15 @@ def retry(times):
                     return await func(*args, **kwargs)
                 except Exception as e:
                     print(e)
+
         return wrapped
+
     return wrapper
 
 
 @retry(3)
 async def bar():
-    print('bar')
+    print("bar")
 
 
 asyncio.run(bar())

@@ -6,18 +6,21 @@ class StopPriceManagerEma:
     def __init__(self, datas, profit_rate_threshold: float = 0):
         self.profit_rate_threshold = profit_rate_threshold
 
-        self.ema5 = {i: bt.indicators.EMA(datas[i].close, period=5)
-                      for i in range(len(datas))}
+        self.ema5 = {
+            i: bt.indicators.EMA(datas[i].close, period=5) for i in range(len(datas))
+        }
 
-        self.ema10 = {i: bt.indicators.EMA(datas[i].close, period=10)
-                      for i in range(len(datas))}
+        self.ema10 = {
+            i: bt.indicators.EMA(datas[i].close, period=10) for i in range(len(datas))
+        }
 
-        self.ema20 = {i: bt.indicators.EMA(datas[i].close, period=20)
-                      for i in range(len(datas))}
+        self.ema20 = {
+            i: bt.indicators.EMA(datas[i].close, period=20) for i in range(len(datas))
+        }
 
-        self.ema30 = {i: bt.indicators.EMA(datas[i].close, period=30)
-                      for i in range(len(datas))}
-
+        self.ema30 = {
+            i: bt.indicators.EMA(datas[i].close, period=30) for i in range(len(datas))
+        }
 
     def update_stop_price(self, context: list[Context], datas, i: int):
         profit_rate = context[i].profit_rate
@@ -34,12 +37,8 @@ class StopPriceManagerEma:
             ema = self.ema5
         else:
             context[i].stop_price = max(
-                context[i].stop_price,
-                round(datas[i].low[-1], 3)
+                context[i].stop_price, round(datas[i].low[-1], 3)
             )
 
         if ema is not None:
-            context[i].stop_price = max(
-                context[i].stop_price,
-                round(ema[i][-1], 3)
-            )
+            context[i].stop_price = max(context[i].stop_price, round(ema[i][-1], 3))

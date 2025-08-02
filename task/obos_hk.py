@@ -1,16 +1,18 @@
-from datetime import (date, timedelta)
 import os
-import sys
 import subprocess
+import sys
+from datetime import date
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from celery_app import app, redis_client
-from stock import is_hk_market_open_today
-from utility import send_email
+from celery_app import app  # noqa: E402
+from stock import is_hk_market_open_today  # noqa: E402
+from utility import send_email  # noqa: E402
 
 
 @app.task
 def obos_hk():
     import conf
+
     conf.parse_config()
 
     if not is_hk_market_open_today():
@@ -26,9 +28,14 @@ def obos_hk():
     try:
         subject = f"obos_hk_{start_date_str}_{end_date_str}"
         command = [
-            "python", "backtest/obos_hk_2.py",
-            "-s", start_date_str, "-e", end_date_str,
-            "-f", "02362 02981",
+            "python",
+            "backtest/obos_hk_2.py",
+            "-s",
+            start_date_str,
+            "-e",
+            end_date_str,
+            "-f",
+            "02362 02981",
         ]
         process = subprocess.run(command, capture_output=True, text=True)
         if process.returncode == 0:

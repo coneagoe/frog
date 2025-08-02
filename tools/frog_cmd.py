@@ -3,10 +3,12 @@ import base64
 import logging
 import os
 import sys
+
+import requests  # type: ignore[import-untyped]
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import requests    # noqa: E402
-import conf        # noqa: E402
+import conf  # noqa: E402
 
 
 def monitor_stock_upload(csv_path: str, ip: str, port: int):
@@ -14,29 +16,31 @@ def monitor_stock_upload(csv_path: str, ip: str, port: int):
         logging.error(f"{csv_path} not exists!")
         return
 
-    with open(csv_path, 'rb') as f:
+    with open(csv_path, "rb") as f:
         stocks_base64 = base64.b64encode(f.read())
-        r = requests.post(f"http://{ip}:{port}/monitor_stock/upload", files={'file': stocks_base64})
+        r = requests.post(
+            f"http://{ip}:{port}/monitor_stock/upload", files={"file": stocks_base64}
+        )
         logging.info(r.text)
 
 
 def monitor_stock_download(csv_path: str, ip: str, port: int):
     r = requests.get(f"http://{ip}:{port}/monitor_stock/download")
     if r.status_code == 200:
-        with open(csv_path, 'wb') as f:
+        with open(csv_path, "wb") as f:
             f.write(base64.b64decode(r.content))
         logging.info("Success")
     else:
         logging.error(f"status: {r.status_code}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-u', type=str, help='upload stocks.csv')
-    parser.add_argument('-d', type=str, help='download stocks.csv')
-    parser.add_argument('-i', type=str, help='frog app ip', default='localhost')
-    parser.add_argument('-p', type=int, help='port', default=5000)
-    parser.add_argument('-P', action='store_true', help='use proxy')
+    parser.add_argument("-u", type=str, help="upload stocks.csv")
+    parser.add_argument("-d", type=str, help="download stocks.csv")
+    parser.add_argument("-i", type=str, help="frog app ip", default="localhost")
+    parser.add_argument("-p", type=int, help="port", default=5000)
+    parser.add_argument("-P", action="store_true", help="use proxy")
     args = parser.parse_args()
 
     if args.P:

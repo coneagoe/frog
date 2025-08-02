@@ -3,19 +3,19 @@ This script is to convert the stock name or fund name as a full name
  according to the stock general info and fund general info.
 """
 
+import logging
 from os import walk
 from os.path import join
-# import logging
+
+import conf
 from fund import get_fund_name
 from stock import (
-    get_stock_name,
     COL_STOCK_ID,
     COL_STOCK_NAME,
+    get_stock_name,
     get_stock_position_path,
-    load_history_position
+    load_history_position,
 )
-import conf
-
 
 conf.parse_config()
 
@@ -38,5 +38,8 @@ if __name__ == "__main__":
     for i in filenames:
         file_path = join(get_stock_position_path(), i)
         df = load_history_position(file_path)
-        # print(df)
-        df.to_csv(file_path, encoding='utf_8_sig', index=False)
+        if df is None:
+            logging.error(f"Failed to load file: {file_path}")
+            continue
+
+        df.to_csv(file_path, encoding="utf_8_sig", index=False)

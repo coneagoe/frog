@@ -1,8 +1,10 @@
 from flask import Flask
+
 from config import config
-from .email import mail, send_email
+
+from .email import mail
 from .model import db
-from .strategy import *
+from .strategy import bp_monitor_stock, scheduler
 
 
 def create_app(config_name):

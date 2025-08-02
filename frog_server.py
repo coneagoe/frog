@@ -1,10 +1,11 @@
 import os
+
 import conf
+from app import add_job_monitor_stock, create_app, db, scheduler
+
 conf.parse_config()
-from app import db, create_app, scheduler, add_job_monitor_stock
 
-
-app = create_app(os.environ['FROG_SERVER_CONFIG'])
+app = create_app(os.environ["FROG_SERVER_CONFIG"])
 
 with app.app_context():
     db.create_all()

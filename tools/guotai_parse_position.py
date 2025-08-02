@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
-import logging
-from os.path import basename, join
-import sys
 import datetime
+import os
+import sys
+from os.path import basename, join
+
 import pandas as pd
 from tqdm import tqdm
-import conf
-from ocr import *
-from stock import *
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import conf  # noqa: E402
+from ocr import OcrType, crop_image  # noqa: E402
+from stock import get_stock_position_path  # noqa: E402
+from stock.account.guotai import GuotaiParser  # noqa: E402
+
+conf.parse_config()
 
 parser = GuotaiParser()
 
@@ -18,13 +23,13 @@ def usage():
 
 
 def update_stock_position(timestamp, images, ocr_type):
-    '''
+    """
     parse stock positions according to screenshots, save the results in csv
     :param timestamp: csv file name
     :param images:
     :param ocr_type:
     :return: None
-    '''
+    """
     global parser
     df = None
     for image in tqdm(images):
@@ -41,19 +46,19 @@ def update_stock_position(timestamp, images, ocr_type):
         print(df)
 
         output_file_name = join(get_stock_position_path(), f"{timestamp}.csv")
-        df.to_csv(output_file_name, encoding='utf_8_sig', index=False)
+        df.to_csv(output_file_name, encoding="utf_8_sig", index=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if len(sys.argv) == 1:
         usage()
         exit()
 
-    # logging.getLogger().setLevel(logging.DEBUG)
-    conf.config = conf.parse_config()
-
-    images = crop_image(sys.argv[1], OCR_ACCURATE_BASIC, 6000)
+    images = crop_image(sys.argv[1], OcrType.OCR_ACCURATE_BASIC, 6000)
 
     today = datetime.date.today()
-    update_stock_position("{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day),
-                          images, OCR_ACCURATE_BASIC)
+    update_stock_position(
+        "{:04d}-{:02d}-{:02d}".format(today.year, today.month, today.day),
+        images,
+        OcrType.OCR_ACCURATE_BASIC,
+    )

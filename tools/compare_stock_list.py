@@ -1,13 +1,14 @@
 import logging
 import os
 import sys
+
 import pandas as pd
+
 from stock import COL_STOCK_ID
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print(f'Usage: {sys.argv[0]} <stock_list_0> <stock_list_1>')
+        print(f"Usage: {sys.argv[0]} <stock_list_0> <stock_list_1>")
         exit(1)
 
     stock_list_0 = sys.argv[1]
@@ -26,7 +27,7 @@ if __name__ == '__main__':
     df2 = df0[~df0[COL_STOCK_ID].isin(df1[COL_STOCK_ID])]
     df3 = df1[~df1[COL_STOCK_ID].isin(df0[COL_STOCK_ID])]
 
-    print(f'stocks in only in {stock_list_0}:')
-    print(f'{df2}\n')
-    print(f'stocks in only in {stock_list_1}:')
+    print(f"stocks in only in {stock_list_0}:")
+    print(f"{df2}\n")
+    print(f"stocks in only in {stock_list_1}:")
     print(df3)
