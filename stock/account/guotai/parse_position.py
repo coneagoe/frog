@@ -1,42 +1,53 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import pandas as pd
 import re
-from stock.common import *
+
+import pandas as pd
+
 from ocr import get_ocr
+from stock.common import (
+    COL_COST,
+    COL_CURRENT_PRICE,
+    COL_MARKET_VALUE,
+    COL_POSITION,
+    COL_POSITION_AVAILABLE,
+    COL_PROFIT,
+    COL_PROFIT_RATE,
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
+)
 
-
-pattern_stick = re.compile(r'(\D+)(\d{6})$')
-pattern_tailing_number = re.compile(r'\d+$')
-pattern_float = re.compile(r'^\s*([-+.,\d%]+)\s*$')
-pattern_int = re.compile(r'^(\d+)$')
+pattern_stick = re.compile(r"(\D+)(\d{6})$")
+pattern_tailing_number = re.compile(r"\d+$")
+pattern_float = re.compile(r"^\s*([-+.,\d%]+)\s*$")
+pattern_int = re.compile(r"^(\d+)$")
 
 g_stocks = {
-    u'当升科技': '300073',
-    u'兆易创新': '603986',
-    u'华润微': '688396',
-    u'北京君正': '300223',
-    u'电池ETF': '159755',
-    u'新能车': '515700',
-    u'稀土基金': '516150',
-    u'创业板成长E': '159967',
-    u'中国A50': '563000',
-    u'恒生科技': '513130',
-    u'恒生医疗': '513060',
-    u'易方达科润LOF': '161131',
-    u'H股LOF': '160717',
-    u'恒生国企ETF': '159850',
-    u'广发创业板定开': '162720',
-    u'南方瑞合': '501062',
-    u'港股通综': '513990',
-    u'科创华泰': '501202',
-    u'富国科创': '506003',
-    u'中欧远见定开': '166025',
-    u'H股消费': '513230',
-    u'万家科创': '506001',
-    u'创业板2年定开': '161914',
-    u'HK消费50': '513070'
+    "当升科技": "300073",
+    "兆易创新": "603986",
+    "华润微": "688396",
+    "北京君正": "300223",
+    "电池ETF": "159755",
+    "新能车": "515700",
+    "稀土基金": "516150",
+    "创业板成长E": "159967",
+    "中国A50": "563000",
+    "恒生科技": "513130",
+    "恒生医疗": "513060",
+    "易方达科润LOF": "161131",
+    "H股LOF": "160717",
+    "恒生国企ETF": "159850",
+    "广发创业板定开": "162720",
+    "南方瑞合": "501062",
+    "港股通综": "513990",
+    "科创华泰": "501202",
+    "富国科创": "506003",
+    "中欧远见定开": "166025",
+    "H股消费": "513230",
+    "万家科创": "506001",
+    "创业板2年定开": "161914",
+    "HK消费50": "513070",
 }
 
 
@@ -46,29 +57,35 @@ def is_valid_stock_name(stock_name: str):
 
 def get_next_float(words: list, i: int):
     while i < len(words):
-        logging.debug(f'{i}: {words[i]}')
+        logging.debug(f"{i}: {words[i]}")
         tmp = pattern_float.match(words[i])
         i += 1
         if tmp:
-            return float(tmp.group(1).strip('%')), i
-    logging.error(f'get_next_float: {i}, {words}')
+            return float(tmp.group(1).strip("%")), i
+    logging.error(f"get_next_float: {i}, {words}")
 
 
 def get_next_int(words: list, i: int):
     while i < len(words):
-        logging.debug(f'{i}: {words[i]}')
+        logging.debug(f"{i}: {words[i]}")
         tmp = pattern_int.match(words[i])
         i += 1
         if tmp:
             return int(tmp.group(1)), i
-    logging.error(f'get_next_float: {i}, {words}')
+    logging.error(f"get_next_float: {i}, {words}")
 
 
 class GuotaiParser:
     stock_id, stock_name = (None, None)
-    position, position_available, position_market_value,\
-        current_price, cost, profit_loss, profit_loss_percent = \
-        (0, 0, 0, 0, 0, 0, 0)
+    (
+        position,
+        position_available,
+        position_market_value,
+        current_price,
+        cost,
+        profit_loss,
+        profit_loss_percent,
+    ) = (0, 0, 0, 0, 0, 0, 0)
     data = None
 
     def __init__(self):
@@ -76,22 +93,32 @@ class GuotaiParser:
 
     def reset(self):
         self.stock_id, self.stock_name = (None, None)
-        self.position, self.position_available, self.position_market_value,\
-            self.current_price, self.cost, self.profit_loss, self.profit_loss_percent,  = \
-            (None, None, None, None, None, None, None)
-        self.data = {COL_STOCK_ID: [],
-                     COL_STOCK_NAME: [],
-                     COL_MARKET_VALUE: [],
-                     COL_POSITION: [],
-                     COL_POSITION_AVAILABLE: [],
-                     COL_CURRENT_PRICE: [],
-                     COL_COST: [],
-                     COL_PROFIT: [],
-                     COL_PROFIT_RATE: []}
+        (
+            self.position,
+            self.position_available,
+            self.position_market_value,
+            self.current_price,
+            self.cost,
+            self.profit_loss,
+            self.profit_loss_percent,
+        ) = (None, None, None, None, None, None, None)
+        self.data = {
+            COL_STOCK_ID: [],
+            COL_STOCK_NAME: [],
+            COL_MARKET_VALUE: [],
+            COL_POSITION: [],
+            COL_POSITION_AVAILABLE: [],
+            COL_CURRENT_PRICE: [],
+            COL_COST: [],
+            COL_PROFIT: [],
+            COL_PROFIT_RATE: [],
+        }
 
     def save_data(self):
         self.data[COL_STOCK_ID].append(self.stock_id)
-        self.data[COL_STOCK_NAME].append(pattern_tailing_number.sub('', self.stock_name))
+        self.data[COL_STOCK_NAME].append(
+            pattern_tailing_number.sub("", self.stock_name)
+        )
         self.data[COL_MARKET_VALUE].append(self.position_market_value)
         self.data[COL_POSITION].append(self.position)
         self.data[COL_POSITION_AVAILABLE].append(self.position_available)
@@ -101,14 +128,20 @@ class GuotaiParser:
         self.data[COL_PROFIT_RATE].append(self.profit_loss_percent)
 
         self.stock_id, self.stock_name = (None, None)
-        self.position, self.position_available, self.position_market_value,\
-            self.current_price, self.cost, self.profit_loss, self.profit_loss_percent = \
-            (None, None, None, None, None, None, None)
+        (
+            self.position,
+            self.position_available,
+            self.position_market_value,
+            self.current_price,
+            self.cost,
+            self.profit_loss,
+            self.profit_loss_percent,
+        ) = (None, None, None, None, None, None, None)
 
     def parse_position(self, image_file_name: str, ocr_type):
         # parse fund positions according to the screenshot
         words = get_ocr(image_file_name, ocr_type)
-        logging.debug(f'{image_file_name}: {words}')
+        logging.debug(f"{image_file_name}: {words}")
 
         if words is not None:
             i = 0

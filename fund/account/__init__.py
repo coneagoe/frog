@@ -1,2 +1,8 @@
-from . tiantian import *
-from . history_position import load_history_positions, load_history_position
+from . import tiantian
+from .history_position import load_history_position, load_history_positions
+
+__all__ = [
+    "load_history_position",
+    "load_history_positions",
+    "tiantian",
+]

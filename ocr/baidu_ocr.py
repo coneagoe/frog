@@ -1,9 +1,10 @@
 import base64
-from enum import Enum
-import logging
-import requests
 import json
+import logging
 import os
+from enum import Enum
+
+import requests  # type: ignore[import-untyped]
 from PIL import Image
 
 
@@ -16,7 +17,7 @@ class OcrType(Enum):
 image_length_limits = {
     OcrType.OCR_GENERAL_BASIC: 4000,
     OcrType.OCR_ACCURATE_BASIC: 8000,
-    OcrType.OCR_ACCURATE: 8000
+    OcrType.OCR_ACCURATE: 8000,
 }
 
 token = None
@@ -63,15 +64,15 @@ def crop_image(image_file_name: str, ocr_type: OcrType, image_length: int) -> li
 
 
 def get_token():
-    client_id = os.environ['baidu_ocr_client_id']
-    client_secret = os.environ['baidu_ocr_client_secret']
+    client_id = os.environ["baidu_ocr_client_id"]
+    client_secret = os.environ["baidu_ocr_client_secret"]
     logging.info(f"client_id: {client_id}, client_secret: {client_secret}")
 
-    token_url = 'https://aip.baidubce.com/oauth/2.0/token'
+    token_url = "https://aip.baidubce.com/oauth/2.0/token"
     params = {
-        'grant_type': 'client_credentials',
-        'client_id': client_id,
-        'client_secret': client_secret
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
     }
 
     try:
@@ -97,7 +98,7 @@ def get_parameter_ocr_accurate(image, token: str):
             success: list
             fail: None
     """
-    ocr_url = 'https://aip.baidubce.com/rest/2.0/ocr/v1/accurate'
+    ocr_url = "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate"
     ocr_url += f"?access_token={token}"
     body = {
         "image": image,
@@ -122,7 +123,7 @@ def get_parameter_ocr_accurate_basic(image, token: str):
             success: list
             fail: None
     """
-    ocr_url = 'https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic'
+    ocr_url = "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic"
     ocr_url += f"?access_token={token}"
     body = {
         "image": image,
@@ -145,7 +146,7 @@ def get_parameter_ocr_general_basic(image, token):
             success: list
             fail: None
     """
-    ocr_url = 'https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic'
+    ocr_url = "https://aip.baidubce.com/rest/2.0/ocr/v1/general_basic"
     ocr_url += f"?access_token={token}"
     body = {
         "image": image,
@@ -160,7 +161,7 @@ def get_parameter_ocr_general_basic(image, token):
 ocr_parameter_table = {
     OcrType.OCR_GENERAL_BASIC: get_parameter_ocr_general_basic,
     OcrType.OCR_ACCURATE_BASIC: get_parameter_ocr_accurate_basic,
-    OcrType.OCR_ACCURATE: get_parameter_ocr_accurate
+    OcrType.OCR_ACCURATE: get_parameter_ocr_accurate,
 }
 
 
@@ -187,10 +188,10 @@ def get_ocr(image_file_name: str, ocr_type: OcrType):
             content = json.loads(response.content.decode("UTF-8"))
             words = []
             try:
-                for x in content['words_result']:
+                for x in content["words_result"]:
                     for k, v in x.items():
-                        if k == 'words':
-                            words.append(v.replace(' ', ''))
+                        if k == "words":
+                            words.append(v.replace(" ", ""))
                 return words
             except KeyError:
                 logging.error(f'{content["error_msg"]}, {image_file_name}')

@@ -1,13 +1,12 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-import logging
+
 import backtrader as bt
 import pandas as pd
-from stock import (
-    get_security_name,
-)
-from backtrader import num2date
+
+from stock import get_security_name
 
 
 class OrderState(Enum):
@@ -30,8 +29,8 @@ class Trade:
     holding_time: int
 
     def __str__(self):
-        open_str = self.open_time.strftime('%Y-%m-%d') if self.open_time else '-'
-        close_str = self.close_time.strftime('%Y-%m-%d') if self.close_time else '-'
+        open_str = self.open_time.strftime("%Y-%m-%d") if self.open_time else "-"
+        close_str = self.close_time.strftime("%Y-%m-%d") if self.close_time else "-"
         return (
             f"开仓时间: {open_str}, 开仓价格: {self.open_price}, "
             f"平仓时间: {close_str}, 平仓价格: {self.close_price}, "
@@ -45,6 +44,7 @@ class Context:
         self.reset()
 
     def reset(self):
+        self.name = None
         self.order_state = OrderState.ORDER_IDLE
         self.current_price = None
         self.open_time = None
@@ -64,33 +64,46 @@ class Context:
 
 
 class MyStrategy(bt.Strategy):
-    stocks = []
+    stocks: list[str] = []
 
     def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.name
         assert len(self.stocks) > 0, "stocks is empty"
         self.context = [Context() for i in range(len(self.stocks))]
-        self.trades = {stock: [] for stock in self.stocks}
+        self.trades: dict[str, list[Trade]] = {stock: [] for stock in self.stocks}
         for i in range(len(self.stocks)):
             self.context[i].name = self.stocks[i]
-
 
     def next(self):
         for i in range(len(self.datas)):
             self.context[i].current_price = self.datas[i].close[0]
             # 如果订单处于OPENING状态且超过2个bar未成交，则取消
             if self.context[i].order_state == OrderState.ORDER_OPENING:
-                try:
-                    if len(self.datas[i]) - self.context[i].order_submit_bar >= 2:
-                        self.cancel(self.context[i].order)
-                        self.context[i].reset()
-                except TypeError:
-                    logging.error(f"Error in order state for {self.stocks[i]}: {self.context[i].order_state}")
-            if self.context[i].order_state == OrderState.ORDER_HOLDING:
-                self.context[i].holding_bars += 1
-                self.context[i].profit_rate = \
-                    round((self.context[i].current_price - self.context[i].open_price) / self.context[i].open_price, 4)
-                self.context[i].score = self.context[i].profit_rate * 100 + self.context[i].holding_bars
+                assert isinstance(
+                    self.context[i].order_submit_bar, int
+                ), f"{self.stocks[i]} order_submit_bar is None"
 
+                if (
+                    len(self.datas[i]) - self.context[i].order_submit_bar  # type: ignore[operator]
+                    >= 2
+                ):
+                    self.cancel(self.context[i].order)
+                    self.context[i].reset()
+            elif self.context[i].order_state == OrderState.ORDER_HOLDING:
+                self.context[i].holding_bars += 1
+                profit_diff = (
+                    self.context[i].current_price - self.context[i].open_price  # type: ignore[operator]
+                )
+                self.context[i].profit_rate = round(
+                    profit_diff / self.context[i].open_price,
+                    4,
+                )
+                self.context[i].score = (
+                    self.context[i].profit_rate * 100 + self.context[i].holding_bars
+                )
 
     def notify_order(self, order):
         stock_name = order.data._name
@@ -109,8 +122,6 @@ class MyStrategy(bt.Strategy):
                 self.context[i].order_state = OrderState.ORDER_HOLDING
                 self.context[i].open_time = bt.num2date(order.executed.dt)
                 self.context[i].open_bar = len(self.datas[i])
-                # if order.executed.price == 2683.0:
-                    # logging.warning(f"order.executed.price: {order.executed.price}, order: {order}")
                 self.context[i].open_price = round(order.executed.price, 3)
                 self.context[i].size = order.executed.size
             elif order.issell():
@@ -119,20 +130,29 @@ class MyStrategy(bt.Strategy):
                 self.context[i].close_bar = len(self.datas[i])
                 self.context[i].close_price = round(order.executed.price, 3)
                 try:
+                    profit_diff = (
+                        self.context[i].close_price - self.context[i].open_price  # type: ignore[operator]
+                    )
                     new_trade = Trade(
-                        open_price=self.context[i].open_price,
-                        close_price=self.context[i].close_price,
-                        profit_rate=round((self.context[i].close_price - self.context[i].open_price) / self.context[i].open_price, 2),
-                        open_time=self.context[i].open_time,
-                        open_bar=self.context[i].open_bar,
-                        close_time=self.context[i].close_time,
-                        close_bar=self.context[i].close_bar,
-                        holding_time=self.context[i].close_bar - self.context[i].open_bar,
+                        open_price=self.context[i].open_price,  # type: ignore
+                        close_price=self.context[i].close_price,  # type: ignore
+                        profit_rate=round(
+                            profit_diff / self.context[i].open_price,
+                            2,
+                        ),
+                        open_time=self.context[i].open_time,  # type: ignore
+                        open_bar=self.context[i].open_bar,  # type: ignore
+                        close_time=self.context[i].close_time,  # type: ignore
+                        close_bar=self.context[i].close_bar,  # type: ignore
+                        holding_time=self.context[i].close_bar  # type: ignore
+                        - self.context[i].open_bar,
                     )
                     self.trades[stock_name].append(new_trade)
                     self.context[i].reset()
                 except TypeError:
-                    logging.error(f"open_price: {self.context[i].open_price}, close_price: {self.context[i].close_price}")
+                    logging.error(
+                        f"open_price: {self.context[i].open_price}, close_price: {self.context[i].close_price}"  # noqa: E501
+                    )
 
         elif order.status == order.Margin:
             # logging.warning(order)
@@ -141,14 +161,13 @@ class MyStrategy(bt.Strategy):
         elif order.status in [order.Canceled, order.Rejected]:
             self.context[i].reset()
 
-
     def notify_trade(self, trade):
         return
 
         stock_name = trade.getdataname()
         i = self.stocks.index(stock_name)
         if trade.isopen:
-            self.context[i].order_state = ORDER_HOLDING
+            self.context[i].order_state = OrderState.ORDER_HOLDING
             self.context[i].open_time = trade.open_datetime()
             self.context[i].open_bar = trade.baropen
             self.context[i].open_price = round(trade.price, 3)
@@ -163,7 +182,11 @@ class MyStrategy(bt.Strategy):
             new_trade = Trade(
                 open_price=self.context[i].open_price,
                 close_price=self.context[i].close_price,
-                profit_rate=round((self.context[i].close_price - self.context[i].open_price) / self.context[i].open_price, 2),
+                profit_rate=round(
+                    (self.context[i].close_price - self.context[i].open_price)
+                    / self.context[i].open_price,
+                    2,
+                ),
                 open_time=self.context[i].open_time,
                 open_bar=self.context[i].open_bar,
                 close_time=trade.close_datetime(),
@@ -173,14 +196,12 @@ class MyStrategy(bt.Strategy):
             self.trades[stock_name].append(new_trade)
             self.context[i].reset()
 
-
     def stop(self):
         print(f"Ending Value: {self.broker.getvalue():.2f}")
 
         self.show_positions()
 
         self.show_trades()
-
 
     def show_trades(self):
         for stock_name, trade_list in self.trades.items():
@@ -191,50 +212,126 @@ class MyStrategy(bt.Strategy):
             for t in trade_list:
                 print(f"{t}")
 
-
     def show_positions(self):
         openings = []
         holdings = []
         closings = []
 
         for context in self.context:
-            if context.order_state == OrderState.ORDER_PRE_OPENING or context.order_state == OrderState.ORDER_OPENING:
+            if (
+                context.order_state == OrderState.ORDER_PRE_OPENING
+                or context.order_state == OrderState.ORDER_OPENING
+            ):
                 total_value = self.broker.getvalue()
                 price = context.current_price if context.current_price else 1
                 expected_shares = int((total_value * self.target) / price)
                 stock_info = {
-                    '代码': context.name,
-                    '名称': get_security_name(context.name),
-                    '预估持仓数': f"{expected_shares}",
-                    '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
+                    "代码": context.name,
+                    "名称": (
+                        get_security_name(context.name)
+                        if context.name is not None
+                        else "-"
+                    ),
+                    "预估持仓数": f"{expected_shares}",
+                    "止损": (
+                        f"{context.stop_price:.3f}"
+                        if context.stop_price is not None
+                        else "-"
+                    ),
                 }
                 openings.append(stock_info)
             elif context.order_state == OrderState.ORDER_HOLDING:
                 stock_info = {
-                    '代码': context.name,
-                    '名称': get_security_name(context.name),
-                    '持仓数': f"{context.size:.2f}",
-                    '成本': f"{context.open_price:.3f}",
-                    '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
-                    '现价': f"{context.current_price:.3f}",
-                    '开仓时间': context.open_time.strftime('%Y-%m-%d'),
-                    '开仓价格': f"{context.open_price:.3f}",
-                    '盈亏': f"{(context.current_price - context.open_price) * context.size:.2f}",
-                    '收益率': f"{(context.profit_rate * 100):.2f}%",
+                    "代码": context.name,
+                    "名称": (
+                        get_security_name(context.name)
+                        if context.name is not None
+                        else "-"
+                    ),
+                    "持仓数": f"{context.size:.2f}",
+                    "成本": (
+                        f"{context.open_price:.3f}"
+                        if context.open_price is not None
+                        else "-"
+                    ),
+                    "止损": (
+                        f"{context.stop_price:.3f}"
+                        if context.stop_price is not None
+                        else "-"
+                    ),
+                    "现价": (
+                        f"{context.current_price:.3f}"
+                        if context.current_price is not None
+                        else "-"
+                    ),
+                    "开仓时间": (
+                        context.open_time.strftime("%Y-%m-%d")
+                        if context.open_time is not None
+                        else "-"
+                    ),
+                    "开仓价格": (
+                        f"{context.open_price:.3f}"
+                        if context.open_price is not None
+                        else "-"
+                    ),
+                    "盈亏": (
+                        f"{(context.current_price - context.open_price) * context.size:.2f}"  # noqa: E501
+                        if context.current_price is not None
+                        and context.open_price is not None
+                        else "-"
+                    ),
+                    "收益率": (
+                        f"{(context.profit_rate * 100):.2f}%"
+                        if context.profit_rate is not None
+                        else "-"
+                    ),
                 }
                 holdings.append(stock_info)
             elif context.order_state == OrderState.ORDER_CLOSING:
                 stock_info = {
-                    '代码': context.name,
-                    '名称': get_security_name(context.name),
-                    '持仓数': f"{context.size:.2f}",
-                    '成本': f"{context.open_price:.3f}",
-                    '止损': f"{context.stop_price:.3f}" if context.stop_price is not None else '-',
-                    '现价': f"{context.current_price:.3f}",
-                    '开仓时间': context.open_time.strftime('%Y-%m-%d'),
-                    '开仓价格': f"{context.open_price:.3f}",
-                    '盈亏': f"{(context.current_price - context.open_price) * context.size:.2f}",
-                    '收益率': f"{(context.profit_rate * 100):.2f}%",
+                    "代码": context.name,
+                    "名称": (
+                        get_security_name(context.name)
+                        if context.name is not None
+                        else "-"
+                    ),
+                    "持仓数": f"{context.size:.2f}",
+                    "成本": (
+                        f"{context.open_price:.3f}"
+                        if context.open_price is not None
+                        else "-"
+                    ),
+                    "止损": (
+                        f"{context.stop_price:.3f}"
+                        if context.stop_price is not None
+                        else "-"
+                    ),
+                    "现价": (
+                        f"{context.current_price:.3f}"
+                        if context.current_price is not None
+                        else "-"
+                    ),
+                    "开仓时间": (
+                        context.open_time.strftime("%Y-%m-%d")
+                        if context.open_time is not None
+                        else "-"
+                    ),
+                    "开仓价格": (
+                        f"{context.open_price:.3f}"
+                        if context.open_price is not None
+                        else "-"
+                    ),
+                    "盈亏": (
+                        f"{(context.current_price - context.open_price) * context.size:.2f}"  # noqa: E501
+                        if context.current_price is not None
+                        and context.open_price is not None
+                        else "-"
+                    ),
+                    "收益率": (
+                        f"{(context.profit_rate * 100):.2f}%"
+                        if context.profit_rate is not None
+                        else "-"
+                    ),
                 }
                 closings.append(stock_info)
 
@@ -245,7 +342,7 @@ class MyStrategy(bt.Strategy):
 
         if holdings:
             df = pd.DataFrame(holdings)
-            df.sort_values(by='开仓时间', ascending=False, inplace=True)
+            df.sort_values(by="开仓时间", ascending=False, inplace=True)
             print("Holding Positions:")
             print(df.to_string(index=False))
 

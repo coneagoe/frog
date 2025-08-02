@@ -1,17 +1,19 @@
 # -*- coding: utf-8 -*-
-from datetime import date
 import logging
 import os
 import re
 import sys
+from datetime import date
+
+import pandas as pd
+from tqdm import tqdm
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pandas as pd   # noqa: E402
-from tqdm import tqdm   # noqa: E402
-
-from ocr import *   # noqa: E402
-from fund import *  # noqa: E402
-import conf        # noqa: E402
+import conf  # noqa: E402
+from fund import get_fund_position_path  # noqa: E402
+from fund.account.tiantian import TiantianParser  # noqa: E402
+from ocr import OcrType, crop_image  # noqa: E402
 
 # logging.getLogger().setLevel(logging.DEBUG)
 
@@ -49,10 +51,10 @@ def update_fund_position(timestamp: str, images: list, ocr_type: OcrType):
         print(df)
 
         output_file_name = os.path.join(get_fund_position_path(), f"{timestamp}.csv")
-        df.to_csv(output_file_name, encoding='utf_8_sig', index=False)
+        df.to_csv(output_file_name, encoding="utf_8_sig", index=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if len(sys.argv) == 1:
         usage()
         exit()
@@ -60,7 +62,7 @@ if __name__ == '__main__':
     image_file_name = sys.argv[1]
     images = crop_image(image_file_name, OcrType.OCR_ACCURATE_BASIC, 6000)
 
-    m = re.match(r'Screenshot_(\d{4})-(\d{2})-(\d{2}).*', image_file_name)
+    m = re.match(r"Screenshot_(\d{4})-(\d{2})-(\d{2}).*", image_file_name)
     if m:
         timestamp = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
     else:

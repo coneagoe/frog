@@ -1,3 +1,3 @@
-from . parse_position import GuotaiParser
+from .parse_position import GuotaiParser
 
-__all__ = ['GuotaiParser']
+__all__ = ["GuotaiParser"]

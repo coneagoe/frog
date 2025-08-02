@@ -1,9 +1,9 @@
-from datetime import datetime
-import os
-import time
+import asyncio
 import functools
 import logging
-import asyncio
+import os
+import time
+from datetime import datetime
 
 
 def is_older_than_n_days(filename: str, n: int) -> bool:
@@ -35,7 +35,9 @@ def retry_async(times: int, seconds: int):
                         logging.error(e)
                 await asyncio.sleep(seconds)
             return None
+
         return wrapped
+
     return wrapper
 
 
@@ -51,5 +53,7 @@ def retry_sync(times: int, seconds: int):
                         logging.error(e)
                 time.sleep(seconds)
             return None
+
         return wrapped
+
     return wrapper

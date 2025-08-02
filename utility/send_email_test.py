@@ -1,10 +1,10 @@
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import conf
-from send_email import send_email
-# from .send_email import send_email
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from send_email import send_email  # noqa: E402
+
+import conf  # noqa: E402
 
 conf.parse_config()
 

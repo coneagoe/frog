@@ -1,16 +1,23 @@
-import sys
 import os
 import re
-from tqdm import tqdm
+import sys
+
 import pandas as pd
-from ocr import *
-import conf
-from stock import *
+from tqdm import tqdm
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import conf  # noqa: E402
+from ocr import OcrType, crop_image, get_ocr  # noqa: E402
+from stock import (  # noqa: E402
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
+    get_etf_name,
+    get_stock_name,
+)
 
-pattern_stock_id = re.compile(r'^(\d{6})$')
+pattern_stock_id = re.compile(r"^(\d{6})$")
 
-conf.config = conf.parse_config()
+conf.parse_config()
 
 
 def usage():
@@ -49,10 +56,10 @@ def import_stocks(images: list, ocr_type):
     if df is not None:
         # df[col_fund_id] = df[col_fund_id].astype('str')
         print(df)
-        df.to_csv('tmp.csv', encoding='utf_8_sig', index=False)
+        df.to_csv("tmp.csv", encoding="utf_8_sig", index=False)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     if len(sys.argv) == 1:
         usage()
         exit()
