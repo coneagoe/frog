@@ -70,7 +70,6 @@ class MyStrategy(bt.Strategy):
         self.reset()
 
     def reset(self):
-        self.name
         assert len(self.stocks) > 0, "stocks is empty"
         self.context = [Context() for i in range(len(self.stocks))]
         self.trades: dict[str, list[Trade]] = {stock: [] for stock in self.stocks}
