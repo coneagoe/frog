@@ -41,7 +41,27 @@ class ObosStrategy(MyStrategy):
             for i in range(len(self.datas))
         }
 
+        self.kdj = {
+            i: bt.indicators.Stochastic(
+                self.datas[i],
+                period=14,  # 增加到14天，减少敏感度
+                period_dfast=3,  # K值的平滑周期
+                period_dslow=3,  # D值的平滑周期
+                safediv=True,  # 启用安全除法，避免除零错误
+            )
+            for i in range(len(self.datas))
+        }
+
         self.stop_manager = StopPriceManager(self.datas, 0.2)
+
+    def is_over_sell(self, i):
+        try:
+            j_value = 3 * self.kdj[i].percK[0] - 2 * self.kdj[i].percD[0]
+            kdj_oversell = j_value < -10
+        except (ZeroDivisionError, IndexError):
+            kdj_oversell = False
+
+        return (self.obos[i] < OBOS_OVERSELL_THRESHOLD) or kdj_oversell
 
     def next(self):
         super().next()
@@ -49,8 +69,7 @@ class ObosStrategy(MyStrategy):
         for i in range(len(self.datas)):
             if self.context[i].order_state == OrderState.ORDER_IDLE:
                 if self.context[i].is_candidator is False:
-                    # 如果OBOS超卖
-                    if self.obos[i] < OBOS_OVERSELL_THRESHOLD:
+                    if self.is_over_sell(i):
                         self.context[i].is_candidator = True
                         continue
                 else:
