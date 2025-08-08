@@ -61,6 +61,8 @@ class Context:
         self.score = 0
         self.order_submit_bar = None
         self.order = None
+        # 'open' | 'close' | None, 标记当前挂单意图，避免平仓单被误 reset
+        self.order_purpose: str | None = None
 
 
 class MyStrategy(bt.Strategy):
@@ -85,12 +87,27 @@ class MyStrategy(bt.Strategy):
                     self.context[i].order_submit_bar, int
                 ), f"{self.stocks[i]} order_submit_bar is None"
 
+                # 仅对开仓（buy）挂单做超时取消。平仓单不在这里被 reset。
                 if (
-                    len(self.datas[i]) - self.context[i].order_submit_bar  # type: ignore[operator]
+                    self.context[i].order_purpose == "open"
+                    and len(self.datas[i]) - self.context[i].order_submit_bar  # type: ignore[operator]
                     >= 2
                 ):
                     self.cancel(self.context[i].order)
+                    # 开仓失败直接重置
                     self.context[i].reset()
+            elif self.context[i].order_state == OrderState.ORDER_CLOSING:
+                # 可选：也可以添加超时处理，如果平仓挂单长时间不成交则撤单回到持仓
+                if isinstance(self.context[i].order_submit_bar, int) and (
+                    len(self.datas[i]) - self.context[i].order_submit_bar  # type: ignore[operator]
+                    >= 5
+                ):
+                    # 撤销未及时成交的平仓单，回到持仓状态，保留开仓信息
+                    self.cancel(self.context[i].order)
+                    self.context[i].order = None
+                    self.context[i].order_submit_bar = None
+                    self.context[i].order_state = OrderState.ORDER_HOLDING
+                    self.context[i].order_purpose = None
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.context[i].holding_bars += 1
                 profit_diff = (
@@ -109,7 +126,27 @@ class MyStrategy(bt.Strategy):
         i = self.stocks.index(stock_name)
         if order.status in [order.Submitted, order.Accepted]:
             self.context[i].name = stock_name
-            self.context[i].order_state = OrderState.ORDER_OPENING
+            # 根据当前持仓与订单方向推断目的
+            pos = self.broker.getposition(order.data)
+            has_position = pos.size != 0
+            if order.isbuy():
+                # 只有当当前没有持仓时，这才是开仓；否则可能是加仓（视策略需要，可扩展）
+                self.context[i].order_state = OrderState.ORDER_OPENING
+                self.context[i].order_purpose = "open"
+            elif order.issell():
+                # 卖单：如果有持仓，则视为平仓/减仓
+                if has_position or self.context[i].open_price is not None:
+                    self.context[i].order_state = OrderState.ORDER_CLOSING
+                    self.context[i].order_purpose = "close"
+                else:
+                    # 没有持仓又发出卖单(罕见)——仍标记为 closing 但不重置开仓信息
+                    self.context[i].order_state = OrderState.ORDER_CLOSING
+                    self.context[i].order_purpose = "close"
+            else:
+                # 其他类型(如调整单)，保守处理
+                self.context[i].order_state = OrderState.ORDER_OPENING
+                self.context[i].order_purpose = "open"
+
             self.context[i].order_submit_bar = len(self.datas[i])
             self.context[i].order = order
         elif order.status == order.Completed:
@@ -123,42 +160,66 @@ class MyStrategy(bt.Strategy):
                 self.context[i].open_bar = len(self.datas[i])
                 self.context[i].open_price = round(order.executed.price, 3)
                 self.context[i].size = order.executed.size
+                self.context[i].order_purpose = None
             elif order.issell():
-                self.context[i].order_state = OrderState.ORDER_IDLE
                 self.context[i].close_time = bt.num2date(order.executed.dt)
                 self.context[i].close_bar = len(self.datas[i])
                 self.context[i].close_price = round(order.executed.price, 3)
-                try:
-                    profit_diff = (
-                        self.context[i].close_price - self.context[i].open_price  # type: ignore[operator]
-                    )
-                    new_trade = Trade(
-                        open_price=self.context[i].open_price,  # type: ignore
-                        close_price=self.context[i].close_price,  # type: ignore
-                        profit_rate=round(
-                            profit_diff / self.context[i].open_price,
-                            2,
-                        ),
-                        open_time=self.context[i].open_time,  # type: ignore
-                        open_bar=self.context[i].open_bar,  # type: ignore
-                        close_time=self.context[i].close_time,  # type: ignore
-                        close_bar=self.context[i].close_bar,  # type: ignore
-                        holding_time=self.context[i].close_bar  # type: ignore
-                        - self.context[i].open_bar,
-                    )
-                    self.trades[stock_name].append(new_trade)
-                    self.context[i].reset()
-                except TypeError:
+                # 防御：如果缺失 open_price，尝试从 position 里取（若仍失败则放弃记录收益）
+                if self.context[i].open_price is None:
+                    pos = self.broker.getposition(order.data)
+                    if pos.size and pos.price:
+                        try:
+                            self.context[i].open_price = round(pos.price, 3)
+                        except Exception:  # noqa: BLE001
+                            pass
+                if self.context[i].open_price is None:
                     logging.error(
-                        f"open_price: {self.context[i].open_price}, close_price: {self.context[i].close_price}"  # noqa: E501
+                        f"skip trade record due to missing open_price, close_price: {self.context[i].close_price}"
                     )
+                    self.context[i].reset()
+                    return
+                profit_diff = (
+                    self.context[i].close_price - self.context[i].open_price  # type: ignore[operator]
+                )
+                new_trade = Trade(
+                    open_price=self.context[i].open_price,  # type: ignore
+                    close_price=self.context[i].close_price,  # type: ignore
+                    profit_rate=round(
+                        profit_diff / self.context[i].open_price,
+                        2,
+                    ),
+                    open_time=self.context[i].open_time,  # type: ignore
+                    open_bar=self.context[i].open_bar,  # type: ignore
+                    close_time=self.context[i].close_time,  # type: ignore
+                    close_bar=self.context[i].close_bar,  # type: ignore
+                    holding_time=self.context[i].close_bar  # type: ignore
+                    - self.context[i].open_bar,
+                )
+                self.trades[stock_name].append(new_trade)
+                self.context[i].reset()
 
         elif order.status == order.Margin:
             # logging.warning(order)
             self.cancel(order)
 
         elif order.status in [order.Canceled, order.Rejected]:
-            self.context[i].reset()
+            # 如果是开仓挂单被取消，且尚未建立仓位，则重置；如果是平仓挂单被取消且仍有 open_price，则回退为持仓状态
+            pos = self.broker.getposition(order.data)
+            if self.context[i].order_purpose == "open" and (
+                self.context[i].open_price is None and pos.size == 0
+            ):
+                self.context[i].reset()
+            elif (
+                self.context[i].order_purpose == "close"
+                and self.context[i].open_price is not None
+            ):
+                self.context[i].order_state = OrderState.ORDER_HOLDING
+                self.context[i].order_purpose = None
+                self.context[i].order = None
+                self.context[i].order_submit_bar = None
+            else:
+                self.context[i].reset()
 
     def notify_trade(self, trade):
         return
