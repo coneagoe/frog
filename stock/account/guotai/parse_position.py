@@ -6,7 +6,7 @@ import re
 import pandas as pd
 
 from ocr import get_ocr
-from stock.common import (
+from stock.const import (
     COL_COST,
     COL_CURRENT_PRICE,
     COL_MARKET_VALUE,
