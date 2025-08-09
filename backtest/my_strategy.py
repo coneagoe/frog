@@ -41,10 +41,10 @@ class Trade:
 
 class Context:
     def __init__(self):
+        self.name = None
         self.reset()
 
     def reset(self):
-        self.name = None
         self.order_state = OrderState.ORDER_IDLE
         self.current_price = None
         self.open_time = None
