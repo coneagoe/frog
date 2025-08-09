@@ -19,23 +19,28 @@ class OrderState(Enum):
 
 @dataclass
 class Trade:
-    open_price: float
-    close_price: float
-    profit_rate: float
+    open_price: float | None
+    close_price: float | None
+    profit_rate: float | None
     open_time: datetime
     open_bar: int
-    close_time: datetime
-    close_bar: int
-    holding_time: int
+    close_time: datetime | None
+    close_bar: int | None
+    holding_time: int | None
 
     def __str__(self):
         open_str = self.open_time.strftime("%Y-%m-%d") if self.open_time else "-"
         close_str = self.close_time.strftime("%Y-%m-%d") if self.close_time else "-"
+        profit_str = (
+            f"{self.profit_rate * 100:.2f}%" if self.profit_rate is not None else "-"
+        )
+        holding_str = f"{self.holding_time}" if self.holding_time is not None else "-"
+        close_price_str = f"{self.close_price}" if self.close_price is not None else "-"
         return (
             f"开仓时间: {open_str}, 开仓价格: {self.open_price}, "
-            f"平仓时间: {close_str}, 平仓价格: {self.close_price}, "
-            f"收益率: {self.profit_rate * 100:.2f}%, "
-            f"HoldingBars: {self.holding_time})"
+            f"平仓时间: {close_str}, 平仓价格: {close_price_str}, "
+            f"收益率: {profit_str}, "
+            f"HoldingBars: {holding_str})"
         )
 
 
@@ -161,6 +166,19 @@ class MyStrategy(bt.Strategy):
                 self.context[i].open_price = round(order.executed.price, 3)
                 self.context[i].size = order.executed.size
                 self.context[i].order_purpose = None
+                # 记录开仓交易（未平仓，close_* 等为 None）
+                self.trades[stock_name].append(
+                    Trade(
+                        open_price=self.context[i].open_price,
+                        close_price=None,
+                        profit_rate=None,
+                        open_time=self.context[i].open_time,  # type: ignore[arg-type]
+                        open_bar=self.context[i].open_bar,  # type: ignore[arg-type]
+                        close_time=None,
+                        close_bar=None,
+                        holding_time=None,
+                    )
+                )
             elif order.issell():
                 self.context[i].close_time = bt.num2date(order.executed.dt)
                 self.context[i].close_bar = len(self.datas[i])
@@ -182,21 +200,38 @@ class MyStrategy(bt.Strategy):
                 profit_diff = (
                     self.context[i].close_price - self.context[i].open_price  # type: ignore[operator]
                 )
-                new_trade = Trade(
-                    open_price=self.context[i].open_price,  # type: ignore
-                    close_price=self.context[i].close_price,  # type: ignore
-                    profit_rate=round(
+                # 如果上一条交易是同一开仓且尚未填写平仓信息，则就地补全；否则新建
+                if (
+                    len(self.trades[stock_name]) > 0
+                    and self.trades[stock_name][-1].close_time is None
+                    and self.trades[stock_name][-1].open_time
+                    == self.context[i].open_time
+                ):
+                    last = self.trades[stock_name][-1]
+                    last.close_price = self.context[i].close_price
+                    last.close_time = self.context[i].close_time
+                    last.close_bar = self.context[i].close_bar
+                    last.holding_time = self.context[i].close_bar - self.context[i].open_bar  # type: ignore[operator]
+                    last.profit_rate = round(
                         profit_diff / self.context[i].open_price,
                         2,
-                    ),
-                    open_time=self.context[i].open_time,  # type: ignore
-                    open_bar=self.context[i].open_bar,  # type: ignore
-                    close_time=self.context[i].close_time,  # type: ignore
-                    close_bar=self.context[i].close_bar,  # type: ignore
-                    holding_time=self.context[i].close_bar  # type: ignore
-                    - self.context[i].open_bar,
-                )
-                self.trades[stock_name].append(new_trade)
+                    )
+                else:
+                    new_trade = Trade(
+                        open_price=self.context[i].open_price,
+                        close_price=self.context[i].close_price,
+                        profit_rate=round(
+                            profit_diff / self.context[i].open_price,
+                            2,
+                        ),
+                        open_time=self.context[i].open_time,  # type: ignore
+                        open_bar=self.context[i].open_bar,  # type: ignore
+                        close_time=self.context[i].close_time,
+                        close_bar=self.context[i].close_bar,
+                        holding_time=self.context[i].close_bar  # type: ignore
+                        - self.context[i].open_bar,
+                    )
+                    self.trades[stock_name].append(new_trade)
                 self.context[i].reset()
 
         elif order.status == order.Margin:
@@ -284,7 +319,7 @@ class MyStrategy(bt.Strategy):
             ):
                 total_value = self.broker.getvalue()
                 price = context.current_price if context.current_price else 1
-                expected_shares = int((total_value * self.target) / price)
+                expected_shares = int((total_value * self.p.target) / price)
                 stock_info = {
                     "代码": context.name,
                     "名称": (
