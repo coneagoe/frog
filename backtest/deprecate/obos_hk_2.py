@@ -23,67 +23,20 @@ from stock import (  # noqa: E402
     drop_delisted_stocks,
     load_all_hk_ggt_stock_general_info,
 )
-<<<<<<< HEAD
-||||||| parent of db76fd2 (chore) [deprecate] move obos_hk_2 to deprecate)
-from my_strategy import (
-    OrderState,
-    MyStrategy,
-)   # noqa: E402
-from obos_indicator import OBOS
-from stop_price_manager_ema import EmaStopPriceManager as StopPriceManager
-
-=======
-from my_strategy import (
-    OrderState,
-    MyStrategy,
-)   # noqa: E402
-from obos_indicator import OBOS
-from stop_price_manager import StopPriceManagerEma as StopPriceManager
-
->>>>>>> db76fd2 (chore) [deprecate] move obos_hk_2 to deprecate)
 
 conf.parse_config()
 
 
 class ObosStrategy(MyStrategy):
     params = (
-<<<<<<< HEAD
         ("param_n", OBOS_PARAM_N),
         ("param_m", OBOS_PARAM_M),
         # ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
         ("param_sp", 5),  # 过去n天的最低价作为initial stop price
     )
-||||||| parent of db76fd2 (chore) [deprecate] move obos_hk_2 to deprecate)
-            ('param_n', OBOS_PARAM_N),
-            ('param_m', OBOS_PARAM_M),
-            ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
-            ('param_sp', 5), # 过去n天的最低价作为initial stop price
-        )
-
-=======
-            ('param_n', OBOS_PARAM_N),
-            ('param_m', OBOS_PARAM_M),
-            # ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
-            ('param_sp', 5), # 过去n天的最低价作为initial stop price
-        )
-
->>>>>>> db76fd2 (chore) [deprecate] move obos_hk_2 to deprecate)
 
     def __init__(self):
         super().__init__()
-
-<<<<<<< HEAD
-        self.target = 0.01
-||||||| parent of db76fd2 (chore) [deprecate] move obos_hk_2 to deprecate)
-        self.target = round(self.params.n_portion / len(self.stocks), 2)
-        if self.target < 0.02:
-            self.target = 0.02
-=======
-        # self.target = round(self.params.n_portion / len(self.stocks), 2)
-        # if self.target < 0.02:
-        #     self.target = 0.02
-        self.target = 0.01
->>>>>>> db76fd2 (chore) [deprecate] move obos_hk_2 to deprecate)
 
         self.obos = {
             i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
@@ -105,7 +58,7 @@ class ObosStrategy(MyStrategy):
                 else:
                     # 如果close > ema20
                     if self.context[i].current_price > self.stop_manager.ema20[i][0]:
-                        self.order_target_percent(self.datas[i], target=self.target)
+                        self.order_target_percent(self.datas[i], target=self.p.target)
                         self.context[i].stop_price = min(
                             [
                                 self.datas[i].low[-j]
@@ -176,18 +129,8 @@ if __name__ == "__main__":
 
     cerebro = bt.Cerebro()
 
-<<<<<<< HEAD
     if os.environ.get("OPTIMIZER") == "True":
-        strats = cerebro.optstrategy(ObosStrategy, param_sp=range(1, 10))
-||||||| parent of db76fd2 (chore) [deprecate] move obos_hk_2 to deprecate)
-    if os.environ.get('OPTIMIZER') == 'True':
-        strats = cerebro.optstrategy(ObosStrategy,
-                                     n_portion=range(1, 10))
-=======
-    if os.environ.get('OPTIMIZER') == 'True':
-        strats = cerebro.optstrategy(ObosStrategy,
-                                     param_sp=range(1, 10))
->>>>>>> db76fd2 (chore) [deprecate] move obos_hk_2 to deprecate)
+        strats = cerebro.optstrategy(ObosStrategy, n_portion=range(1, 10))
     else:
         cerebro.addstrategy(ObosStrategy)
 
