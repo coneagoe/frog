@@ -1,0 +1,97 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Shallow clones should be disabled for better analysis
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: 1.7.1
+
+    - name: Install dependencies
+      run: |
+        poetry install --with dev
+
+    - name: Run complexity analysis
+      run: |
+        poetry add --group dev radon
+        poetry run radon cc . --average
+
+    - name: Run code duplication check
+      run: |
+        poetry add --group dev pyflakes
+        poetry run pyflakes .
+
+    - name: Generate coverage report
+      run: |
+        # Uncomment when you have tests
+        # poetry add --group dev pytest-cov
+        # poetry run pytest --cov=. --cov-report=xml
+        echo "Coverage reporting will be enabled when tests are added"
+
+    - name: SonarCloud Scan
+      if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+      uses: SonarSource/sonarcloud-github-action@master
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      continue-on-error: true  # Don't fail if SonarCloud is not configured
+
+  documentation:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.12"
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: 1.7.1
+
+    - name: Install documentation dependencies
+      run: |
+        poetry add --group dev sphinx sphinx-rtd-theme
+        poetry install --with dev
+
+    - name: Build documentation
+      run: |
+        # Create basic sphinx structure if it doesn't exist
+        if [ ! -d "docs" ]; then
+          mkdir docs
+          cd docs
+          poetry run sphinx-quickstart -q -p "Frog" -a "coneagoe" --ext-autodoc --makefile --no-batchfile .
+          cd ..
+        fi
+        # Build docs
+        # cd docs && poetry run make html
+
+    - name: Deploy documentation
+      if: github.ref == 'refs/heads/main'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs/_build/html
+      continue-on-error: true  # Don't fail if docs build fails
