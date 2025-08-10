@@ -18,7 +18,6 @@ from indicator import (  # noqa: E402
     OBOS_PARAM_M,
     OBOS_PARAM_N,
 )
-from stock import drop_delisted_stocks  # noqa: E402
 from stock import COL_STOCK_ID, load_all_hk_ggt_stock_general_info  # noqa: E402
 
 conf.parse_config()
@@ -120,7 +119,6 @@ if __name__ == "__main__":
         filter_list = args.filter.split()
         stocks = [stock for stock in stocks if stock not in filter_list]
 
-    stocks = drop_delisted_stocks(stocks, args.start, args.end)
     ObosStrategy.stocks = drop_suspended(stocks, args.start, args.end, 10)
 
     cerebro = bt.Cerebro()
