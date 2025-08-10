@@ -29,13 +29,13 @@ def obos_hk():
         subject = f"obos_hk_{start_date_str}_{end_date_str}"
         command = [
             "python",
-            "backtest/obos_hk_2.py",
+            "backtest/obos_hk_9.py",
             "-s",
             start_date_str,
             "-e",
             end_date_str,
             "-f",
-            "02362 02981",
+            "02362 02981 00168 01211 09997 01558",
         ]
         process = subprocess.run(command, capture_output=True, text=True)
         if process.returncode == 0:
