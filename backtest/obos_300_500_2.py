@@ -32,17 +32,11 @@ class ObosStrategy(MyStrategy):
     params = (
         ("param_n", OBOS_PARAM_N),
         ("param_m", OBOS_PARAM_M),
-        # ('n_portion', 2), # 每支股票允许持有的n倍最小仓位
         ("param_sp", 5),  # 过去n天的最低价作为initial stop price
     )
 
     def __init__(self):
         super().__init__()
-
-        # self.target = round(self.p.n_portion / len(self.stocks), 2)
-        # if self.target < 0.02:
-        #     self.target = 0.02
-        self.target = 0.01
 
         self.obos = {
             i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
@@ -64,7 +58,7 @@ class ObosStrategy(MyStrategy):
                 else:
                     # 如果close > ema20
                     if self.context[i].current_price > self.stop_manager.ema20[i][0]:
-                        self.order_target_percent(self.datas[i], target=self.target)
+                        self.order_target_percent(self.datas[i], target=self.p.target)
                         self.context[i].stop_price = min(
                             [
                                 self.datas[i].low[-j]

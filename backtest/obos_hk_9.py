@@ -7,7 +7,7 @@ import pandas as pd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from common import drop_suspended, run  # noqa: E402
-from my_strategy import MyStrategy, OrderState  # noqa: E402
+from my_strategy import MyStrategy, OrderState, parse_args  # noqa: E402
 from obos_indicator import OBOS  # noqa: E402
 from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
 
@@ -129,9 +129,8 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--plot", required=False, default="", help="Plot trade")
     args = parser.parse_args()
 
-    os.environ["PLOT_TRADE"] = args.plot
-    if args.cash:
-        os.environ["INIT_CASH"] = str(args.cash)
+    strategy_name = os.path.splitext(os.path.basename(__file__))[0]
+    parse_args(args, strategy_name)
 
     hk_ggt_stocks_df = load_all_hk_ggt_stock_general_info()
 
@@ -152,7 +151,6 @@ if __name__ == "__main__":
 
     df_stocks = pd.DataFrame(ObosStrategy.stocks, columns=[COL_STOCK_ID])
 
-    strategy_name = os.path.splitext(os.path.basename(__file__))[0]
     run(
         strategy_name=strategy_name,
         cerebro=cerebro,

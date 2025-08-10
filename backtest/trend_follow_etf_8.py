@@ -31,8 +31,6 @@ class TrendFollowingStrategy(MyStrategy):
     def __init__(self):
         super().__init__()
 
-        self.target = 0.1
-
         self.macd_1 = {
             i: bt.indicators.MACD(
                 self.datas[i].close,
@@ -75,7 +73,9 @@ class TrendFollowingStrategy(MyStrategy):
                             and self.macd_1[i].signal[0] > 0
                             and self.macd_1[i].macd[0] > 0
                         ):
-                            self.order_target_percent(self.datas[i], target=self.target)
+                            self.order_target_percent(
+                                self.datas[i], target=self.p.target
+                            )
                             self.context[i].stop_price = round(
                                 self.stop_manager.ema20[i][-1], 3
                             )
