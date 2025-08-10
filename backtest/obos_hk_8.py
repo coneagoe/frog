@@ -34,8 +34,6 @@ class ObosStrategy(MyStrategy):
     def __init__(self):
         super().__init__()
 
-        self.target = 0.01
-
         self.obos = {
             i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
             for i in range(len(self.datas))
@@ -75,7 +73,7 @@ class ObosStrategy(MyStrategy):
                 else:
                     # 如果close > ema20
                     if self.context[i].current_price > self.stop_manager.ema20[i][0]:
-                        self.order_target_percent(self.datas[i], target=self.target)
+                        self.order_target_percent(self.datas[i], target=self.p.target)
                         self.context[i].stop_price = min(
                             [
                                 self.datas[i].low[-j]

@@ -1,10 +1,13 @@
 import logging
+import os
+import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
 import backtrader as bt
 import pandas as pd
+import plotly.graph_objs as go
 
 from stock import get_security_name
 
@@ -72,6 +75,7 @@ class Context:
 
 class MyStrategy(bt.Strategy):
     stocks: list[str] = []
+    params = (("target", 0.005),)  # default portfolio target weight per position
 
     def __init__(self):
         self.reset()
@@ -445,3 +449,136 @@ class MyStrategy(bt.Strategy):
             df = pd.DataFrame(closings)
             print("Closing Positions:")
             print(df.to_string(index=False))
+
+        self.plot_trade()
+
+    def plot_trade(self) -> None:
+        """Plot candlesticks with buy/sell markers for selected tickers.
+
+        Data is retrieved from each Backtrader data feed. If the feed was
+        created from a Pandas DataFrame, it is accessed via data.p.dataname.
+        Otherwise, a minimal OHLC DataFrame is reconstructed from the lines.
+        """
+        plot_trade_env = os.getenv("PLOT_TRADE")
+        if not plot_trade_env:
+            return
+
+        stock_ids = plot_trade_env.split()
+
+        start_date = os.getenv("START_DATE")
+        if start_date is None:
+            logging.error("START_DATE environment variable is not set.")
+            return
+
+        end_date = os.getenv("END_DATE")
+        if end_date is None:
+            logging.error("END_DATE environment variable is not set.")
+
+        strategy_name = os.getenv("STRATEGY_NAME")
+        if strategy_name is None:
+            logging.error("STRATEGY_NAME environment variable is not set.")
+            return
+
+        for i, data in enumerate(self.datas):
+            if data._name in stock_ids:
+                # Try to retrieve original DataFrame used to create the feed
+                df: pd.DataFrame
+                dn = getattr(data.p, "dataname", None)
+                if isinstance(dn, pd.DataFrame):
+                    df = dn
+                else:
+                    # Fallback: reconstruct a small OHLC DataFrame from feed lines
+                    size = len(data)
+                    # Extract datetimes and convert to pandas datetime index
+                    dts = [bt.num2date(x) for x in data.datetime.get(size=size)]
+                    df = pd.DataFrame(
+                        {
+                            "open": list(data.open.get(size=size)),
+                            "high": list(data.high.get(size=size)),
+                            "low": list(data.low.get(size=size)),
+                            "close": list(data.close.get(size=size)),
+                        },
+                        index=pd.to_datetime(dts),
+                    )
+                    df.index.name = "date"
+                fig = go.Figure()
+
+                fig.add_trace(
+                    go.Candlestick(
+                        x=df.index,
+                        open=df["open"],
+                        high=df["high"],
+                        low=df["low"],
+                        close=df["close"],
+                        name=data._name,
+                    )
+                )
+
+                trades = self.trades[data._name]
+                buy_markers = []
+                sell_markers = []
+                for t in trades:
+                    buy_markers.append(
+                        dict(
+                            x=t.open_time,
+                            y=t.open_price,
+                            marker=dict(symbol="triangle-up", color="yellow", size=10),
+                            mode="markers",
+                            name="Buy",
+                        )
+                    )
+                    sell_markers.append(
+                        dict(
+                            x=t.close_time,
+                            y=t.close_price,
+                            marker=dict(symbol="triangle-down", color="blue", size=10),
+                            mode="markers",
+                            name="Sell",
+                        )
+                    )
+
+                for marker in buy_markers:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[marker["x"]],
+                            y=[marker["y"]],
+                            mode=marker["mode"],
+                            marker=marker["marker"],
+                            name=marker["name"],
+                        )
+                    )
+
+                for marker in sell_markers:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=[marker["x"]],
+                            y=[marker["y"]],
+                            mode=marker["mode"],
+                            marker=marker["marker"],
+                            name=marker["name"],
+                        )
+                    )
+
+                fig.update_layout(
+                    title=data._name, yaxis_title="Price", xaxis_title="Date"
+                )
+
+                plot_file_name = f"plot_trade_{data._name}_{strategy_name}_{start_date}_{end_date}.html"
+                fig.write_html(plot_file_name)
+                webbrowser.open("file://" + os.path.realpath(plot_file_name))
+
+
+def parse_args(args, strategy_name: str):
+    """Parse command line arguments and set environment variables.
+
+    Args:
+        args: Parsed command line arguments from argparse
+        strategy_name: Name of the strategy (typically extracted from filename)
+    """
+    os.environ["START_DATE"] = args.start
+    os.environ["END_DATE"] = args.end
+    os.environ["STRATEGY_NAME"] = strategy_name
+
+    os.environ["PLOT_TRADE"] = args.plot
+    if args.cash:
+        os.environ["INIT_CASH"] = str(args.cash)
