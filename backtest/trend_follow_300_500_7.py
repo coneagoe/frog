@@ -7,7 +7,8 @@ import pandas as pd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from common import drop_suspended, run  # noqa: E402
-from my_strategy import MyStrategy, OrderState  # noqa: E402
+from my_strategy import MyStrategy, OrderState, parse_args  # noqa: E402
+from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
 
 import conf  # noqa: E402
 from stock import (  # noqa: E402
@@ -18,8 +19,6 @@ from stock import (  # noqa: E402
 )
 
 conf.parse_config()
-
-# enable_optimize()
 
 
 class TrendFollowingStrategy(MyStrategy):
@@ -33,30 +32,6 @@ class TrendFollowingStrategy(MyStrategy):
 
     def __init__(self):
         super().__init__()
-
-        self.target = round(self.p.n_portion / len(self.stocks), 2)
-        if self.target < 0.02:
-            self.target = 0.02
-
-        self.ema30 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=30)
-            for i in range(len(self.datas))
-        }
-
-        self.ema20 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=20)
-            for i in range(len(self.datas))
-        }
-
-        self.ema10 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=10)
-            for i in range(len(self.datas))
-        }
-
-        self.ema5 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=5)
-            for i in range(len(self.datas))
-        }
 
         self.macd_1 = {
             i: bt.indicators.MACD(
@@ -72,6 +47,8 @@ class TrendFollowingStrategy(MyStrategy):
             i: bt.indicators.CrossOver(self.macd_1[i].macd, self.macd_1[i].signal)
             for i in range(len(self.datas))
         }
+
+        self.stop_manager = StopPriceManager(self.datas, 0.2)
 
     def next(self):
         super().next()
@@ -93,33 +70,17 @@ class TrendFollowingStrategy(MyStrategy):
                         continue
                     else:
                         if (
-                            self.context[i].current_price > self.ema20[i][0]
+                            self.context[i].current_price
+                            > self.stop_manager.ema20[i][0]
                             and self.macd_1[i].signal[0] > 0
                             and self.macd_1[i].macd[0] > 0
                         ):
-                            self.order_target_percent(self.datas[i], target=self.target)
-                            self.context[i].stop_price = round(self.ema20[i][-1], 3)
+                            self.order_target_percent(
+                                self.datas[i], target=self.p.target
+                            )
+                            self.context[i].order_state = OrderState.ORDER_PRE_OPENING
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
-                profit_rate = self.context[i].profit_rate
-
-                ema = None
-                if profit_rate < 0.2:
-                    ema = self.ema30
-                elif profit_rate < 0.4:
-                    ema = self.ema20
-                elif profit_rate < 0.6:
-                    ema = self.ema10
-                elif profit_rate < 0.8:
-                    ema = self.ema5
-                else:
-                    self.context[i].stop_price = max(
-                        self.context[i].stop_price, self.datas[i].low[-1]
-                    )
-
-                if ema is not None:
-                    self.context[i].stop_price = max(
-                        self.context[i].stop_price, ema[i][-1]
-                    )
+                self.stop_manager.update_stop_price(self.context, self.datas, i)
 
                 if self.context[i].current_price < self.context[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
@@ -130,11 +91,7 @@ class TrendFollowingStrategy(MyStrategy):
 
         if trade.isopen:
             i = self.stocks.index(trade.getdataname())
-            self.context[i].stop_price = round(self.ema20[i][-1], 3)
-
-    def stop(self):
-        print("ema_period: %d, n_positions: %d" % (self.p.ema_period, self.p.n_portion))
-        super().stop()
+            self.context[i].stop_price = round(self.stop_manager.ema20[i][-1], 3)
 
 
 if __name__ == "__main__":
@@ -157,9 +114,8 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--plot", required=False, default="", help="Plot trade")
     args = parser.parse_args()
 
-    os.environ["PLOT_TRADE"] = args.plot
-    if args.cash:
-        os.environ["INIT_CASH"] = str(args.cash)
+    strategy_name = os.path.splitext(os.path.basename(__file__))[0]
+    parse_args(args, strategy_name)
 
     stocks = load_300_ingredients(args.start)
     tmp = load_500_ingredients(args.start)
@@ -186,7 +142,6 @@ if __name__ == "__main__":
 
     df_stocks = pd.DataFrame(TrendFollowingStrategy.stocks, columns=[COL_STOCK_ID])
 
-    strategy_name = os.path.splitext(os.path.basename(__file__))[0]
     run(
         strategy_name=strategy_name,
         cerebro=cerebro,
