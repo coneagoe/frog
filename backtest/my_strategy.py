@@ -109,7 +109,7 @@ class MyStrategy(bt.Strategy):
                 # 可选：也可以添加超时处理，如果平仓挂单长时间不成交则撤单回到持仓
                 if isinstance(self.context[i].order_submit_bar, int) and (
                     len(self.datas[i]) - self.context[i].order_submit_bar  # type: ignore[operator]
-                    >= 5
+                    >= 2
                 ):
                     # 撤销未及时成交的平仓单，回到持仓状态，保留开仓信息
                     self.cancel(self.context[i].order)
