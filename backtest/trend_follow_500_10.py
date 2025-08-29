@@ -20,26 +20,26 @@ class TrendFollowingStrategy(MyStrategy):
     params = (
         ("ema_period", 20),
         ("n_portion", 2),  # 每支股票允许持有的n倍最小仓位
-        ("p_macd_1_dif", 6),
-        ("p_macd_1_dea", 12),
-        ("p_macd_1_signal", 5),
+        ("p_macd_dif", 6),
+        ("p_macd_dea", 12),
+        ("p_macd_signal", 5),
     )
 
     def __init__(self):
         super().__init__()
 
-        self.macd_1 = {
+        self.macd = {
             i: bt.indicators.MACD(
                 self.datas[i].close,
-                period_me1=self.p.p_macd_1_dif,
-                period_me2=self.p.p_macd_1_dea,
-                period_signal=self.p.p_macd_1_signal,
+                period_me1=self.p.p_macd_dif,
+                period_me2=self.p.p_macd_dea,
+                period_signal=self.p.p_macd_signal,
             )
             for i in range(len(self.datas))
         }
 
         self.cross_signal_1 = {
-            i: bt.indicators.CrossOver(self.macd_1[i].macd, self.macd_1[i].signal)
+            i: bt.indicators.CrossOver(self.macd[i].macd, self.macd[i].signal)
             for i in range(len(self.datas))
         }
 
@@ -51,15 +51,19 @@ class TrendFollowingStrategy(MyStrategy):
         for i in range(len(self.datas)):
             if self.context[i].order_state == OrderState.ORDER_IDLE:
                 if self.context[i].is_candidator is False:
-                    # 如果MACD金叉
-                    if self.cross_signal_1[i] > 0:
+                    # 如果MACDs水上金叉
+                    if (
+                        self.cross_signal_1[i] > 0
+                        and self.macd[i].macd[0] > 0
+                        and self.macd[i].signal[0] > 0
+                    ):
                         self.context[i].is_candidator = True
                         continue
                 else:
                     # 如果MACD死叉或MACD.macd曲线不光滑
                     if (
                         self.cross_signal_1[i] < 0
-                        or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0
+                        or self.macd[i].macd[0] - self.macd[i].macd[-1] <= 0
                     ):
                         self.context[i].is_candidator = False
                         continue
@@ -67,8 +71,8 @@ class TrendFollowingStrategy(MyStrategy):
                         if (
                             self.context[i].current_price
                             > self.stop_manager.ema20[i][0]
-                            and self.macd_1[i].signal[0] > 0
-                            and self.macd_1[i].macd[0] > 0
+                            and self.macd[i].signal[0] > 0
+                            and self.macd[i].macd[0] > 0
                         ):
                             self.order_target_percent(
                                 self.datas[i], target=self.p.target
