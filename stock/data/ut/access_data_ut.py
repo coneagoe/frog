@@ -128,6 +128,8 @@ class TestAccessData(unittest.TestCase):
 
     def test_is_stock(self):
         self.assertTrue(is_stock("600000"))
+        self.assertTrue(is_stock("000001"))
+        self.assertTrue(is_stock("300043"))
 
     def test_load_500_ingredients(self):
         # Test with a specific date
