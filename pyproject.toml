@@ -42,6 +42,7 @@ pre-commit = "^4.2.0"
 mypy = "^1.17.0"
 types-requests = "^2.32.4.20250611"
 flake8 = "^7.3.0"
+apache-airflow = "^3.0.4"
 
 [tool.block]
 target-version = ["py311"]
