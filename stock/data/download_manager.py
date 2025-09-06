@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from .storage.base import DataStorage
-from .downloaders.base import DataDownloader
+from .downloader.base import DataDownloader
 from stock.const import COL_DATE
 
 

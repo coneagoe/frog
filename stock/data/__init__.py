@@ -89,7 +89,7 @@ from .factory import (
 )
 from .download_manager import DownloadManager
 from .storage import DataStorage, CSVStorage, TimescaleDBStorage
-from .downloaders import DataDownloader, AkshareDownloader
+from .downloader import DataDownloader, AkshareDownloader
 
 # 新的便捷函数
 from .download_data import (
