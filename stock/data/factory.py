@@ -2,7 +2,7 @@ import logging
 from .download_manager import DownloadManager
 from .storage.csv_storage import CSVStorage
 from .storage.timescale_storage import TimescaleDBStorage
-from .downloaders.akshare_downloader import AkshareDownloader
+from .downloader.akshare_downloader import AkshareDownloader
 
 
 def create_download_manager(storage_type: str = "csv", **kwargs) -> DownloadManager:
