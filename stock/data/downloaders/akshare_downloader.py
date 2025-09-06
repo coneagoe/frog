@@ -5,6 +5,7 @@ import re
 import logging
 from typing import Optional
 from .base import DataDownloader
+from . import AdjustType
 from stock.const import (
     COL_CLOSE,
     COL_DATE,
@@ -25,13 +26,12 @@ class AkshareDownloader(DataDownloader):
     """AkShare数据下载器"""
     
     @retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
-    def download_stock_history(self, stock_id: str, period: str, start_date: str, end_date: str, adjust: str = "qfq") -> Optional[pd.DataFrame]:
+    def download_stock_history(self, stock_id: str, period: str, start_date: str, end_date: str, adjust: AdjustType = AdjustType.QFQ) -> Optional[pd.DataFrame]:
         try:
             assert re.match(r"\d{6}", stock_id)
             assert period in ["daily", "week", "month"]
-            assert adjust in ["", "qfq", "hfq"]
             
-            df = ak.stock_zh_a_hist(symbol=stock_id, period=period, adjust=adjust)
+            df = ak.stock_zh_a_hist(symbol=stock_id, period=period, adjust=adjust.value[0])
             if df.empty:
                 logging.warning(f"download history data {stock_id} fail, please check")
                 return None
@@ -41,13 +41,12 @@ class AkshareDownloader(DataDownloader):
             return None
     
     @retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
-    def download_etf_history(self, etf_id: str, period: str, start_date: str, end_date: str, adjust: str = "qfq") -> Optional[pd.DataFrame]:
+    def download_etf_history(self, etf_id: str, period: str, start_date: str, end_date: str, adjust: AdjustType = AdjustType.QFQ) -> Optional[pd.DataFrame]:
         try:
             assert period in ["daily", "week", "month"]
-            assert adjust in ["", "qfq", "hfq"]
             
             try:
-                df = ak.fund_etf_hist_em(symbol=etf_id, period=period, adjust=adjust)
+                df = ak.fund_etf_hist_em(symbol=etf_id, period=period, adjust=adjust.value[0])
                 if df.empty:
                     raise KeyError("ETF data not found")
                 return df
@@ -70,19 +69,19 @@ class AkshareDownloader(DataDownloader):
             logging.error(f"Failed to download ETF history for {etf_id}: {e}")
             return None
     
+
     @retrying.retry(wait_fixed=5000, stop_max_attempt_number=5)
-    def download_hk_stock_history(self, stock_id: str, period: str, start_date: str, end_date: str, adjust: str = "hfq") -> Optional[pd.DataFrame]:
+    def download_hk_stock_history(self, stock_id: str, period: str, start_date: str, end_date: str, adjust: AdjustType = AdjustType.HFQ) -> Optional[pd.DataFrame]:
         try:
             assert re.match(r"\d{5}", stock_id)
             assert period in ["daily", "week", "month"]
-            assert adjust in ["", "qfq", "hfq"]
             
             df = ak.stock_hk_hist(
                 symbol=stock_id,
                 period=period,
                 start_date=start_date.replace("-", ""),
                 end_date=end_date.replace("-", ""),
-                adjust=adjust,
+                adjust=adjust.value[0],
             )
             
             if df.empty:
@@ -105,6 +104,7 @@ class AkshareDownloader(DataDownloader):
             logging.error(f"Failed to download HK stock history for {stock_id}: {e}")
             return None
     
+
     @retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
     def download_us_index_history(self, index: str, period: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         try:
@@ -122,6 +122,7 @@ class AkshareDownloader(DataDownloader):
             logging.error(f"Failed to download US index history for {index}: {e}")
             return None
     
+
     @retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
     def download_a_index_history(self, index: str, period: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         try:
