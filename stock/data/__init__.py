@@ -78,3 +78,23 @@ __all__ = [
     "get_today_ma",
     "get_yesterday_ma",
 ]
+
+# 新的架构组件
+from .factory import (
+    create_download_manager,
+    download_stock_data_with_csv,
+    download_stock_data_with_timescale,
+    download_general_info_with_csv,
+    download_general_info_with_timescale,
+)
+from .download_manager import DownloadManager
+from .storage import DataStorage, CSVStorage, TimescaleDBStorage
+from .downloaders import DataDownloader, AkshareDownloader
+
+# 新的便捷函数
+from .download_data import (
+    download_stock_with_timescale,
+    download_etf_with_timescale,
+    download_hk_stock_with_timescale,
+    download_general_info_with_storage,
+)

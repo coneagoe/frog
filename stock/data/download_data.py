@@ -471,3 +471,31 @@ def download_300_ingredients():
 
 def download_500_ingredients():
     download_baostock_ingredients(bs.query_zz500_stocks, get_stock_500_ingredients_path)
+
+
+# 新的基于架构的便捷函数
+def download_stock_with_timescale(stock_id: str, period: str = "daily", start_date: str = "20200101", end_date: str = "20231231", adjust: str = "qfq"):
+    """使用TimescaleDB下载股票数据的便捷函数"""
+    from .factory import download_stock_data_with_timescale
+    return download_stock_data_with_timescale(stock_id, period, start_date, end_date, adjust)
+
+
+def download_etf_with_timescale(etf_id: str, period: str = "daily", start_date: str = "20200101", end_date: str = "20231231", adjust: str = "qfq"):
+    """使用TimescaleDB下载ETF数据的便捷函数"""
+    from .factory import create_download_manager
+    manager = create_download_manager(storage_type="timescale")
+    return manager.download_and_save_etf_data(etf_id, period, start_date, end_date, adjust)
+
+
+def download_hk_stock_with_timescale(stock_id: str, period: str = "daily", start_date: str = "2020-01-01", end_date: str = "2023-12-31", adjust: str = "hfq"):
+    """使用TimescaleDB下载港股数据的便捷函数"""
+    from .factory import create_download_manager
+    manager = create_download_manager(storage_type="timescale")
+    return manager.download_and_save_hk_stock_data(stock_id, period, start_date, end_date, adjust)
+
+
+def download_general_info_with_storage(info_type: str, storage_type: str = "csv", **kwargs):
+    """使用指定存储方式下载基本信息的便捷函数"""
+    from .factory import create_download_manager
+    manager = create_download_manager(storage_type=storage_type, **kwargs)
+    return manager.download_and_save_general_info(info_type)
