@@ -1,0 +1,225 @@
+import functools
+import json
+import logging
+import os
+from dataclasses import asdict, dataclass
+from datetime import date, datetime
+from enum import Enum
+from typing import Any, Callable, Dict, Optional
+
+
+class DownloadStatus(Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    SUCCESS = "success"
+    FAILED = "failed"
+    PARTIAL = "partial"
+
+
+@dataclass
+class TaskStatus:
+    task_name: str
+    status: DownloadStatus
+    timestamp: str
+    error_message: Optional[str] = None
+    execution_time: Optional[float] = None
+
+
+class DownloadStatusManager:
+    _instance = None
+
+    def __new__(cls, status_file_path: str = "data/download_status.json"):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self, status_file_path: str = "data/download_status.json"):
+        if self._initialized:
+            return
+
+        self.status_file_path = status_file_path
+        self._ensure_dir_exists()
+        self.status_data = self._load_status()
+        self._initialized = True
+
+    def _ensure_dir_exists(self):
+        if self.status_file_path and os.path.dirname(self.status_file_path):
+            os.makedirs(os.path.dirname(self.status_file_path), exist_ok=True)
+
+    def _load_status(self) -> Dict:
+        if os.path.exists(self.status_file_path):
+            try:
+                with open(self.status_file_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.warning(f"Failed to load status file: {e}")
+                return {}
+        return {}
+
+    def _save_status(self):
+        try:
+            with open(self.status_file_path, "w", encoding="utf-8") as f:
+                json.dump(self.status_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"Failed to save status file: {e}")
+
+    def get_today_key(self) -> str:
+        return date.today().strftime("%Y-%m-%d")
+
+    def is_task_completed_today(self, task_name: str) -> bool:
+        today = self.get_today_key()
+        if today not in self.status_data:
+            return False
+
+        task_status = self.status_data[today].get(task_name)
+        if not task_status:
+            return False
+
+        return task_status.get("status") == DownloadStatus.SUCCESS.value
+
+    def update_task_status(
+        self,
+        task_name: str,
+        status: DownloadStatus,
+        error_message: str = None,
+        execution_time: float = None,
+    ):
+        today = self.get_today_key()
+        if today not in self.status_data:
+            self.status_data[today] = {}
+
+        task_status = TaskStatus(
+            task_name=task_name,
+            status=status,
+            timestamp=datetime.now().isoformat(),
+            error_message=error_message,
+            execution_time=execution_time,
+        )
+
+        self.status_data[today][task_name] = asdict(task_status)
+        self._save_status()
+
+    def get_task_status(self, task_name: str) -> Optional[Dict]:
+        today = self.get_today_key()
+        if today not in self.status_data:
+            return None
+        return self.status_data[today].get(task_name)
+
+    def cleanup_old_records(self, keep_days: int = 30):
+        from datetime import timedelta
+
+        cutoff_date = (date.today() - timedelta(days=keep_days)).strftime("%Y-%m-%d")
+
+        keys_to_remove = [key for key in self.status_data.keys() if key < cutoff_date]
+        for key in keys_to_remove:
+            del self.status_data[key]
+
+        if keys_to_remove:
+            self._save_status()
+            logging.info(f"Cleaned up {len(keys_to_remove)} old status records")
+
+
+# 全局状态管理器实例
+status_manager = DownloadStatusManager()
+
+
+def track_download_status(task_name: str = None, skip_if_completed: bool = True):
+    """
+    decorator
+
+    Args:
+        task_name: if None, using function name instead
+        skip_if_completed
+    """
+
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs) -> Any:
+            actual_task_name = task_name or func.__name__
+
+            # execute anyway if forced
+            force = kwargs.get("force", False)
+            if (
+                skip_if_completed
+                and not force
+                and status_manager.is_task_completed_today(actual_task_name)
+            ):
+                logging.info(
+                    f"Task '{actual_task_name}' already completed today, skipping..."
+                )
+                return True
+
+            status_manager.update_task_status(
+                actual_task_name, DownloadStatus.IN_PROGRESS
+            )
+            logging.info(f"Starting task: {actual_task_name}")
+
+            start_time = datetime.now()
+            try:
+                result = func(self, *args, **kwargs)
+                execution_time = (datetime.now() - start_time).total_seconds()
+
+                if result:
+                    status_manager.update_task_status(
+                        actual_task_name,
+                        DownloadStatus.SUCCESS,
+                        execution_time=execution_time,
+                    )
+                    logging.info(
+                        f"Task '{actual_task_name}' completed successfully in {execution_time:.2f}s"
+                    )
+                else:
+                    raise RuntimeError("Task function returned False")
+
+                return result
+
+            except Exception as e:
+                execution_time = (datetime.now() - start_time).total_seconds()
+                error_msg = str(e)
+
+                # 标记失败
+                status_manager.update_task_status(
+                    actual_task_name,
+                    DownloadStatus.FAILED,
+                    error_message=error_msg,
+                    execution_time=execution_time,
+                )
+                logging.error(
+                    f"Task '{actual_task_name}' failed after {execution_time:.2f}s: {error_msg}"
+                )
+                return False
+
+        return wrapper
+
+    return decorator
+
+
+def force_run_task(task_name: str):
+    """强制运行指定任务，即使今天已完成"""
+    status_manager.update_task_status(task_name, DownloadStatus.PENDING)
+
+
+def get_today_status_summary() -> Dict[str, Any]:
+    """获取今天的状态摘要"""
+    today = status_manager.get_today_key()
+    if today not in status_manager.status_data:
+        return {
+            "date": today,
+            "tasks": {},
+            "summary": {"total": 0, "success": 0, "failed": 0, "in_progress": 0},
+        }
+
+    tasks = status_manager.status_data[today]
+    summary = {"total": len(tasks), "success": 0, "failed": 0, "in_progress": 0}
+
+    for task_data in tasks.values():
+        status = task_data.get("status")
+        if status == DownloadStatus.SUCCESS.value:
+            summary["success"] += 1
+        elif status == DownloadStatus.FAILED.value:
+            summary["failed"] += 1
+        elif status == DownloadStatus.IN_PROGRESS.value:
+            summary["in_progress"] += 1
+
+    return {"date": today, "tasks": tasks, "summary": summary}

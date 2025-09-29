@@ -36,7 +36,10 @@ from .download_data import (
     download_history_data_stock_hk,
     download_history_data_us_index,
 )
+from .download_manager import DownloadManager
+from .downloader import DataDownloader
 from .eastmoney import fetch_close_price
+from .factory import create_download_manager
 from .moving_average import get_today_ma, get_yesterday_ma
 
 __all__ = [
@@ -77,6 +80,9 @@ __all__ = [
     "fetch_close_price",
     "get_today_ma",
     "get_yesterday_ma",
+    "DownloadManager",
+    "DataDownloader",
+    "create_download_manager",
 ]
 
 # 新的架构组件
