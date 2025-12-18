@@ -5,7 +5,7 @@ import sys
 import backtrader as bt
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import run  # noqa: E402
+from bt_common import run  # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
 from trend_follow_etf_pool import etf_pool as stocks  # noqa: E402
 

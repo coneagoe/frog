@@ -4,14 +4,18 @@ import sys
 
 import backtrader as bt
 
+from .bt_common import run
+from .indicator_rsrs_0 import RsrsZscore
+from .my_strategy import MyStrategy
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import run  # noqa: E402
-from indicator_rsrs_0 import RsrsZscore  # noqa: E402
-from my_strategy import MyStrategy  # noqa: E402
 
 import conf  # noqa: E402
+from common.const import SecurityType  # noqa: E402
 
-stocks = ("sh000300",)
+stocks = [
+    "sh000300",
+]
 
 
 conf.parse_config()
@@ -78,5 +82,5 @@ if __name__ == "__main__":
         stocks=RsrsStrategy.stocks,
         start_date=args.start,
         end_date=args.end,
-        security_type="auto",
+        security_type=SecurityType.AUTO,
     )

@@ -8,7 +8,7 @@ import swifter  # noqa: F401
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import conf  # noqa: E402
-from stock import (  # noqa: E402
+from common.const import (  # noqa: E402
     COL_ADJUSTED_STOPLOSS,
     COL_ADJUSTED_TAKE_PROFIT,
     COL_BUYING_PRICE,
@@ -19,9 +19,8 @@ from stock import (  # noqa: E402
     COL_STOPLOSS_PERCENT,
     COL_SUPPORT,
     COL_TAKE_PROFIT_PERCENT,
-    calculate_support_resistance,
-    fetch_close_price,
 )
+from stock import calculate_support_resistance, fetch_close_price  # noqa: E402
 from utility import send_email  # noqa: E402
 
 # pd.set_option('display.max_columns', None)

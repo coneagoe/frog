@@ -9,9 +9,8 @@ import plotly.graph_objs as go
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import conf  # noqa: E402
+from common.const import COL_CLOSE, COL_DATE, PeriodType  # noqa: E402
 from stock import (  # noqa: E402
-    COL_CLOSE,
-    COL_DATE,
     get_last_trading_day,
     get_security_name,
     load_history_data,
@@ -109,7 +108,7 @@ if __name__ == "__main__":
         df_list.append(
             load_history_data(
                 security_id=sec_id,
-                period="daily",
+                period=PeriodType.DAILY,
                 start_date=start_date,
                 end_date=end_date,
             )

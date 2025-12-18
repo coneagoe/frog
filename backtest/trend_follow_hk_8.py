@@ -4,17 +4,15 @@ import sys
 
 import backtrader as bt
 
+from .bt_common import drop_suspended, run
+from .my_strategy import MyStrategy, OrderState
+from .stop_price_manager import StopPriceManagerEma as StopPriceManager
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import drop_suspended, run  # noqa: E402
-from my_strategy import MyStrategy, OrderState  # noqa: E402
-from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
 
 import conf  # noqa: E402
-from stock import (  # noqa: E402
-    COL_STOCK_ID,
-    drop_delisted_stocks,
-    load_all_hk_ggt_stock_general_info,
-)
+from common.const import COL_STOCK_ID, SecurityType  # noqa: E402
+from stock import drop_delisted_stocks, load_general_info_hk_ggt  # noqa: E402
 
 conf.parse_config()
 
@@ -69,7 +67,8 @@ class TrendFollowingStrategy(MyStrategy):
                         continue
                     else:
                         if (
-                            self.context[i].current_price
+                            self.context[i].current_price is not None
+                            and self.context[i].current_price
                             > self.stop_manager.ema20[i][0]
                             and self.macd_1[i].signal[0] > 0
                             and self.macd_1[i].macd[0] > 0
@@ -81,7 +80,13 @@ class TrendFollowingStrategy(MyStrategy):
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
 
-                if self.context[i].current_price < self.context[i].stop_price:
+                current_price = self.context[i].current_price
+                stop_price = self.context[i].stop_price
+                if (
+                    isinstance(current_price, (int, float))
+                    and isinstance(stop_price, (int, float))
+                    and current_price < stop_price
+                ):
                     self.order_target_percent(self.datas[i], target=0.0)
                     self.context[i].order_state = OrderState.ORDER_CLOSING
 
@@ -121,7 +126,7 @@ if __name__ == "__main__":
     if args.cash:
         os.environ["INIT_CASH"] = str(args.cash)
 
-    hk_ggt_stocks_df = load_all_hk_ggt_stock_general_info()
+    hk_ggt_stocks_df = load_general_info_hk_ggt()
 
     stocks = hk_ggt_stocks_df[COL_STOCK_ID].tolist()
     if args.filter:
@@ -150,5 +155,5 @@ if __name__ == "__main__":
         stocks=TrendFollowingStrategy.stocks,
         start_date=args.start,
         end_date=args.end,
-        security_type="auto",
+        security_type=SecurityType.AUTO,
     )

@@ -3,7 +3,8 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from ..const import COL_CLOSE
+from common.const import COL_CLOSE
+
 from .access_data import load_history_data
 
 

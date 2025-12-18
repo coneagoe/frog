@@ -4,7 +4,7 @@ import sys
 
 import pandas as pd
 
-from stock import COL_STOCK_ID
+from common.const import COL_STOCK_ID
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:

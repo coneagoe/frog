@@ -1,50 +1,22 @@
 import logging
-import os
-import re
-from datetime import datetime
 
 import akshare as ak
 import pandas as pd
 
-from stock.common import (
-    get_etf_general_info_path,
-    get_hk_ggt_stock_general_info_path,
-    get_stock_300_ingredients_path,
-    get_stock_500_ingredients_path,
-    get_stock_data_path_1d,
-    get_stock_data_path_1M,
-    get_stock_data_path_1w,
-    get_stock_delisting_info_path,
-    get_stock_general_info_path,
-)
-from stock.const import (
+from common.const import (
     COL_CLOSE,
-    COL_DATE,
-    COL_DELISTING_DATE,
     COL_ETF_ID,
     COL_ETF_NAME,
-    COL_HIGH,
-    COL_IPO_DATE,
-    COL_LOW,
     COL_OPEN,
     COL_STOCK_ID,
     COL_STOCK_NAME,
-    COL_VOLUME,
+    AdjustType,
+    PeriodType,
+    SecurityType,
 )
-from stock.data.download_data import (
-    download_300_ingredients,
-    download_500_ingredients,
-    download_delisted_stock_info,
-    download_general_info_etf,
-    download_general_info_hk_ggt_stock,
-    download_general_info_stock,
-    download_history_data_a_index,
-    download_history_data_etf,
-    download_history_data_stock,
-    download_history_data_stock_hk,
-    download_history_data_us_index,
-)
-from utility import is_older_than_a_month, is_older_than_a_week, is_older_than_n_days
+from storage import get_storage
+
+# from utility import is_older_than_a_month, is_older_than_a_week, is_older_than_n_days
 
 g_df_stocks = None
 g_df_etfs = None
@@ -52,136 +24,131 @@ g_df_hk_ggt_stocks = None
 
 
 def load_history_data_stock(
-    security_id: str, period: str, start_date: str, end_date: str, adjust: str = "hfq"
+    security_id: str,
+    period: PeriodType,
+    start_date: str,
+    end_date: str,
+    adjust: AdjustType = AdjustType.HFQ,
 ) -> pd.DataFrame:
-    download_history_data_stock(security_id, period, start_date, end_date, adjust)
-
-    data_file_name = f"{security_id}_{adjust}.csv"
-    if period == "daily":
-        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
-    elif period == "weekly":
-        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
-    else:
-        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
-
-    start_date_ts0 = pd.Timestamp(start_date)
-    end_date_ts0 = pd.Timestamp(end_date)
-    df = pd.read_csv(data_path, encoding="utf_8_sig")
-    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
-
-    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
-    return df
+    return get_storage().load_history_data_stock(
+        stock_id=security_id,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        adjust=adjust,
+    )
 
 
 def load_history_data_etf(
-    security_id: str, period: str, start_date: str, end_date: str, adjust: str = "hfq"
+    security_id: str,
+    period: PeriodType,
+    start_date: str,
+    end_date: str,
+    adjust: AdjustType = AdjustType.HFQ,
 ) -> pd.DataFrame:
-    download_history_data_etf(security_id, period, start_date, end_date, adjust)
-
-    data_file_name = f"{security_id}_{adjust}.csv"
-    if period == "daily":
-        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
-    elif period == "weekly":
-        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
-    else:
-        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
-
-    start_date_ts0 = pd.Timestamp(start_date)
-    end_date_ts0 = pd.Timestamp(end_date)
-    df = pd.read_csv(data_path, encoding="utf_8_sig")
-    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
-
-    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
-    return df
+    return get_storage().load_history_data_etf(
+        etf_id=security_id,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        adjust=adjust,
+    )
 
 
 def load_history_data_us_index(
-    security_id: str, period: str, start_date: str, end_date: str, **kwargs
+    security_id: str, period: PeriodType, start_date: str, end_date: str, **kwargs
 ) -> pd.DataFrame:
-    download_history_data_us_index(
-        index=security_id, period=period, start_date=start_date, end_date=end_date
-    )
+    pass
 
-    data_file_name = f"{security_id}.csv"
-    if period == "daily":
-        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
-    elif period == "weekly":
-        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
-    else:
-        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+    # download_history_data_us_index(
+    #     index=security_id, period=period, start_date=start_date, end_date=end_date
+    # )
 
-    start_date_ts0 = pd.Timestamp(start_date)
-    end_date_ts0 = pd.Timestamp(end_date)
-    df = pd.read_csv(data_path, encoding="utf_8_sig")
-    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+    # data_file_name = f"{security_id}.csv"
+    # if period == "daily":
+    #     data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    # elif period == "weekly":
+    #     data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    # else:
+    #     data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
 
-    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
-    return df
+    # start_date_ts0 = pd.Timestamp(start_date)
+    # end_date_ts0 = pd.Timestamp(end_date)
+    # df = pd.read_csv(data_path, encoding="utf_8_sig")
+    # df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+
+    # df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    # return df
 
 
 def load_history_data_a_index(
-    security_id: str, period: str, start_date: str, end_date: str, **kwargs
+    security_id: str, period: PeriodType, start_date: str, end_date: str, **kwargs
 ) -> pd.DataFrame:
-    download_history_data_a_index(
-        index=security_id, period=period, start_date=start_date, end_date=end_date
+    pass
+
+    # download_history_data_a_index(
+    #     index=security_id, period=period, start_date=start_date, end_date=end_date
+    # )
+
+    # data_file_name = f"{security_id}.csv"
+    # if period == "daily":
+    #     data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    # elif period == "weekly":
+    #     data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    # else:
+    #     data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+
+    # start_date_ts0 = pd.Timestamp(start_date)
+    # end_date_ts0 = pd.Timestamp(end_date)
+    # df = pd.read_csv(data_path, encoding="utf_8_sig")
+    # df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+
+    # df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    # return df
+
+
+def load_history_data_stock_hk_ggt(
+    security_id: str,
+    period: PeriodType,
+    start_date: str,
+    end_date: str,
+    adjust: AdjustType = AdjustType.HFQ,
+) -> pd.DataFrame:
+    return get_storage().load_history_data_stock_hk_ggt(
+        stock_id=security_id,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        adjust=adjust,
     )
 
-    data_file_name = f"{security_id}.csv"
-    if period == "daily":
-        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
-    elif period == "weekly":
-        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
-    else:
-        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+    # download_history_data_stock_hk_ggt(security_id, period, start_date, end_date, adjust)
 
-    start_date_ts0 = pd.Timestamp(start_date)
-    end_date_ts0 = pd.Timestamp(end_date)
-    df = pd.read_csv(data_path, encoding="utf_8_sig")
-    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+    # data_file_name = f"{security_id}_{adjust}.csv"
+    # if period == "daily":
+    #     data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    # elif period == "weekly":
+    #     data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    # else:
+    #     data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
 
-    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
-    return df
-
-
-def load_history_data_stock_hk(
-    security_id: str, period: str, start_date: str, end_date: str, adjust: str = "hfq"
-) -> pd.DataFrame:
-    download_history_data_stock_hk(security_id, period, start_date, end_date, adjust)
-
-    data_file_name = f"{security_id}_{adjust}.csv"
-    if period == "daily":
-        data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
-    elif period == "weekly":
-        data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
-    else:
-        data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
-
-    start_date_ts0 = pd.Timestamp(start_date)
-    end_date_ts0 = pd.Timestamp(end_date)
-    df = pd.read_csv(data_path, encoding="utf_8_sig")
-    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
-    df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
-    return df
+    # start_date_ts0 = pd.Timestamp(start_date)
+    # end_date_ts0 = pd.Timestamp(end_date)
+    # df = pd.read_csv(data_path, encoding="utf_8_sig")
+    # df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+    # df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    # return df
 
 
 def load_history_data(
     security_id: str,
-    period: str,
+    period: PeriodType,
     start_date: str,
     end_date: str,
-    adjust: str = "qfq",
-    security_type: str = "auto",
+    adjust: AdjustType = AdjustType.HFQ,
+    security_type: SecurityType = SecurityType.AUTO,
 ) -> pd.DataFrame:
-    assert security_type in [
-        "auto",
-        "stock",
-        "etf",
-        "us_index",
-        "a_index",
-        "hk_ggt_stock",
-    ]
-
-    if security_type == "auto":
+    if security_type == SecurityType.AUTO:
         if is_stock(security_id):
             loader = load_history_data_stock
         elif is_etf(security_id):
@@ -191,20 +158,20 @@ def load_history_data(
         elif is_a_index(security_id):
             loader = load_history_data_a_index
         elif is_hk_ggt_stock(security_id):
-            loader = load_history_data_stock_hk
+            loader = load_history_data_stock_hk_ggt
         else:
             logging.error(f"Invalid security id: {security_id}")
             exit(-1)
-    elif security_type == "stock":
+    elif security_type == SecurityType.STOCK:
         loader = load_history_data_stock
-    elif security_type == "etf":
+    elif security_type == SecurityType.ETF:
         loader = load_history_data_etf
-    elif security_type == "us_index":
+    elif security_type == SecurityType.US_INDEX:
         loader = load_history_data_us_index
-    elif security_type == "a_index":
+    elif security_type == SecurityType.A_INDEX:
         loader = load_history_data_a_index
-    elif security_type == "hk_ggt_stock":
-        loader = load_history_data_stock_hk
+    elif security_type == SecurityType.HK_GGT_STOCK:
+        loader = load_history_data_stock_hk_ggt
 
     df = loader(
         security_id=security_id,
@@ -214,56 +181,58 @@ def load_history_data(
         adjust=adjust,
     )
 
-    df[COL_OPEN] = df[COL_OPEN].astype(float)
-    df[COL_CLOSE] = df[COL_CLOSE].astype(float)
-    df[COL_HIGH] = df[COL_HIGH].astype(float)
-    df[COL_LOW] = df[COL_LOW].astype(float)
-    df[COL_VOLUME] = df[COL_VOLUME].astype(float)
+    # df[COL_OPEN] = df[COL_OPEN].astype(float)
+    # df[COL_CLOSE] = df[COL_CLOSE].astype(float)
+    # df[COL_HIGH] = df[COL_HIGH].astype(float)
+    # df[COL_LOW] = df[COL_LOW].astype(float)
+    # df[COL_VOLUME] = df[COL_VOLUME].astype(float)
 
     return df
 
 
-def load_all_stock_general_info():
+def load_general_info_stock() -> pd.DataFrame:
     global g_df_stocks
 
     if g_df_stocks is not None:
         return g_df_stocks
 
-    stock_general_info_path = get_stock_general_info_path()
-    if not os.path.exists(stock_general_info_path) or is_older_than_a_month(
-        stock_general_info_path
-    ):
-        download_general_info_stock()
+    try:
+        g_df_stocks = get_storage().load_general_info_stock()
 
-    g_df_stocks = pd.read_csv(stock_general_info_path)
-    g_df_stocks[COL_STOCK_ID] = g_df_stocks[COL_STOCK_ID].astype(str)
-    g_df_stocks[COL_STOCK_ID] = g_df_stocks[COL_STOCK_ID].str.zfill(6)
-    return g_df_stocks
+        return g_df_stocks
+
+    except Exception as e:
+        # Handle database errors gracefully and return empty DataFrame
+        logging.error(f"Failed to load stock general info: {e}")
+        g_df_stocks = pd.DataFrame(columns=[COL_STOCK_ID, COL_STOCK_NAME])
+        return g_df_stocks
 
 
-def load_all_etf_general_info():
+def load_general_info_etf():
     global g_df_etfs
 
     if g_df_etfs is not None:
         return g_df_etfs
 
-    etf_general_info_path = get_etf_general_info_path()
-    if not os.path.exists(etf_general_info_path) or is_older_than_a_week(
-        etf_general_info_path
-    ):
-        download_general_info_etf()
+    try:
+        storage = get_storage()
 
-    g_df_etfs = pd.read_csv(etf_general_info_path)
-    g_df_etfs[COL_ETF_ID] = g_df_etfs[COL_ETF_ID].astype(str)
-    g_df_etfs[COL_ETF_ID] = g_df_etfs[COL_ETF_ID].str.zfill(6)
-    return g_df_etfs
+        g_df_etfs = storage.load_general_info_etf()
+
+        return g_df_etfs
+
+    except Exception as e:
+        # Handle database errors gracefully and return empty DataFrame
+        logging.error(f"Failed to load ETF general info: {e}")
+        g_df_etfs = pd.DataFrame(columns=[COL_STOCK_ID, COL_STOCK_NAME])
+        return g_df_etfs
 
 
 def is_stock(stock_id: str):
     global g_df_stocks
 
     if g_df_stocks is None:
-        g_df_stocks = load_all_stock_general_info()
+        g_df_stocks = load_general_info_stock()
 
     try:
         return stock_id in g_df_stocks[COL_STOCK_ID].values
@@ -275,7 +244,7 @@ def get_stock_name(stock_id: str):
     global g_df_stocks
 
     if g_df_stocks is None:
-        g_df_stocks = load_all_stock_general_info()
+        g_df_stocks = load_general_info_stock()
 
     try:
         return g_df_stocks.loc[g_df_stocks[COL_STOCK_ID] == stock_id][
@@ -289,7 +258,7 @@ def is_etf(etf_id: str):
     global g_df_etfs
 
     if g_df_etfs is None:
-        g_df_etfs = load_all_etf_general_info()
+        g_df_etfs = load_general_info_etf()
 
     return etf_id in g_df_etfs[COL_ETF_ID].values
 
@@ -298,7 +267,7 @@ def get_etf_name(etf_id: str):
     global g_df_etfs
 
     if g_df_etfs is None:
-        g_df_etfs = load_all_etf_general_info()
+        g_df_etfs = load_general_info_etf()
 
     try:
         return g_df_etfs.loc[g_df_etfs[COL_ETF_ID] == etf_id][COL_ETF_NAME].iloc[0]
@@ -346,7 +315,7 @@ def is_hk_ggt_stock(stock_id: str):
     global g_df_hk_ggt_stocks
 
     if g_df_hk_ggt_stocks is None:
-        g_df_hk_ggt_stocks = load_all_hk_ggt_stock_general_info()
+        g_df_hk_ggt_stocks = load_general_info_hk_ggt()
 
     try:
         return stock_id in g_df_hk_ggt_stocks[COL_STOCK_ID].values
@@ -358,7 +327,7 @@ def get_hk_ggt_stock_name(stock_id: str):
     global g_df_hk_ggt_stocks
 
     if g_df_hk_ggt_stocks is None:
-        g_df_hk_ggt_stocks = load_all_hk_ggt_stock_general_info()
+        g_df_hk_ggt_stocks = load_general_info_hk_ggt()
 
     try:
         return g_df_hk_ggt_stocks.loc[g_df_hk_ggt_stocks[COL_STOCK_ID] == stock_id][
@@ -368,26 +337,12 @@ def get_hk_ggt_stock_name(stock_id: str):
         return None
 
 
-def load_all_hk_ggt_stock_general_info() -> pd.DataFrame:
-    global g_df_hk_ggt_stocks
-
-    if g_df_hk_ggt_stocks is not None:
-        return g_df_hk_ggt_stocks
-
-    stock_general_info_path = get_hk_ggt_stock_general_info_path()
-    if not os.path.exists(stock_general_info_path) or is_older_than_a_month(
-        stock_general_info_path
-    ):
-        download_general_info_hk_ggt_stock()
-
-    g_df_hk_ggt_stocks = pd.read_csv(stock_general_info_path)
-    g_df_hk_ggt_stocks[COL_STOCK_ID] = g_df_hk_ggt_stocks[COL_STOCK_ID].astype(str)
-    g_df_hk_ggt_stocks[COL_STOCK_ID] = g_df_hk_ggt_stocks[COL_STOCK_ID].str.zfill(5)
-    return g_df_hk_ggt_stocks
+def load_general_info_hk_ggt() -> pd.DataFrame:
+    return get_storage().load_general_info_hk_ggt()
 
 
 def is_st(stock_id: str):
-    df = load_all_stock_general_info()
+    df = load_general_info_stock()
     # print(df[df[COL_STOCK_ID] == stock_id])
     return (
         (df[COL_STOCK_ID] == stock_id)
@@ -399,7 +354,7 @@ def is_st(stock_id: str):
 
 
 def drop_st(df: pd.DataFrame) -> pd.DataFrame:
-    df_gen_info = load_all_stock_general_info()
+    df_gen_info = load_general_info_stock()
     df_tmp = pd.merge(
         df, df_gen_info[[COL_STOCK_ID, COL_STOCK_NAME]], on=COL_STOCK_ID, how="inner"
     )
@@ -413,10 +368,10 @@ def drop_low_price_stocks(
     def _get_first_price(stock_id: str, start_date: str, end_date: str) -> float:
         df_stock = load_history_data_stock(
             security_id=stock_id,
-            period="daily",
+            period=PeriodType.DAILY,
             start_date=start_date,
             end_date=end_date,
-            adjust="",
+            adjust=AdjustType.HFQ,
         )
         return df_stock[COL_CLOSE].iloc[0]  # type: ignore
 
@@ -438,69 +393,25 @@ def drop_suspended_stocks(stocks: list, date: str) -> list:
 
 
 def drop_delisted_stocks(stocks: list, start_date: str, end_date: str) -> list:
-    data_path = get_stock_delisting_info_path()
-    if not os.path.exists(data_path) or is_older_than_n_days(data_path, 1):
-        download_delisted_stock_info()
+    pass
 
-    df = pd.read_csv(data_path, encoding="utf_8_sig")
-    df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
-    # FIXME: for hk stocks, the stock id is 5 digits
-    df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
-    df = df[(start_date <= df[COL_IPO_DATE]) | (df[COL_DELISTING_DATE] <= end_date)]
-    delisted_stocks = df[COL_STOCK_ID].tolist()
-    filtered_stocks = [stock for stock in stocks if stock not in delisted_stocks]
-    return filtered_stocks
+    # data_path = get_stock_delisting_info_path()
+    # if not os.path.exists(data_path) or is_older_than_n_days(data_path, 1):
+    #     download_delisted_stock_info()
 
-
-def load_300_ingredients(date: str) -> list:
-    assert re.match(
-        r"^\d{4}-\d{2}-\d{2}$", date
-    ), "Date must be in the format YYYY-MM-DD"
-
-    dt = datetime.strptime(date, "%Y-%m-%d")
-    if 1 <= dt.month < 7:
-        dt = dt.replace(month=1, day=1)
-    else:
-        dt = dt.replace(month=7, day=1)
-    converted_date = dt.strftime("%Y-%m-%d")
-
-    ingredients = []
-
-    file_path = os.path.join(get_stock_300_ingredients_path(), f"{converted_date}.csv")
-    if not os.path.exists(file_path):
-        download_300_ingredients()
-
-    df = pd.read_csv(file_path, encoding="utf_8_sig")
-    df = df[~df[COL_STOCK_NAME].str.startswith(("ST", "*ST"))]
-    df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
-    df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
-    ingredients = df[COL_STOCK_ID].tolist()
-
-    return ingredients
+    # df = pd.read_csv(data_path, encoding="utf_8_sig")
+    # df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
+    # # FIXME: for hk stocks, the stock id is 5 digits
+    # df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
+    # df = df[(start_date <= df[COL_IPO_DATE]) | (df[COL_DELISTING_DATE] <= end_date)]
+    # delisted_stocks = df[COL_STOCK_ID].tolist()
+    # filtered_stocks = [stock for stock in stocks if stock not in delisted_stocks]
+    # return filtered_stocks
 
 
-def load_500_ingredients(date: str) -> list:
-    assert re.match(
-        r"^\d{4}-\d{2}-\d{2}$", date
-    ), "Date must be in the format YYYY-MM-DD"
+def load_ingredient_300(date: str) -> list:
+    return get_storage().load_ingredient_300().to_list()
 
-    dt = datetime.strptime(date, "%Y-%m-%d")
-    if 1 <= dt.month < 7:
-        dt = dt.replace(month=1, day=1)
-    else:
-        dt = dt.replace(month=7, day=1)
-    converted_date = dt.strftime("%Y-%m-%d")
 
-    ingredients = []
-
-    file_path = os.path.join(get_stock_500_ingredients_path(), f"{converted_date}.csv")
-    if not os.path.exists(file_path):
-        download_500_ingredients()
-
-    df = pd.read_csv(file_path, encoding="utf_8_sig")
-    df = df[~df[COL_STOCK_NAME].str.startswith(("ST", "*ST"))]
-    df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
-    df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
-    ingredients = df[COL_STOCK_ID].tolist()
-
-    return ingredients
+def load_ingredient_500(date: str) -> list:
+    return get_storage().load_ingredient_500().to_list()

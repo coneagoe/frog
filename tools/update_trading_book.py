@@ -7,13 +7,15 @@ import swifter  # noqa: F401
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import conf  # noqa: E402
-from stock import (  # noqa: E402
+from common.const import (  # noqa: E402
     COL_BUY_COUNT,
     COL_BUYING_PRICE,
     COL_CURRENT_PRICE,
     COL_RESISTANCE,
     COL_STOCK_ID,
     COL_SUPPORT,
+)
+from stock import (  # noqa: E402
     calculate_support_resistance,
     fetch_close_price,
     get_trading_book_path,

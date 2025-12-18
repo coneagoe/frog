@@ -4,12 +4,14 @@ import sys
 
 import backtrader as bt
 
+from .bt_common import run
+from .my_strategy import MyStrategy, OrderState
+from .rotate_etf_pool import etf_pool as stocks
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import run  # noqa: E402
-from my_strategy import MyStrategy, OrderState  # noqa: E402
-from rotate_etf_pool import etf_pool as stocks  # noqa: E402
 
 import conf  # noqa: E402
+from common.const import SecurityType  # noqa: E402
 
 conf.parse_config()
 
@@ -64,7 +66,7 @@ class RotateStrategy(MyStrategy):
                     self.order_target_percent(self.datas[i], target=self.target)
                     self.context[i].stop_price = 0.0
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
-                if (self.context[i].stop_price > self.context[i].current_price) or (
+                if (self.context[i].stop_price > self.context[i].current_price) or (  # type: ignore[operator]
                     (i not in selected)
                     and (self.context[i].holding_bars >= self.p.holding_bars)
                 ):
@@ -76,7 +78,7 @@ class RotateStrategy(MyStrategy):
 
         if trade.isopen:
             i = self.stocks.index(trade.getdataname())
-            self.context[i].stop_price = round(self.context[i].open_price * 0.95, 3)
+            self.context[i].stop_price = round(self.context[i].open_price * 0.95, 3)  # type: ignore[operator]
 
     def stop(self):  # noqa: E303
         print(
@@ -139,5 +141,5 @@ if __name__ == "__main__":
         stocks=stocks,
         start_date=args.start,
         end_date=args.end,
-        security_type="auto",
+        security_type=SecurityType.AUTO,
     )

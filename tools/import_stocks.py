@@ -7,13 +7,9 @@ from tqdm import tqdm
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import conf  # noqa: E402
+from common.const import COL_STOCK_ID, COL_STOCK_NAME  # noqa: E402
 from ocr import OcrType, crop_image, get_ocr  # noqa: E402
-from stock import (  # noqa: E402
-    COL_STOCK_ID,
-    COL_STOCK_NAME,
-    get_etf_name,
-    get_stock_name,
-)
+from stock import get_etf_name, get_stock_name  # noqa: E402
 
 pattern_stock_id = re.compile(r"^(\d{6})$")
 

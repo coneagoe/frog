@@ -24,9 +24,11 @@ dependencies = [
     "celery (>=5.5.3,<6.0.0)",
     "redis (>=6.2.0,<7.0.0)",
     "requests (>=2.32.4,<3.0.0)",
-    "types-requests (>=2.32.4.20250611,<3.0.0.0)",
     "multitasking @ git+https://github.com/ranaroussi/multitasking.git",
-    "psycopg2-binary (>=2.9.10,<3.0.0)"
+    "pytest (>=8.4.2,<9.0.0)",
+    "types-requests (>=2.32.4.20250913,<3.0.0.0)",
+    "sqlalchemy (>=2.0.44,<3.0.0)",
+    "psycopg2-binary (>=2.9.11,<3.0.0)"
 ]
 
 [build-system]
@@ -40,10 +42,14 @@ package-mode = false
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^4.2.0"
-mypy = "^1.17.0"
-types-requests = "^2.32.4.20250611"
 flake8 = "^7.3.0"
 apache-airflow = "^3.0.4"
+types-requests = "^2.32.4.20250913"
+mypy = "^1.18.2"
+pandas-stubs = "^2.3.2.250926"
+types-tqdm = "^4.67.0.20250809"
+types-psycopg2 = "^2.9.21.20251012"
+scipy-stubs = "^1.16.3.0"
 
 [tool.block]
 target-version = ["py311"]
@@ -75,9 +81,9 @@ ignore_errors = true
 module = "frog_server"
 ignore_errors = true
 
-# Exclude tools
+# Exclude tools directory
 [[tool.mypy.overrides]]
-module = "tools"
+module = "tools.*"
 ignore_errors = true
 
 # Exclude stock
@@ -88,4 +94,25 @@ ignore_errors = true
 # Exclude stock
 [[tool.mypy.overrides]]
 module = "fund.*"
+ignore_errors = true
+
+# Exclude backtest/deprecate directory
+[[tool.mypy.overrides]]
+module = "backtest.deprecate.*"
+ignore_errors = true
+
+# Third-party libraries without type stubs
+[[tool.mypy.overrides]]
+module = ["akshare.*"]
+ignore_missing_imports = true
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["retrying.*"]
+ignore_missing_imports = true
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["baostock.*"]
+ignore_missing_imports = true
 ignore_errors = true

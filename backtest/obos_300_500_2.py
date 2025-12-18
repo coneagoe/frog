@@ -5,43 +5,32 @@ import sys
 import backtrader as bt
 import pandas as pd
 
+from .bt_common import drop_suspended, run
+from .my_strategy import MyStrategy, OrderState
+from .obos_indicator import OBOS
+from .stop_price_manager import StopPriceManagerEma as StopPriceManager
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import drop_suspended, run  # noqa: E402
-from my_strategy import MyStrategy, OrderState  # noqa: E402
-from obos_indicator import OBOS  # noqa: E402
-from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
 
 import conf  # noqa: E402
-from indicator import (  # noqa: E402
-    OBOS_OVERBUY_THRESHOLD,
-    OBOS_OVERSELL_THRESHOLD,
-    OBOS_PARAM_M,
-    OBOS_PARAM_N,
-)
+from common.const import COL_STOCK_ID, SecurityType  # noqa: E402
+from indicator import OBOS_OVERBUY_THRESHOLD, OBOS_OVERSELL_THRESHOLD  # noqa: E402
 from stock import (  # noqa: E402
-    COL_STOCK_ID,
     drop_delisted_stocks,
-    load_300_ingredients,
-    load_500_ingredients,
+    load_ingredient_300,
+    load_ingredient_500,
 )
 
 conf.parse_config()
 
 
 class ObosStrategy(MyStrategy):
-    params = (
-        ("param_n", OBOS_PARAM_N),
-        ("param_m", OBOS_PARAM_M),
-        ("param_sp", 5),  # 过去n天的最低价作为initial stop price
-    )
+    params = (("param_sp", 5),)  # 过去n天的最低价作为initial stop price
 
     def __init__(self):
         super().__init__()
 
-        self.obos = {
-            i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
-            for i in range(len(self.datas))
-        }
+        self.obos = {i: OBOS(data=self.datas[i]) for i in range(len(self.datas))}
 
         self.stop_manager = StopPriceManager(self.datas)
 
@@ -57,7 +46,11 @@ class ObosStrategy(MyStrategy):
                         continue
                 else:
                     # 如果close > ema20
-                    if self.context[i].current_price > self.stop_manager.ema20[i][0]:
+                    if (
+                        self.context[i].current_price is not None
+                        and self.context[i].current_price
+                        > self.stop_manager.ema20[i][0]
+                    ):
                         self.order_target_percent(self.datas[i], target=self.p.target)
                         self.context[i].stop_price = min(
                             [
@@ -73,7 +66,7 @@ class ObosStrategy(MyStrategy):
                         self.context[i].stop_price, self.datas[i].low[-1]
                     )
 
-                if self.context[i].current_price < self.context[i].stop_price:
+                if self.context[i].current_price < self.context[i].stop_price:  # type: ignore[operator]
                     self.order_target_percent(self.datas[i], target=0.0)
                     self.context[i].order_state = OrderState.ORDER_CLOSING
 
@@ -116,8 +109,8 @@ if __name__ == "__main__":
     if args.cash:
         os.environ["INIT_CASH"] = str(args.cash)
 
-    stocks = load_300_ingredients(args.start)
-    tmp = load_500_ingredients(args.start)
+    stocks = load_ingredient_300(args.start)
+    tmp = load_ingredient_500(args.start)
     stocks.extend(tmp)
     if args.filter:
         filter_list = args.filter.split()
@@ -142,5 +135,5 @@ if __name__ == "__main__":
         stocks=ObosStrategy.stocks,
         start_date=args.start,
         end_date=args.end,
-        security_type="stock",
+        security_type=SecurityType.STOCK,
     )

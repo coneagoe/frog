@@ -5,13 +5,14 @@ import sys
 import backtrader as bt
 import pandas as pd
 
+from .bt_common import run
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import run  # noqa: E402
 from my_strategy import MyStrategy  # noqa: E402
 from stock_pool_power import stocks  # noqa: E402
 
 import conf  # noqa: E402
-from stock import COL_STOCK_ID  # noqa: E402
+from common.const import COL_STOCK_ID, SecurityType  # noqa: E402
 
 conf.parse_config()
 
@@ -171,5 +172,5 @@ if __name__ == "__main__":
         stocks=TrendFollowingStrategy.stocks,
         start_date=args.start,
         end_date=args.end,
-        security_type="stock",
+        security_type=SecurityType.STOCK,
     )

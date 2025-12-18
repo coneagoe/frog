@@ -9,11 +9,14 @@ import plotly.graph_objs as go
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import conf  # noqa: E402
-from stock import (  # noqa: E402
+from common.const import (  # noqa: E402
     COL_BUYING_PRICE,
     COL_CLOSE,
     COL_DATE,
     COL_STOCK_ID,
+    PeriodType,
+)
+from stock import (  # noqa: E402
     get_security_name,
     get_support_resistance,
     get_trading_book_path,
@@ -199,7 +202,10 @@ if __name__ == "__main__":
         end_date = end_date.strftime("%Y%m%d")
 
     df = load_history_data(
-        security_id=stock_id, period="daily", start_date=start_date, end_date=end_date
+        security_id=stock_id,
+        period=PeriodType.DAILY,
+        start_date=start_date,
+        end_date=end_date,
     )
     turning_points = get_turning_points(df)
     support_index, resistance_index = get_support_resistance(df, turning_points)

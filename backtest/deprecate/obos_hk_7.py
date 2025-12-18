@@ -6,7 +6,7 @@ import backtrader as bt
 import pandas as pd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import drop_suspended, run  # noqa: E402
+from bt_common import drop_suspended, run  # noqa: E402
 from my_strategy import MyStrategy, OrderState  # noqa: E402
 from obos_indicator import OBOS  # noqa: E402
 from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402

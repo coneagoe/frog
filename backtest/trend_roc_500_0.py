@@ -4,12 +4,14 @@ import sys
 
 import backtrader as bt
 
+from .bt_common import run
+from .my_strategy import MyStrategy
+from .trend_follow_500_pool import stocks
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import run  # noqa: E402
-from my_strategy import MyStrategy  # noqa: E402
-from trend_follow_500_pool import stocks  # noqa: E402
 
 import conf  # noqa: E402
+from common.const import SecurityType  # noqa: E402
 
 conf.parse_config()
 
@@ -17,8 +19,8 @@ conf.parse_config()
 class TrendRoc(MyStrategy):
     # 参数定义
     params = (
-        ("period", 20),  # 动量周期
-        ("n_portion", 2),  # 每支股票允许持有的n倍最小仓位
+        ("period", 20.0),  # 动量周期
+        ("n_portion", 2.0),  # 每支股票允许持有的n倍最小仓位
     )
 
     def __init__(self):
@@ -77,4 +79,5 @@ if __name__ == "__main__":
         stocks=stocks,
         start_date=args.start,
         end_date=args.end,
+        security_type=SecurityType.STOCK,
     )

@@ -2,7 +2,7 @@ from enum import Enum
 
 import pandas as pd
 
-from stock import COL_CLOSE, COL_HIGH, COL_LOW
+from common.const import COL_CLOSE, COL_HIGH, COL_LOW
 
 COL_LOWEST = "lowest"
 COL_HIGHEST = "highest"
