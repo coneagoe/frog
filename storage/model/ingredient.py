@@ -14,9 +14,7 @@ class Ingredient300(Base):
     股票代码 = Column(
         COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
     )
-    股票名称 = Column(
-        COL_STOCK_NAME, String(10), nullable=False, comment="股票名称"
-    )
+    股票名称 = Column(COL_STOCK_NAME, String(10), nullable=False, comment="股票名称")
 
 
 class Ingredient500(Base):
@@ -25,6 +23,4 @@ class Ingredient500(Base):
     股票代码 = Column(
         COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
     )
-    股票名称 = Column(
-        COL_STOCK_NAME, String(10), nullable=False, comment="股票名称"
-    )
+    股票名称 = Column(COL_STOCK_NAME, String(10), nullable=False, comment="股票名称")
