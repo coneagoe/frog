@@ -4,11 +4,13 @@ import sys
 
 import backtrader as bt
 
+from .bt_common import run
+from .trend_follow_500_pool import stocks
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import run  # noqa: E402
-from trend_follow_500_pool import stocks  # noqa: E402
 
 import conf  # noqa: E402
+from common.const import SecurityType  # noqa: E402
 
 conf.parse_config()
 
@@ -173,4 +175,11 @@ if __name__ == "__main__":
     else:
         cerebro.addstrategy(TrendFollowingStrategy)
 
-    run("trend_follow_500_5", cerebro, stocks, args.start, args.end)
+    run(
+        strategy_name="trend_follow_500_5",
+        cerebro=cerebro,
+        stocks=stocks,
+        start_date=args.start,
+        end_date=args.end,
+        security_type=SecurityType.STOCK,
+    )

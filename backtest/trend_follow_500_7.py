@@ -5,13 +5,15 @@ import sys
 import backtrader as bt
 import pandas as pd
 
+from .bt_common import drop_suspended, run
+from .my_strategy import MyStrategy, OrderState, parse_args
+from .stop_price_manager import StopPriceManagerEma as StopPriceManager
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import drop_suspended, run  # noqa: E402
-from my_strategy import MyStrategy, OrderState, parse_args  # noqa: E402
-from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
 
 import conf  # noqa: E402
-from stock import COL_STOCK_ID, drop_delisted_stocks, load_500_ingredients  # noqa: E402
+from common.const import COL_STOCK_ID, SecurityType  # noqa: E402
+from stock import drop_delisted_stocks, load_ingredient_500  # noqa: E402
 
 conf.parse_config()
 
@@ -77,7 +79,7 @@ class TrendFollowingStrategy(MyStrategy):
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
 
-                if self.context[i].current_price < self.context[i].stop_price:
+                if self.context[i].current_price < self.context[i].stop_price:  # type: ignore[operator]
                     self.order_target_percent(self.datas[i], target=0.0)
                     self.context[i].order_state = OrderState.ORDER_CLOSING
 
@@ -112,7 +114,7 @@ if __name__ == "__main__":
     strategy_name = os.path.splitext(os.path.basename(__file__))[0]
     parse_args(args, strategy_name)
 
-    stocks = load_500_ingredients(args.start)
+    stocks = load_ingredient_500(args.start)
     if args.filter:
         filter_list = args.filter.split()
         stocks = [stock for stock in stocks if stock not in filter_list]
@@ -141,5 +143,5 @@ if __name__ == "__main__":
         stocks=TrendFollowingStrategy.stocks,
         start_date=args.start,
         end_date=args.end,
-        security_type="stock",
+        security_type=SecurityType.STOCK,
     )

@@ -6,27 +6,21 @@ import backtrader as bt
 import pandas as pd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import drop_suspended, run  # noqa: E402
 from my_strategy import MyStrategy, OrderState, parse_args  # noqa: E402
 from obos_indicator import OBOS  # noqa: E402
 from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
 
 import conf  # noqa: E402
-from indicator import (  # noqa: E402
-    OBOS_OVERBUY_THRESHOLD,
-    OBOS_OVERSELL_THRESHOLD,
-    OBOS_PARAM_M,
-    OBOS_PARAM_N,
-)
-from stock import COL_STOCK_ID, load_all_hk_ggt_stock_general_info  # noqa: E402
+from backtest.bt_common import drop_suspended, run  # noqa: E402
+from common.const import COL_STOCK_ID, SecurityType  # noqa: E402
+from indicator import OBOS_OVERBUY_THRESHOLD, OBOS_OVERSELL_THRESHOLD  # noqa: E402
+from stock import load_general_info_hk_ggt  # noqa: E402
 
 conf.parse_config()
 
 
 class ObosStrategy(MyStrategy):
     params = (
-        ("param_n", OBOS_PARAM_N),
-        ("param_m", OBOS_PARAM_M),
         ("param_sp", 5),  # 过去n天的最低价作为initial stop price
         ("target", 0.005),  # 单笔仓位占比(例如 0.005 表示 0.5%)
     )
@@ -34,10 +28,7 @@ class ObosStrategy(MyStrategy):
     def __init__(self):
         super().__init__()
 
-        self.obos = {
-            i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
-            for i in range(len(self.datas))
-        }
+        self.obos = {i: OBOS(self.datas[i]) for i in range(len(self.datas))}
 
         self.kdj = {
             i: bt.indicators.Stochastic(
@@ -83,6 +74,7 @@ class ObosStrategy(MyStrategy):
                         self.context[i].order_state = OrderState.ORDER_PRE_OPENING
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
+
                 # 如果OBOS超买
                 if self.obos[i] > OBOS_OVERBUY_THRESHOLD:
                     self.context[i].stop_price = max(
@@ -131,7 +123,7 @@ if __name__ == "__main__":
     strategy_name = os.path.splitext(os.path.basename(__file__))[0]
     parse_args(args, strategy_name)
 
-    hk_ggt_stocks_df = load_all_hk_ggt_stock_general_info()
+    hk_ggt_stocks_df = load_general_info_hk_ggt()
 
     stocks = hk_ggt_stocks_df[COL_STOCK_ID].tolist()
     if args.filter:
@@ -155,5 +147,5 @@ if __name__ == "__main__":
         stocks=ObosStrategy.stocks,
         start_date=args.start,
         end_date=args.end,
-        security_type="hk_ggt_stock",
+        security_type=SecurityType.HK_GGT_STOCK,
     )

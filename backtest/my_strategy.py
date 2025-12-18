@@ -4,6 +4,7 @@ import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 import backtrader as bt
 import pandas as pd
@@ -75,7 +76,9 @@ class Context:
 
 class MyStrategy(bt.Strategy):
     stocks: list[str] = []
-    params = (("target", 0.005),)  # default portfolio target weight per position
+    params: tuple[tuple[str, Any], ...] = (
+        ("target", 0.005),
+    )  # default portfolio target weight per position
 
     def __init__(self):
         self.reset()

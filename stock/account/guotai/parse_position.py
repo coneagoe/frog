@@ -5,8 +5,7 @@ import re
 
 import pandas as pd
 
-from ocr import get_ocr
-from stock.const import (
+from common import (
     COL_COST,
     COL_CURRENT_PRICE,
     COL_MARKET_VALUE,
@@ -17,6 +16,7 @@ from stock.const import (
     COL_STOCK_ID,
     COL_STOCK_NAME,
 )
+from ocr import get_ocr
 
 pattern_stick = re.compile(r"(\D+)(\d{6})$")
 pattern_tailing_number = re.compile(r"\d+$")

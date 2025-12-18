@@ -5,28 +5,23 @@ import sys
 import backtrader as bt
 import pandas as pd
 
+from .bt_common import drop_suspended, run
+from .my_strategy import MyStrategy, OrderState, parse_args
+from .obos_indicator import OBOS
+from .stop_price_manager import StopPriceManagerEma as StopPriceManager
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import drop_suspended, run  # noqa: E402
-from my_strategy import MyStrategy, OrderState, parse_args  # noqa: E402
-from obos_indicator import OBOS  # noqa: E402
-from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
 
 import conf  # noqa: E402
-from indicator import (  # noqa: E402
-    OBOS_OVERBUY_THRESHOLD,
-    OBOS_OVERSELL_THRESHOLD,
-    OBOS_PARAM_M,
-    OBOS_PARAM_N,
-)
-from stock import COL_STOCK_ID, drop_st  # noqa: E402
+from common.const import COL_STOCK_ID, SecurityType  # noqa: E402
+from indicator import OBOS_OVERBUY_THRESHOLD, OBOS_OVERSELL_THRESHOLD  # noqa: E402
+from stock import drop_st  # noqa: E402
 
 conf.parse_config()
 
 
 class ObosStrategy(MyStrategy):
     params = (
-        ("param_n", OBOS_PARAM_N),
-        ("param_m", OBOS_PARAM_M),
         ("param_sp", 5),  # 过去n天的最低价作为initial stop price
         ("target", 0.01),  # 单笔仓位占比
     )
@@ -34,10 +29,7 @@ class ObosStrategy(MyStrategy):
     def __init__(self):
         super().__init__()
 
-        self.obos = {
-            i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
-            for i in range(len(self.datas))
-        }
+        self.obos = {i: OBOS(data=self.datas[i]) for i in range(len(self.datas))}
 
         self.kdj = {
             i: bt.indicators.Stochastic(
@@ -89,7 +81,7 @@ class ObosStrategy(MyStrategy):
                         self.context[i].stop_price, self.datas[i].low[-1]
                     )
 
-                if self.context[i].current_price < self.context[i].stop_price:
+                if self.context[i].current_price < self.context[i].stop_price:  # type: ignore[operator]
                     self.order_target_percent(self.datas[i], target=0.0)
                     self.context[i].order_state = OrderState.ORDER_CLOSING
 
@@ -167,5 +159,5 @@ if __name__ == "__main__":
         stocks=ObosStrategy.stocks,
         start_date=args.start,
         end_date=args.end,
-        security_type="auto",
+        security_type=SecurityType.AUTO,
     )

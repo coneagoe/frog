@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 from scipy.signal import argrelextrema
 
-from .const import COL_CLOSE, COL_STOCK_ID
+from common.const import COL_CLOSE, COL_STOCK_ID
+
 from .data import load_history_data
 
 percent = 0.05

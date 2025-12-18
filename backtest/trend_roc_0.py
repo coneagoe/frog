@@ -4,11 +4,13 @@ import sys
 
 import backtrader as bt
 
+from .bt_common import run
+from .my_strategy import MyStrategy
+
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import run  # noqa: E402
-from my_strategy import MyStrategy  # noqa: E402
 
 import conf  # noqa: E402
+from common.const import SecurityType  # noqa: E402
 
 conf.parse_config()
 
@@ -18,9 +20,7 @@ stocks = ["159915"]
 
 class TrendRoc(MyStrategy):
     # 参数定义
-    params = dict(
-        period=20,  # 动量周期
-    )
+    params = (("period", 20),)  # 动量周期
 
     def __init__(self):
         super(TrendRoc, self).__init__()
@@ -74,4 +74,5 @@ if __name__ == "__main__":
         stocks=stocks,
         start_date=args.start,
         end_date=args.end,
+        security_type=SecurityType.ETF,
     )

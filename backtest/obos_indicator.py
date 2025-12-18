@@ -8,9 +8,9 @@ class OBOS(bt.Indicator):
     )
     lines = ("obos",)
 
-    def __init__(self):
-        lowest_price = bt.indicators.Lowest(self.data.low, period=self.p.n)
-        highest_price = bt.indicators.Highest(self.data.high, period=self.p.m)
+    def __init__(self, data) -> None:
+        lowest_price = bt.indicators.Lowest(data.low, period=self.p.n)
+        highest_price = bt.indicators.Highest(data.high, period=self.p.m)
         base = (highest_price - lowest_price) + 1e-8
-        ratio = (self.data.close - lowest_price) / base * 4
+        ratio = (data.close - lowest_price) / base * 4
         self.l.obos = bt.indicators.EMA(ratio, period=4)

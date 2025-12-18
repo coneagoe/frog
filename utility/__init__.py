@@ -1,3 +1,4 @@
+from .proxy import change_proxy
 from .send_email import send_email
 from .utility import (
     is_older_than_a_month,
@@ -16,4 +17,5 @@ __all__ = [
     "retry_async",
     "retry_sync",
     "send_email",
+    "change_proxy",
 ]

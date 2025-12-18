@@ -5,15 +5,12 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
-# 添加项目路径到 Python 路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from stock.data.downloader.download_status import (  # noqa: E402
     get_today_status_summary,
     status_manager,
 )
-
-# 导入项目模块
 from stock.data.factory import create_download_manager  # noqa: E402
 
 # DAG 默认参数

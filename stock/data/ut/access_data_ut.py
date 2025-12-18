@@ -6,7 +6,7 @@ import pandas as pd
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 import conf  # noqa: E402
-from stock.const import (  # noqa: E402
+from common import (  # noqa: E402
     COL_CLOSE,
     COL_HIGH,
     COL_LOW,

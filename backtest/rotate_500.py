@@ -3,10 +3,11 @@ import sys
 
 import backtrader as bt
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from common import run  # noqa: E402
+from .bt_common import run
 
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import conf  # noqa: E402
+from common.const import SecurityType  # noqa: E402
 
 COL_START_DATE = "开始日期"
 COL_END_DATE = "结束日期"
@@ -617,4 +618,11 @@ if os.environ.get("OPTIMIZER") == "True":
 else:
     cerebro.addstrategy(MyStrategy)
 
-run(cerebro, stocks, start_date, end_date)
+run(
+    strategy_name="rotate_500",
+    cerebro=cerebro,
+    stocks=stocks,
+    start_date=start_date,
+    end_date=end_date,
+    security_type=SecurityType.STOCK,
+)

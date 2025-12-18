@@ -42,3 +42,20 @@ class StopPriceManagerEma:
 
         if ema is not None:
             context[i].stop_price = max(context[i].stop_price, round(ema[i][-1], 3))
+
+    def calculate_stop_price(self, context: list[Context], datas, i: int) -> float:
+        profit_rate = context[i].profit_rate
+        if profit_rate < self.profit_rate_threshold:
+            return 0.0
+        elif profit_rate < 0.2:
+            ema = self.ema30
+        elif profit_rate < 0.4:
+            ema = self.ema20
+        elif profit_rate < 0.6:
+            ema = self.ema10
+        elif profit_rate < 0.8:
+            ema = self.ema5
+        else:
+            return round(float(datas[i].low[-1]), 3)
+
+        return round(float(ema[i][-1]), 3)

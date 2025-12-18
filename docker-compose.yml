@@ -24,6 +24,7 @@ services:
   db:
     image: timescale/timescaledb:latest-pg16
     environment:
+      POSTGRES_DB: quant
       POSTGRES_USER: quant
       POSTGRES_PASSWORD: quant
     ports: ["5432:5432"]

@@ -4,7 +4,7 @@ import logging
 import os
 from enum import Enum
 
-import requests  # type: ignore[import-untyped]
+import requests
 from PIL import Image
 
 
