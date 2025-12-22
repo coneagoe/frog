@@ -18,6 +18,7 @@ from .storage_db import (
     StorageDb,
     StorageError,
     get_storage,
+    get_table_name,
     reset_storage,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "ConnectionError",
     "StorageConfig",
     "get_storage",
+    "get_table_name",
     "reset_storage",
     "tb_name_general_info_stock",
     "tb_name_general_info_ggt",

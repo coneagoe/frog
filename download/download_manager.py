@@ -1,47 +1,35 @@
 import logging
+from datetime import datetime
+from typing import Any, Callable
 
 import pandas as pd
 
-from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType
+from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType, SecurityType
 from storage import (
     get_storage,
+    get_table_name,
     tb_name_general_info_stock,
-    tb_name_history_data_daily_a_stock_hfq,
-    tb_name_history_data_daily_a_stock_qfq,
-    tb_name_history_data_daily_hk_stock_hfq,
-    tb_name_history_data_monthly_hk_stock_hfq,
-    tb_name_history_data_weekly_a_stock_hfq,
-    tb_name_history_data_weekly_a_stock_qfq,
-    tb_name_history_data_weekly_hk_stock_hfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
 )
-from storage.model import (
-    tb_name_history_data_daily_etf_hfq,
-    tb_name_history_data_daily_etf_qfq,
-    tb_name_history_data_weekly_etf_hfq,
-    tb_name_history_data_weekly_etf_qfq,
-)
 
 from .dl import Downloader
+from .mp_utils import run_history_download_mp
 
 
 class DownloadManager:
     def __init__(self):
-        storage = get_storage()
-
-        self.storage = storage
         self.downloader = Downloader()
 
     def download_general_info_stock(self, force: bool = False) -> bool:
-        self.storage.drop_table(tb_name_general_info_stock)
+        get_storage().drop_table(tb_name_general_info_stock)
 
         df = self.downloader.dl_general_info_stock()
         if df is None or df.empty:
             logging.warning("Failed to download stock info or data is empty.")
             return False
 
-        return self.storage.save_general_info_stock(df)
+        return get_storage().save_general_info_stock(df)
 
     def download_general_info_etf(self, force: bool = False) -> bool:
         df = self.downloader.dl_general_info_etf()
@@ -49,7 +37,7 @@ class DownloadManager:
             logging.warning("Failed to download ETF info or data is empty.")
             return False
 
-        return self.storage.save_general_info_etf(df)
+        return get_storage().save_general_info_etf(df)
 
     def download_general_info_hk_ggt(self, force: bool = False) -> bool:
         df = self.downloader.dl_general_info_hk_ggt_stock()
@@ -57,7 +45,46 @@ class DownloadManager:
             logging.warning("Failed to download HK GGT info or data is empty.")
             return False
 
-        return self.storage.save_general_info_hk_ggt(df)
+        return get_storage().save_general_info_hk_ggt(df)
+
+    def _download_history_data(
+        self,
+        table_name: str,
+        security_id: str,
+        period: PeriodType,
+        start_date: str,
+        end_date: str,
+        adjust: AdjustType,
+        downloader_func: Callable[[str, str, str, PeriodType, AdjustType], Any],
+        storage_save_func: Callable[[Any, PeriodType, AdjustType], bool],
+    ) -> bool:
+        try:
+            last_record = get_storage().get_last_record(table_name, security_id)
+
+            if last_record is not None:
+                latest_date = pd.Timestamp(last_record[COL_DATE])
+                actual_start_ts = latest_date + pd.Timedelta(days=1)
+                actual_start_date = actual_start_ts.strftime("%Y%m%d")
+
+                if actual_start_ts > pd.to_datetime(end_date):
+                    logging.info(f"Data for {security_id} is already up to date")
+                    return True
+            else:
+                actual_start_date = start_date
+
+            df = downloader_func(
+                security_id, actual_start_date, end_date, period, adjust
+            )
+
+            if df is None or df.empty:
+                logging.info(f"No new data for {security_id}")
+                return True
+
+            return storage_save_func(df, period, adjust)
+
+        except Exception as e:
+            logging.error(f"Error processing history for {security_id}: {e}")
+            return False
 
     def download_stock_history(
         self,
@@ -67,47 +94,18 @@ class DownloadManager:
         end_date: str,
         adjust: AdjustType = AdjustType.QFQ,
     ) -> bool:
-        if adjust == AdjustType.QFQ:
-            table_name = (
-                tb_name_history_data_daily_a_stock_qfq
-                if period == PeriodType.DAILY
-                else tb_name_history_data_weekly_a_stock_qfq
-            )
-        else:
-            table_name = (
-                tb_name_history_data_daily_a_stock_hfq
-                if period == PeriodType.DAILY
-                else tb_name_history_data_weekly_a_stock_hfq
-            )
+        table_name = get_table_name(SecurityType.STOCK, period, adjust)
 
-        try:
-            last_record = self.storage.get_last_record(table_name, stock_id)
-
-            if last_record is not None:
-                latest_date = pd.Timestamp(last_record[COL_DATE])
-                actual_start_date = (latest_date + pd.Timedelta(days=1)).strftime(
-                    "%Y%m%d"
-                )
-
-                if actual_start_date > end_date:
-                    logging.info(f"Data for {stock_id} is already up to date")
-                    return True
-            else:
-                actual_start_date = start_date
-
-            df = self.downloader.dl_history_data_stock(
-                stock_id, actual_start_date, end_date, period, adjust
-            )
-
-            if df is None or df.empty:
-                logging.info(f"No new data for {stock_id}")
-                return True
-
-            return self.storage.save_history_data_stock(df, period, adjust)
-
-        except Exception as e:
-            logging.error(f"Error processing history for {stock_id}: {e}")
-            return False
+        return self._download_history_data(
+            table_name=table_name,
+            security_id=stock_id,
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+            adjust=adjust,
+            downloader_func=self.downloader.dl_history_data_stock,
+            storage_save_func=get_storage().save_history_data_stock,
+        )
 
     def download_all_stock_history(
         self,
@@ -129,24 +127,19 @@ class DownloadManager:
             bool: 是否成功完成所有股票的下载
         """
         if end_date is None:
-            from datetime import datetime
-
             end_date = datetime.now().strftime("%Y-%m-%d")
 
         logging.info(
             f"开始下载所有股票历史数据，周期: {period.value}, 复权: {adjust.value}, 日期范围: {start_date} 到 {end_date}"
         )
 
+        table_name = get_table_name(SecurityType.STOCK, period, adjust)
+
         try:
             if adjust == AdjustType.QFQ:
-                table_name = (
-                    tb_name_history_data_daily_a_stock_qfq
-                    if period == PeriodType.DAILY
-                    else tb_name_history_data_weekly_a_stock_qfq
-                )
-                self.storage.drop_table(table_name)
+                get_storage().drop_table(table_name)
 
-            df_stocks = self.storage.load_general_info_stock()
+            df_stocks = get_storage().load_general_info_stock()
 
             if df_stocks is None or df_stocks.empty:
                 logging.error("无法获取股票基本信息数据")
@@ -155,51 +148,27 @@ class DownloadManager:
             stock_ids = df_stocks[COL_STOCK_ID].tolist()
             total_stocks = len(stock_ids)
 
-            logging.info(f"共获取到 {total_stocks} 只股票，开始批量下载历史数据...")
+            logging.info(f"共获取到 {total_stocks} 只股票，开始多进程下载历史数据...")
 
-            success_count = 0
-            failure_count = 0
-
-            for i, stock_id in enumerate(stock_ids, 1):
-                try:
-                    logging.info(f"正在下载第 {i}/{total_stocks} 只股票: {stock_id}")
-
-                    success = self.download_stock_history(
-                        stock_id=stock_id,
-                        period=period,
-                        start_date=start_date,
-                        end_date=end_date,
-                        adjust=adjust,
-                    )
-
-                    if success:
-                        success_count += 1
-                        logging.info(f"✓ 股票 {stock_id} 下载成功 ({i}/{total_stocks})")
-                    else:
-                        failure_count += 1
-                        logging.warning(
-                            f"⚠ 股票 {stock_id} 下载失败 ({i}/{total_stocks})"
-                        )
-
-                except Exception as e:
-                    failure_count += 1
-                    logging.error(
-                        f"✗ 股票 {stock_id} 下载出错: {e} ({i}/{total_stocks})"
-                    )
-
-            # 总结下载结果
-            logging.info(
-                f"批量下载完成！成功: {success_count}, 失败: {failure_count}, 总计: {total_stocks}"
+            result = run_history_download_mp(
+                security_type=SecurityType.STOCK,
+                ids=stock_ids,
+                period_value=period.value,
+                adjust_value=adjust.value,
+                start_date=start_date,
+                end_date=end_date,
+                process_count=None,
+                log_prefix="[A股] ",
             )
 
-            if failure_count == 0:
+            if result.failed == 0:
                 logging.info("🎉 所有股票历史数据下载成功！")
                 return True
-            else:
-                logging.warning(
-                    f"⚠ 部分股票下载失败，成功率: {success_count/total_stocks*100:.1f}%"
-                )
-                return False
+
+            logging.warning(
+                f"⚠ 部分股票下载失败，成功率: {result.success/total_stocks*100:.1f}%"
+            )
+            return False
 
         except Exception as e:
             logging.error(f"批量下载股票历史数据时发生错误: {e}")
@@ -226,48 +195,18 @@ class DownloadManager:
         Returns:
             bool: 是否成功下载并保存
         """
-        # 根据周期选择对应的表名
-        if period == PeriodType.DAILY:
-            table_name = tb_name_history_data_daily_hk_stock_hfq
-        elif period == PeriodType.WEEKLY:
-            table_name = tb_name_history_data_weekly_hk_stock_hfq
-        elif period == PeriodType.MONTHLY:
-            table_name = tb_name_history_data_monthly_hk_stock_hfq
-        else:
-            logging.error(f"不支持的周期类型: {period}")
-            return False
+        table_name = get_table_name(SecurityType.HK_GGT_STOCK, period, adjust)
 
-        try:
-            # 获取最后一条记录以实现增量更新
-            last_record = self.storage.get_last_record(table_name, stock_id)
-
-            if last_record is not None:
-                latest_date = pd.Timestamp(last_record[COL_DATE])
-                actual_start_date = (latest_date + pd.Timedelta(days=1)).strftime(
-                    "%Y-%m-%d"
-                )
-
-                if actual_start_date > end_date:
-                    logging.info(f"香港股票 {stock_id} 数据已是最新")
-                    return True
-            else:
-                actual_start_date = start_date
-
-            # 下载香港股票历史数据
-            df = self.downloader.dl_history_data_stock_hk(
-                stock_id, actual_start_date, end_date, period, adjust
-            )
-
-            if df is None or df.empty:
-                logging.info(f"香港股票 {stock_id} 无新数据")
-                return True
-
-            # 保存数据到对应的香港股票历史数据表
-            return self.storage.save_history_data_hk_stock(df, period, adjust)
-
-        except Exception as e:
-            logging.error(f"处理香港股票 {stock_id} 历史数据时出错: {e}")
-            return False
+        return self._download_history_data(
+            table_name=table_name,
+            security_id=stock_id,
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+            adjust=adjust,
+            downloader_func=self.downloader.dl_history_data_stock_hk,
+            storage_save_func=get_storage().save_history_data_hk_stock,
+        )
 
     def download_all_hk_stock_history(
         self,
@@ -289,24 +228,18 @@ class DownloadManager:
             bool: 是否成功完成所有香港股票的下载
         """
         if end_date is None:
-            from datetime import datetime
-
             end_date = datetime.now().strftime("%Y-%m-%d")
 
         logging.info(
             f"开始下载所有香港股票历史数据，周期: {period.value}, 复权: {adjust.value}, 日期范围: {start_date} 到 {end_date}"
         )
 
+        table_name = get_table_name(SecurityType.HK_GGT_STOCK, period, adjust)
         try:
             if adjust == AdjustType.QFQ:
-                table_name = (
-                    tb_name_history_data_daily_hk_stock_hfq
-                    if period == PeriodType.DAILY
-                    else tb_name_history_data_weekly_hk_stock_hfq
-                )
-                self.storage.drop_table(table_name)
+                get_storage().drop_table(table_name)
 
-            df_hk_stocks = self.storage.load_general_info_hk_ggt()
+            df_hk_stocks = get_storage().load_general_info_hk_ggt()
 
             if df_hk_stocks is None or df_hk_stocks.empty:
                 logging.error("无法获取香港股票基本信息数据")
@@ -315,55 +248,29 @@ class DownloadManager:
             stock_ids = df_hk_stocks[COL_STOCK_ID].tolist()
             total_stocks = len(stock_ids)
 
-            logging.info(f"共获取到 {total_stocks} 只香港股票，开始批量下载历史数据...")
-
-            success_count = 0
-            failure_count = 0
-
-            for i, stock_id in enumerate(stock_ids, 1):
-                try:
-                    logging.info(
-                        f"正在下载第 {i}/{total_stocks} 只香港股票: {stock_id}"
-                    )
-
-                    success = self.download_hk_stock_history(
-                        stock_id=stock_id,
-                        period=period,
-                        start_date=start_date,
-                        end_date=end_date,
-                        adjust=adjust,
-                    )
-
-                    if success:
-                        success_count += 1
-                        logging.info(
-                            f"✓ 香港股票 {stock_id} 下载成功 ({i}/{total_stocks})"
-                        )
-                    else:
-                        failure_count += 1
-                        logging.warning(
-                            f"⚠ 香港股票 {stock_id} 下载失败 ({i}/{total_stocks})"
-                        )
-
-                except Exception as e:
-                    failure_count += 1
-                    logging.error(
-                        f"✗ 香港股票 {stock_id} 下载出错: {e} ({i}/{total_stocks})"
-                    )
-
-            # 总结下载结果
             logging.info(
-                f"香港股票批量下载完成！成功: {success_count}, 失败: {failure_count}, 总计: {total_stocks}"
+                f"共获取到 {total_stocks} 只香港股票，开始多进程下载历史数据..."
             )
 
-            if failure_count == 0:
+            result = run_history_download_mp(
+                security_type=SecurityType.HK_GGT_STOCK,
+                ids=stock_ids,
+                period_value=period.value,
+                adjust_value=adjust.value,
+                start_date=start_date,
+                end_date=end_date,
+                process_count=None,
+                log_prefix="[港股] ",
+            )
+
+            if result.failed == 0:
                 logging.info("🎉 所有香港股票历史数据下载成功！")
                 return True
-            else:
-                logging.warning(
-                    f"⚠ 部分香港股票下载失败，成功率: {success_count/total_stocks*100:.1f}%"
-                )
-                return False
+
+            logging.warning(
+                f"⚠ 部分香港股票下载失败，成功率: {result.success/total_stocks*100:.1f}%"
+            )
+            return False
 
         except Exception as e:
             logging.error(f"批量下载香港股票历史数据时发生错误: {e}")
@@ -390,51 +297,18 @@ class DownloadManager:
         Returns:
             bool: 是否成功下载并保存
         """
-        # 根据复权类型选择对应的表名
-        if adjust == AdjustType.QFQ:
-            table_name = (
-                tb_name_history_data_daily_etf_qfq
-                if period == PeriodType.DAILY
-                else tb_name_history_data_weekly_etf_qfq
-            )
-        else:
-            table_name = (
-                tb_name_history_data_daily_etf_hfq
-                if period == PeriodType.DAILY
-                else tb_name_history_data_weekly_etf_hfq
-            )
+        table_name = get_table_name(SecurityType.ETF, period, adjust)
 
-        try:
-            # 获取最后一条记录以实现增量更新
-            last_record = self.storage.get_last_record(table_name, etf_id)
-
-            if last_record is not None:
-                latest_date = pd.Timestamp(last_record[COL_DATE])
-                actual_start_date = (latest_date + pd.Timedelta(days=1)).strftime(
-                    "%Y%m%d"
-                )
-
-                if actual_start_date > end_date:
-                    logging.info(f"ETF {etf_id} 数据已是最新")
-                    return True
-            else:
-                actual_start_date = start_date
-
-            # 下载ETF历史数据
-            df = self.downloader.dl_history_data_etf(
-                etf_id, actual_start_date, end_date, period, adjust
-            )
-
-            if df is None or df.empty:
-                logging.info(f"ETF {etf_id} 无新数据")
-                return True
-
-            # 保存数据到对应的ETF历史数据表
-            return self.storage.save_history_data_etf(df, period, adjust)
-
-        except Exception as e:
-            logging.error(f"处理ETF {etf_id} 历史数据时出错: {e}")
-            return False
+        return self._download_history_data(
+            table_name=table_name,
+            security_id=etf_id,
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+            adjust=adjust,
+            downloader_func=self.downloader.dl_history_data_etf,
+            storage_save_func=get_storage().save_history_data_etf,
+        )
 
     def download_all_etf_history(
         self,
@@ -464,17 +338,14 @@ class DownloadManager:
             f"开始下载所有ETF历史数据，周期: {period.value}, 复权: {adjust.value}, 日期范围: {start_date} 到 {end_date}"
         )
 
+        table_name = get_table_name(SecurityType.ETF, period, adjust)
+
         try:
             if adjust == AdjustType.QFQ:
-                table_name = (
-                    tb_name_history_data_daily_etf_qfq
-                    if period == PeriodType.DAILY
-                    else tb_name_history_data_weekly_etf_qfq
-                )
-                self.storage.drop_table(table_name)
+                get_storage().drop_table(table_name)
 
             # 获取ETF基本信息
-            df_etfs = self.storage.load_general_info_etf()
+            df_etfs = get_storage().load_general_info_etf()
 
             if df_etfs is None or df_etfs.empty:
                 logging.error("无法获取ETF基本信息数据")
@@ -483,47 +354,27 @@ class DownloadManager:
             etf_ids = df_etfs[COL_STOCK_ID].tolist()
             total_etfs = len(etf_ids)
 
-            logging.info(f"共获取到 {total_etfs} 只ETF，开始批量下载历史数据...")
+            logging.info(f"共获取到 {total_etfs} 只ETF，开始多进程下载历史数据...")
 
-            success_count = 0
-            failure_count = 0
-
-            for i, etf_id in enumerate(etf_ids, 1):
-                try:
-                    logging.info(f"正在下载第 {i}/{total_etfs} 只ETF: {etf_id}")
-
-                    success = self.download_etf_history(
-                        etf_id=etf_id,
-                        period=period,
-                        start_date=start_date,
-                        end_date=end_date,
-                        adjust=adjust,
-                    )
-
-                    if success:
-                        success_count += 1
-                        logging.info(f"✓ ETF {etf_id} 下载成功 ({i}/{total_etfs})")
-                    else:
-                        failure_count += 1
-                        logging.warning(f"⚠ ETF {etf_id} 下载失败 ({i}/{total_etfs})")
-
-                except Exception as e:
-                    failure_count += 1
-                    logging.error(f"✗ ETF {etf_id} 下载出错: {e} ({i}/{total_etfs})")
-
-            # 总结下载结果
-            logging.info(
-                f"ETF批量下载完成！成功: {success_count}, 失败: {failure_count}, 总计: {total_etfs}"
+            result = run_history_download_mp(
+                security_type=SecurityType.ETF,
+                ids=etf_ids,
+                period_value=period.value,
+                adjust_value=adjust.value,
+                start_date=start_date,
+                end_date=end_date,
+                process_count=None,
+                log_prefix="[ETF] ",
             )
 
-            if failure_count == 0:
+            if result.failed == 0:
                 logging.info("🎉 所有ETF历史数据下载成功！")
                 return True
-            else:
-                logging.warning(
-                    f"⚠ 部分ETF下载失败，成功率: {success_count/total_etfs*100:.1f}%"
-                )
-                return False
+
+            logging.warning(
+                f"⚠ 部分ETF下载失败，成功率: {result.success/total_etfs*100:.1f}%"
+            )
+            return False
 
         except Exception as e:
             logging.error(f"批量下载ETF历史数据时发生错误: {e}")
@@ -539,7 +390,7 @@ class DownloadManager:
         Returns:
             bool: 是否成功下载并保存
         """
-        self.storage.drop_table(tb_name_ingredient_300)
+        get_storage().drop_table(tb_name_ingredient_300)
 
         try:
             # 下载沪深300成分股数据
@@ -551,7 +402,7 @@ class DownloadManager:
                 return False
 
             # 保存数据到数据库
-            return self.storage.save_ingredient_300(df)
+            return get_storage().save_ingredient_300(df)
 
         except Exception as e:
             logging.error(f"下载沪深300成分股数据时出错: {e}")
@@ -567,10 +418,9 @@ class DownloadManager:
         Returns:
             bool: 是否成功下载并保存
         """
-        self.storage.drop_table(tb_name_ingredient_500)
+        get_storage().drop_table(tb_name_ingredient_500)
 
         try:
-            # 下载中证500成分股数据
             df = self.downloader.dl_ingredient_500()
             if df is None or df.empty:
                 logging.warning(
@@ -578,8 +428,7 @@ class DownloadManager:
                 )
                 return False
 
-            # 保存数据到数据库
-            return self.storage.save_ingredient_500(df)
+            return get_storage().save_ingredient_500(df)
 
         except Exception as e:
             logging.error(f"下载中证500成分股数据时出错: {e}")

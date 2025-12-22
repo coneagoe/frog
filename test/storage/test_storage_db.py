@@ -1017,7 +1017,7 @@ class TestStorageDb:
         assert 'WHERE "股票代码" = %s' in sql_query  # 使用实际的列名
         assert 'ORDER BY "日期" ASC' in sql_query  # 使用实际的列名
         assert args[1] == storage_db.engine  # engine参数
-        assert kwargs["params"] == ["000001"]  # stock_id参数
+        assert kwargs["params"] == ("000001",)  # stock_id参数
 
     def test_load_history_data_stock_weekly_hfq_success(self, storage_db, monkeypatch):
         """Test successful load_history_data_stock for weekly HFQ data"""
@@ -1057,7 +1057,7 @@ class TestStorageDb:
         args, kwargs = mock_read_sql.call_args
         sql_query = args[0]
         assert "history_data_weekly_a_stock_hfq" in sql_query
-        assert kwargs["params"] == ["000002"]
+        assert kwargs["params"] == ("000002",)
 
     def test_load_history_data_stock_with_date_range(self, storage_db, monkeypatch):
         """Test load_history_data_stock with date range filter"""
@@ -1101,7 +1101,7 @@ class TestStorageDb:
         assert "history_data_daily_a_stock_qfq" in sql_query
         assert 'AND "日期" >= %s' in sql_query  # 使用实际的列名
         assert 'AND "日期" <= %s' in sql_query  # 使用实际的列名
-        assert kwargs["params"] == ["000001", "2023-01-15", "2023-01-17"]
+        assert kwargs["params"] == ("000001", "2023-01-15", "2023-01-17")
 
     def test_load_history_data_stock_empty_result(self, storage_db, monkeypatch):
         """Test load_history_data_stock returns empty DataFrame when no data found"""
@@ -1148,7 +1148,7 @@ class TestStorageDb:
         # 验证SQL查询被调用
         mock_read_sql.assert_called_once()
         args, kwargs = mock_read_sql.call_args
-        assert kwargs["params"] == ["000003"]
+        assert kwargs["params"] == ("000003",)
 
     def test_load_history_data_stock_database_error(self, storage_db, monkeypatch):
         """Test load_history_data_stock handles database errors gracefully"""
@@ -1231,7 +1231,7 @@ class TestStorageDb:
         sql_query = args[0]
         assert 'AND "日期" >= %s' in sql_query  # 使用实际的列名
         assert 'AND "日期" <= %s' not in sql_query  # 不应该有结束日期条件
-        assert kwargs["params"] == ["000001", "2023-01-10"]
+        assert kwargs["params"] == ("000001", "2023-01-10")
 
     def test_load_history_data_stock_with_only_end_date(self, storage_db, monkeypatch):
         """Test load_history_data_stock with only end date filter"""
@@ -1270,7 +1270,7 @@ class TestStorageDb:
         sql_query = args[0]
         assert 'AND "日期" >= %s' not in sql_query  # 不应该有开始日期条件
         assert 'AND "日期" <= %s' in sql_query  # 使用实际的列名
-        assert kwargs["params"] == ["000001", "2023-01-07"]
+        assert kwargs["params"] == ("000001", "2023-01-07")
 
     def test_load_history_data_etf_daily_qfq_success(self, storage_db, monkeypatch):
         """Test successful load_history_data_etf for daily QFQ data"""
@@ -1310,7 +1310,7 @@ class TestStorageDb:
         assert 'WHERE "股票代码" = %s' in sql_query  # 使用实际的列名
         assert 'ORDER BY "日期" ASC' in sql_query  # 使用实际的列名
         assert args[1] == storage_db.engine  # engine参数
-        assert kwargs["params"] == ["510300"]  # etf_id参数
+        assert kwargs["params"] == ("510300",)  # etf_id参数
 
     def test_load_history_data_etf_weekly_hfq_success(self, storage_db, monkeypatch):
         """Test successful load_history_data_etf for weekly HFQ data"""
@@ -1350,7 +1350,7 @@ class TestStorageDb:
         args, kwargs = mock_read_sql.call_args
         sql_query = args[0]
         assert "history_data_weekly_etf_hfq" in sql_query
-        assert kwargs["params"] == ["510500"]
+        assert kwargs["params"] == ("510500",)
 
     def test_load_history_data_etf_with_date_range(self, storage_db, monkeypatch):
         """Test load_history_data_etf with date range filter"""
@@ -1394,7 +1394,7 @@ class TestStorageDb:
         assert "history_data_daily_etf_qfq" in sql_query
         assert 'AND "日期" >= %s' in sql_query  # 使用实际的列名
         assert 'AND "日期" <= %s' in sql_query  # 使用实际的列名
-        assert kwargs["params"] == ["510300", "2023-01-15", "2023-01-17"]
+        assert kwargs["params"] == ("510300", "2023-01-15", "2023-01-17")
 
     def test_load_history_data_etf_empty_result(self, storage_db, monkeypatch):
         """Test load_history_data_etf returns empty DataFrame when no data found"""
@@ -1441,7 +1441,7 @@ class TestStorageDb:
         # 验证SQL查询被调用
         mock_read_sql.assert_called_once()
         args, kwargs = mock_read_sql.call_args
-        assert kwargs["params"] == ["510300"]
+        assert kwargs["params"] == ("510300",)
 
     def test_load_history_data_etf_database_error(self, storage_db, monkeypatch):
         """Test load_history_data_etf handles database errors gracefully"""
@@ -1522,7 +1522,7 @@ class TestStorageDb:
         sql_query = args[0]
         assert 'AND "日期" >= %s' in sql_query  # 使用实际的列名
         assert 'AND "日期" <= %s' not in sql_query  # 不应该有结束日期条件
-        assert kwargs["params"] == ["510300", "2023-01-10"]
+        assert kwargs["params"] == ("510300", "2023-01-10")
 
     def test_load_history_data_etf_with_only_end_date(self, storage_db, monkeypatch):
         """Test load_history_data_etf with only end date filter"""
@@ -1561,7 +1561,7 @@ class TestStorageDb:
         sql_query = args[0]
         assert 'AND "日期" >= %s' not in sql_query  # 不应该有开始日期条件
         assert 'AND "日期" <= %s' in sql_query  # 使用实际的列名
-        assert kwargs["params"] == ["510300", "2023-01-07"]
+        assert kwargs["params"] == ("510300", "2023-01-07")
 
     def test_save_ingredient_300_success(self, storage_db):
         """Test successful save_ingredient_300"""
@@ -2013,7 +2013,7 @@ class TestStorageDb:
         assert 'WHERE "股票代码" = %s' in sql_query  # 使用实际的列名
         assert 'ORDER BY "日期" ASC' in sql_query  # 使用实际的列名
         assert args[1] == storage_db.engine  # engine参数
-        assert kwargs["params"] == ["00700"]  # stock_id参数
+        assert kwargs["params"] == ("00700",)  # stock_id参数
 
     def test_load_history_data_stock_hk_ggt_weekly_success(
         self, storage_db, monkeypatch
@@ -2052,7 +2052,7 @@ class TestStorageDb:
         args, kwargs = mock_read_sql.call_args
         sql_query = args[0]
         assert "history_data_weekly_hk_stock_hfq" in sql_query
-        assert kwargs["params"] == ["09988"]
+        assert kwargs["params"] == ("09988",)
 
     def test_load_history_data_stock_hk_ggt_monthly_success(
         self, storage_db, monkeypatch
@@ -2091,7 +2091,7 @@ class TestStorageDb:
         args, kwargs = mock_read_sql.call_args
         sql_query = args[0]
         assert "history_data_monthly_hk_stock_hfq" in sql_query
-        assert kwargs["params"] == ["02318"]
+        assert kwargs["params"] == ("02318",)
 
     def test_load_history_data_stock_hk_ggt_with_date_range(
         self, storage_db, monkeypatch
@@ -2134,7 +2134,7 @@ class TestStorageDb:
         assert "history_data_daily_hk_stock_hfq" in sql_query
         assert 'AND "日期" >= %s' in sql_query  # 使用实际的列名
         assert 'AND "日期" <= %s' in sql_query  # 使用实际的列名
-        assert kwargs["params"] == ["00700", "2023-01-15", "2023-01-17"]
+        assert kwargs["params"] == ("00700", "2023-01-15", "2023-01-17")
 
     def test_load_history_data_stock_hk_ggt_unsupported_adjust_type(self, storage_db):
         """Test load_history_data_stock_hk_ggt with unsupported adjust type (should only support HFQ)"""
@@ -2222,7 +2222,7 @@ class TestStorageDb:
         # 验证SQL查询被调用
         mock_read_sql.assert_called_once()
         args, kwargs = mock_read_sql.call_args
-        assert kwargs["params"] == ["00700"]
+        assert kwargs["params"] == ("00700",)
 
     def test_load_history_data_stock_hk_ggt_with_only_start_date(
         self, storage_db, monkeypatch
@@ -2260,7 +2260,7 @@ class TestStorageDb:
         sql_query = args[0]
         assert 'AND "日期" >= %s' in sql_query  # 使用实际的列名
         assert 'AND "日期" <= %s' not in sql_query  # 不应该有结束日期条件
-        assert kwargs["params"] == ["00700", "2023-01-10"]
+        assert kwargs["params"] == ("00700", "2023-01-10")
 
     def test_load_history_data_stock_hk_ggt_with_only_end_date(
         self, storage_db, monkeypatch
@@ -2298,7 +2298,7 @@ class TestStorageDb:
         sql_query = args[0]
         assert 'AND "日期" >= %s' not in sql_query  # 不应该有开始日期条件
         assert 'AND "日期" <= %s' in sql_query  # 使用实际的列名
-        assert kwargs["params"] == ["00700", "2023-01-07"]
+        assert kwargs["params"] == ("00700", "2023-01-07")
 
 
 if __name__ == "__main__":

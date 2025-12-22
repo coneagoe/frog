@@ -141,6 +141,13 @@ def parse_backtest_config(config: ConfigParser):
         os.environ["INIT_CASH"] = "300000"
 
 
+def parse_download_config(config: ConfigParser):
+    try:
+        os.environ["DOWNLOAD_PROCESS_COUNT"] = config["download"]["process_count"]
+    except KeyError:
+        os.environ["DOWNLOAD_PROCESS_COUNT"] = "4"
+
+
 def parse_config():
     if not os.path.exists(config_file_name):
         logging.error(f"{config_file_name} does not exist!")
@@ -157,3 +164,4 @@ def parse_config():
     parse_account_config(config)
     parse_frog_server(config)
     parse_backtest_config(config)
+    parse_download_config(config)

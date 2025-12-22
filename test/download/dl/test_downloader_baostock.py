@@ -35,12 +35,35 @@ from common.const import (  # noqa: E402
 def downloader_bs_module(monkeypatch):
     """Setup baostock downloader module with mocked dependencies."""
     module_name = "download.dl.downloader_baostock"
-    sys.modules.pop(module_name, None)
 
-    # Mock baostock module
+    # First, remove any existing modules from sys.modules to ensure clean import
+    modules_to_remove = [
+        module_name,
+        "download.dl.downloader",
+        "download.dl",
+        "download.download_manager",
+        "download",
+    ]
+
+    for mod in modules_to_remove:
+        sys.modules.pop(mod, None)
+
+    # Mock baostock module with nested structure BEFORE any imports
     bs_stub = types.SimpleNamespace()
-    monkeypatch.setitem(sys.modules, "baostock", bs_stub)
 
+    # Mock the nested data.resultset structure
+    data_stub = types.SimpleNamespace()
+    resultset_stub = types.SimpleNamespace()
+    resultset_stub.ResultData = object  # Mock ResultData type
+    data_stub.resultset = resultset_stub
+    bs_stub.data = data_stub
+
+    # Mock both the main module and the submodule
+    monkeypatch.setitem(sys.modules, "baostock", bs_stub)
+    monkeypatch.setitem(sys.modules, "baostock.data", data_stub)
+    monkeypatch.setitem(sys.modules, "baostock.data.resultset", resultset_stub)
+
+    # Now import the module
     module = importlib.import_module(module_name)
     return module, bs_stub
 
