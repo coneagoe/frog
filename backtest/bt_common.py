@@ -96,7 +96,9 @@ def load_test_data(
         security_type=security_type,
     )
 
-    assert not df.empty, f"No data for {security_id} from {start_date} to {end_date}"
+    assert (
+        not df.empty
+    ), f"No data for {security_id} from {start_date} to {end_date}, df = {df.head()}"
 
     df = df[[COL_DATE, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME]]
     df.columns = pd.Index(

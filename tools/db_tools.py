@@ -140,9 +140,10 @@ def show_sample_data(table_name, limit=5):
     try:
         # 使用SQLAlchemy引擎避免pandas警告
         config = StorageConfig()
-        sqlalchemy_url = f"""
-        postgresql://{config.db_username}:{config.db_password}@{config.db_host}:{config.db_port}/{config.db_name}
-        """
+        sqlalchemy_url = (
+            f"postgresql://{config.db_username}:{config.db_password}@"
+            f"{config.db_host}:{config.db_port}/{config.db_name}"
+        )
         engine = create_engine(sqlalchemy_url, echo=False)
 
         df = pd.read_sql(f'SELECT * FROM "{table_name}" LIMIT {limit}', engine)
@@ -185,6 +186,106 @@ def show_sample_data(table_name, limit=5):
         print(f"❌ 查询失败: {e}")
 
 
+def query_specific_stock(table_name, stock_code, limit=5):
+    """查询指定表中指定的股票，显示前N条和后N条记录"""
+    print(f"\n🔍 查询表 '{table_name}' 中股票代码 '{stock_code}' 的数据：")
+    print("=" * 60)
+
+    try:
+        # 使用SQLAlchemy引擎避免pandas警告
+        config = StorageConfig()
+        sqlalchemy_url = (
+            f"postgresql://{config.db_username}:{config.db_password}@"
+            f"{config.db_host}:{config.db_port}/{config.db_name}"
+        )
+        engine = create_engine(sqlalchemy_url, echo=False)
+
+        # 首先检查表是否存在以及是否有股票代码列
+        check_query = f"""
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = '{table_name}'
+        AND column_name IN ('股票代码', 'stock_code', 'code')
+        """
+
+        check_df = pd.read_sql(check_query, engine)
+        if check_df.empty:
+            print(
+                f"❌ 表 '{table_name}' 中没有找到股票代码列（股票代码/stock_code/code）"
+            )
+            engine.dispose()
+            return
+
+        # 获取股票代码列名
+        stock_code_column = check_df.iloc[0]["column_name"]
+
+        # 获取该股票的总记录数
+        count_query = f"""
+        SELECT COUNT(*) as count
+        FROM "{table_name}"
+        WHERE "{stock_code_column}" = '{stock_code}'
+        """
+        total_count = pd.read_sql(count_query, engine)["count"].iloc[0]
+
+        if total_count == 0:
+            print(f"❌ 在表 '{table_name}' 中没有找到股票代码 '{stock_code}' 的数据")
+            engine.dispose()
+            return
+
+        print(f"📊 该股票在表中的总记录数: {total_count}")
+
+        # 查询前N条记录
+        print(f"\n📈 前{limit}条记录：")
+        print("-" * 40)
+        first_query = f"""
+        SELECT * FROM "{table_name}"
+        WHERE "{stock_code_column}" = '{stock_code}'
+        ORDER BY 1 ASC
+        LIMIT {limit}
+        """
+        first_df = pd.read_sql(first_query, engine)
+        print(first_df.to_string())
+
+        # 如果总记录数大于limit，再查询后N条记录
+        if total_count > limit:
+            print(f"\n📈 后{limit}条记录：")
+            print("-" * 40)
+            last_query = f"""
+            SELECT * FROM (
+                SELECT * FROM "{table_name}"
+                WHERE "{stock_code_column}" = '{stock_code}'
+                ORDER BY 1 DESC
+                LIMIT {limit}
+            ) AS last_records
+            ORDER BY 1 ASC
+            """
+            last_df = pd.read_sql(last_query, engine)
+            print(last_df.to_string())
+
+        # 如果有日期列，显示日期范围
+        date_cols = [
+            col for col in first_df.columns if "日期" in col or "date" in col.lower()
+        ]
+        if date_cols:
+            date_col = date_cols[0]
+            date_stats_query = f"""
+            SELECT
+                MIN("{date_col}") as 最早日期,
+                MAX("{date_col}") as 最晚日期
+            FROM "{table_name}"
+            WHERE "{stock_code_column}" = '{stock_code}'
+            """
+            date_stats = pd.read_sql(date_stats_query, engine)
+            print(
+                f"\n📅 数据日期范围: {date_stats['最早日期'].iloc[0]} 到 {date_stats['最晚日期'].iloc[0]}"
+            )
+
+        engine.dispose()
+
+    except Exception as e:
+        print(f"❌ 查询失败: {e}")
+
+
 def show_raw_command_examples():
     """显示一些基础的PostgreSQL命令行示例"""
     print("\n=== 基本命令行查看方法 ===")
@@ -216,11 +317,12 @@ def main_menu():
         print("1. 📋 显示所有表")
         print("2. 🔍 查看表结构")
         print("3. 📊 查看样例数据")
-        print("4. ❓ 显示基本命令行示例")
-        print("5. ❌ 退出")
+        print("4. 🔍 查询指定股票数据")
+        print("5. ❓ 显示基本命令行示例")
+        print("6. ❌ 退出")
         print("=" * 60)
 
-        choice = input("\n请选择操作 (1-5): ").strip()
+        choice = input("\n请选择操作 (1-6): ").strip()
 
         if choice == "1":
             show_tables()
@@ -241,8 +343,21 @@ def main_menu():
             limit = int(limit_str) if limit_str.isdigit() else 5
             show_sample_data(table_name, limit)
         elif choice == "4":
-            show_raw_command_examples()
+            table_name = input(
+                f"请输入表名 (默认: {tb_name_history_data_daily_a_stock_qfq}): "
+            ).strip()
+            if not table_name:
+                table_name = tb_name_history_data_daily_a_stock_qfq
+            stock_code = input("请输入股票代码: ").strip()
+            if not stock_code:
+                print("❌ 股票代码不能为空")
+                continue
+            limit_str = input("显示前/后多少条记录 (默认: 5): ").strip()
+            limit = int(limit_str) if limit_str.isdigit() else 5
+            query_specific_stock(table_name, stock_code, limit)
         elif choice == "5":
+            show_raw_command_examples()
+        elif choice == "6":
             print("👋 再见！")
             break
         else:

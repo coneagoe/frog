@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from storage import get_storage  # noqa: E402
 
 
 def main():
@@ -51,7 +52,7 @@ def main():
 
             # 加载并显示下载结果
             logger.info("正在加载下载结果...")
-            df_hk_ggt = manager.storage.load_general_info_hk_ggt()
+            df_hk_ggt = get_storage().load_general_info_hk_ggt()
 
             if df_hk_ggt is not None and not df_hk_ggt.empty:
                 total_stocks = len(df_hk_ggt)

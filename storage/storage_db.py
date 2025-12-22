@@ -9,7 +9,14 @@ from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from common.const import COL_DATE, COL_STOCK_ID, COL_STOCK_NAME, AdjustType, PeriodType
+from common.const import (
+    COL_DATE,
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
+    AdjustType,
+    PeriodType,
+    SecurityType,
+)
 
 from .config import StorageConfig
 from .model import (
@@ -35,6 +42,42 @@ from .model import (
 logger = logging.getLogger(__name__)
 
 _storage_instance: Optional["StorageDb"] = None
+
+
+def get_table_name(
+    security_type: SecurityType, period: PeriodType, adjust: AdjustType
+) -> str:
+    if security_type == SecurityType.STOCK:
+        if period == PeriodType.DAILY:
+            if adjust == AdjustType.QFQ:
+                return tb_name_history_data_daily_a_stock_qfq
+            elif adjust == AdjustType.HFQ:
+                return tb_name_history_data_daily_a_stock_hfq
+        elif period == PeriodType.WEEKLY:
+            if adjust == AdjustType.QFQ:
+                return tb_name_history_data_weekly_a_stock_qfq
+            elif adjust == AdjustType.HFQ:
+                return tb_name_history_data_weekly_a_stock_hfq
+    elif security_type == SecurityType.ETF:
+        if period == PeriodType.DAILY:
+            if adjust == AdjustType.QFQ:
+                return tb_name_history_data_daily_etf_qfq
+            elif adjust == AdjustType.HFQ:
+                return tb_name_history_data_daily_etf_hfq
+        elif period == PeriodType.WEEKLY:
+            if adjust == AdjustType.QFQ:
+                return tb_name_history_data_weekly_etf_qfq
+            elif adjust == AdjustType.HFQ:
+                return tb_name_history_data_weekly_etf_hfq
+    elif security_type == SecurityType.HK_GGT_STOCK:
+        if period == PeriodType.DAILY and adjust == AdjustType.HFQ:
+            return tb_name_history_data_daily_hk_stock_hfq
+        elif period == PeriodType.WEEKLY and adjust == AdjustType.HFQ:
+            return tb_name_history_data_weekly_hk_stock_hfq
+        elif period == PeriodType.MONTHLY and adjust == AdjustType.HFQ:
+            return tb_name_history_data_monthly_hk_stock_hfq
+
+    raise ValueError(f"Unsupported combination: {security_type}, {period}, {adjust}")
 
 
 def reset_storage() -> None:
@@ -519,7 +562,9 @@ class StorageDb:
 
             sql += f' ORDER BY "{COL_DATE}" ASC'
 
-            df = pd.read_sql(sql, self.engine, params=tuple(params))
+            # Convert list to tuple for pandas read_sql compatibility
+            sql_params = tuple(params) if params else None
+            df = pd.read_sql(sql, self.engine, params=sql_params)
             logger.info(
                 f"股票历史数据加载成功: {stock_id}, 周期: {period}, 复权: {adjust}, 数据条数: {len(df)}"
             )
@@ -587,7 +632,9 @@ class StorageDb:
 
             sql += f' ORDER BY "{COL_DATE}" ASC'
 
-            df = pd.read_sql(sql, self.engine, params=tuple(params))
+            # Convert list to tuple for pandas read_sql compatibility
+            sql_params = tuple(params) if params else None
+            df = pd.read_sql(sql, self.engine, params=sql_params)
             logger.info(
                 f"港股通成分股历史数据加载成功: {stock_id}, 周期: {period}, 复权: {adjust}, 数据条数: {len(df)}"
             )
@@ -660,7 +707,9 @@ class StorageDb:
 
             sql += f' ORDER BY "{COL_DATE}" ASC'
 
-            df = pd.read_sql(sql, self.engine, params=tuple(params))
+            # Convert list to tuple for pandas read_sql compatibility
+            sql_params = tuple(params) if params else None
+            df = pd.read_sql(sql, self.engine, params=sql_params)
             logger.info(
                 f"ETF历史数据加载成功: {etf_id}, 周期: {period}, 复权: {adjust}, 数据条数: {len(df)}"
             )
@@ -811,13 +860,14 @@ class StorageDb:
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
-    global _storage_instance
+    """
+    获取StorageDb实例
 
-    if _storage_instance is not None:
-        return _storage_instance
-
+    注意：多进程环境下建议每个进程创建独立实例，避免连接共享冲突
+    """
+    # 多进程环境下，每个进程应该创建自己的实例
+    # 不在多进程间共享数据库连接
     if config is None:
         config = StorageConfig()
-    _storage_instance = StorageDb(config)
 
-    return _storage_instance
+    return StorageDb(config)
