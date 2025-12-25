@@ -4,13 +4,17 @@ x-airflow-common: &airflow-common
   build:
     context: .
     dockerfile: airflow.Dockerfile
-  user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0}"
+  user: "${AIRFLOW_UID:-1000}:${AIRFLOW_GID:-0}"
   environment:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://quant:quant@db:5432/quant
     AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://quant:quant@db:5432/quant
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Asia/Shanghai
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: "false"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -59,27 +63,40 @@ services:
   airflow-webserver:
     <<: *airflow-common
     ports: ["8080:8080"]
-    command: webserver
+    command: >
+      bash -c "
+        airflow db init &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com ||
+        echo 'User already exists or db already initialized';
+        airflow webserver
+      "
     depends_on:
       - db
       - redis
-      - airflow-init-permissions
 
   airflow-scheduler:
     <<: *airflow-common
-    command: scheduler
+    command: >
+      bash -c "
+        airflow db upgrade || echo 'DB already upgraded';
+        airflow scheduler
+      "
     depends_on:
       - db
       - redis
-      - airflow-init-permissions
+      - airflow-webserver
 
   airflow-worker:
     <<: *airflow-common
-    command: celery worker
+    command: >
+      bash -c "
+        airflow db upgrade || echo 'DB already upgraded';
+        airflow celery worker
+      "
     depends_on:
       - db
       - redis
-      - airflow-init-permissions
+      - airflow-webserver
 
   airflow-init:
     <<: *airflow-common
@@ -90,10 +107,7 @@ services:
         echo 'User already exists'
       "
     profiles: ["init"]
-    depends_on:
-      - db
-      - redis
-      - airflow-init-permissions
+    restart: "no"
 
 volumes:
   db_data:
