@@ -1,3 +1,9 @@
 FROM apache/airflow:2.9.2-python3.11
 
-RUN pip install akshare pandas sqlalchemy
+# Minimal deps needed by project code imported from DAGs.
+# Keep this list small to reduce image size and build time.
+RUN pip install --no-cache-dir \
+    akshare \
+    retrying==1.3.4 \
+    baostock==0.8.9 \
+    pandas_market_calendars==4.6.1

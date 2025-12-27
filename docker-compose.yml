@@ -15,10 +15,14 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: "false"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Make project packages (common/, download/, stock/, etc.) importable from DAGs
+    PYTHONPATH: /opt/airflow/frog
+    FROG_PROJECT_ROOT: /opt/airflow/frog
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+    - ./:/opt/airflow/frog
   depends_on:
     - db
     - redis

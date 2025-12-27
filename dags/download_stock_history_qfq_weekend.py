@@ -11,7 +11,6 @@ if os.path.isdir(project_root):
     sys.path.insert(0, project_root)
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import is_a_market_open_today  # noqa: E402
 from common.const import AdjustType, PeriodType  # noqa: E402
 from download import DownloadManager  # noqa: E402
 
@@ -26,52 +25,48 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-# 创建 DAG（工作日 HFQ）
+# 创建 DAG（周末 QFQ）
 dag = DAG(
-    "download_stock_history_hfq_weekdays",
+    "download_stock_history_qfq_weekend",
     default_args=default_args,
-    description="Weekdays stock history HFQ download",
-    schedule="0 16 * * 1-5",  # 每个工作日下午4点执行
+    description="Weekend stock history QFQ download",
+    schedule="0 3 * * 0",  # 每周日凌晨3点执行
     catchup=False,
     max_active_runs=1,
 )
 
 
 def download_stock_history_task(**context):
-    """工作日下载A股HFQ历史数据任务"""
-    if not is_a_market_open_today():
-        print("A股市场今日休市，跳过下载任务")
-        return "Market is closed today, task skipped."
-
+    """周末下载A股QFQ历史数据任务"""
     try:
         manager = DownloadManager()
 
         start_date = "2010-01-01"
-        end_date = datetime.today().strftime("%Y-%m-%d")
+        end_date = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-        print("开始批量下载A股历史数据（HFQ）...")
+        print("开始批量下载A股历史数据（QFQ）...")
         print(f"日期范围: {start_date} 到 {end_date}")
 
         success = manager.download_all_stock_history(
             period=PeriodType.DAILY,
-            adjust=AdjustType.HFQ,
+            adjust=AdjustType.QFQ,
             start_date=start_date,
             end_date=end_date,
         )
 
         if not success:
-            raise Exception("部分股票HFQ历史数据下载失败，请查看日志了解详情")
+            raise Exception("部分股票QFQ历史数据下载失败，请查看日志了解详情")
 
-        return "A股HFQ历史数据下载成功完成"
+        return "A股QFQ历史数据下载成功完成"
 
     except Exception as e:
-        error_message = f"股票HFQ历史数据下载任务执行失败: {str(e)}"
+        error_message = f"股票QFQ历史数据下载任务执行失败: {str(e)}"
         print(f"❌ {error_message}")
         raise Exception(error_message)
 
 
-task_download_stock_history_hfq = PythonOperator(
-    task_id="download_stock_history_hfq",
+task_download_stock_history_qfq = PythonOperator(
+    task_id="download_stock_history_qfq",
     python_callable=download_stock_history_task,
     dag=dag,
 )
