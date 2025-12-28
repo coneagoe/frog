@@ -14,12 +14,24 @@ else:
 from common.const import AdjustType, PeriodType  # noqa: E402
 from download import DownloadManager  # noqa: E402
 
+
+def _parse_alert_emails(raw: str) -> list[str]:
+    return [
+        email.strip() for email in raw.replace(";", ",").split(",") if email.strip()
+    ]
+
+
+ALERT_EMAILS = _parse_alert_emails(
+    os.environ.get("ALERT_EMAILS") or os.environ.get("MAIL_RECEIVERS") or ""
+)
+
 # DAG 默认参数
 default_args = {
     "owner": "frog",
     "depends_on_past": False,
     "start_date": datetime(2025, 1, 1),
-    "email_on_failure": False,
+    "email": ALERT_EMAILS,
+    "email_on_failure": bool(ALERT_EMAILS),
     "email_on_retry": False,
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
