@@ -20,10 +20,4 @@ beat_schedule = {
         "task": "task.monitor_fallback_stock.monitor_fallback_stock",
         "schedule": crontab(minute="*/5", hour="9-14", day_of_week="mon-fri"),
     },
-    "download_stock_history": {
-        "task": "task.download_stock_history.download_stock_history",
-        "schedule": crontab(
-            hour=16, minute=0, day_of_week="mon-fri"
-        ),  # 工作日下午4点执行
-    },
 }
