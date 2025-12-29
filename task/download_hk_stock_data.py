@@ -4,7 +4,7 @@ import sys
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from celery_app import app  # noqa: E402
-from stock import is_hk_market_open_today  # noqa: E402
+from common import is_hk_market_open_today  # noqa: E402
 from utility import send_email  # noqa: E402
 
 from .obos_hk import obos_hk  # noqa: E402

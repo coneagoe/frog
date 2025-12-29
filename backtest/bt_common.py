@@ -232,6 +232,13 @@ def generate_report(cerebro, results):
     if os.getenv("OPTIMIZER"):
         return
 
+    if not results:
+        print("WARNING: No results returned from backtest. This could mean:")
+        print("  - No stocks were processed (empty stock list)")
+        print("  - All stocks failed data loading")
+        print("  - Strategy configuration issues")
+        return
+
     strategy = results[0]
 
     pyfolio = strategy.analyzers.getbyname("pyfolio")

@@ -5,7 +5,7 @@ from datetime import date
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from celery_app import app  # noqa: E402
-from stock import is_a_market_open_today  # noqa: E402
+from common import is_a_market_open_today  # noqa: E402
 from utility import send_email  # noqa: E402
 
 

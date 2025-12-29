@@ -157,7 +157,6 @@ def parse_config():
     config.read(config_file_name)
 
     parse_common_config(config)
-    parse_email_config(config)
     parse_ocr_config(config)
     parse_fund_config(config)
     parse_stock_config(config)

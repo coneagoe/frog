@@ -93,9 +93,7 @@ class ObosStrategy(MyStrategy):
 
         if trade.isopen:
             i = self.stocks.index(trade.getdataname())
-            sp0 = min(
-                [self.datas[i].low[-j] for j in range(1, self.p.n_day_sp + 1)]
-            )
+            sp0 = min([self.datas[i].low[-j] for j in range(1, self.p.n_day_sp + 1)])
             sp1 = round(trade.price * (1 - self.p.init_sp), 2)
             self.context[i].stop_price = max(sp0, sp1)
 

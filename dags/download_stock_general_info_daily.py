@@ -8,7 +8,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from download import DownloadManager  # noqa: E402
-from stock import is_a_market_open_today  # noqa: E402
+from common import is_a_market_open_today  # noqa: E402
 
 # DAG 默认参数
 default_args = {

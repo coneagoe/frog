@@ -8,6 +8,7 @@ import pandas as pd
 import swifter  # noqa: F401
 
 import conf
+from common import is_market_open
 from common.const import (
     COL_COMMENT,
     COL_CURRENT_PRICE,
@@ -19,7 +20,7 @@ from common.const import (
     COL_STOCK_NAME,
     DATABASE_NAME,
 )
-from stock import fetch_close_price, get_yesterday_ma, is_market_open
+from stock import fetch_close_price, get_yesterday_ma
 from utility import send_email
 
 monitor_stock_table_name = "monitor_stock"
