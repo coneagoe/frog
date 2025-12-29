@@ -9,12 +9,9 @@ import plotly.graph_objs as go
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import conf  # noqa: E402
+from common import get_last_trading_day  # noqa: E402
 from common.const import COL_CLOSE, COL_DATE, PeriodType  # noqa: E402
-from stock import (  # noqa: E402
-    get_last_trading_day,
-    get_security_name,
-    load_history_data,
-)
+from stock import get_security_name, load_history_data  # noqa: E402
 
 conf.parse_config()
 
