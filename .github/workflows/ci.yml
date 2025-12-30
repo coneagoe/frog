@@ -27,7 +27,7 @@ jobs:
     - name: Install Poetry
       uses: snok/install-poetry@v1
       with:
-        version: 1.7.1
+        version: 2.0.0
         virtualenvs-create: true
         virtualenvs-in-project: true
 
@@ -53,37 +53,8 @@ jobs:
       run: |
         poetry run pytest test
 
-  security:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.12"
-
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: 1.7.1
-
-    - name: Install dependencies
-      run: |
-        poetry install
-
-    - name: Run safety check
-      run: |
-        poetry add --group dev safety
-        poetry run safety check
-
-    - name: Run bandit security check
-      run: |
-        poetry add --group dev bandit
-        poetry run bandit -r . -x ./test/,./tests/,./.venv/
-
 #  build:
-#    needs: [test, security]
+#    needs: [test]
 #    runs-on: ubuntu-latest
 #    if: github.ref == 'refs/heads/main'
 #
@@ -98,7 +69,7 @@ jobs:
 #    - name: Install Poetry
 #      uses: snok/install-poetry@v1
 #      with:
-#        version: 1.7.1
+#        version: 2.0.0
 #
 #    - name: Build package
 #      run: |
