@@ -42,6 +42,8 @@ docker compose logs airflow-init-permissions
 docker compose down
 ```
 
+说明：数据库数据保存在 Docker named volume `db_data` 中，重建镜像不会丢数据；请勿使用 `docker compose down -v/--volumes` 或 `docker system prune --volumes`，否则会删除数据卷导致数据丢失。更多细节见 [doc/docker.md](doc/docker.md)。
+
 ## 工作原理
 
 1. **权限初始化容器** (`airflow-init-permissions`):
