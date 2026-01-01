@@ -45,5 +45,5 @@
 
 ## 备份与恢复
 用如下脚本import/export DB：
-- `tools/pg_export.sh`
-- `tools/pg_import.sh`
+- `tools/db_export.sh`
+- `tools/db_import.sh`

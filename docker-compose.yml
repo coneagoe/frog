@@ -4,7 +4,7 @@ x-airflow-common: &airflow-common
   build:
     context: .
     dockerfile: airflow.Dockerfile
-  user: "${AIRFLOW_UID:-1000}:${AIRFLOW_GID:-0}"
+  user: "${AIRFLOW_UID:-1000}:0"
   environment:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://quant:quant@db:5432/quant
@@ -73,7 +73,7 @@ services:
     command: >
       sh -c "
         mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags &&
-        chown -R ${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-0} /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags &&
+        chown -R ${AIRFLOW_UID:-1000}:0 /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags &&
         echo 'Permissions fixed successfully!'
       "
 
