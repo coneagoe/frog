@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+TOOLS_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$TOOLS_DIR/db_common.sh"
+
 usage() {
   cat <<'USAGE'
 Import business tables into PostgreSQL using psql.
@@ -8,8 +11,8 @@ Import business tables into PostgreSQL using psql.
 Default mode is Docker (docker compose exec db). Input should be a plain SQL dump (optionally .gz).
 
 Usage:
-  bash tools/pg_import.sh --in FILE [options]
-  cat dump.sql | bash tools/pg_import.sh [options]
+  bash tools/db_import.sh --in FILE [options]
+  cat dump.sql | bash tools/db_import.sh [options]
 
 Options:
   --in FILE           Input file (.sql or .sql.gz). If omitted, reads from stdin.
@@ -31,66 +34,27 @@ Environment variables (direct mode):
 
 Examples:
   # docker mode, import from file
-  bash tools/pg_import.sh --in ./backups/quant_business_xxx.sql.gz
+  bash tools/db_import.sh --in ./backups/quant_business_xxx.sql.gz
 
   # drop business tables first
-  bash tools/pg_import.sh --clean --in ./backups/quant_business_xxx.sql
+  bash tools/db_import.sh --clean --in ./backups/quant_business_xxx.sql
 
   # direct mode (requires psql installed locally)
-  DB_HOST=localhost DB_PASSWORD=quant bash tools/pg_import.sh --direct --in dump.sql
+  DB_HOST=localhost DB_PASSWORD=quant bash tools/db_import.sh --direct --in dump.sql
 USAGE
 }
 
-err() {
-  echo "[pg_import] $*" >&2
-}
-
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 127; }
-}
-
-pick_docker_compose() {
-  if docker compose version >/dev/null 2>&1; then
-    echo "docker compose"
-    return 0
-  fi
-  if command -v docker-compose >/dev/null 2>&1; then
-    echo "docker-compose"
-    return 0
-  fi
-  return 1
-}
-
-# Business tables defined in storage/model
-BUSINESS_TABLES=(
-  general_info_stock
-  general_info_etf
-  general_info_hk_ggt
-  ingredient_300
-  ingredient_500
-  history_data_daily_a_stock_qfq
-  history_data_daily_a_stock_hfq
-  history_data_weekly_a_stock_qfq
-  history_data_weekly_a_stock_hfq
-  history_data_daily_etf_qfq
-  history_data_daily_etf_hfq
-  history_data_weekly_etf_qfq
-  history_data_weekly_etf_hfq
-  history_data_daily_hk_stock_hfq
-  history_data_weekly_hk_stock_hfq
-  history_data_monthly_hk_stock_hfq
-)
-
-MODE="docker"
-SERVICE="db"
-DB_NAME="quant"
-DB_USER="quant"
-DB_HOST="${DB_HOST:-${db_host:-localhost}}"
-DB_PORT="${DB_PORT:-${db_port:-5432}}"
-DB_PASSWORD="${DB_PASSWORD:-${db_password:-}}"
-SCHEMA="public"
+# Import-specific variables
 IN_FILE=""
 CLEAN=0
+MODE="$DEFAULT_MODE"
+SERVICE="$DEFAULT_SERVICE"
+DB_NAME="$DEFAULT_DB_NAME"
+DB_USER="$DEFAULT_DB_USER"
+DB_HOST="${DB_HOST:-${db_host:-$DEFAULT_DB_HOST}}"
+DB_PORT="${DB_PORT:-${db_port:-$DEFAULT_DB_PORT}}"
+DB_PASSWORD="${DB_PASSWORD:-${db_password:-}}"
+SCHEMA="$DEFAULT_SCHEMA"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -229,4 +193,4 @@ else
   fi
 fi
 
-echo "[pg_import] Done."
+echo "[db_import] Done."
