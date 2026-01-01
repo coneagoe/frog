@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+TOOLS_DIR=$(dirname "${BASH_SOURCE[0]}")
+source "$TOOLS_DIR/db_common.sh"
+
 usage() {
   cat <<'USAGE'
 Export business tables from PostgreSQL as plain SQL using pg_dump.
@@ -8,7 +11,7 @@ Export business tables from PostgreSQL as plain SQL using pg_dump.
 Default mode is Docker (docker compose exec db). Output is plain SQL suitable for psql restore.
 
 Usage:
-  bash tools/pg_export.sh [options]
+  bash tools/db_export.sh [options]
 
 Options:
   --out FILE          Output file (default: ./backups/quant_business_YYYYmmdd_HHMMSS.sql.gz)
@@ -33,68 +36,29 @@ Environment variables (direct mode):
 
 Examples:
   # default (docker), gzip
-  bash tools/pg_export.sh
+  bash tools/db_export.sh
 
   # specify schema
-  bash tools/pg_export.sh --schema public
+  bash tools/db_export.sh --schema public
 
   # direct mode (requires pg_dump installed locally)
-  DB_HOST=localhost DB_PASSWORD=quant bash tools/pg_export.sh --direct
+  DB_HOST=localhost DB_PASSWORD=quant bash tools/db_export.sh --direct
 USAGE
 }
 
-err() {
-  echo "[pg_export] $*" >&2
-}
-
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 127; }
-}
-
-pick_docker_compose() {
-  if docker compose version >/dev/null 2>&1; then
-    echo "docker compose"
-    return 0
-  fi
-  if command -v docker-compose >/dev/null 2>&1; then
-    echo "docker-compose"
-    return 0
-  fi
-  return 1
-}
-
-# Business tables defined in storage/model
-BUSINESS_TABLES=(
-  general_info_stock
-  general_info_etf
-  general_info_hk_ggt
-  ingredient_300
-  ingredient_500
-  history_data_daily_a_stock_qfq
-  history_data_daily_a_stock_hfq
-  history_data_weekly_a_stock_qfq
-  history_data_weekly_a_stock_hfq
-  history_data_daily_etf_qfq
-  history_data_daily_etf_hfq
-  history_data_weekly_etf_qfq
-  history_data_weekly_etf_hfq
-  history_data_daily_hk_stock_hfq
-  history_data_weekly_hk_stock_hfq
-  history_data_monthly_hk_stock_hfq
-)
-
-MODE="docker"
-SERVICE="db"
-DB_NAME="quant"
-DB_USER="quant"
-DB_HOST="${DB_HOST:-${db_host:-localhost}}"
-DB_PORT="${DB_PORT:-${db_port:-5432}}"
-DB_PASSWORD="${DB_PASSWORD:-${db_password:-}}"
-SCHEMA="public"
+# Export-specific variables
 OUT_DIR="./backups"
 OUT_FILE=""
 GZIP=1
 CLEAN=0
+MODE="$DEFAULT_MODE"
+SERVICE="$DEFAULT_SERVICE"
+DB_NAME="$DEFAULT_DB_NAME"
+DB_USER="$DEFAULT_DB_USER"
+DB_HOST="${DB_HOST:-${db_host:-$DEFAULT_DB_HOST}}"
+DB_PORT="${DB_PORT:-${db_port:-$DEFAULT_DB_PORT}}"
+DB_PASSWORD="${DB_PASSWORD:-${db_password:-}}"
+SCHEMA="$DEFAULT_SCHEMA"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -237,4 +201,4 @@ case "$MODE" in
     ;;
 esac
 
-echo "[pg_export] Wrote: $OUT_FILE"
+echo "[db_export] Wrote: $OUT_FILE"
