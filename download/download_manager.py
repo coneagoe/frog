@@ -21,7 +21,7 @@ class DownloadManager:
     def __init__(self):
         self.downloader = Downloader()
 
-    def download_general_info_stock(self, force: bool = False) -> bool:
+    def download_general_info_stock(self) -> bool:
         get_storage().drop_table(tb_name_general_info_stock)
 
         df = self.downloader.dl_general_info_stock()
@@ -31,7 +31,7 @@ class DownloadManager:
 
         return get_storage().save_general_info_stock(df)
 
-    def download_general_info_etf(self, force: bool = False) -> bool:
+    def download_general_info_etf(self) -> bool:
         df = self.downloader.dl_general_info_etf()
         if df is None or df.empty:
             logging.warning("Failed to download ETF info or data is empty.")
@@ -39,7 +39,7 @@ class DownloadManager:
 
         return get_storage().save_general_info_etf(df)
 
-    def download_general_info_hk_ggt(self, force: bool = False) -> bool:
+    def download_general_info_hk_ggt(self) -> bool:
         df = self.downloader.dl_general_info_hk_ggt_stock()
         if df is None or df.empty:
             logging.warning("Failed to download HK GGT info or data is empty.")
@@ -384,9 +384,6 @@ class DownloadManager:
         """
         下载沪深300成分股数据
 
-        Args:
-            force: 是否强制重新下载（删除现有数据）
-
         Returns:
             bool: 是否成功下载并保存
         """
@@ -411,9 +408,6 @@ class DownloadManager:
     def download_ingredient_500(self) -> bool:
         """
         下载中证500成分股数据
-
-        Args:
-            force: 是否强制重新下载（删除现有数据）
 
         Returns:
             bool: 是否成功下载并保存
