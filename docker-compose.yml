@@ -1,6 +1,6 @@
 # common variable & volume
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.9.2-python3.11
+  image: frog-airflow:2.9.2-python3.12
   build:
     context: .
     dockerfile: airflow.Dockerfile
