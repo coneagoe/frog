@@ -48,12 +48,17 @@ services:
       POSTGRES_DB: quant
       POSTGRES_USER: quant
       POSTGRES_PASSWORD: quant
-    ports: ["5432:5432"]
+    # SECURITY: bind Postgres to localhost only (avoid exposing 5432 to the internet).
+    # If you need remote access, prefer VPN/SSH tunnel or a firewall allowlist.
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["db_data:/var/lib/postgresql/data"]
 
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    # SECURITY: do not publish Redis to the host network.
+    # Exposing 6379 publicly allows unauthenticated commands (e.g. REPLICAOF)
+    # that can break Celery/Airflow. Containers can still reach Redis via the
+    # internal Docker network name "redis".
 
   app:
     build: .
