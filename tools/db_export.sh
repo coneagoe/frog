@@ -8,7 +8,7 @@ usage() {
   cat <<'USAGE'
 Export business tables from PostgreSQL as plain SQL using pg_dump.
 
-Default mode is Docker (docker compose exec db). Output is plain SQL suitable for psql restore.
+Uses Docker (docker compose exec db). Output is plain SQL suitable for psql restore.
 
 Usage:
   bash tools/db_export.sh [options]
@@ -21,28 +21,18 @@ Options:
   --gzip              Gzip output (default)
   --clean             Include DROP statements for selected tables (pg_dump --clean --if-exists)
 
-  --docker            Use docker compose exec (default)
-  --direct            Connect directly using local pg_dump
   --service NAME      Docker compose service name (default: db)
 
   --db NAME           Database name (default: quant)
   --user NAME         Database user (default: quant)
-  --host HOST         Host (direct mode only; default: localhost)
-  --port PORT         Port (direct mode only; default: 5432)
-
-Environment variables (direct mode):
-  DB_HOST / db_host, DB_PORT / db_port, DB_NAME, DB_USER / db_username, DB_PASSWORD / db_password
-  PGPASSWORD can also be used.
 
 Examples:
-  # default (docker), gzip
+  # default, gzip
   bash tools/db_export.sh
 
   # specify schema
   bash tools/db_export.sh --schema public
 
-  # direct mode (requires pg_dump installed locally)
-  DB_HOST=localhost DB_PASSWORD=quant bash tools/db_export.sh --direct
 USAGE
 }
 
@@ -51,12 +41,9 @@ OUT_DIR="./backups"
 OUT_FILE=""
 GZIP=1
 CLEAN=0
-MODE="$DEFAULT_MODE"
 SERVICE="$DEFAULT_SERVICE"
 DB_NAME="$DEFAULT_DB_NAME"
 DB_USER="$DEFAULT_DB_USER"
-DB_HOST="${DB_HOST:-${db_host:-$DEFAULT_DB_HOST}}"
-DB_PORT="${DB_PORT:-${db_port:-$DEFAULT_DB_PORT}}"
 DB_PASSWORD="${DB_PASSWORD:-${db_password:-}}"
 SCHEMA="$DEFAULT_SCHEMA"
 
@@ -65,14 +52,6 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage
       exit 0
-      ;;
-    --docker)
-      MODE="docker"
-      shift
-      ;;
-    --direct)
-      MODE="direct"
-      shift
       ;;
     --service)
       SERVICE="$2"
@@ -84,14 +63,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --user)
       DB_USER="$2"
-      shift 2
-      ;;
-    --host)
-      DB_HOST="$2"
-      shift 2
-      ;;
-    --port)
-      DB_PORT="$2"
       shift 2
       ;;
     --schema)
@@ -175,30 +146,6 @@ run_export_docker() {
   fi
 }
 
-run_export_direct() {
-  need_cmd pg_dump
-  if [[ -n "$DB_PASSWORD" && -z "${PGPASSWORD:-}" ]]; then
-    export PGPASSWORD="$DB_PASSWORD"
-  fi
-
-  if [[ $GZIP -eq 1 ]]; then
-    pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}" | gzip -c >"$OUT_FILE"
-  else
-    pg_dump -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}" >"$OUT_FILE"
-  fi
-}
-
-case "$MODE" in
-  docker)
-    run_export_docker
-    ;;
-  direct)
-    run_export_direct
-    ;;
-  *)
-    err "Invalid mode: $MODE"
-    exit 2
-    ;;
-esac
+run_export_docker
 
 echo "[db_export] Wrote: $OUT_FILE"
