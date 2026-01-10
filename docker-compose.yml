@@ -1,4 +1,9 @@
 # common variable & volume
+x-postgres-common-env: &postgres-common-env
+  POSTGRES_DB: quant
+  POSTGRES_USER: quant
+  POSTGRES_PASSWORD: quant
+
 x-airflow-common: &airflow-common
   image: frog-airflow:2.9.2-python3.12
   build:
@@ -7,14 +12,20 @@ x-airflow-common: &airflow-common
   user: "${AIRFLOW_UID:-1000}:0"
   environment:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://quant:quant@db:5432/quant
+    # Airflow metadata DB (separate from business data DB)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://quant:quant@db:5432/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://quant:quant@db:5432/quant
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://quant:quant@db:5432/airflow
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Asia/Shanghai
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: "false"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Business data DB settings used by storage/storage_db.py (avoid container-local localhost)
+    db_host: db
+    db_port: 5432
+    db_username: quant
+    db_password: quant
     # Make project packages (common/, download/, stock/, etc.) importable from DAGs
     PYTHONPATH: /opt/airflow/frog
     FROG_PROJECT_ROOT: /opt/airflow/frog
@@ -37,21 +48,57 @@ x-airflow-common: &airflow-common
     - ./plugins:/opt/airflow/plugins
     - ./:/opt/airflow/frog
   depends_on:
-    - db
-    - redis
-    - airflow-init-permissions
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_started
+    db-init-airflow:
+      condition: service_completed_successfully
+    airflow-init-permissions:
+      condition: service_completed_successfully
 
 services:
   db:
     image: timescale/timescaledb:latest-pg16
     environment:
-      POSTGRES_DB: quant
-      POSTGRES_USER: quant
-      POSTGRES_PASSWORD: quant
+      <<: *postgres-common-env
     # SECURITY: bind Postgres to localhost only (avoid exposing 5432 to the internet).
     # If you need remote access, prefer VPN/SSH tunnel or a firewall allowlist.
     ports: ["127.0.0.1:5432:5432"]
-    volumes: ["db_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+
+  # Ensure the Airflow metadata DB exists on every `docker compose up`.
+  # This is necessary because /docker-entrypoint-initdb.d scripts run only
+  # on first initialization of the data directory.
+  db-init-airflow:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *postgres-common-env
+      AIRFLOW_DB_NAME: airflow
+      PGPASSWORD: quant
+    restart: "no"
+    command:
+      - sh
+      - -euc
+      - |
+        until pg_isready -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"; do
+          sleep 1;
+        done
+
+        exists=$$(psql -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT 1 FROM pg_database WHERE datname='$$AIRFLOW_DB_NAME'" || true)
+        if [ "$$exists" != "1" ]; then
+          createdb -h db -U "$$POSTGRES_USER" -O "$$POSTGRES_USER" "$$AIRFLOW_DB_NAME"
+        fi
 
   redis:
     image: redis:7-alpine
@@ -87,27 +134,38 @@ services:
     ports: ["8080:8080"]
     command: >
       bash -c "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo 'User already exists or db already initialized'; airflow webserver"
-    depends_on:
-      - db
-      - redis
 
   airflow-scheduler:
     <<: *airflow-common
     command: >
       bash -c "airflow db upgrade || echo 'DB already upgraded'; airflow scheduler"
     depends_on:
-      - db
-      - redis
-      - airflow-webserver
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      db-init-airflow:
+        condition: service_completed_successfully
+      airflow-init-permissions:
+        condition: service_completed_successfully
+      airflow-webserver:
+        condition: service_started
 
   airflow-worker:
     <<: *airflow-common
     command: >
       bash -c "airflow db upgrade || echo 'DB already upgraded'; airflow celery worker"
     depends_on:
-      - db
-      - redis
-      - airflow-webserver
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      db-init-airflow:
+        condition: service_completed_successfully
+      airflow-init-permissions:
+        condition: service_completed_successfully
+      airflow-webserver:
+        condition: service_started
 
   airflow-init:
     <<: *airflow-common
