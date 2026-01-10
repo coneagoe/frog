@@ -85,6 +85,6 @@ setup_db_connection() {
 get_psql_args() {
   local db_user="$1"
   local db_name="$2"
-  
+
   echo "-v ON_ERROR_STOP=1 -U \"$db_user\" -d \"$db_name\""
 }

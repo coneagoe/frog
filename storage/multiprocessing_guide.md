@@ -59,12 +59,12 @@ def process_stock_data(stock_data):
     """处理单个股票数据"""
     # 每个进程创建自己的storage实例
     storage = get_storage()
-    
+
     try:
         # 使用SQLAlchemy engine进行写操作（安全）
         storage.save_history_data_stock(
-            stock_data['df'], 
-            stock_data['period'], 
+            stock_data['df'],
+            stock_data['period'],
             stock_data['adjust']
         )
         return True
@@ -78,7 +78,7 @@ def process_stock_data(stock_data):
 # 多进程处理
 if __name__ == '__main__':
     stock_data_list = [...]  # 股票数据列表
-    
+
     with Pool(processes=4) as pool:
         results = pool.map(process_stock_data, stock_data_list)
 ```
@@ -89,7 +89,7 @@ if __name__ == '__main__':
 def query_stock_data(query_params):
     """查询股票数据"""
     storage = get_storage()
-    
+
     try:
         # 使用engine进行查询（安全）
         df = pd.read_sql(query_params['sql'], storage.engine)
