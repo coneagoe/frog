@@ -4,6 +4,31 @@ x-postgres-common-env: &postgres-common-env
   POSTGRES_USER: quant
   POSTGRES_PASSWORD: quant
 
+x-airflow-common-depends-on: &airflow-common-depends-on
+  db:
+    condition: service_healthy
+  redis:
+    condition: service_started
+  db-init-airflow:
+    condition: service_completed_successfully
+  airflow-init-permissions:
+    condition: service_completed_successfully
+
+x-airflow-email-env: &airflow-email-env
+  # Email (required; define these in .env)
+  AIRFLOW__SMTP__SMTP_HOST: ${SMTP_HOST:?SMTP_HOST is required}
+  AIRFLOW__SMTP__SMTP_PORT: ${SMTP_PORT:?SMTP_PORT is required}
+  AIRFLOW__SMTP__SMTP_USER: ${SMTP_USER:?SMTP_USER is required}
+  AIRFLOW__SMTP__SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD is required}
+  AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_MAIL_FROM:?SMTP_MAIL_FROM is required}
+  ALERT_EMAILS: ${ALERT_EMAILS:?ALERT_EMAILS is required}
+  # Repo email helper compatibility (utility.send_email)
+  MAIL_SERVER: ${SMTP_HOST:?SMTP_HOST is required}
+  MAIL_PORT: ${SMTP_PORT:?SMTP_PORT is required}
+  MAIL_SENDER: ${SMTP_MAIL_FROM:?SMTP_MAIL_FROM is required}
+  MAIL_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD is required}
+  MAIL_RECEIVERS: ${ALERT_EMAILS:?ALERT_EMAILS is required}
+
 x-airflow-common: &airflow-common
   image: frog-airflow:2.9.2-python3.12
   build:
@@ -15,12 +40,26 @@ x-airflow-common: &airflow-common
     # Airflow metadata DB (separate from business data DB)
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://quant:quant@db:5432/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://quant:quant@db:5432/airflow
+    # Use Redis for Celery task results (DB index 1) to reduce Postgres connection pressure.
+    # Business data still writes to Postgres via storage layer; Airflow metadata remains in Postgres.
+    AIRFLOW__CELERY__RESULT_BACKEND: redis://redis:6379/1
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Asia/Shanghai
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: "false"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Cap Airflow SQLAlchemy connection usage (metadata DB) to avoid exhausting Postgres connections.
+    # These apply to scheduler/webserver/worker processes.
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: "5"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: "0"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_RECYCLE: "1800"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_PRE_PING: "true"
+    # Stopgap: avoid frequent DAG parsing process kills when imports are slow.
+    AIRFLOW__SCHEDULER__STALE_DAG_THRESHOLD: "300"
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "120"
+    # Limit Celery worker concurrency to prevent Postgres connection exhaustion.
+    # Each worker process creates its own DB connection pool; too many workers = too many clients.
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: "2"
     # Business data DB settings used by storage/storage_db.py (avoid container-local localhost)
     db_host: db
     db_port: 5432
@@ -29,37 +68,22 @@ x-airflow-common: &airflow-common
     # Make project packages (common/, download/, stock/, etc.) importable from DAGs
     PYTHONPATH: /opt/airflow/frog
     FROG_PROJECT_ROOT: /opt/airflow/frog
-    # Email (required; define these in .env)
-    AIRFLOW__SMTP__SMTP_HOST: ${SMTP_HOST:?SMTP_HOST is required}
-    AIRFLOW__SMTP__SMTP_PORT: ${SMTP_PORT:?SMTP_PORT is required}
-    AIRFLOW__SMTP__SMTP_USER: ${SMTP_USER:?SMTP_USER is required}
-    AIRFLOW__SMTP__SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD is required}
-    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_MAIL_FROM:?SMTP_MAIL_FROM is required}
-    ALERT_EMAILS: ${ALERT_EMAILS:?ALERT_EMAILS is required}
-    # Repo email helper compatibility (utility.send_email)
-    MAIL_SERVER: ${SMTP_HOST:?SMTP_HOST is required}
-    MAIL_PORT: ${SMTP_PORT:?SMTP_PORT is required}
-    MAIL_SENDER: ${SMTP_MAIL_FROM:?SMTP_MAIL_FROM is required}
-    MAIL_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD is required}
-    MAIL_RECEIVERS: ${ALERT_EMAILS:?ALERT_EMAILS is required}
+    # Airflow history-download partitioning (DAG creates up to 16 tasks; this controls active partitions)
+    DOWNLOAD_PROCESS_COUNT: ${DOWNLOAD_PROCESS_COUNT:-4}
+    <<: *airflow-email-env
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
     - ./:/opt/airflow/frog
-  depends_on:
-    db:
-      condition: service_healthy
-    redis:
-      condition: service_started
-    db-init-airflow:
-      condition: service_completed_successfully
-    airflow-init-permissions:
-      condition: service_completed_successfully
+  depends_on: *airflow-common-depends-on
 
 services:
   db:
     image: timescale/timescaledb:latest-pg16
+    # Default max_connections for this image can be low; Airflow + workers can briefly spike.
+    # Raise it to reduce "too many clients already" failures.
+    command: ["postgres", "-c", "max_connections=200"]
     environment:
       <<: *postgres-common-env
     # SECURITY: bind Postgres to localhost only (avoid exposing 5432 to the internet).
@@ -122,55 +146,38 @@ services:
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
       - ./dags:/opt/airflow/dags
-    command: >
-      sh -c "
-        mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags &&
-        chown -R ${AIRFLOW_UID:-1000}:0 /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags &&
-        echo 'Permissions fixed successfully!'
-      "
+    command:
+      ["sh", "-c", "mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags && chown -R ${AIRFLOW_UID:-1000}:0 /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags && echo 'Permissions fixed successfully!'"]
 
   airflow-webserver:
     <<: *airflow-common
     ports: ["8080:8080"]
-    command: >
-      bash -c "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo 'User already exists or db already initialized'; airflow webserver"
+    # Includes init + admin user creation (idempotent) before starting the webserver.
+    command:
+      ["bash", "-c", "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo 'User already exists or db already initialized'; airflow webserver"]
 
   airflow-scheduler:
     <<: *airflow-common
-    command: >
-      bash -c "airflow db upgrade || echo 'DB already upgraded'; airflow scheduler"
+    command:
+      ["bash", "-c", "airflow db upgrade || echo 'DB already upgraded'; airflow scheduler"]
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-      db-init-airflow:
-        condition: service_completed_successfully
-      airflow-init-permissions:
-        condition: service_completed_successfully
+      <<: *airflow-common-depends-on
       airflow-webserver:
         condition: service_started
 
   airflow-worker:
     <<: *airflow-common
-    command: >
-      bash -c "airflow db upgrade || echo 'DB already upgraded'; airflow celery worker"
+    command:
+      ["bash", "-c", "airflow db upgrade || echo 'DB already upgraded'; airflow celery worker"]
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-      db-init-airflow:
-        condition: service_completed_successfully
-      airflow-init-permissions:
-        condition: service_completed_successfully
+      <<: *airflow-common-depends-on
       airflow-webserver:
         condition: service_started
 
   airflow-init:
     <<: *airflow-common
-    command: >
-      bash -c "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo 'User already exists'"
+    command:
+      ["bash", "-c", "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo 'User already exists'"]
     profiles: ["init"]
     restart: "no"
 

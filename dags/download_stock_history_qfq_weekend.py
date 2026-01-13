@@ -3,6 +3,7 @@ import sys
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
 
 # Ensure project root is on sys.path (Airflow container mounts code at /opt/airflow/frog)
@@ -12,7 +13,6 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common.const import AdjustType, PeriodType  # noqa: E402
-from download import DownloadManager  # noqa: E402
 
 
 def _parse_alert_emails(raw: str) -> list[str]:
@@ -48,37 +48,129 @@ dag = DAG(
 )
 
 
-def download_stock_history_task(**context):
-    """周末下载A股QFQ历史数据任务"""
+MAX_PARTITIONS = 16
+_DEFAULT_PARTITION_COUNT = 4
+
+
+def get_partition_count() -> int:
+    """Partition count for Airflow tasks.
+
+    Priority:
+    1) Env var DOWNLOAD_PROCESS_COUNT
+    2) Airflow Variable DOWNLOAD_PROCESS_COUNT (read at runtime)
+    3) Default (4)
+    """
+
+    def _parse_int(value: str | None) -> int | None:
+        if not value:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
+    env_value = os.getenv("DOWNLOAD_PROCESS_COUNT")
+    parsed = _parse_int(env_value)
+    if parsed is not None:
+        return max(1, parsed)
+
     try:
-        manager = DownloadManager()
+        from airflow.models import Variable
 
-        start_date = "2010-01-01"
-        end_date = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        var_value = Variable.get("DOWNLOAD_PROCESS_COUNT", default_var=None)
+    except Exception:
+        var_value = None
 
-        print("开始批量下载A股历史数据（QFQ）...")
-        print(f"日期范围: {start_date} 到 {end_date}")
+    parsed = _parse_int(var_value)
+    if parsed is not None:
+        return max(1, parsed)
 
-        success = manager.download_all_stock_history(
-            period=PeriodType.DAILY,
-            adjust=AdjustType.QFQ,
-            start_date=start_date,
-            end_date=end_date,
+    return _DEFAULT_PARTITION_COUNT
+
+
+def reset_stock_history_qfq_table(**context):
+    """清空A股QFQ历史数据表（周末全量重建）。"""
+    # Import inside task to keep DAG parsing fast.
+    from common.const import SecurityType
+    from storage import get_storage, get_table_name
+
+    table_name = get_table_name(SecurityType.STOCK, PeriodType.DAILY, AdjustType.QFQ)
+    get_storage().drop_table(table_name)
+    return f"cleared table: {table_name}"
+
+
+def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
+    """周末下载A股QFQ历史数据（分片任务，最多16片）。"""
+    # Import heavy modules inside the task to keep DAG parsing fast.
+    from common.const import COL_STOCK_ID
+    from download import DownloadManager
+    from storage import get_storage
+
+    partition_count = min(get_partition_count(), MAX_PARTITIONS)
+    if partition_id >= partition_count:
+        raise AirflowSkipException(
+            f"partition_id={partition_id} >= partition_count={partition_count}, skip"
         )
 
-        if not success:
-            raise Exception("部分股票QFQ历史数据下载失败，请查看日志了解详情")
+    start_date = "2010-01-01"
+    end_date = (datetime.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-        return "A股QFQ历史数据下载成功完成"
+    df_stocks = get_storage().load_general_info_stock()
+    if df_stocks is None or df_stocks.empty:
+        raise Exception("无法获取股票基本信息数据")
 
-    except Exception as e:
-        error_message = f"股票QFQ历史数据下载任务执行失败: {str(e)}"
-        print(f"❌ {error_message}")
-        raise Exception(error_message)
+    stock_ids = df_stocks[COL_STOCK_ID].tolist()
+    my_ids = [
+        sid
+        for idx, sid in enumerate(stock_ids)
+        if (idx % partition_count) == partition_id
+    ]
+
+    manager = DownloadManager()
+
+    failed_ids: list[str] = []
+    total = len(my_ids)
+    for idx, stock_id in enumerate(my_ids, start=1):
+        ok = manager.download_stock_history(
+            stock_id=stock_id,
+            period=PeriodType.DAILY,
+            start_date=start_date,
+            end_date=end_date,
+            adjust=AdjustType.QFQ,
+        )
+        if not ok:
+            failed_ids.append(stock_id)
+
+        if idx % 50 == 0 or idx == total:
+            print(
+                f"[QFQ p{partition_id:02d}] 进度: {idx}/{total} "
+                f"(failed={len(failed_ids)})"
+            )
+
+    if failed_ids:
+        preview = ",".join(failed_ids[:10])
+        raise Exception(
+            f"QFQ 分片下载失败: partition={partition_id}/{partition_count}, "
+            f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
+        )
+
+    return (
+        f"A股QFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, "
+        f"count={total}"
+    )
 
 
-task_download_stock_history_qfq = PythonOperator(
-    task_id="download_stock_history_qfq",
-    python_callable=download_stock_history_task,
+task_reset_stock_history_qfq = PythonOperator(
+    task_id="reset_stock_history_qfq",
+    python_callable=reset_stock_history_qfq_table,
     dag=dag,
 )
+
+for _pid in range(MAX_PARTITIONS):
+    task = PythonOperator(
+        task_id=f"download_stock_history_qfq_p{_pid:02d}",
+        python_callable=download_stock_history_qfq_partition_task,
+        op_kwargs={"partition_id": _pid},
+        dag=dag,
+    )
+    task_reset_stock_history_qfq >> task

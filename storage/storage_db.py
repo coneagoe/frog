@@ -1,6 +1,7 @@
 import logging
+import os
 from functools import wraps
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 import psycopg2
@@ -41,7 +42,10 @@ from .model import (
 
 logger = logging.getLogger(__name__)
 
-_storage_instance: Optional["StorageDb"] = None
+# PID-scoped singleton: one StorageDb instance per process to avoid connection explosion
+_storage_instances: Dict[int, "StorageDb"] = {}
+# Track which PIDs have already run metadata.create_all() to avoid repeated DDL checks
+_metadata_initialized_pids: Set[int] = set()
 
 
 def get_table_name(
@@ -82,13 +86,15 @@ def get_table_name(
 
 def reset_storage() -> None:
     """
-    重置 StorageDb 单例实例（主要用于测试）
+    重置当前进程的 StorageDb 单例实例（主要用于测试）
     """
-    global _storage_instance
-    if _storage_instance is not None:
-        _storage_instance.disconnect()
-        _storage_instance = None
-        logger.info("Reset StorageDb singleton instance")
+    global _storage_instances, _metadata_initialized_pids
+    pid = os.getpid()
+    if pid in _storage_instances:
+        _storage_instances[pid].disconnect()
+        del _storage_instances[pid]
+        _metadata_initialized_pids.discard(pid)
+        logger.info(f"Reset StorageDb singleton instance for PID {pid}")
 
 
 def connect_once(func):
@@ -148,10 +154,34 @@ class StorageDb:
         self.Session = None
 
         sqlalchemy_url = f"postgresql://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
-        self.engine = create_engine(sqlalchemy_url, echo=False)
+
+        # Pool settings to prevent connection explosion under concurrent Airflow tasks.
+        # Read overrides from env vars; defaults are very conservative (1 conn per process).
+        pool_size = int(os.getenv("STORAGE_DB_POOL_SIZE", "1"))
+        max_overflow = int(os.getenv("STORAGE_DB_MAX_OVERFLOW", "0"))
+        pool_recycle = int(os.getenv("STORAGE_DB_POOL_RECYCLE", "1800"))
+        pool_pre_ping = os.getenv("STORAGE_DB_POOL_PRE_PING", "true").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
+        self.engine = create_engine(
+            sqlalchemy_url,
+            echo=False,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_recycle=pool_recycle,
+            pool_pre_ping=pool_pre_ping,
+        )
 
         self.Session = sessionmaker(bind=self.engine)
-        Base.metadata.create_all(self.engine)
+
+        # Run DDL/table creation only once per process to avoid repeated checks
+        pid = os.getpid()
+        if pid not in _metadata_initialized_pids:
+            Base.metadata.create_all(self.engine)
+            _metadata_initialized_pids.add(pid)
 
     def connect(self) -> bool:
         try:
@@ -861,13 +891,23 @@ class StorageDb:
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
     """
-    获取StorageDb实例
+    获取当前进程的 StorageDb 单例实例(PID-scoped singleton）。
 
-    注意：多进程环境下建议每个进程创建独立实例，避免连接共享冲突
+    每个进程维护自己的 StorageDb 实例和 SQLAlchemy 连接池，避免：
+    1) 多进程共享连接导致的冲突
+    2) 每次调用都创建新引擎/连接池导致的连接爆炸（"too many clients already"）
+
+    Args:
+        config: 可选的 StorageConfig；如果不传则使用默认配置。
+                注意：如果当前进程已有实例，此参数会被忽略。
     """
-    # 多进程环境下，每个进程应该创建自己的实例
-    # 不在多进程间共享数据库连接
-    if config is None:
-        config = StorageConfig()
+    global _storage_instances
+    pid = os.getpid()
 
-    return StorageDb(config)
+    if pid not in _storage_instances:
+        if config is None:
+            config = StorageConfig()
+        _storage_instances[pid] = StorageDb(config)
+        logger.debug(f"Created new StorageDb instance for PID {pid}")
+
+    return _storage_instances[pid]
