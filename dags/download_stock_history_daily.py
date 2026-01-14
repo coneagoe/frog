@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -25,11 +26,13 @@ ALERT_EMAILS = _parse_alert_emails(
     os.environ.get("ALERT_EMAILS") or os.environ.get("MAIL_RECEIVERS") or ""
 )
 
+LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+
 # DAG 默认参数
 default_args = {
     "owner": "frog",
     "depends_on_past": False,
-    "start_date": datetime(2025, 1, 1),
+    "start_date": datetime(2025, 1, 1, tzinfo=LOCAL_TZ),
     "email": ALERT_EMAILS,
     "email_on_failure": bool(ALERT_EMAILS),
     "email_on_retry": False,
@@ -105,7 +108,7 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, **context):
         )
 
     start_date = "2010-01-01"
-    end_date = datetime.today().strftime("%Y-%m-%d")
+    end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
 
     df_stocks = get_storage().load_general_info_stock()
     if df_stocks is None or df_stocks.empty:

@@ -174,7 +174,7 @@ class DownloadManager:
             logging.error(f"批量下载股票历史数据时发生错误: {e}")
             return False
 
-    def download_hk_stock_history(
+    def download_hk_ggt_history(
         self,
         stock_id: str,
         period: PeriodType,
@@ -183,7 +183,7 @@ class DownloadManager:
         adjust: AdjustType = AdjustType.HFQ,
     ) -> bool:
         """
-        下载香港股票历史数据
+        下载港股通(GuGangTong, GGT)香港股票历史数据
 
         Args:
             stock_id: 香港股票代码 (5位数字)
