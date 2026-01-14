@@ -46,6 +46,10 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
     AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Asia/Shanghai
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    # Keep this identical across webserver/scheduler/worker, otherwise log fetching can fail with
+    # "serve_logs signature was wrong" due to presigned URL verification errors.
+    # Override via .env/CI secrets in real deployments.
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-frog_airflow_secret_key_change_me}
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: "false"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     # Cap Airflow SQLAlchemy connection usage (metadata DB) to avoid exhausting Postgres connections.
@@ -57,6 +61,12 @@ x-airflow-common: &airflow-common
     # Stopgap: avoid frequent DAG parsing process kills when imports are slow.
     AIRFLOW__SCHEDULER__STALE_DAG_THRESHOLD: "300"
     AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "120"
+    # When worker concurrency < active partitions, tasks can sit in "queued" for hours.
+    # Default queued timeout is often too low and causes scheduler to mark them failed.
+    AIRFLOW__SCHEDULER__TASK_QUEUED_TIMEOUT: "21600"  # 6 hours
+    AIRFLOW__SCHEDULER__TASK_QUEUED_TIMEOUT_CHECK_INTERVAL: "60"
+    # Long-running tasks: avoid false-positive zombie detection.
+    AIRFLOW__SCHEDULER__SCHEDULER_ZOMBIE_TASK_THRESHOLD: "1800"
     # Limit Celery worker concurrency to prevent Postgres connection exhaustion.
     # Each worker process creates its own DB connection pool; too many workers = too many clients.
     AIRFLOW__CELERY__WORKER_CONCURRENCY: "2"
