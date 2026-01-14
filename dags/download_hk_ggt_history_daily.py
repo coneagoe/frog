@@ -40,12 +40,11 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-# 创建 DAG（周末 QFQ）
 dag = DAG(
-    "download_stock_history_qfq_weekend",
+    "download_hk_ggt_history_daily",
     default_args=default_args,
-    description="Weekend stock history QFQ download",
-    schedule="0 3 * * 0",  # 每周日凌晨3点执行
+    description="Weekdays HK GGT stock history HFQ download",
+    schedule="30 16 * * 1-5",  # 每个工作日下午4点30执行（Asia/Shanghai）
     catchup=False,
     max_active_runs=1,
 )
@@ -91,23 +90,16 @@ def get_partition_count() -> int:
     return _DEFAULT_PARTITION_COUNT
 
 
-def reset_stock_history_qfq_table(**context):
-    """清空A股QFQ历史数据表（周末全量重建）。"""
-    # Import inside task to keep DAG parsing fast.
-    from common.const import SecurityType
-    from storage import get_storage, get_table_name
-
-    table_name = get_table_name(SecurityType.STOCK, PeriodType.DAILY, AdjustType.QFQ)
-    get_storage().drop_table(table_name)
-    return f"cleared table: {table_name}"
-
-
-def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
-    """周末下载A股QFQ历史数据（分片任务，最多16片）。"""
+def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, **context):
+    """工作日下载港股通HFQ历史数据（分片任务，最多16片）。"""
     # Import heavy modules inside the task to keep DAG parsing fast.
+    from common import is_hk_market_open_today
     from common.const import COL_STOCK_ID
     from download import DownloadManager
     from storage import get_storage
+
+    if not is_hk_market_open_today():
+        raise AirflowSkipException("港股市场今日休市，跳过下载任务")
 
     partition_count = min(get_partition_count(), MAX_PARTITIONS)
     if partition_id >= partition_count:
@@ -116,11 +108,11 @@ def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
         )
 
     start_date = "2010-01-01"
-    end_date = (datetime.now(tz=LOCAL_TZ) - timedelta(days=1)).date().isoformat()
+    end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
 
-    df_stocks = get_storage().load_general_info_stock()
+    df_stocks = get_storage().load_general_info_hk_ggt()
     if df_stocks is None or df_stocks.empty:
-        raise Exception("无法获取股票基本信息数据")
+        raise Exception("无法获取港股通股票基本信息数据")
 
     stock_ids = df_stocks[COL_STOCK_ID].tolist()
     my_ids = [
@@ -134,46 +126,39 @@ def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
     failed_ids: list[str] = []
     total = len(my_ids)
     for idx, stock_id in enumerate(my_ids, start=1):
-        ok = manager.download_stock_history(
+        ok = manager.download_hk_ggt_history(
             stock_id=stock_id,
             period=PeriodType.DAILY,
             start_date=start_date,
             end_date=end_date,
-            adjust=AdjustType.QFQ,
+            adjust=AdjustType.HFQ,
         )
         if not ok:
             failed_ids.append(stock_id)
 
         if idx % 50 == 0 or idx == total:
             print(
-                f"[QFQ p{partition_id:02d}] 进度: {idx}/{total} "
+                f"[HK HFQ p{partition_id:02d}] 进度: {idx}/{total} "
                 f"(failed={len(failed_ids)})"
             )
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
         raise Exception(
-            f"QFQ 分片下载失败: partition={partition_id}/{partition_count}, "
+            f"HK HFQ 分片下载失败: partition={partition_id}/{partition_count}, "
             f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
         )
 
     return (
-        f"A股QFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, "
+        f"港股通HFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, "
         f"count={total}"
     )
 
 
-task_reset_stock_history_qfq = PythonOperator(
-    task_id="reset_stock_history_qfq",
-    python_callable=reset_stock_history_qfq_table,
-    dag=dag,
-)
-
 for _pid in range(MAX_PARTITIONS):
-    task = PythonOperator(
-        task_id=f"download_stock_history_qfq_p{_pid:02d}",
-        python_callable=download_stock_history_qfq_partition_task,
+    PythonOperator(
+        task_id=f"download_hk_ggt_history_hfq_p{_pid:02d}",
+        python_callable=download_hk_ggt_history_hfq_partition_task,
         op_kwargs={"partition_id": _pid},
         dag=dag,
     )
-    task_reset_stock_history_qfq >> task

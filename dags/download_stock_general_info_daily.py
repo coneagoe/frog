@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -8,10 +9,12 @@ from airflow.operators.python import PythonOperator
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # DAG 默认参数
+LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+
 default_args = {
     "owner": "frog",
     "depends_on_past": False,
-    "start_date": datetime(2025, 1, 1),
+    "start_date": datetime(2025, 1, 1, tzinfo=LOCAL_TZ),
     "email_on_failure": False,
     "email_on_retry": False,
     "retries": 1,
