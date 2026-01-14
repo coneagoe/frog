@@ -19,21 +19,48 @@
 - `SMTP_MAIL_FROM`、`ALERT_EMAILS`
 否则 `docker compose` 会提示 “is required” 并退出。
 
-```bash
-# 启动所有服务
-docker compose up -d
+同时建议在 `.env` 里配置 Airflow 管理员账号密码（首次初始化时使用）：
 
-# 如需显式初始化（可选）
-docker compose run --rm airflow-init
+- `AIRFLOW_ADMIN_USERNAME`（默认 `admin`）
+- `AIRFLOW_ADMIN_PASSWORD`（必填；不要使用弱口令）
+- `AIRFLOW_ADMIN_EMAIL`（可选；默认 `admin@example.com`）
+
+说明：这些变量只会在一次性初始化容器 `airflow-init`（profile `init`）里用于创建管理员用户。
+
+```bash
+# 仅首次部署/新库时：初始化 DB + 创建管理员用户
+docker compose --profile init up --abort-on-container-exit airflow-init
+
+# 正常启动所有服务
+docker compose up -d
 ```
 
 ### 2. 访问 Airflow UI
 
 - URL: http://localhost:8080
-- 用户名: admin
-- 密码: admin
 
-### 3. 查看日志
+登录信息：
+
+- 用户名：`AIRFLOW_ADMIN_USERNAME`（默认 `admin`）
+- 密码：首次初始化时设置的 `AIRFLOW_ADMIN_PASSWORD`
+
+注意：如果你已经启动过并且数据库里已存在用户，修改 `.env` 里的 `AIRFLOW_ADMIN_PASSWORD` 不会自动修改旧用户的密码；需要用下面的“重置密码”命令。
+
+### 3. 重置/修改 Airflow 密码
+
+Airflow 2.x 支持在容器内用 CLI 重置密码：
+
+```bash
+# 交互式（推荐，不会把密码留在 shell history）
+docker compose exec -it airflow-webserver airflow users reset-password --username admin
+
+# 非交互式（会出现在 shell history，请谨慎）
+docker compose exec airflow-webserver airflow users reset-password --username admin --password 'REPLACE_WITH_STRONG_PASSWORD'
+```
+
+如果你用的不是 `admin` 用户名，把 `--username` 改成实际用户名即可。
+
+### 4. 查看日志
 
 ```bash
 # 查看所有服务状态
@@ -46,7 +73,7 @@ docker compose logs airflow-webserver
 docker compose logs airflow-init-permissions
 ```
 
-### 4. 停止服务
+### 5. 停止服务
 
 ```bash
 docker compose down
