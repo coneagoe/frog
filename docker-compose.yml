@@ -29,6 +29,15 @@ x-airflow-email-env: &airflow-email-env
   MAIL_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD is required}
   MAIL_RECEIVERS: ${ALERT_EMAILS:?ALERT_EMAILS is required}
 
+# Airflow admin bootstrap (used by the one-time `airflow-init` profile).
+# Keep password unset here; `airflow-init` will fail fast if it's missing.
+x-airflow-admin-env: &airflow-admin-env
+  AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+  AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-}
+  AIRFLOW_ADMIN_FIRSTNAME: ${AIRFLOW_ADMIN_FIRSTNAME:-Admin}
+  AIRFLOW_ADMIN_LASTNAME: ${AIRFLOW_ADMIN_LASTNAME:-User}
+  AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+
 x-airflow-common: &airflow-common
   image: frog-airflow:2.9.2-python3.12
   build:
@@ -80,7 +89,7 @@ x-airflow-common: &airflow-common
     FROG_PROJECT_ROOT: /opt/airflow/frog
     # Airflow history-download partitioning (DAG creates up to 16 tasks; this controls active partitions)
     DOWNLOAD_PROCESS_COUNT: ${DOWNLOAD_PROCESS_COUNT:-4}
-    <<: *airflow-email-env
+    <<: [*airflow-email-env, *airflow-admin-env]
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -164,7 +173,7 @@ services:
     ports: ["8080:8080"]
     # Includes init + admin user creation (idempotent) before starting the webserver.
     command:
-      ["bash", "-c", "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo 'User already exists or db already initialized'; airflow webserver"]
+      ["bash", "-c", "airflow db init && airflow webserver"]
 
   airflow-scheduler:
     <<: *airflow-common
@@ -187,7 +196,7 @@ services:
   airflow-init:
     <<: *airflow-common
     command:
-      ["bash", "-c", "airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo 'User already exists'"]
+      ["bash", "-c", "set -euo pipefail; if [ -z \"$$AIRFLOW_ADMIN_PASSWORD\" ]; then echo 'AIRFLOW_ADMIN_PASSWORD is required (set it in .env)'; exit 1; fi; airflow db init; airflow users create --username \"$$AIRFLOW_ADMIN_USERNAME\" --password \"$$AIRFLOW_ADMIN_PASSWORD\" --firstname \"$$AIRFLOW_ADMIN_FIRSTNAME\" --lastname \"$$AIRFLOW_ADMIN_LASTNAME\" --role Admin --email \"$$AIRFLOW_ADMIN_EMAIL\" || echo 'User already exists' "]
     profiles: ["init"]
     restart: "no"
 
