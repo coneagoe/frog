@@ -28,6 +28,7 @@ from .ingredient import (
     tb_name_ingredient_300,
     tb_name_ingredient_500,
 )
+from .stk_limit_a_stock import StkLimitAStock, tb_name_stk_limit_a_stock
 
 __all__ = [
     "Base",
@@ -39,6 +40,7 @@ __all__ = [
     "GeneralInfoGGT",
     "GeneralInfoStock",
     "DailyBasicAStock",
+    "StkLimitAStock",
     "Ingredient300",
     "Ingredient500",
     "tb_name_general_info_etf",
@@ -49,6 +51,7 @@ __all__ = [
     "tb_name_history_data_daily_a_stock_qfq",
     "tb_name_history_data_daily_a_stock_hfq",
     "tb_name_daily_basic_a_stock",
+    "tb_name_stk_limit_a_stock",
     "tb_name_history_data_weekly_a_stock_qfq",
     "tb_name_history_data_weekly_a_stock_hfq",
     "tb_name_history_data_daily_hk_stock_hfq",
