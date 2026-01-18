@@ -54,6 +54,21 @@ COL_BUY_AMOUNT = "买入金额"
 COL_IPO_DATE = "上市日期"
 COL_DELISTING_DATE = "退市日期"
 
+# TuShare stock_basic
+COL_TS_CODE = "TS代码"
+COL_AREA = "地域"
+COL_INDUSTRY = "所属行业"
+COL_FULLNAME = "股票全称"
+COL_ENNAME = "英文全称"
+COL_CN_SPELL = "拼音缩写"
+COL_MARKET = "市场类型"
+COL_EXCHANGE = "交易所"
+COL_CURR_TYPE = "交易货币"
+COL_LIST_STATUS = "上市状态"
+COL_IS_HS = "是否沪深港通"
+COL_ACT_NAME = "实控人姓名"
+COL_ACT_ENT_TYPE = "实控人企业性质"
+
 COL_MONITOR_PRICE = "监控价格"
 COL_COMMENT = "comment"
 # platforms to be notified
