@@ -53,6 +53,7 @@ COL_TIME = "时间"
 COL_BUY_AMOUNT = "买入金额"
 COL_IPO_DATE = "上市日期"
 COL_DELISTING_DATE = "退市日期"
+COL_LIMIT_STATUS = "涨跌停状态"
 
 # TuShare stock_basic
 COL_TS_CODE = "TS代码"

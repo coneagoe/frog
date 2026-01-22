@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, Float, String
+from sqlalchemy import Column, Date, Float, Integer, String
 
 from common.const import (
     COL_CIRC_MV,
@@ -8,15 +8,16 @@ from common.const import (
     COL_DV_TTM,
     COL_FLOAT_SHARE,
     COL_FREE_SHARE,
+    COL_LIMIT_STATUS,
     COL_PB,
     COL_PB_MRQ,
     COL_PE,
     COL_PE_TTM,
     COL_PS,
     COL_PS_TTM,
-    COL_STOCK_ID,
     COL_TOTAL_MV,
     COL_TOTAL_SHARE,
+    COL_TS_CODE,
     COL_TURNOVER_RATE,
     COL_TURNOVER_RATE_F,
     COL_VOLUME_RATIO,
@@ -32,7 +33,7 @@ class DailyBasicAStock(Base):
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
     股票代码 = Column(
-        COL_STOCK_ID, String(10), primary_key=True, nullable=False, comment="股票代码"
+        COL_TS_CODE, String(10), primary_key=True, nullable=False, comment="股票代码"
     )
 
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="当日收盘价")
@@ -60,3 +61,5 @@ class DailyBasicAStock(Base):
 
     总市值 = Column(COL_TOTAL_MV, Float, nullable=True, comment="总市值")
     流通市值 = Column(COL_CIRC_MV, Float, nullable=True, comment="流通市值")
+
+    涨跌停状态 = Column(COL_LIMIT_STATUS, Integer, nullable=True, comment="涨跌停状态")
