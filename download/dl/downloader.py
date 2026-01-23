@@ -11,6 +11,7 @@ from .downloader_baostock import (
     download_ingredient_300,
     download_ingredient_500,
 )
+from .downloader_tushare import download_daily_basic_a_stock_ts
 
 
 class Downloader:
@@ -25,3 +26,5 @@ class Downloader:
 
     dl_ingredient_300 = staticmethod(download_ingredient_300)
     dl_ingredient_500 = staticmethod(download_ingredient_500)
+
+    dl_daily_basic_a_stock = staticmethod(download_daily_basic_a_stock_ts)

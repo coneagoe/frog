@@ -4,15 +4,18 @@ from functools import wraps
 from typing import Any, Callable, TypeVar, cast
 
 import pandas as pd
+import retrying
 import tushare as ts
 
 from common.const import (
     COL_CIRC_MV,
     COL_CLOSE,
+    COL_DATE,
     COL_DV_RATIO,
     COL_DV_TTM,
     COL_FLOAT_SHARE,
     COL_FREE_SHARE,
+    COL_LIMIT_STATUS,
     COL_PB,
     COL_PB_MRQ,
     COL_PE,
@@ -33,15 +36,12 @@ F = TypeVar("F", bound=Callable[..., Any])
 def get_pro(func: F) -> F:
     """Decorator to create a TuShare pro client and inject it into function.
 
-    This mirrors the baostock downloader style: do setup in a decorator, then
-    run the wrapped function.
-
     Token source: env var `TUSHARE_TOKEN`.
 
     The decorated function must accept a keyword argument `pro`.
 
     Raises:
-        ConnectionError: If token is missing.
+        ConnectionError: if token is missing.
     """
 
     @wraps(func)
@@ -95,6 +95,8 @@ _TS_TO_INTERNAL_COL_MAP = {
     "free_share": COL_FREE_SHARE,
     "total_mv": COL_TOTAL_MV,
     "circ_mv": COL_CIRC_MV,
+    "trade_date": COL_DATE,
+    "limit_status": COL_LIMIT_STATUS,
 }
 
 
@@ -121,6 +123,7 @@ daily_basic_fields = [
 ]
 
 
+@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
 @get_pro
 def download_daily_basic_a_stock_ts(
     trade_date: str,
@@ -129,8 +132,8 @@ def download_daily_basic_a_stock_ts(
 
     return ts.pro_api().daily_basic(
         **{
-            "ts_code": trade_date,
-            "trade_date": "",
+            "ts_code": "",
+            "trade_date": trade_date,
             "start_date": "",
             "end_date": "",
             "limit": "",

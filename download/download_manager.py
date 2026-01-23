@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 import pandas as pd
+import pandas_market_calendars as mcal
 
 from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType, SecurityType
 from storage import (
@@ -12,6 +13,7 @@ from storage import (
     tb_name_ingredient_300,
     tb_name_ingredient_500,
 )
+from storage.model import tb_name_daily_basic_a_stock
 
 from .dl import Downloader
 from .mp_utils import run_history_download_mp
@@ -426,4 +428,56 @@ class DownloadManager:
 
         except Exception as e:
             logging.error(f"下载中证500成分股数据时出错: {e}")
+            return False
+
+    def download_daily_basic_a_stock(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> bool:
+        """
+        下载A股每日基本面数据（daily_basic）
+
+        Args:
+            trade_date: 交易日期，默认为当天（格式：YYYY-MM-DD 或 YYYYMMDD）
+
+        Returns:
+            bool: 是否成功下载并保存
+        """
+        last_record = get_storage().get_last_record(tb_name_daily_basic_a_stock)
+
+        if start_date is None:
+            start_date = "2010-01-01"
+
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+
+        if last_record is not None:
+            latest_date = pd.Timestamp(last_record[COL_DATE])
+            actual_start_ts = latest_date + pd.Timedelta(days=1)
+            actual_start_date = actual_start_ts.strftime("%Y%m%d")
+
+            if actual_start_ts > pd.to_datetime(end_date):
+                logging.info("A股每日基本面数据已是最新，无需下载")
+                return True
+        else:
+            actual_start_date = start_date
+
+        market_calendar = mcal.get_calendar("XSHG")
+        trade_days = market_calendar.schedule(
+            start_date=actual_start_date, end_date=end_date
+        )
+
+        try:
+            for date in trade_days.index:
+                trade_date = date.strftime("%Y-%m-%d")
+
+                df = self.downloader.dl_daily_basic_a_stock(trade_date)
+                if df is None or df.empty:
+                    logging.info(f"日期 {trade_date} 无数据")
+                    return True
+
+                get_storage().save_daily_basic_a_stock(df)
+
+            return True
+        except Exception as e:
+            logging.error(f"下载A股每日基本面数据时出错: {e}")
             return False

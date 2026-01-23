@@ -22,6 +22,7 @@ from common.const import (
 from .config import StorageConfig
 from .model import (
     Base,
+    tb_name_daily_basic_a_stock,
     tb_name_general_info_etf,
     tb_name_general_info_ggt,
     tb_name_general_info_stock,
@@ -349,15 +350,16 @@ class StorageDb:
         )
         return True
 
-    def load_general_info_stock(
-        self, table_name: str = tb_name_general_info_stock
-    ) -> pd.DataFrame:
+    def load_general_info_stock(self) -> pd.DataFrame:
         """
         加载股票基本信息数据，过滤掉北交所股票
 
         Returns:
             pd.DataFrame: 股票基本信息数据（不含北交所股票）。如果表不存在或加载失败则返回空DataFrame
         """
+
+        table_name = tb_name_general_info_stock
+
         try:
             sql = f"""
             SELECT * FROM {table_name}
@@ -887,6 +889,34 @@ class StorageDb:
                 f"获取最新记录失败 - 表名: {table_name}, 股票代码: {stock_id}, 错误: {str(e)}"
             )
             return None
+
+    def save_daily_basic_a_stock(self, df: pd.DataFrame) -> bool:
+        """
+        保存每日基础数据到对应的数据库表
+
+        Args:
+            df: 每日基础数据DataFrame
+
+        Returns:
+            bool: 保存是否成功
+        """
+
+        table_name = tb_name_daily_basic_a_stock
+
+        try:
+            df.to_sql(
+                table_name,
+                self.engine,
+                if_exists="append",
+                index=False,
+                method="multi",
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"保存每日基础数据失败: {str(e)}")
+            return False
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
