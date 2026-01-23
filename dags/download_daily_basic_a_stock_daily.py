@@ -14,6 +14,9 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from common import is_a_market_open_today  # noqa: E402
+from download import DownloadManager  # noqa: E402
+
 
 def _parse_alert_emails(raw: str) -> list[str]:
     return [
@@ -50,11 +53,6 @@ dag = DAG(
 
 
 def download_daily_basic_a_stock_task(**context):
-    """工作日下载A股 daily_basic 数据（单进程增量）。"""
-    # Import heavy modules inside the task to keep DAG parsing fast.
-    from common import is_a_market_open_today
-    from download import DownloadManager
-
     if not is_a_market_open_today():
         raise AirflowSkipException("Market is closed today.")
 
