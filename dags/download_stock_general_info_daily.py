@@ -4,9 +4,13 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from airflow import DAG
+from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from common import is_a_market_open_today  # noqa: E402
+from download import DownloadManager  # noqa: E402
 
 # DAG 默认参数
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
@@ -34,11 +38,8 @@ dag = DAG(
 
 def download_stock_general_info_task(**context):
     # Import heavy modules inside the task to keep DAG parsing fast.
-    from common import is_a_market_open_today
-    from download import DownloadManager
-
     if not is_a_market_open_today():
-        return "Market is closed today."
+        raise AirflowSkipException("Market is closed today.")
 
     try:
         # 创建下载管理器
