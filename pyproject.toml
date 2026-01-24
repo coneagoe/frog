@@ -29,7 +29,8 @@ dependencies = [
     "pytest (>=8.4.2,<9.0.0)",
     "types-requests (>=2.32.4.20250913,<3.0.0.0)",
     "sqlalchemy (>=2.0.44,<3.0.0)",
-    "psycopg2-binary (>=2.9.11,<3.0.0)"
+    "psycopg2-binary (>=2.9.11,<3.0.0)",
+    "toml (>=0.10.2,<0.11.0)"
 ]
 
 [build-system]

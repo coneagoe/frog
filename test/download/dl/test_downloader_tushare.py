@@ -96,8 +96,8 @@ def test_download_daily_basic_a_stock_ts_success(downloader_ts_module, monkeypat
 
     # Verify daily_basic was called with correct parameters
     expected_params = {
-        "ts_code": "20240105",  # Date should be converted to YYYYMMDD format
-        "trade_date": "",
+        "ts_code": "",
+        "trade_date": "20240105",  # Date should be converted to YYYYMMDD format
         "start_date": "",
         "end_date": "",
         "limit": "",
@@ -138,8 +138,8 @@ def test_download_daily_basic_a_stock_ts_different_date_formats(
 
         # All formats should be converted to YYYYMMDD
         expected_params = {
-            "ts_code": "20240105",
-            "trade_date": "",
+            "ts_code": "",
+            "trade_date": "20240105",
             "start_date": "",
             "end_date": "",
             "limit": "",

@@ -58,7 +58,7 @@ python3 tools/code_simplifier.py --help
 ### GitHub Copilot Agent 工作流
 1. Code Simplifier (Review) 分析代码
 2. 生成 Change List
-3. 用户点击 "Apply changes" 
+3. 用户点击 "Apply changes"
 4. Code Simplifier Apply 自动修改并验证
 
 ### opencode Code Simplifier 工作流
