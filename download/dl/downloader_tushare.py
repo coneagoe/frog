@@ -11,6 +11,7 @@ from common.const import (
     COL_CIRC_MV,
     COL_CLOSE,
     COL_DATE,
+    COL_DOWN_LIMIT,
     COL_DV_RATIO,
     COL_DV_TTM,
     COL_FLOAT_SHARE,
@@ -20,6 +21,7 @@ from common.const import (
     COL_PB_MRQ,
     COL_PE,
     COL_PE_TTM,
+    COL_PRE_CLOSE,
     COL_PS,
     COL_PS_TTM,
     COL_TOTAL_MV,
@@ -27,6 +29,7 @@ from common.const import (
     COL_TS_CODE,
     COL_TURNOVER_RATE,
     COL_TURNOVER_RATE_F,
+    COL_UP_LIMIT,
     COL_VOLUME_RATIO,
 )
 
@@ -97,6 +100,9 @@ _TS_TO_INTERNAL_COL_MAP = {
     "circ_mv": COL_CIRC_MV,
     "trade_date": COL_DATE,
     "limit_status": COL_LIMIT_STATUS,
+    "pre_close": COL_PRE_CLOSE,
+    "up_limit": COL_UP_LIMIT,
+    "down_limit": COL_DOWN_LIMIT,
 }
 
 
@@ -123,6 +129,15 @@ daily_basic_fields = [
 ]
 
 
+stk_limit_fields = [
+    "trade_date",
+    "ts_code",
+    "pre_close",
+    "up_limit",
+    "down_limit",
+]
+
+
 @retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
 @get_pro
 def download_daily_basic_a_stock_ts(
@@ -142,5 +157,32 @@ def download_daily_basic_a_stock_ts(
         fields=daily_basic_fields,
     )
 
-    # Rename columns from tushare names to internal names
-    return df.rename(columns=_TS_TO_INTERNAL_COL_MAP)
+    return df
+
+
+@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@get_pro
+def download_stk_limit(
+    ts_code: str = "",
+    trade_date: str = "",
+    start_date: str = "",
+    end_date: str = "",
+) -> pd.DataFrame | Any:
+    if trade_date:
+        trade_date = convert_date(trade_date)
+    if start_date:
+        start_date = convert_date(start_date)
+    if end_date:
+        end_date = convert_date(end_date)
+
+    df = ts.pro_api().stk_limit(
+        **{
+            "ts_code": ts_code,
+            "trade_date": trade_date,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        fields=stk_limit_fields,
+    )
+
+    return df
