@@ -130,7 +130,7 @@ def download_daily_basic_a_stock_ts(
 ) -> pd.DataFrame | Any:
     trade_date = convert_date(trade_date)
 
-    return ts.pro_api().daily_basic(
+    df = ts.pro_api().daily_basic(
         **{
             "ts_code": "",
             "trade_date": trade_date,
@@ -141,3 +141,6 @@ def download_daily_basic_a_stock_ts(
         },
         fields=daily_basic_fields,
     )
+
+    # Rename columns from tushare names to internal names
+    return df.rename(columns=_TS_TO_INTERNAL_COL_MAP)

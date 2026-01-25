@@ -1,5 +1,6 @@
 import logging
 import os
+import textwrap
 from functools import wraps
 from typing import Any, Dict, List, Optional, Set
 
@@ -855,13 +856,15 @@ class StorageDb:
                 self.connection.rollback()
 
     @connect_once
-    def get_last_record(self, table_name: str, stock_id: str) -> Optional[dict]:
+    def get_last_record(
+        self, table_name: str, stock_id: Optional[str] = None
+    ) -> Optional[dict]:
         """
         获取指定股票在指定表中的最新一条记录
 
         Args:
             table_name: 表名
-            stock_id: 股票代码
+            stock_id: 股票代码，如果为None则获取表中所有记录的最新一条
 
         Returns:
             dict: 最新记录的字段值字典，如果不存在则返回None
@@ -869,14 +872,28 @@ class StorageDb:
         try:
             assert self.cursor is not None, "Database cursor should not be None"
 
-            sql = f"""
-            SELECT * FROM {table_name}
-            WHERE "{COL_STOCK_ID}" = %s
-            ORDER BY "{COL_DATE}" DESC
-            LIMIT 1
-            """
+            if stock_id:
+                sql = textwrap.dedent(
+                    f"""\
+                SELECT * FROM {table_name}
+                WHERE "{COL_STOCK_ID}" = %s
+                ORDER BY "{COL_DATE}" DESC
+                LIMIT 1
+                """
+                ).replace("\n", "\n" + " " * 12)
+                sql = "\n" + " " * 12 + sql
+                self.cursor.execute(sql, (stock_id,))
+            else:
+                sql = textwrap.dedent(
+                    f"""\
+                SELECT * FROM {table_name}
+                ORDER BY "{COL_DATE}" DESC
+                LIMIT 1
+                """
+                ).replace("\n", "\n" + " " * 12)
+                sql = "\n" + " " * 12 + sql
+                self.cursor.execute(sql)
 
-            self.cursor.execute(sql, (stock_id,))
             result = self.cursor.fetchone()
 
             if result:
