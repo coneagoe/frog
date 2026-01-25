@@ -21,6 +21,8 @@ x-airflow-email-env: &airflow-email-env
   AIRFLOW__SMTP__SMTP_USER: ${SMTP_USER:?SMTP_USER is required}
   AIRFLOW__SMTP__SMTP_PASSWORD: ${SMTP_PASSWORD:?SMTP_PASSWORD is required}
   AIRFLOW__SMTP__SMTP_MAIL_FROM: ${SMTP_MAIL_FROM:?SMTP_MAIL_FROM is required}
+  AIRFLOW__SMTP__SMTP_SSL: "true"
+  AIRFLOW__SMTP__SMTP_STARTTLS: "false"
   ALERT_EMAILS: ${ALERT_EMAILS:?ALERT_EMAILS is required}
   # Repo email helper compatibility (utility.send_email)
   MAIL_SERVER: ${SMTP_HOST:?SMTP_HOST is required}
@@ -89,6 +91,8 @@ x-airflow-common: &airflow-common
     FROG_PROJECT_ROOT: /opt/airflow/frog
     # Airflow history-download partitioning (DAG creates up to 16 tasks; this controls active partitions)
     DOWNLOAD_PROCESS_COUNT: ${DOWNLOAD_PROCESS_COUNT:-4}
+    # Tushare API token for downloading data (required; define in .env)
+    TUSHARE_TOKEN: ${TUSHARE_TOKEN:?TUSHARE_TOKEN is required in .env}
     <<: [*airflow-email-env, *airflow-admin-env]
   volumes:
     - ./dags:/opt/airflow/dags
@@ -151,11 +155,15 @@ services:
     # internal Docker network name "redis".
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        TUSHARE_TOKEN: ${TUSHARE_TOKEN:?TUSHARE_TOKEN is required in .env}
     depends_on: [db, redis]
     environment:
       DATABASE_URL: postgresql://quant:quant@db:5432/quant
       REDIS_URL: redis://redis:6379/0
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN:?TUSHARE_TOKEN is required in .env}
     volumes: [".:/app"]
 
   airflow-init-permissions:
@@ -197,7 +205,6 @@ services:
     <<: *airflow-common
     command:
       ["bash", "-c", "set -euo pipefail; if [ -z \"$$AIRFLOW_ADMIN_PASSWORD\" ]; then echo 'AIRFLOW_ADMIN_PASSWORD is required (set it in .env)'; exit 1; fi; airflow db init; airflow users create --username \"$$AIRFLOW_ADMIN_USERNAME\" --password \"$$AIRFLOW_ADMIN_PASSWORD\" --firstname \"$$AIRFLOW_ADMIN_FIRSTNAME\" --lastname \"$$AIRFLOW_ADMIN_LASTNAME\" --role Admin --email \"$$AIRFLOW_ADMIN_EMAIL\" || echo 'User already exists' "]
-    profiles: ["init"]
     restart: "no"
 
 volumes:
