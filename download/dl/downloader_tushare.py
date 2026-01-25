@@ -150,7 +150,11 @@ suspend_d_fields = [
 ]
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
 @get_pro
 def download_daily_basic_a_stock_ts(
     trade_date: str,
@@ -172,7 +176,11 @@ def download_daily_basic_a_stock_ts(
     return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
 @get_pro
 def download_stk_limit(
     ts_code: str = "",
@@ -200,7 +208,11 @@ def download_stk_limit(
     return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
 @get_pro
 def download_suspend_d(
     ts_code: str = "",
