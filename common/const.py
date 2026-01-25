@@ -55,6 +55,10 @@ COL_IPO_DATE = "上市日期"
 COL_DELISTING_DATE = "退市日期"
 COL_LIMIT_STATUS = "涨跌停状态"
 
+# TuShare suspend_d
+COL_SUSPEND_TIMING = "停牌时间段"
+COL_SUSPEND_TYPE = "停复牌类型"
+
 # TuShare stock_basic
 COL_TS_CODE = "TS代码"
 COL_AREA = "地域"

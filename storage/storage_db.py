@@ -19,6 +19,7 @@ from common.const import (
     PeriodType,
     SecurityType,
 )
+from download.dl.downloader_tushare import _TS_TO_INTERNAL_COL_MAP
 
 from .config import StorageConfig
 from .model import (
@@ -41,6 +42,7 @@ from .model import (
     tb_name_ingredient_300,
     tb_name_ingredient_500,
     tb_name_stk_limit_a_stock,
+    tb_name_suspend_d_a_stock,
 )
 
 logger = logging.getLogger(__name__)
@@ -918,8 +920,6 @@ class StorageDb:
         Returns:
             bool: 保存是否成功
         """
-        from download.dl.downloader_tushare import _TS_TO_INTERNAL_COL_MAP
-
         table_name = tb_name_daily_basic_a_stock
 
         try:
@@ -949,8 +949,6 @@ class StorageDb:
         Returns:
             bool: 保存是否成功
         """
-        from download.dl.downloader_tushare import _TS_TO_INTERNAL_COL_MAP
-
         table_name = tb_name_stk_limit_a_stock
 
         try:
@@ -968,6 +966,35 @@ class StorageDb:
 
         except Exception as e:
             logger.error(f"保存涨跌停价格数据失败: {str(e)}")
+            return False
+
+    def save_suspend_d_a_stock(self, df: pd.DataFrame) -> bool:
+        """
+        保存停复牌数据到对应的数据库表
+
+        Args:
+            df: 停复牌数据DataFrame
+
+        Returns:
+            bool: 保存是否成功
+        """
+        table_name = tb_name_suspend_d_a_stock
+
+        try:
+            # Rename columns from tushare names to internal names
+            df_renamed = df.rename(columns=_TS_TO_INTERNAL_COL_MAP)
+            df_renamed.to_sql(
+                table_name,
+                self.engine,
+                if_exists="append",
+                index=False,
+                method="multi",
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"保存停复牌数据失败: {str(e)}")
             return False
 
 
