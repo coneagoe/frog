@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 from typing import Any, Callable
 
@@ -479,6 +480,9 @@ class DownloadManager:
                     continue
 
                 get_storage().save_daily_basic_a_stock(df)
+
+                # 添加延迟避免触发 TuShare IP 限流
+                time.sleep(2)
 
                 if i % 50 == 0:
                     logging.info(f"进度: {i}/{total_days} ({i/total_days*100:.1f}%)")
