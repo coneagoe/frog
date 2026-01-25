@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Business tables array
 BUSINESS_TABLES=(
+  daily_basic_a_stock
   general_info_stock
   general_info_etf
   general_info_hk_ggt
@@ -19,6 +20,8 @@ BUSINESS_TABLES=(
   history_data_daily_hk_stock_hfq
   history_data_weekly_hk_stock_hfq
   history_data_monthly_hk_stock_hfq
+  stk_limit_a_stock
+  suspend_d_a_stock
 )
 
 # Common database configuration defaults
