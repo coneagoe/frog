@@ -24,6 +24,8 @@ from common.const import (
     COL_PRE_CLOSE,
     COL_PS,
     COL_PS_TTM,
+    COL_SUSPEND_TIMING,
+    COL_SUSPEND_TYPE,
     COL_TOTAL_MV,
     COL_TOTAL_SHARE,
     COL_TS_CODE,
@@ -103,6 +105,8 @@ _TS_TO_INTERNAL_COL_MAP = {
     "pre_close": COL_PRE_CLOSE,
     "up_limit": COL_UP_LIMIT,
     "down_limit": COL_DOWN_LIMIT,
+    "suspend_timing": COL_SUSPEND_TIMING,
+    "suspend_type": COL_SUSPEND_TYPE,
 }
 
 
@@ -135,6 +139,14 @@ stk_limit_fields = [
     "pre_close",
     "up_limit",
     "down_limit",
+]
+
+
+suspend_d_fields = [
+    "ts_code",
+    "trade_date",
+    "suspend_timing",
+    "suspend_type",
 ]
 
 
@@ -183,6 +195,36 @@ def download_stk_limit(
             "end_date": end_date,
         },
         fields=stk_limit_fields,
+    )
+
+    return df
+
+
+@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@get_pro
+def download_suspend_d(
+    ts_code: str = "",
+    trade_date: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    suspend_type: str = "",
+) -> pd.DataFrame | Any:
+    if trade_date:
+        trade_date = convert_date(trade_date)
+    if start_date:
+        start_date = convert_date(start_date)
+    if end_date:
+        end_date = convert_date(end_date)
+
+    df = ts.pro_api().suspend_d(
+        **{
+            "ts_code": ts_code,
+            "trade_date": trade_date,
+            "start_date": start_date,
+            "end_date": end_date,
+            "suspend_type": suspend_type,
+        },
+        fields=suspend_d_fields,
     )
 
     return df
