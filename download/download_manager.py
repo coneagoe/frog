@@ -467,16 +467,23 @@ class DownloadManager:
         )
 
         try:
-            for date in trade_days.index:
+            total_days = len(trade_days)
+            logging.info(f"需要下载 {total_days} 个交易日的每日基本面数据")
+
+            for i, date in enumerate(trade_days.index, 1):
                 trade_date = date.strftime("%Y-%m-%d")
 
                 df = self.downloader.dl_daily_basic_a_stock(trade_date)
                 if df is None or df.empty:
-                    logging.info(f"日期 {trade_date} 无数据")
-                    return True
+                    logging.info(f"日期 {trade_date} 无数据，跳过")
+                    continue
 
                 get_storage().save_daily_basic_a_stock(df)
 
+                if i % 50 == 0:
+                    logging.info(f"进度: {i}/{total_days} ({i/total_days*100:.1f}%)")
+
+            logging.info(f"每日基本面数据下载完成，共处理 {total_days} 个交易日")
             return True
         except Exception as e:
             logging.error(f"下载A股每日基本面数据时出错: {e}")

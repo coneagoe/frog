@@ -1,8 +1,17 @@
 # 配置说明
 
-Airflow会通过邮件发送告警。你必须在`.env`中配置相关环境变量，否则docker image build时会失败。
+你必须在`.env`中配置相关环境变量，否则docker image build时会失败。
 
-下面是配置说明：
+## 必填变量
+
+- `TUSHARE_TOKEN`：Tushare API Token（必填，用于数据下载）
+  - 获取地址：https://tushare.pro/register
+  - 登录后在个人中心获取
+
+## 邮件告警配置
+
+Airflow会通过邮件发送告警。
+
 - `SMTP_HOST`：SMTP 服务器地址（例如：`smtp.qq.com`）
 - `SMTP_PORT`：SMTP 端口（例如 QQ 常用 `465`）
 - `SMTP_USER`：SMTP 用户名/账号（示例：`2485144732`）
@@ -13,12 +22,13 @@ Airflow会通过邮件发送告警。你必须在`.env`中配置相关环境变�
 示例 `.env`：
 
 ```dotenv
+TUSHARE_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 SMTP_HOST=smtp.qq.com
 SMTP_PORT=465
-SMTP_MAIL_FROM=2485144732@qq.com
-SMTP_USER=2485144732
+SMTP_MAIL_FROM=xxxxxxxxxx@qq.com
+SMTP_USER=xxxxxxxxxx
 SMTP_PASSWORD=xxxxxxxxxxxxxxxx
-ALERT_EMAILS=coneagoe@hotmail.com
+ALERT_EMAILS=xxxxxxxx@xxxxxxx.com
 ```
 
 注意：**不要**把`.env`添加到repo。

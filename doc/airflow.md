@@ -44,7 +44,8 @@ docker compose up -d
 - 用户名：`AIRFLOW_ADMIN_USERNAME`（默认 `admin`）
 - 密码：首次初始化时设置的 `AIRFLOW_ADMIN_PASSWORD`
 
-注意：如果你已经启动过并且数据库里已存在用户，修改 `.env` 里的 `AIRFLOW_ADMIN_PASSWORD` 不会自动修改旧用户的密码；需要用下面的“重置密码”命令。
+> !注意
+> 如果你已经启动过并且数据库里已存在用户，修改 `.env` 里的 `AIRFLOW_ADMIN_PASSWORD` 不会自动修改旧用户的密码；需要用下面的“重置密码”命令。
 
 ### 3. 重置/修改 Airflow 密码
 

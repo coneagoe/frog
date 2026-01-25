@@ -28,8 +28,8 @@ def download_daily_basic_a_stock_task(**context):
         AirflowSkipException: If market is closed
         Exception: If download fails
     """
-    if not is_a_market_open_today():
-        raise AirflowSkipException("Market is closed today.")
+    # if not is_a_market_open_today():
+    #     raise AirflowSkipException("Market is closed today.")
 
     manager = DownloadManager()
     ok = manager.download_daily_basic_a_stock()
