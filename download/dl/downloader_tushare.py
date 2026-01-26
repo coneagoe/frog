@@ -81,35 +81,6 @@ def convert_date(date_str: str) -> str:
     raise ValueError(f"Invalid date format: {date_str}.")
 
 
-_TS_TO_INTERNAL_COL_MAP = {
-    "ts_code": COL_TS_CODE,
-    "close": COL_CLOSE,
-    "turnover_rate": COL_TURNOVER_RATE,
-    "turnover_rate_f": COL_TURNOVER_RATE_F,
-    "volume_ratio": COL_VOLUME_RATIO,
-    "pe": COL_PE,
-    "pe_ttm": COL_PE_TTM,
-    "pb": COL_PB,
-    "pb_mrq": COL_PB_MRQ,
-    "ps": COL_PS,
-    "ps_ttm": COL_PS_TTM,
-    "dv_ratio": COL_DV_RATIO,
-    "dv_ttm": COL_DV_TTM,
-    "total_share": COL_TOTAL_SHARE,
-    "float_share": COL_FLOAT_SHARE,
-    "free_share": COL_FREE_SHARE,
-    "total_mv": COL_TOTAL_MV,
-    "circ_mv": COL_CIRC_MV,
-    "trade_date": COL_DATE,
-    "limit_status": COL_LIMIT_STATUS,
-    "pre_close": COL_PRE_CLOSE,
-    "up_limit": COL_UP_LIMIT,
-    "down_limit": COL_DOWN_LIMIT,
-    "suspend_timing": COL_SUSPEND_TIMING,
-    "suspend_type": COL_SUSPEND_TYPE,
-}
-
-
 daily_basic_fields = [
     "ts_code",
     "trade_date",

@@ -12,14 +12,37 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from common.const import (
+    COL_CLOSE,
+    COL_CIRC_MV,
     COL_DATE,
+    COL_DOWN_LIMIT,
+    COL_DV_RATIO,
+    COL_DV_TTM,
+    COL_FLOAT_SHARE,
+    COL_FREE_SHARE,
+    COL_LIMIT_STATUS,
+    COL_PB,
+    COL_PB_MRQ,
+    COL_PE,
+    COL_PE_TTM,
+    COL_PRE_CLOSE,
+    COL_PS,
+    COL_PS_TTM,
     COL_STOCK_ID,
     COL_STOCK_NAME,
+    COL_SUSPEND_TIMING,
+    COL_SUSPEND_TYPE,
+    COL_TOTAL_MV,
+    COL_TOTAL_SHARE,
+    COL_TS_CODE,
+    COL_TURNOVER_RATE,
+    COL_TURNOVER_RATE_F,
+    COL_UP_LIMIT,
+    COL_VOLUME_RATIO,
     AdjustType,
     PeriodType,
     SecurityType,
 )
-from download.dl.downloader_tushare import _TS_TO_INTERNAL_COL_MAP
 
 from .config import StorageConfig
 from .model import (
@@ -46,6 +69,35 @@ from .model import (
 )
 
 logger = logging.getLogger(__name__)
+
+# TuShare column name mapping to internal column names
+_TS_TO_INTERNAL_COL_MAP = {
+    "ts_code": COL_TS_CODE,
+    "close": COL_CLOSE,
+    "turnover_rate": COL_TURNOVER_RATE,
+    "turnover_rate_f": COL_TURNOVER_RATE_F,
+    "volume_ratio": COL_VOLUME_RATIO,
+    "pe": COL_PE,
+    "pe_ttm": COL_PE_TTM,
+    "pb": COL_PB,
+    "pb_mrq": COL_PB_MRQ,
+    "ps": COL_PS,
+    "ps_ttm": COL_PS_TTM,
+    "dv_ratio": COL_DV_RATIO,
+    "dv_ttm": COL_DV_TTM,
+    "total_share": COL_TOTAL_SHARE,
+    "float_share": COL_FLOAT_SHARE,
+    "free_share": COL_FREE_SHARE,
+    "total_mv": COL_TOTAL_MV,
+    "circ_mv": COL_CIRC_MV,
+    "trade_date": COL_DATE,
+    "limit_status": COL_LIMIT_STATUS,
+    "pre_close": COL_PRE_CLOSE,
+    "up_limit": COL_UP_LIMIT,
+    "down_limit": COL_DOWN_LIMIT,
+    "suspend_timing": COL_SUSPEND_TIMING,
+    "suspend_type": COL_SUSPEND_TYPE,
+}
 
 # PID-scoped singleton: one StorageDb instance per process to avoid connection explosion
 _storage_instances: Dict[int, "StorageDb"] = {}
