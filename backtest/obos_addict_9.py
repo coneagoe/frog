@@ -29,7 +29,7 @@ class ObosStrategy(MyStrategy):
     def __init__(self):
         super().__init__()
 
-        self.obos = {i: OBOS(data=self.datas[i]) for i in range(len(self.datas))}
+        self.obos = {i: OBOS(self.datas[i]) for i in range(len(self.datas))}  # type: ignore[call-arg]
 
         self.kdj = {
             i: bt.indicators.Stochastic(

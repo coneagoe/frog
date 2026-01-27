@@ -14,6 +14,7 @@ from storage import (
     tb_name_ingredient_500,
 )
 from storage.model import (
+    tb_name_a_stock_basic,
     tb_name_daily_basic_a_stock,
     tb_name_stk_limit_a_stock,
     tb_name_suspend_d_a_stock,
@@ -618,4 +619,32 @@ class DownloadManager:
             return True
         except Exception as e:
             logging.error(f"下载A股停复牌数据时出错: {e}")
+            return False
+
+    def download_a_stock_basic(self, list_status: str = "L") -> bool:
+        """
+        下载A股基础信息数据（stock_basic）
+
+        Args:
+            list_status: 上市状态，默认为"L"（上市）
+                      L-上市 D-退市 P-暂停上市 G-过会未交易
+
+        Returns:
+            bool: 是否成功下载并保存
+        """
+        get_storage().drop_table(tb_name_a_stock_basic)
+
+        try:
+            df = self.downloader.dl_a_stock_basic(list_status=list_status)
+            if df is None or df.empty:
+                logging.warning(
+                    "Failed to download A-stock basic info or data is empty."
+                )
+                return False
+
+            logging.info(f"成功下载 {len(df)} 条A股基础信息数据")
+            return get_storage().save_a_stock_basic(df)
+
+        except Exception as e:
+            logging.error(f"下载A股基础信息数据时出错: {e}")
             return False

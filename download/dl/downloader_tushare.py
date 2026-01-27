@@ -7,34 +7,6 @@ import pandas as pd
 import retrying
 import tushare as ts
 
-from common.const import (
-    COL_CIRC_MV,
-    COL_CLOSE,
-    COL_DATE,
-    COL_DOWN_LIMIT,
-    COL_DV_RATIO,
-    COL_DV_TTM,
-    COL_FLOAT_SHARE,
-    COL_FREE_SHARE,
-    COL_LIMIT_STATUS,
-    COL_PB,
-    COL_PB_MRQ,
-    COL_PE,
-    COL_PE_TTM,
-    COL_PRE_CLOSE,
-    COL_PS,
-    COL_PS_TTM,
-    COL_SUSPEND_TIMING,
-    COL_SUSPEND_TYPE,
-    COL_TOTAL_MV,
-    COL_TOTAL_SHARE,
-    COL_TS_CODE,
-    COL_TURNOVER_RATE,
-    COL_TURNOVER_RATE_F,
-    COL_UP_LIMIT,
-    COL_VOLUME_RATIO,
-)
-
 F = TypeVar("F", bound=Callable[..., Any])
 
 
@@ -118,6 +90,27 @@ suspend_d_fields = [
     "trade_date",
     "suspend_timing",
     "suspend_type",
+]
+
+
+stock_basic_fields = [
+    "ts_code",
+    "symbol",
+    "name",
+    "area",
+    "industry",
+    "fullname",
+    "enname",
+    "cnspell",
+    "market",
+    "exchange",
+    "curr_type",
+    "list_status",
+    "list_date",
+    "delist_date",
+    "is_hs",
+    "act_name",
+    "act_ent_type",
 ]
 
 
@@ -208,6 +201,35 @@ def download_suspend_d(
             "suspend_type": suspend_type,
         },
         fields=suspend_d_fields,
+    )
+
+    return df
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
+def download_a_stock_basic(
+    ts_code: str = "",
+    name: str = "",
+    market: str = "",
+    list_status: str = "L",
+    exchange: str = "",
+    is_hs: str = "",
+) -> pd.DataFrame | Any:
+    df = ts.pro_api().stock_basic(
+        **{
+            "ts_code": ts_code,
+            "name": name,
+            "market": market,
+            "list_status": list_status,
+            "exchange": exchange,
+            "is_hs": is_hs,
+        },
+        fields=stock_basic_fields,
     )
 
     return df
