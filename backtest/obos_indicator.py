@@ -15,6 +15,7 @@ class OBOS(bt.Indicator):
         - OBOS(self.datas[1]) → self.data refers to datas[1] (stock 1)
         - Each instance's self.data points to its respective stock's historical data
     """
+
     params = (
         ("n", 10),
         ("m", 25),

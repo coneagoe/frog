@@ -12,15 +12,29 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from common.const import (
-    COL_CLOSE,
+    COL_ACT_ENT_TYPE,
+    COL_ACT_NAME,
+    COL_AREA,
     COL_CIRC_MV,
+    COL_CLOSE,
+    COL_CN_SPELL,
+    COL_CURR_TYPE,
     COL_DATE,
+    COL_DELISTING_DATE,
     COL_DOWN_LIMIT,
     COL_DV_RATIO,
     COL_DV_TTM,
+    COL_ENNAME,
+    COL_EXCHANGE,
     COL_FLOAT_SHARE,
     COL_FREE_SHARE,
+    COL_FULLNAME,
+    COL_INDUSTRY,
+    COL_IPO_DATE,
+    COL_IS_HS,
     COL_LIMIT_STATUS,
+    COL_LIST_STATUS,
+    COL_MARKET,
     COL_PB,
     COL_PB_MRQ,
     COL_PE,
@@ -47,6 +61,7 @@ from common.const import (
 from .config import StorageConfig
 from .model import (
     Base,
+    tb_name_a_stock_basic,
     tb_name_daily_basic_a_stock,
     tb_name_general_info_etf,
     tb_name_general_info_ggt,
@@ -97,6 +112,27 @@ _TS_TO_INTERNAL_COL_MAP = {
     "down_limit": COL_DOWN_LIMIT,
     "suspend_timing": COL_SUSPEND_TIMING,
     "suspend_type": COL_SUSPEND_TYPE,
+}
+
+# TuShare stock_basic column name mapping to internal column names
+_TS_TO_INTERNAL_COL_MAP_STOCK_BASIC = {
+    "ts_code": COL_TS_CODE,
+    "symbol": COL_STOCK_ID,
+    "name": COL_STOCK_NAME,
+    "area": COL_AREA,
+    "industry": COL_INDUSTRY,
+    "fullname": COL_FULLNAME,
+    "enname": COL_ENNAME,
+    "cnspell": COL_CN_SPELL,
+    "market": COL_MARKET,
+    "exchange": COL_EXCHANGE,
+    "curr_type": COL_CURR_TYPE,
+    "list_status": COL_LIST_STATUS,
+    "list_date": COL_IPO_DATE,
+    "delist_date": COL_DELISTING_DATE,
+    "is_hs": COL_IS_HS,
+    "act_name": COL_ACT_NAME,
+    "act_ent_type": COL_ACT_ENT_TYPE,
 }
 
 # PID-scoped singleton: one StorageDb instance per process to avoid connection explosion
@@ -1047,6 +1083,35 @@ class StorageDb:
 
         except Exception as e:
             logger.error(f"保存停复牌数据失败: {str(e)}")
+            return False
+
+    def save_a_stock_basic(self, df: pd.DataFrame) -> bool:
+        """
+        保存A股基础信息数据到对应的数据库表
+
+        Args:
+            df: A股基础信息数据DataFrame (from TuShare stock_basic接口)
+
+        Returns:
+            bool: 保存是否成功
+        """
+        table_name = tb_name_a_stock_basic
+
+        try:
+            # Rename columns from tushare names to internal names
+            df_renamed = df.rename(columns=_TS_TO_INTERNAL_COL_MAP_STOCK_BASIC)
+            df_renamed.to_sql(
+                table_name,
+                self.engine,
+                if_exists="append",
+                index=False,
+                method="multi",
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"保存A股基础信息数据失败: {str(e)}")
             return False
 
 

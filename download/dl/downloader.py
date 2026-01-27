@@ -12,6 +12,7 @@ from .downloader_baostock import (
     download_ingredient_500,
 )
 from .downloader_tushare import (
+    download_a_stock_basic,
     download_daily_basic_a_stock_ts,
     download_stk_limit,
     download_suspend_d,
@@ -34,3 +35,4 @@ class Downloader:
     dl_daily_basic_a_stock = staticmethod(download_daily_basic_a_stock_ts)
     dl_stk_limit_a_stock = staticmethod(download_stk_limit)
     dl_suspend_d_a_stock = staticmethod(download_suspend_d)
+    dl_a_stock_basic = staticmethod(download_a_stock_basic)
