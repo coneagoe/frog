@@ -4,7 +4,7 @@ from common.const import (
     COL_DATE,
     COL_DOWN_LIMIT,
     COL_PRE_CLOSE,
-    COL_TS_CODE,
+    COL_STOCK_ID,
     COL_UP_LIMIT,
 )
 
@@ -18,7 +18,7 @@ class StkLimitAStock(Base):
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
     股票代码 = Column(
-        COL_TS_CODE, String(10), primary_key=True, nullable=False, comment="TS股票代码"
+        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
     )
 
     昨日收盘价 = Column(COL_PRE_CLOSE, Float, nullable=True, comment="昨日收盘价")

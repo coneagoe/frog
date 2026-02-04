@@ -17,7 +17,6 @@ from common.const import (
     COL_MARKET,
     COL_STOCK_ID,
     COL_STOCK_NAME,
-    COL_TS_CODE,
 )
 
 from .base import Base
@@ -28,17 +27,12 @@ tb_name_a_stock_basic = "a_stock_basic"
 class AStockBasic(Base):
     __tablename__ = tb_name_a_stock_basic
 
-    TS代码 = Column(
-        COL_TS_CODE, String(10), primary_key=True, nullable=False, comment="TS代码"
-    )
-
     股票代码 = Column(
         COL_STOCK_ID,
         String(6),
+        primary_key=True,
         nullable=False,
-        unique=True,
-        index=True,
-        comment="股票代码(symbol，6位)",
+        comment="股票代码",
     )
     股票名称 = Column(COL_STOCK_NAME, String(40), nullable=False, comment="股票名称")
 

@@ -32,11 +32,9 @@ from common.const import (
     COL_INDUSTRY,
     COL_IPO_DATE,
     COL_IS_HS,
-    COL_LIMIT_STATUS,
     COL_LIST_STATUS,
     COL_MARKET,
     COL_PB,
-    COL_PB_MRQ,
     COL_PE,
     COL_PE_TTM,
     COL_PRE_CLOSE,
@@ -48,7 +46,6 @@ from common.const import (
     COL_SUSPEND_TYPE,
     COL_TOTAL_MV,
     COL_TOTAL_SHARE,
-    COL_TS_CODE,
     COL_TURNOVER_RATE,
     COL_TURNOVER_RATE_F,
     COL_UP_LIMIT,
@@ -85,9 +82,10 @@ from .model import (
 
 logger = logging.getLogger(__name__)
 
-# TuShare column name mapping to internal column names
-_TS_TO_INTERNAL_COL_MAP = {
-    "ts_code": COL_TS_CODE,
+
+COL_MAP_DAILY_BASIC = {
+    "ts_code": COL_STOCK_ID,
+    "trade_date": COL_DATE,
     "close": COL_CLOSE,
     "turnover_rate": COL_TURNOVER_RATE,
     "turnover_rate_f": COL_TURNOVER_RATE_F,
@@ -95,7 +93,6 @@ _TS_TO_INTERNAL_COL_MAP = {
     "pe": COL_PE,
     "pe_ttm": COL_PE_TTM,
     "pb": COL_PB,
-    "pb_mrq": COL_PB_MRQ,
     "ps": COL_PS,
     "ps_ttm": COL_PS_TTM,
     "dv_ratio": COL_DV_RATIO,
@@ -105,19 +102,28 @@ _TS_TO_INTERNAL_COL_MAP = {
     "free_share": COL_FREE_SHARE,
     "total_mv": COL_TOTAL_MV,
     "circ_mv": COL_CIRC_MV,
+}
+
+
+COL_MAP_STK_LIMIT = {
     "trade_date": COL_DATE,
-    "limit_status": COL_LIMIT_STATUS,
+    "ts_code": COL_STOCK_ID,
     "pre_close": COL_PRE_CLOSE,
     "up_limit": COL_UP_LIMIT,
     "down_limit": COL_DOWN_LIMIT,
+}
+
+
+COL_MAP_SUSPEND_D = {
+    "ts_code": COL_STOCK_ID,
+    "trade_date": COL_DATE,
     "suspend_timing": COL_SUSPEND_TIMING,
     "suspend_type": COL_SUSPEND_TYPE,
 }
 
-# TuShare stock_basic column name mapping to internal column names
-_TS_TO_INTERNAL_COL_MAP_STOCK_BASIC = {
-    "ts_code": COL_TS_CODE,
-    "symbol": COL_STOCK_ID,
+
+COL_MAP_STOCK_BASIC = {
+    "ts_code": COL_STOCK_ID,
     "name": COL_STOCK_NAME,
     "area": COL_AREA,
     "industry": COL_INDUSTRY,
@@ -134,6 +140,7 @@ _TS_TO_INTERNAL_COL_MAP_STOCK_BASIC = {
     "act_name": COL_ACT_NAME,
     "act_ent_type": COL_ACT_ENT_TYPE,
 }
+
 
 # PID-scoped singleton: one StorageDb instance per process to avoid connection explosion
 _storage_instances: Dict[int, "StorageDb"] = {}
@@ -1008,15 +1015,15 @@ class StorageDb:
         Returns:
             bool: 保存是否成功
         """
-        table_name = tb_name_daily_basic_a_stock
 
         try:
-            # Rename columns from tushare names to internal names
-            df_renamed = df.rename(columns=_TS_TO_INTERNAL_COL_MAP)
-            df_renamed.to_sql(
-                table_name,
+            df.rename(columns=COL_MAP_DAILY_BASIC, inplace=True)
+            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
+            df = df[list(COL_MAP_DAILY_BASIC.values())]
+            df.to_sql(
+                tb_name_daily_basic_a_stock,
                 self.engine,
-                if_exists="append",
+                if_exists="replace",
                 index=False,
                 method="multi",
             )
@@ -1037,15 +1044,15 @@ class StorageDb:
         Returns:
             bool: 保存是否成功
         """
-        table_name = tb_name_stk_limit_a_stock
 
         try:
-            # Rename columns from tushare names to internal names
-            df_renamed = df.rename(columns=_TS_TO_INTERNAL_COL_MAP)
-            df_renamed.to_sql(
-                table_name,
+            df = df.rename(columns=COL_MAP_STK_LIMIT)
+            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
+            df = df[list(COL_MAP_STK_LIMIT.values())]
+            df.to_sql(
+                tb_name_stk_limit_a_stock,
                 self.engine,
-                if_exists="append",
+                if_exists="replace",
                 index=False,
                 method="multi",
             )
@@ -1066,15 +1073,15 @@ class StorageDb:
         Returns:
             bool: 保存是否成功
         """
-        table_name = tb_name_suspend_d_a_stock
 
         try:
-            # Rename columns from tushare names to internal names
-            df_renamed = df.rename(columns=_TS_TO_INTERNAL_COL_MAP)
-            df_renamed.to_sql(
-                table_name,
+            df.rename(columns=COL_MAP_SUSPEND_D, inplace=True)
+            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
+            df = df[list(COL_MAP_SUSPEND_D.values())]
+            df.to_sql(
+                tb_name_suspend_d_a_stock,
                 self.engine,
-                if_exists="append",
+                if_exists="replace",
                 index=False,
                 method="multi",
             )
@@ -1095,15 +1102,15 @@ class StorageDb:
         Returns:
             bool: 保存是否成功
         """
-        table_name = tb_name_a_stock_basic
 
         try:
-            # Rename columns from tushare names to internal names
-            df_renamed = df.rename(columns=_TS_TO_INTERNAL_COL_MAP_STOCK_BASIC)
-            df_renamed.to_sql(
-                table_name,
+            df.rename(columns=COL_MAP_STOCK_BASIC, inplace=True)
+            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
+            df = df[list(COL_MAP_STOCK_BASIC.values())]
+            df.to_sql(
+                tb_name_a_stock_basic,
                 self.engine,
-                if_exists="append",
+                if_exists="replace",
                 index=False,
                 method="multi",
             )
