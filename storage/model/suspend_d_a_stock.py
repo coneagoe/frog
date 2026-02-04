@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Date, String
 
-from common.const import COL_DATE, COL_SUSPEND_TIMING, COL_SUSPEND_TYPE, COL_TS_CODE
+from common.const import COL_DATE, COL_STOCK_ID, COL_SUSPEND_TIMING, COL_SUSPEND_TYPE
 
 from .base import Base
 
@@ -11,7 +11,7 @@ class SuspendDAStock(Base):
     __tablename__ = tb_name_suspend_d_a_stock
 
     股票代码 = Column(
-        COL_TS_CODE, String(10), primary_key=True, nullable=False, comment="TS股票代码"
+        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
     )
     停复牌日期 = Column(
         COL_DATE, Date, primary_key=True, nullable=False, comment="停复牌日期"
