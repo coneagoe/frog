@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Business tables array
 BUSINESS_TABLES=(
+  a_stock_basic
   daily_basic_a_stock
   general_info_stock
   general_info_etf
