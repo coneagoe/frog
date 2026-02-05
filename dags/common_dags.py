@@ -42,6 +42,7 @@ def get_default_args() -> dict:
         "email": alert_emails,
         "email_on_failure": bool(alert_emails),
         "email_on_retry": False,
+        "email_on_success": False,
         "retries": 1,
         "retry_delay": timedelta(minutes=5),
     }
