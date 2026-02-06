@@ -15,6 +15,7 @@ Usage:
   cat dump.sql | bash tools/db_import.sh [options]
 
 Options:
+  --table NAME        Import single table (default: import all business tables)
   --in FILE           Input file (.sql or .sql.gz). If omitted, reads from stdin.
   --schema NAME       Schema for business tables (used for --clean drop list; default: public)
   --clean             Drop business tables before importing (DROP TABLE IF EXISTS ... CASCADE)
@@ -25,8 +26,11 @@ Options:
   --user NAME         Database user (default: quant)
 
 Examples:
-  # import from file
+  # import all tables from file
   bash tools/db_import.sh --in ./backups/quant_business_xxx.sql.gz
+
+  # import single table
+  bash tools/db_import.sh --table a_stock_basic --in ./backups/quant_a_stock_basic_xxx.sql.gz
 
   # drop business tables first
   bash tools/db_import.sh --clean --in ./backups/quant_business_xxx.sql
@@ -34,6 +38,7 @@ USAGE
 }
 
 # Import-specific variables
+TABLE_NAME=""
 IN_FILE=""
 CLEAN=0
 SERVICE="$DEFAULT_SERVICE"
@@ -47,6 +52,10 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage
       exit 0
+      ;;
+    --table)
+      TABLE_NAME="$2"
+      shift 2
       ;;
     --in)
       IN_FILE="$2"
@@ -88,9 +97,13 @@ fi
 DROP_SQL=""
 if [[ $CLEAN -eq 1 ]]; then
   DROP_SQL="BEGIN;"
-  for t in "${BUSINESS_TABLES[@]}"; do
-    DROP_SQL+=" DROP TABLE IF EXISTS \"${SCHEMA}\".\"${t}\" CASCADE;"
-  done
+  if [[ -n "$TABLE_NAME" ]]; then
+    DROP_SQL+=" DROP TABLE IF EXISTS \"${SCHEMA}\".\"${TABLE_NAME}\" CASCADE;"
+  else
+    for t in "${BUSINESS_TABLES[@]}"; do
+      DROP_SQL+=" DROP TABLE IF EXISTS \"${SCHEMA}\".\"${t}\" CASCADE;"
+    done
+  fi
   DROP_SQL+=" COMMIT;"
 fi
 
