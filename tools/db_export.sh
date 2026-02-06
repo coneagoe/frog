@@ -14,6 +14,7 @@ Usage:
   bash tools/db_export.sh [options]
 
 Options:
+  --table NAME        Export single table (default: export all business tables)
   --out FILE          Output file (default: ./backups/quant_business_YYYYmmdd_HHMMSS.sql.gz)
   --out-dir DIR       Output directory (default: ./backups)
   --schema NAME       Schema for business tables (default: public)
@@ -27,8 +28,11 @@ Options:
   --user NAME         Database user (default: quant)
 
 Examples:
-  # default, gzip
+  # default, gzip, export all business tables
   bash tools/db_export.sh
+
+  # export single table
+  bash tools/db_export.sh --table a_stock_basic
 
   # specify schema
   bash tools/db_export.sh --schema public
@@ -37,6 +41,7 @@ USAGE
 }
 
 # Export-specific variables
+TABLE_NAME=""
 OUT_DIR="./backups"
 OUT_FILE=""
 GZIP=1
@@ -52,6 +57,10 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage
       exit 0
+      ;;
+    --table)
+      TABLE_NAME="$2"
+      shift 2
       ;;
     --service)
       SERVICE="$2"
@@ -101,7 +110,11 @@ mkdir -p "$OUT_DIR"
 
 if [[ -z "$OUT_FILE" ]]; then
   ts="$(date +%Y%m%d_%H%M%S)"
-  base="$OUT_DIR/${DB_NAME}_business_${ts}.sql"
+  if [[ -n "$TABLE_NAME" ]]; then
+    base="$OUT_DIR/${DB_NAME}_${TABLE_NAME}_${ts}.sql"
+  else
+    base="$OUT_DIR/${DB_NAME}_business_${ts}.sql"
+  fi
   if [[ $GZIP -eq 1 ]]; then
     OUT_FILE="${base}.gz"
   else
@@ -121,9 +134,14 @@ if [[ $CLEAN -eq 1 ]]; then
   DUMP_ARGS+=(--clean --if-exists)
 fi
 
-for t in "${BUSINESS_TABLES[@]}"; do
-  DUMP_ARGS+=("--table=${SCHEMA}.${t}")
-done
+# Build table list - either single table or all business tables
+if [[ -n "$TABLE_NAME" ]]; then
+  DUMP_ARGS+=("--table=${SCHEMA}.${TABLE_NAME}")
+else
+  for t in "${BUSINESS_TABLES[@]}"; do
+    DUMP_ARGS+=("--table=${SCHEMA}.${t}")
+  done
+fi
 
 run_export_docker() {
   local dc
