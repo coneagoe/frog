@@ -72,7 +72,6 @@ daily_basic_fields = [
     "free_share",
     "total_mv",
     "circ_mv",
-    "limit_status",
 ]
 
 
