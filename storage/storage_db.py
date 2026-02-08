@@ -1023,7 +1023,7 @@ class StorageDb:
             df.to_sql(
                 tb_name_daily_basic_a_stock,
                 self.engine,
-                if_exists="replace",
+                if_exists="append",
                 index=False,
                 method="multi",
             )
@@ -1052,7 +1052,7 @@ class StorageDb:
             df.to_sql(
                 tb_name_stk_limit_a_stock,
                 self.engine,
-                if_exists="replace",
+                if_exists="append",
                 index=False,
                 method="multi",
             )
@@ -1081,7 +1081,7 @@ class StorageDb:
             df.to_sql(
                 tb_name_suspend_d_a_stock,
                 self.engine,
-                if_exists="replace",
+                if_exists="append",
                 index=False,
                 method="multi",
             )
@@ -1110,7 +1110,7 @@ class StorageDb:
             df.to_sql(
                 tb_name_a_stock_basic,
                 self.engine,
-                if_exists="replace",
+                if_exists="append",
                 index=False,
                 method="multi",
             )
