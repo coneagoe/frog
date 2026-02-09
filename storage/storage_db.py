@@ -1,6 +1,7 @@
 import logging
 import os
 import textwrap
+from datetime import datetime
 from functools import wraps
 from typing import Any, Dict, List, Optional, Set
 
@@ -1120,6 +1121,60 @@ class StorageDb:
         except Exception as e:
             logger.error(f"保存A股基础信息数据失败: {str(e)}")
             return False
+
+    def load_daily_basic(self, date: str, stock_ids: list[str]) -> pd.DataFrame:
+        """加载指定日期的daily_basic数据（PB, PE, 市值等）
+
+        Args:
+            date: 日期，支持多种格式（YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD, YYYYMMDD）
+            stock_ids: 股票代码列表
+
+        Returns:
+            pd.DataFrame: 包含PB, PE, 市值等数据的DataFrame
+        """
+        # 转换日期格式为 YYYYMMDD
+        date_formats = [
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+            "%Y.%m.%d",
+            "%Y%m%d",
+        ]
+        converted_date = None
+        for fmt in date_formats:
+            try:
+                converted_date = datetime.strptime(date, fmt).strftime("%Y%m%d")
+                break
+            except ValueError:
+                continue
+        if converted_date is None:
+            raise ValueError(f"Invalid date format: {date}")
+
+        sql = f"""
+        SELECT * FROM "{tb_name_daily_basic_a_stock}"
+        WHERE "{COL_DATE}" = %s
+        AND "{COL_STOCK_ID}" = ANY(%s)
+        """
+
+        df = pd.read_sql(sql, self.engine, params=(converted_date, stock_ids))  # type: ignore[arg-type]
+        return df
+
+    def load_stock_basic(self, stock_ids: list[str]) -> pd.DataFrame:
+        """加载股票基本信息（用于获取上市日期）
+
+        Args:
+            stock_ids: 股票代码列表
+
+        Returns:
+            pd.DataFrame: 包含上市日期等信息的DataFrame，上市日期已转换为datetime类型
+        """
+        sql = f"""
+        SELECT "{COL_STOCK_ID}", "{COL_IPO_DATE}" FROM "{tb_name_a_stock_basic}"
+        WHERE "{COL_STOCK_ID}" = ANY(%s)
+        """
+
+        df = pd.read_sql(sql, self.engine, params=(stock_ids,))  # type: ignore[arg-type]
+        df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d")
+        return df
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
