@@ -9,10 +9,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import conf  # noqa: E402
 from backtest.bt_common import run  # noqa: E402
-from backtest.small_market_capital_common import (  # noqa: E402
-    load_daily_basic,
-    load_stock_basic,
-)
 from common.const import (  # noqa: E402
     COL_IPO_DATE,
     COL_PB,
@@ -21,7 +17,8 @@ from common.const import (  # noqa: E402
     COL_TOTAL_MV,
     SecurityType,
 )
-from storage import get_storage, tb_name_a_stock_basic  # noqa: E402
+from storage import get_storage  # noqa: E402
+from storage import tb_name_a_stock_basic  # noqa: E402
 
 conf.parse_config()
 
@@ -78,18 +75,18 @@ class SmallMarketCapitalStrategy(bt.Strategy):
 
     def rebalance(self, current_date):
         """调仓逻辑"""
+        storage = get_storage()
         date_str = current_date.strftime("%Y-%m-%d")
 
         # 获取当前日期的daily_basic数据
-        df_daily_basic = load_daily_basic(date_str, self.stock_ids)
+        df_daily_basic = storage.load_daily_basic(date_str, self.stock_ids)
 
         if df_daily_basic.empty:
             print(f"No daily_basic data for {date_str}")
             return
 
         # 获取股票基本信息（上市日期）
-        df_basic = load_stock_basic(self.stock_ids)
-        df_basic[COL_IPO_DATE] = pd.to_datetime(df_basic[COL_IPO_DATE], format="%Y%m%d")
+        df_basic = storage.load_stock_basic(self.stock_ids)
 
         # 筛选条件
         df_filtered = df_daily_basic[
@@ -108,9 +105,12 @@ class SmallMarketCapitalStrategy(bt.Strategy):
             how="inner",
         )
 
+        # 确保上市日期是datetime类型
+        df_filtered[COL_IPO_DATE] = pd.to_datetime(df_filtered[COL_IPO_DATE])
+
         # 计算上市天数并筛选
         df_filtered["上市天数"] = (
-            current_date - df_filtered[COL_IPO_DATE].dt.date
+            pd.to_datetime(current_date) - df_filtered[COL_IPO_DATE]
         ).dt.days
 
         df_filtered = df_filtered[df_filtered["上市天数"] > self.p.min_list_days]
