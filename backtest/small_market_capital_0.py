@@ -169,7 +169,7 @@ if __name__ == "__main__":
     cerebro.addstrategy(SmallMarketCapitalStrategy)
 
     run(
-        strategy_name="small_market_capital",
+        strategy_name="small_market_capital_0",
         cerebro=cerebro,
         stocks=stocks,
         start_date=args.start,
