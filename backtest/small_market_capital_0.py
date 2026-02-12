@@ -46,7 +46,7 @@ def load_all_stocks(start_date: str, end_date: str) -> list:
     WHERE "{COL_STOCK_ID}" NOT LIKE '8%%'
     AND "{COL_STOCK_ID}" NOT LIKE '4%%'
     AND "{COL_STOCK_ID}" NOT LIKE '920%%'
-    AND "{COL_IPO_DATE}" <= %s
+    AND "{COL_IPO_DATE}" <= %s::date - INTERVAL '2 years'
     """
 
     df = pd.read_sql(sql, storage.engine, params=(start_date,))
@@ -57,7 +57,7 @@ class SmallMarketCapitalStrategy(bt.Strategy):
     params = (
         ("top_n", 50),  # 按市值排序前N只
         ("buy_count", 20),  # 每次买入数量
-        ("min_list_days", 500),  # 最少上市天数（约1年半）
+        ("min_list_days", 730),  # 最少上市天数（约2年）
     )
 
     def __init__(self):
