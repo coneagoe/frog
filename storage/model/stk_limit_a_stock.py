@@ -16,6 +16,7 @@ tb_name_stk_limit_a_stock = "stk_limit_a_stock"
 class StkLimitAStock(Base):
     __tablename__ = tb_name_stk_limit_a_stock
 
+    # YYYY-MM-DD
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
     股票代码 = Column(
         COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
