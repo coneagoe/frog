@@ -1,7 +1,6 @@
 import logging
 import os
 import textwrap
-from datetime import datetime
 from functools import wraps
 from typing import Any, Dict, List, Optional, Set
 
@@ -1021,6 +1020,10 @@ class StorageDb:
             df.rename(columns=COL_MAP_DAILY_BASIC, inplace=True)
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_DAILY_BASIC.values())]
+            # 转换日期为 YYYY-MM-DD 格式
+            df[COL_DATE] = pd.to_datetime(
+                df[COL_DATE], format="%Y%m%d", errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
             df.to_sql(
                 tb_name_daily_basic_a_stock,
                 self.engine,
@@ -1050,6 +1053,10 @@ class StorageDb:
             df = df.rename(columns=COL_MAP_STK_LIMIT)
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_STK_LIMIT.values())]
+            # 转换日期为 YYYY-MM-DD 格式
+            df[COL_DATE] = pd.to_datetime(
+                df[COL_DATE], format="%Y%m%d", errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
             df.to_sql(
                 tb_name_stk_limit_a_stock,
                 self.engine,
@@ -1079,6 +1086,10 @@ class StorageDb:
             df.rename(columns=COL_MAP_SUSPEND_D, inplace=True)
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_SUSPEND_D.values())]
+            # 转换停复牌日期为 YYYY-MM-DD 格式
+            df[COL_DATE] = pd.to_datetime(
+                df[COL_DATE], format="%Y%m%d", errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
             df.to_sql(
                 tb_name_suspend_d_a_stock,
                 self.engine,
@@ -1108,6 +1119,13 @@ class StorageDb:
             df.rename(columns=COL_MAP_STOCK_BASIC, inplace=True)
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_STOCK_BASIC.values())]
+            # 转换上市日期和退市日期为 YYYY-MM-DD 格式
+            df[COL_IPO_DATE] = pd.to_datetime(
+                df[COL_IPO_DATE], format="%Y%m%d", errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
+            df[COL_DELISTING_DATE] = pd.to_datetime(
+                df[COL_DELISTING_DATE], format="%Y%m%d", errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
             df.to_sql(
                 tb_name_a_stock_basic,
                 self.engine,
@@ -1126,36 +1144,19 @@ class StorageDb:
         """加载指定日期的daily_basic数据（PB, PE, 市值等）
 
         Args:
-            date: 日期，支持多种格式（YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD, YYYYMMDD）
+            date: 日期(YYYY-MM-DD)
             stock_ids: 股票代码列表
 
         Returns:
             pd.DataFrame: 包含PB, PE, 市值等数据的DataFrame
         """
-        # 转换日期格式为 YYYYMMDD
-        date_formats = [
-            "%Y-%m-%d",
-            "%Y/%m/%d",
-            "%Y.%m.%d",
-            "%Y%m%d",
-        ]
-        converted_date = None
-        for fmt in date_formats:
-            try:
-                converted_date = datetime.strptime(date, fmt).strftime("%Y%m%d")
-                break
-            except ValueError:
-                continue
-        if converted_date is None:
-            raise ValueError(f"Invalid date format: {date}")
-
         sql = f"""
         SELECT * FROM "{tb_name_daily_basic_a_stock}"
         WHERE "{COL_DATE}" = %s
         AND "{COL_STOCK_ID}" = ANY(%s)
         """
 
-        df = pd.read_sql(sql, self.engine, params=(converted_date, stock_ids))  # type: ignore[arg-type]
+        df = pd.read_sql(sql, self.engine, params=(date, stock_ids))  # type: ignore[arg-type]
         return df
 
     def load_stock_basic(self, stock_ids: list[str]) -> pd.DataFrame:
@@ -1173,7 +1174,7 @@ class StorageDb:
         """
 
         df = pd.read_sql(sql, self.engine, params=(stock_ids,))  # type: ignore[arg-type]
-        df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d")
+        # df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d")
         return df
 
 

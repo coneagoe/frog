@@ -10,7 +10,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import conf  # noqa: E402
 from backtest.bt_common import run  # noqa: E402
 from common.const import (  # noqa: E402
+    COL_DATE,
     COL_IPO_DATE,
+    COL_IS_ST,
     COL_PB,
     COL_PE,
     COL_STOCK_ID,
@@ -18,13 +20,21 @@ from common.const import (  # noqa: E402
     SecurityType,
 )
 from storage import get_storage  # noqa: E402
-from storage import tb_name_a_stock_basic  # noqa: E402
+from storage import (  # noqa: E402
+    tb_name_a_stock_basic,
+    tb_name_daily_basic_a_stock,
+    tb_name_history_data_daily_a_stock_hfq,
+)
 
 conf.parse_config()
 
 
-def load_all_stocks() -> list:
-    """加载所有A股股票（排除北交所）
+def load_all_stocks(start_date: str, end_date: str) -> list:
+    """加载所有A股股票（排除北交所和回测期间未上市的股票）
+
+    Args:
+        start_date: 回测开始日期 (YYYY-MM-DD)
+        end_date: 回测结束日期 (YYYY-MM-DD)
 
     Returns:
         list: 股票代码列表
@@ -36,9 +46,10 @@ def load_all_stocks() -> list:
     WHERE "{COL_STOCK_ID}" NOT LIKE '8%%'
     AND "{COL_STOCK_ID}" NOT LIKE '4%%'
     AND "{COL_STOCK_ID}" NOT LIKE '920%%'
+    AND "{COL_IPO_DATE}" <= %s
     """
 
-    df = pd.read_sql(sql, storage.engine)
+    df = pd.read_sql(sql, storage.engine, params=(start_date,))
     return df[COL_STOCK_ID].tolist()
 
 
@@ -78,52 +89,53 @@ class SmallMarketCapitalStrategy(bt.Strategy):
         storage = get_storage()
         date_str = current_date.strftime("%Y-%m-%d")
 
-        # 获取当前日期的daily_basic数据
-        df_daily_basic = storage.load_daily_basic(date_str, self.stock_ids)
+        # 一次性查询 daily_basic、ST状态、上市日期
+        sql = f"""
+        SELECT db.*, h."{COL_IS_ST}", b."{COL_IPO_DATE}"
+        FROM "{tb_name_daily_basic_a_stock}" db
+        LEFT JOIN "{tb_name_history_data_daily_a_stock_hfq}" h
+            ON h."{COL_STOCK_ID}" = db."{COL_STOCK_ID}"
+            AND h."{COL_DATE}" = %s
+        LEFT JOIN "{tb_name_a_stock_basic}" b
+            ON b."{COL_STOCK_ID}" = db."{COL_STOCK_ID}"
+        WHERE db."{COL_DATE}" = %s
+        AND db."{COL_STOCK_ID}" = ANY(%s)
+        AND (h."{COL_IS_ST}" IS NULL OR h."{COL_IS_ST}" = 0)
+        AND db."{COL_PB}" > 0
+        AND db."{COL_PE}" > 0
+        """
 
-        if df_daily_basic.empty:
-            print(f"No daily_basic data for {date_str}")
-            return
-
-        # 获取股票基本信息（上市日期）
-        df_basic = storage.load_stock_basic(self.stock_ids)
-
-        # 筛选条件
-        df_filtered = df_daily_basic[
-            (df_daily_basic[COL_PB] > 0) & (df_daily_basic[COL_PE] > 0)
-        ]
-
-        if df_filtered.empty:
-            print(f"No stocks pass PB/PE filter for {date_str}")
-            return
-
-        # 合并上市日期信息
-        df_filtered = pd.merge(
-            df_filtered,
-            df_basic[[COL_STOCK_ID, COL_IPO_DATE]],
-            on=COL_STOCK_ID,
-            how="inner",
+        df = pd.read_sql(
+            sql,
+            storage.engine,
+            params=(current_date, current_date, self.stock_ids),  # type: ignore[arg-type]
         )
 
+        if df.empty:
+            print(f"No stocks pass filter for {date_str}")
+            return
+
         # 确保上市日期是datetime类型
-        df_filtered[COL_IPO_DATE] = pd.to_datetime(df_filtered[COL_IPO_DATE])
+        df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE])
 
         # 计算上市天数并筛选
-        df_filtered["上市天数"] = (
-            pd.to_datetime(current_date) - df_filtered[COL_IPO_DATE]
-        ).dt.days
+        df["上市天数"] = (pd.to_datetime(current_date) - df[COL_IPO_DATE]).dt.days
+        df = df[df["上市天数"] > self.p.min_list_days]
 
-        df_filtered = df_filtered[df_filtered["上市天数"] > self.p.min_list_days]
-
-        if df_filtered.empty:
+        if df.empty:
             print(f"No stocks pass listing days filter for {date_str}")
             return
 
         # 按市值升序排列，取前N只
-        df_sorted = df_filtered.sort_values(by=COL_TOTAL_MV, ascending=True)
+        df_sorted = df.sort_values(by=COL_TOTAL_MV, ascending=True)
         df_selected = df_sorted.head(self.p.top_n)
 
         selected_stocks = df_selected[COL_STOCK_ID].tolist()
+
+        print(
+            f"{date_str}: 调仓完成，筛选出{len(df)}只股票，"
+            f"选择买入{min(self.p.buy_count, len(selected_stocks))}只"
+        )
 
         # 先清仓
         for data in self.datas:
@@ -141,11 +153,6 @@ class SmallMarketCapitalStrategy(bt.Strategy):
                     self.order_target_percent(data, target=target_weight)
                     break
 
-        print(
-            f"{date_str}: 调仓完成，筛选出{len(df_filtered)}只股票，"
-            f"选择买入{min(self.p.buy_count, len(selected_stocks))}只"
-        )
-
     def stop(self):
         print(f"Ending Value: {self.broker.getvalue():.2f}")
 
@@ -160,8 +167,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # 获取所有A股股票（排除北交所）
-    stocks = load_all_stocks()
+    # 获取所有A股股票（排除北交所和回测期间未上市的股票）
+    stocks = load_all_stocks(args.start, args.end)
 
     print(f"Total stocks: {len(stocks)}")
 
