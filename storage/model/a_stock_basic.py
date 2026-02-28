@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String
+from sqlalchemy import Column, Date, String
 
 from common.const import (
     COL_ACT_ENT_TYPE,
@@ -47,11 +47,12 @@ class AStockBasic(Base):
     交易货币 = Column(COL_CURR_TYPE, String(10), nullable=True, comment="交易货币")
 
     上市状态 = Column(COL_LIST_STATUS, String(2), nullable=True, comment="上市状态")
+    # YYYY-MM-DD
     上市日期 = Column(
-        COL_IPO_DATE, String(8), nullable=True, comment="上市日期(YYYY-MM-DD)"
+        COL_IPO_DATE, Date, nullable=True, comment="上市日期"
     )
     退市日期 = Column(
-        COL_DELISTING_DATE, String(8), nullable=True, comment="退市日期(YYYY-MM-DD)"
+        COL_DELISTING_DATE, Date, nullable=True, comment="退市日期"
     )
 
     是否沪深港通 = Column(COL_IS_HS, String(2), nullable=True, comment="是否沪深港通")
