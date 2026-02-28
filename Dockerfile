@@ -1,15 +1,9 @@
-# 1. Use the official Python image as a parent image
 FROM python:3.12-slim
 
-# 2. Build arguments for environment variables
-ARG TUSHARE_TOKEN
-
-# 3. Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TUSHARE_TOKEN=${TUSHARE_TOKEN}
 
-# 4. Install Poetry
 RUN pip install poetry
 
 # 5. Set the working directory in the container
