@@ -1119,13 +1119,13 @@ class StorageDb:
             df.rename(columns=COL_MAP_STOCK_BASIC, inplace=True)
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_STOCK_BASIC.values())]
-            # 转换上市日期和退市日期为 YYYY-MM-DD 格式
+            # 转换上市日期和退市日期为 date 类型
             df[COL_IPO_DATE] = pd.to_datetime(
                 df[COL_IPO_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.strftime("%Y-%m-%d")
+            ).dt.date
             df[COL_DELISTING_DATE] = pd.to_datetime(
                 df[COL_DELISTING_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.strftime("%Y-%m-%d")
+            ).dt.date
             df.to_sql(
                 tb_name_a_stock_basic,
                 self.engine,
