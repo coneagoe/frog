@@ -105,3 +105,8 @@ class SecurityType(Enum):
     US_INDEX = "us_index"
     HK_GGT_STOCK = "hk_ggt_stock"
     AUTO = "auto"
+
+
+# Redis keys
+REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY = "download_hk_ggt_history"
+DEFAULT_REDIS_URL = "redis://redis:6379/0"
