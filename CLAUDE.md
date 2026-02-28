@@ -31,11 +31,6 @@ poetry run mypy                              # Type checking
 
 # Testing
 poetry run pytest test                       # Run all tests
-
-# Code simplifier (for refactoring existing code)
-# python3 tools/code_simplifier.py review [files...]
-# python3 tools/code_simplifier.py review --staged
-# python3 tools/code_simplifier.py verify
 ```
 
 
