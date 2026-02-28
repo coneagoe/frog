@@ -142,29 +142,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 - Line ending normalization: `git add --renormalize .`
 - Type checking respects existing exclusions for gradual adoption
 
-### Code Simplification Tools
-```bash
-# Review code for simplification opportunities (similar to GitHub Copilot agent)
-python3 tools/code_simplifier.py review [files...]          # Review current changes or specific files
-python3 tools/code_simplifier.py review --staged             # Review staged files
-python3 tools/code_simplifier.py verify                     # Run verification commands from whitelist
-
-# Examples:
-python3 tools/code_simplifier.py review                      # Review all changed files
-python3 tools/code_simplifier.py review src/main.py         # Review specific file
-python3 tools/code_simplifier.py verify                     # Run validation checks
-```
-
 ### Development Workflow
 1. Create feature branch
 2. Make changes following style guidelines
-3. **Optional**: Run `python3 tools/code_simplifier.py review` for code quality suggestions
-4. Run `poetry run pre-commit run --all-files` before commit
-5. Write/update tests
-6. Run `poetry run pytest` to ensure tests pass
-7. **Optional**: Run `python3 tools/code_simplifier.py verify` for additional validation
-8. Commit with descriptive message
-9. Pre-commit hooks will automatically run code quality checks
+3. Run `poetry run pre-commit run --all-files` before commit
+4. Write/update tests
+5. Run `poetry run pytest` to ensure tests pass
+6. Commit with descriptive message
+7. Pre-commit hooks will automatically run code quality checks
 
 ### Tool Configuration Files
 - `pyproject.toml`: Project metadata, dependencies, tool configs
