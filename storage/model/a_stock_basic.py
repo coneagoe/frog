@@ -48,12 +48,8 @@ class AStockBasic(Base):
 
     上市状态 = Column(COL_LIST_STATUS, String(2), nullable=True, comment="上市状态")
     # YYYY-MM-DD
-    上市日期 = Column(
-        COL_IPO_DATE, Date, nullable=True, comment="上市日期"
-    )
-    退市日期 = Column(
-        COL_DELISTING_DATE, Date, nullable=True, comment="退市日期"
-    )
+    上市日期 = Column(COL_IPO_DATE, Date, nullable=True, comment="上市日期")
+    退市日期 = Column(COL_DELISTING_DATE, Date, nullable=True, comment="退市日期")
 
     是否沪深港通 = Column(COL_IS_HS, String(2), nullable=True, comment="是否沪深港通")
     实控人姓名 = Column(COL_ACT_NAME, String(40), nullable=True, comment="实控人姓名")
