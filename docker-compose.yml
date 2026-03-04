@@ -40,6 +40,14 @@ x-airflow-admin-env: &airflow-admin-env
   AIRFLOW_ADMIN_LASTNAME: ${AIRFLOW_ADMIN_LASTNAME:-User}
   AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
 
+# Common DB settings for all services that need database access
+x-db-common-env: &db-common-env
+  db_host: db
+  db_port: 5432
+  db_username: quant
+  db_password: quant
+  TUSHARE_TOKEN: ${TUSHARE_TOKEN:?TUSHARE_TOKEN is required in .env}
+
 x-airflow-common: &airflow-common
   image: frog-airflow:2.9.2-python3.12
   build:
@@ -81,25 +89,24 @@ x-airflow-common: &airflow-common
     # Limit Celery worker concurrency to prevent Postgres connection exhaustion.
     # Each worker process creates its own DB connection pool; too many workers = too many clients.
     AIRFLOW__CELERY__WORKER_CONCURRENCY: "2"
-    # Business data DB settings used by storage/storage_db.py (avoid container-local localhost)
-    db_host: db
-    db_port: 5432
-    db_username: quant
-    db_password: quant
     # Make project packages (common/, download/, stock/, etc.) importable from DAGs
     PYTHONPATH: /opt/airflow/frog
     FROG_PROJECT_ROOT: /opt/airflow/frog
     # Airflow history-download partitioning (DAG creates up to 16 tasks; this controls active partitions)
     DOWNLOAD_PROCESS_COUNT: ${DOWNLOAD_PROCESS_COUNT:-4}
-    # Tushare API token for downloading data (required; define in .env)
-    TUSHARE_TOKEN: ${TUSHARE_TOKEN:?TUSHARE_TOKEN is required in .env}
-    <<: [*airflow-email-env, *airflow-admin-env]
+    <<: [*db-common-env, *airflow-email-env, *airflow-admin-env]
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
     - ./:/opt/airflow/frog
   depends_on: *airflow-common-depends-on
+
+# Common environment variables for app and celery-worker services
+x-app-common-env: &app-common-env
+  <<: *db-common-env
+  DATABASE_URL: postgresql://quant:quant@db:5432/quant
+  REDIS_URL: redis://redis:6379/0
 
 services:
   db:
@@ -159,10 +166,7 @@ services:
       context: .
     depends_on: [db, redis]
     environment:
-      DATABASE_URL: postgresql://quant:quant@db:5432/quant
-      REDIS_URL: redis://redis:6379/0
-      TUSHARE_TOKEN: ${TUSHARE_TOKEN:?TUSHARE_TOKEN is required in .env}
-      <<: *airflow-email-env
+      <<: [*app-common-env, *airflow-email-env]
     volumes: [".:/app"]
 
   celery-worker:
@@ -171,9 +175,7 @@ services:
     command: ["celery", "-A", "celery_app", "worker", "--loglevel=info"]
     depends_on: [db, redis]
     environment:
-      DATABASE_URL: postgresql://quant:quant@db:5432/quant
-      REDIS_URL: redis://redis:6379/0
-      TUSHARE_TOKEN: ${TUSHARE_TOKEN:?TUSHARE_TOKEN is required in .env}
+      <<: *app-common-env
     volumes: [".:/app"]
     profiles: ["worker"]
 
