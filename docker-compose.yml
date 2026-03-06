@@ -207,7 +207,7 @@ services:
 
   airflow-worker:
     <<: *airflow-common
-    entrypoint: ["bash", "/opt/airflow/frog/docker/entrypoint-common.sh"]
+    entrypoint: ["bash", "/opt/airflow/frog/entrypoint-common.sh"]
     command:
       ["bash", "-c", "airflow db upgrade || echo 'DB already upgraded'; airflow celery worker"]
     depends_on:
