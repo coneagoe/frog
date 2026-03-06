@@ -54,7 +54,6 @@ x-airflow-common: &airflow-common
     context: .
     dockerfile: airflow.Dockerfile
   user: "${AIRFLOW_UID:-1000}:0"
-  entrypoint: ["bash", "/opt/airflow/frog/docker/entrypoint-common.sh"]
   environment:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     # Airflow metadata DB (separate from business data DB)
@@ -208,6 +207,7 @@ services:
 
   airflow-worker:
     <<: *airflow-common
+    entrypoint: ["bash", "/opt/airflow/frog/docker/entrypoint-common.sh"]
     command:
       ["bash", "-c", "airflow db upgrade || echo 'DB already upgraded'; airflow celery worker"]
     depends_on:

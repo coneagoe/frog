@@ -1,6 +1,14 @@
 #!/bin/bash
 # Auto-detect CPU cores and set worker concurrency if not specified
 
+# Add user to passwd if running as non-standard uid
+if ! whoami &>/dev/null; then
+    CURRENT_UID=$(id -u)
+    CURRENT_GID=$(id -g)
+    echo "airflow:x:${CURRENT_UID}:${CURRENT_GID}:airflow:/home/airflow:/bin/bash" >> /etc/passwd
+    echo "Added user to passwd: uid=${CURRENT_UID}, gid=${CURRENT_GID}"
+fi
+
 # Detect CPU cores (fallback to 2 if detection fails)
 CORES=$(nproc 2>/dev/null || echo "2")
 
