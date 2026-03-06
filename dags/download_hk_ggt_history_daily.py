@@ -35,7 +35,7 @@ from common.const import (  # noqa: E402
 from download import DownloadManager  # noqa: E402
 from storage import get_storage  # noqa: E402
 
-MAX_PARTITIONS: Final = 16
+MAX_PARTITIONS: Final = 4
 DEFAULT_START_DATE: Final = "2010-01-01"
 
 
