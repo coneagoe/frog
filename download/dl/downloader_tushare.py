@@ -113,6 +113,21 @@ stock_basic_fields = [
 ]
 
 
+fund_daily_fields = [
+    "ts_code",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "pre_close",
+    "change",
+    "pct_chg",
+    "vol",
+    "amount",
+]
+
+
 @retrying.retry(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
@@ -229,6 +244,38 @@ def download_a_stock_basic(
             "is_hs": is_hs,
         },
         fields=stock_basic_fields,
+    )
+
+    return df
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
+def download_etf_daily(
+    ts_code: str = "",
+    trade_date: str = "",
+    start_date: str = "",
+    end_date: str = "",
+) -> pd.DataFrame | Any:
+    if trade_date:
+        trade_date = convert_date(trade_date)
+    if start_date:
+        start_date = convert_date(start_date)
+    if end_date:
+        end_date = convert_date(end_date)
+
+    df = ts.pro_api().fund_daily(
+        **{
+            "ts_code": ts_code,
+            "trade_date": trade_date,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        fields=fund_daily_fields,
     )
 
     return df

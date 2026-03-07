@@ -8,6 +8,8 @@ Frog is a quantitative trading system for Chinese stock markets (A-shares, Hong 
 
 ## Development Commands
 
+> **Important**: Always use `poetry run` to execute Python commands (e.g., `poetry run python`, `poetry run pytest`), never use bare `python` or `python3`.
+
 ```bash
 # Docker operations
 docker compose up -d                          # Start all services
