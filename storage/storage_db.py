@@ -14,7 +14,10 @@ from sqlalchemy.orm import sessionmaker
 from common.const import (
     COL_ACT_ENT_TYPE,
     COL_ACT_NAME,
+    COL_AMOUNT,
     COL_AREA,
+    COL_CHANGE,
+    COL_CHANGE_RATE,
     COL_CIRC_MV,
     COL_CLOSE,
     COL_CN_SPELL,
@@ -25,15 +28,19 @@ from common.const import (
     COL_DV_RATIO,
     COL_DV_TTM,
     COL_ENNAME,
+    COL_ETF_ID,
     COL_EXCHANGE,
     COL_FLOAT_SHARE,
     COL_FREE_SHARE,
     COL_FULLNAME,
+    COL_HIGH,
     COL_INDUSTRY,
     COL_IPO_DATE,
     COL_IS_HS,
     COL_LIST_STATUS,
+    COL_LOW,
     COL_MARKET,
+    COL_OPEN,
     COL_PB,
     COL_PE,
     COL_PE_TTM,
@@ -49,6 +56,7 @@ from common.const import (
     COL_TURNOVER_RATE,
     COL_TURNOVER_RATE_F,
     COL_UP_LIMIT,
+    COL_VOLUME,
     COL_VOLUME_RATIO,
     AdjustType,
     PeriodType,
@@ -67,6 +75,7 @@ from .model import (
     tb_name_history_data_daily_a_stock_qfq,
     tb_name_history_data_daily_etf_hfq,
     tb_name_history_data_daily_etf_qfq,
+    tb_name_history_data_daily_fund,
     tb_name_history_data_daily_hk_stock_hfq,
     tb_name_history_data_monthly_hk_stock_hfq,
     tb_name_history_data_weekly_a_stock_hfq,
@@ -139,6 +148,21 @@ COL_MAP_STOCK_BASIC = {
     "is_hs": COL_IS_HS,
     "act_name": COL_ACT_NAME,
     "act_ent_type": COL_ACT_ENT_TYPE,
+}
+
+
+COL_MAP_FUND_DAILY = {
+    "ts_code": COL_ETF_ID,
+    "trade_date": COL_DATE,
+    "open": COL_OPEN,
+    "high": COL_HIGH,
+    "low": COL_LOW,
+    "close": COL_CLOSE,
+    "pre_close": COL_PRE_CLOSE,
+    "change": COL_CHANGE,
+    "pct_chg": COL_CHANGE_RATE,
+    "vol": COL_VOLUME,
+    "amount": COL_AMOUNT,
 }
 
 
@@ -442,6 +466,98 @@ class StorageDb:
         except Exception as e:
             logger.error(f"保存ETF历史数据失败: {str(e)}")
             return False
+
+    def save_history_data_fund(self, df: pd.DataFrame) -> bool:
+        """
+        保存基金/ETF日线行情数据到对应的数据库表 (Tushare fund_daily 接口)
+
+        Args:
+            df: 基金日线行情数据DataFrame
+
+        Returns:
+            bool: 保存是否成功
+        """
+        try:
+            # 重命名列
+            df = df.rename(columns=COL_MAP_FUND_DAILY)
+
+            # 提取基金代码（去掉 .SH/.SZ 后缀）
+            if COL_ETF_ID in df.columns:
+                df[COL_ETF_ID] = df[COL_ETF_ID].str.split(".").str[0]
+
+            # 选择需要的列
+            df = df[list(COL_MAP_FUND_DAILY.values())]
+
+            # 转换日期为 YYYY-MM-DD 格式
+            df[COL_DATE] = pd.to_datetime(
+                df[COL_DATE], format="%Y%m%d", errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
+
+            # 保存到数据库
+            df.to_sql(
+                tb_name_history_data_daily_fund,
+                self.engine,
+                if_exists="append",
+                index=False,
+                method="multi",
+            )
+
+            logger.info(
+                f"基金日线行情数据保存成功: {tb_name_history_data_daily_fund}, 数据条数: {len(df)}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"保存基金日线行情数据失败: {str(e)}")
+            return False
+
+    def load_history_data_fund(
+        self,
+        fund_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        加载基金/ETF日线行情数据
+
+        Args:
+            fund_id: 基金代码
+            start_date: 开始日期（可选，格式：YYYY-MM-DD）
+            end_date: 结束日期（可选，格式：YYYY-MM-DD）
+
+        Returns:
+            pd.DataFrame: 基金日线行情数据，如果表不存在或加载失败则返回空DataFrame
+        """
+        try:
+            table_name = tb_name_history_data_daily_fund
+
+            # 构建SQL查询
+            sql = f"""
+            SELECT * FROM {table_name}
+            WHERE "{COL_ETF_ID}" = %s
+            """
+
+            params: List[Any] = [fund_id]
+
+            # 添加日期范围条件
+            if start_date:
+                sql += f' AND "{COL_DATE}" >= %s'
+                params.append(start_date)
+            if end_date:
+                sql += f' AND "{COL_DATE}" <= %s'
+                params.append(end_date)
+
+            sql += f' ORDER BY "{COL_DATE}" ASC'
+
+            # Convert list to tuple for pandas read_sql compatibility
+            sql_params = tuple(params) if params else None
+            df = pd.read_sql(sql, self.engine, params=sql_params)
+            logger.info(f"基金日线行情数据加载成功: {fund_id}, 数据条数: {len(df)}")
+            return df
+
+        except Exception as e:
+            logger.error(f"加载基金日线行情数据失败: {fund_id}, 错误: {str(e)}")
+            return pd.DataFrame()
 
     def save_general_info_stock(self, df: pd.DataFrame) -> bool:
         df.to_sql(
