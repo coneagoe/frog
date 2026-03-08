@@ -16,12 +16,42 @@ from storage import (
 from storage.model import (
     tb_name_a_stock_basic,
     tb_name_daily_basic_a_stock,
+    tb_name_etf_daily,
     tb_name_stk_limit_a_stock,
     tb_name_suspend_d_a_stock,
 )
 
 from .dl import Downloader
 from .mp_utils import run_history_download_mp
+
+
+# Wrapper for dl_etf_daily to match the signature expected by _download_history_data
+def _dl_etf_daily_wrapper(
+    etf_id: str,
+    start_date: str,
+    end_date: str,
+    period: PeriodType,
+    adjust: AdjustType,
+) -> pd.DataFrame:
+    """Discard period and adjust parameters, delegate to dl_etf_daily."""
+    downloader = Downloader()
+    result = downloader.dl_etf_daily(
+        ts_code=etf_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    assert isinstance(result, pd.DataFrame)
+    return result
+
+
+# Wrapper for save_etf_daily to match the signature expected by _download_history_data
+def _save_etf_daily_wrapper(
+    df: pd.DataFrame,
+    period: PeriodType,
+    adjust: AdjustType,
+) -> bool:
+    """Discard period and adjust parameters, delegate to save_etf_daily."""
+    return get_storage().save_etf_daily(df)
 
 
 class DownloadManager:
@@ -304,7 +334,7 @@ class DownloadManager:
         Returns:
             bool: 是否成功下载并保存
         """
-        table_name = get_table_name(SecurityType.ETF, period, adjust)
+        table_name = tb_name_etf_daily
 
         return self._download_history_data(
             table_name=table_name,
@@ -313,8 +343,8 @@ class DownloadManager:
             start_date=start_date,
             end_date=end_date,
             adjust=adjust,
-            downloader_func=self.downloader.dl_history_data_etf,
-            storage_save_func=get_storage().save_history_data_etf,
+            downloader_func=_dl_etf_daily_wrapper,
+            storage_save_func=_save_etf_daily_wrapper,
         )
 
     def download_all_etf_history(

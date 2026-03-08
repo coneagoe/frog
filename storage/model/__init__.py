@@ -2,6 +2,7 @@ from .a_stock_basic import AStockBasic, tb_name_a_stock_basic
 from .base import Base
 from .daily_basic_a_stock import DailyBasicAStock, tb_name_daily_basic_a_stock
 from .etf_basic import ETFBasic, tb_name_etf_basic
+from .etf_daily import ETFDaily, tb_name_etf_daily
 from .general_info_etf import GeneralInfoETF, tb_name_general_info_etf
 from .general_info_ggt import GeneralInfoGGT, tb_name_general_info_ggt
 from .general_info_stock import GeneralInfoStock, tb_name_general_info_stock
@@ -38,6 +39,7 @@ __all__ = [
     "Base",
     "AStockBasic",
     "ETFBasic",
+    "ETFDaily",
     "HistoryDataDailyAStockQFQ",
     "HistoryDataDailyAStockHFQ",
     "HistoryDataWeeklyAStockQFQ",
@@ -62,6 +64,7 @@ __all__ = [
     "tb_name_suspend_d_a_stock",
     "tb_name_a_stock_basic",
     "tb_name_etf_basic",
+    "tb_name_etf_daily",
     "tb_name_history_data_weekly_a_stock_qfq",
     "tb_name_history_data_weekly_a_stock_hfq",
     "tb_name_history_data_daily_hk_stock_hfq",
