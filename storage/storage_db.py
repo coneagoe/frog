@@ -78,6 +78,7 @@ from .model import (
     tb_name_a_stock_basic,
     tb_name_daily_basic_a_stock,
     tb_name_etf_basic,
+    tb_name_etf_daily,
     tb_name_general_info_etf,
     tb_name_general_info_ggt,
     tb_name_general_info_stock,
@@ -191,6 +192,21 @@ COL_MAP_ETF_BASIC = {
     "custod_name": COL_CUSTOD_NAME,
     "mgt_fee": COL_MGT_FEE,
     "etf_type": COL_ETF_TYPE,
+}
+
+
+COL_MAP_ETF_DAILY = {
+    "ts_code": COL_ETF_ID,
+    "trade_date": COL_DATE,
+    "open": COL_OPEN,
+    "high": COL_HIGH,
+    "low": COL_LOW,
+    "close": COL_CLOSE,
+    "pre_close": COL_PRE_CLOSE,
+    "change": COL_CHANGE,
+    "pct_chg": COL_CHANGE_RATE,
+    "vol": COL_VOLUME,
+    "amount": COL_AMOUNT,
 }
 
 
@@ -1376,6 +1392,89 @@ class StorageDb:
         except Exception as e:
             logger.error(f"加载ETF基础信息数据失败: {str(e)}")
             return pd.DataFrame(columns=[COL_ETF_ID, COL_ETF_NAME])
+
+    def save_etf_daily(self, df: pd.DataFrame) -> bool:
+        """
+        保存ETF日线数据到数据库
+
+        Args:
+            df: ETF日线数据DataFrame，包含以下列：
+                - ts_code: 基金代码
+                - trade_date: 交易日期
+                - open: 开盘价
+                - high: 最高价
+                - low: 最低价
+                - close: 收盘价
+                - pre_close: 昨日收盘价
+                - change: 涨跌额
+                - pct_chg: 涨跌幅
+                - vol: 成交量
+                - amount: 成交额
+
+        Returns:
+            bool: 保存是否成功
+        """
+        try:
+            df = df.rename(columns=COL_MAP_ETF_DAILY)
+            # 转换日期格式
+            df[COL_DATE] = pd.to_datetime(df[COL_DATE], format="%Y%m%d").dt.date
+
+            df.to_sql(
+                tb_name_etf_daily,
+                self.engine,
+                if_exists="append",
+                index=False,
+                method="multi",
+            )
+            logger.info(
+                f"ETF日线数据保存成功: {tb_name_etf_daily}, 数据条数: {len(df)}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"保存ETF日线数据失败: {str(e)}")
+            return False
+
+    def load_etf_daily(
+        self,
+        etf_ids: list[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        加载ETF日线数据
+
+        Args:
+            etf_ids: ETF代码列表
+            start_date: 开始日期 (YYYY-MM-DD格式)
+            end_date: 结束日期 (YYYY-MM-DD格式)
+
+        Returns:
+            pd.DataFrame: ETF日线数据
+        """
+        try:
+            sql = f"""
+            SELECT * FROM {tb_name_etf_daily}
+            WHERE "{COL_ETF_ID}" = ANY(%s)
+            """
+            params: list[Any] = [etf_ids]
+
+            if start_date:
+                sql += f' AND "{COL_DATE}" >= %s'
+                params.append(start_date)
+            if end_date:
+                sql += f' AND "{COL_DATE}" <= %s'
+                params.append(end_date)
+
+            sql += f' ORDER BY "{COL_ETF_ID}", "{COL_DATE}"'
+
+            df = pd.read_sql(sql, self.engine, params=params)
+            logger.info(f"ETF日线数据加载成功，数据条数: {len(df)}")
+            return df
+
+        except Exception as e:
+            logger.error(f"加载ETF日线数据失败: {str(e)}")
+            return pd.DataFrame()
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
