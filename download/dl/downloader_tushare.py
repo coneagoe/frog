@@ -305,27 +305,10 @@ def download_etf_daily(
     stop_max_attempt_number=3,
 )
 @get_pro
-def download_etf_basic(
-    ts_code: str = "",
-    index_code: str = "",
-    list_date: str = "",
-    list_status: str = "",
-    exchange: str = "",
-    mgr: str = "",
-) -> pd.DataFrame | Any:
-    if list_date:
-        list_date = convert_date(list_date)
-
+def download_etf_basic() -> pd.DataFrame | Any:
     df = ts.pro_api().etf_basic(
-        **{
-            "ts_code": ts_code,
-            "index_code": index_code,
-            "list_date": list_date,
-            "list_status": list_status,
-            "exchange": exchange,
-            "mgr": mgr,
-        },
-        fields=etf_basic_fields,
+        list_status="L",
+        fields="ts_code,extname,index_code,index_name,exchange,mgr_name",
     )
 
     return df
