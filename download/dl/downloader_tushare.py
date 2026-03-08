@@ -28,8 +28,7 @@ def get_pro(func: F) -> F:
             raise ConnectionError(
                 "Tushare token is missing. Please set env var TUSHARE_TOKEN."
             )
-
-        ts.set_token(token)
+        kwargs["pro"] = ts.pro_api(token=token)
 
         return func(*args, **kwargs)
 
@@ -51,6 +50,12 @@ def convert_date(date_str: str) -> str:
             continue
 
     raise ValueError(f"Invalid date format: {date_str}.")
+
+
+def require_pro_client(pro: Any | None) -> Any:
+    if pro is None:
+        raise ConnectionError("Tushare pro client is missing.")
+    return pro
 
 
 daily_basic_fields = [
@@ -154,10 +159,12 @@ etf_basic_fields = [
 @get_pro
 def download_daily_basic_a_stock_ts(
     trade_date: str,
+    pro: Any | None = None,
 ) -> pd.DataFrame | Any:
     trade_date = convert_date(trade_date)
+    client = require_pro_client(pro)
 
-    df = ts.pro_api().daily_basic(
+    df = client.daily_basic(
         **{
             "ts_code": "",
             "trade_date": trade_date,
@@ -183,6 +190,7 @@ def download_stk_limit(
     trade_date: str = "",
     start_date: str = "",
     end_date: str = "",
+    pro: Any | None = None,
 ) -> pd.DataFrame | Any:
     if trade_date:
         trade_date = convert_date(trade_date)
@@ -190,8 +198,9 @@ def download_stk_limit(
         start_date = convert_date(start_date)
     if end_date:
         end_date = convert_date(end_date)
+    client = require_pro_client(pro)
 
-    df = ts.pro_api().stk_limit(
+    df = client.stk_limit(
         **{
             "ts_code": ts_code,
             "trade_date": trade_date,
@@ -216,6 +225,7 @@ def download_suspend_d(
     start_date: str = "",
     end_date: str = "",
     suspend_type: str = "",
+    pro: Any | None = None,
 ) -> pd.DataFrame | Any:
     if trade_date:
         trade_date = convert_date(trade_date)
@@ -223,8 +233,9 @@ def download_suspend_d(
         start_date = convert_date(start_date)
     if end_date:
         end_date = convert_date(end_date)
+    client = require_pro_client(pro)
 
-    df = ts.pro_api().suspend_d(
+    df = client.suspend_d(
         **{
             "ts_code": ts_code,
             "trade_date": trade_date,
@@ -251,8 +262,11 @@ def download_a_stock_basic(
     list_status: str = "L",
     exchange: str = "",
     is_hs: str = "",
+    pro: Any | None = None,
 ) -> pd.DataFrame | Any:
-    df = ts.pro_api().stock_basic(
+    client = require_pro_client(pro)
+
+    df = client.stock_basic(
         **{
             "ts_code": ts_code,
             "name": name,
@@ -278,6 +292,7 @@ def download_etf_daily(
     trade_date: str = "",
     start_date: str = "",
     end_date: str = "",
+    pro: Any | None = None,
 ) -> pd.DataFrame | Any:
     if trade_date:
         trade_date = convert_date(trade_date)
@@ -285,8 +300,9 @@ def download_etf_daily(
         start_date = convert_date(start_date)
     if end_date:
         end_date = convert_date(end_date)
+    client = require_pro_client(pro)
 
-    df = ts.pro_api().fund_daily(
+    df = client.fund_daily(
         **{
             "ts_code": ts_code,
             "trade_date": trade_date,
@@ -305,10 +321,14 @@ def download_etf_daily(
     stop_max_attempt_number=3,
 )
 @get_pro
-def download_etf_basic() -> pd.DataFrame | Any:
-    df = ts.pro_api().etf_basic(
+def download_etf_basic(
+    pro: Any | None = None,
+) -> pd.DataFrame | Any:
+    client = require_pro_client(pro)
+
+    df = client.etf_basic(
         list_status="L",
-        fields="ts_code,extname,index_code,index_name,exchange,mgr_name",
+        fields=etf_basic_fields,
     )
 
     return df

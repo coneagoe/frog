@@ -25,7 +25,6 @@ def downloader_ts_module(monkeypatch):
         sys.modules.pop(mod, None)
 
     ts_stub = types.SimpleNamespace()
-    ts_stub.set_token = Mock()
 
     pro_stub = types.SimpleNamespace()
     pro_stub.daily_basic = Mock()
@@ -87,12 +86,8 @@ def test_download_daily_basic_a_stock_ts_success(downloader_ts_module, monkeypat
     # Test with different date formats
     test_date = "2024-01-05"
     result = module.download_daily_basic_a_stock_ts(test_date)
-
-    # Verify token was set
-    ts_stub.set_token.assert_called_once_with("test_token_123")
-
-    # Verify pro_api was called
-    ts_stub.pro_api.assert_called_once()
+    # Verify pro_api was called with explicit token (no local token file write)
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
 
     # Verify daily_basic was called with correct parameters
     expected_params = {
