@@ -128,6 +128,24 @@ fund_daily_fields = [
 ]
 
 
+etf_basic_fields = [
+    "ts_code",
+    "csname",
+    "extname",
+    "cname",
+    "index_code",
+    "index_name",
+    "setup_date",
+    "list_date",
+    "list_status",
+    "exchange",
+    "mgr_name",
+    "custod_name",
+    "mgt_fee",
+    "etf_type",
+]
+
+
 @retrying.retry(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
@@ -276,6 +294,38 @@ def download_etf_daily(
             "end_date": end_date,
         },
         fields=fund_daily_fields,
+    )
+
+    return df
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
+def download_etf_basic(
+    ts_code: str = "",
+    index_code: str = "",
+    list_date: str = "",
+    list_status: str = "",
+    exchange: str = "",
+    mgr: str = "",
+) -> pd.DataFrame | Any:
+    if list_date:
+        list_date = convert_date(list_date)
+
+    df = ts.pro_api().etf_basic(
+        **{
+            "ts_code": ts_code,
+            "index_code": index_code,
+            "list_date": list_date,
+            "list_status": list_status,
+            "exchange": exchange,
+            "mgr": mgr,
+        },
+        fields=etf_basic_fields,
     )
 
     return df

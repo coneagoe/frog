@@ -648,3 +648,27 @@ class DownloadManager:
         except Exception as e:
             logging.error(f"下载A股基础信息数据时出错: {e}")
             return False
+
+    def download_etf_basic(self, list_status: str = "L") -> bool:
+        """
+        下载ETF基础信息数据（etf_basic）
+
+        Args:
+            list_status: 存续状态，默认为"L"（正常）
+                      L-正常 D-已终止 P-暂停
+
+        Returns:
+            bool: 是否成功下载并保存
+        """
+        try:
+            df = self.downloader.dl_etf_basic(list_status=list_status)
+            if df is None or df.empty:
+                logging.warning("Failed to download ETF basic info or data is empty.")
+                return False
+
+            logging.info(f"成功下载 {len(df)} 条ETF基础信息数据")
+            return get_storage().save_etf_basic(df)
+
+        except Exception as e:
+            logging.error(f"下载ETF基础信息数据时出错: {e}")
+            return False
