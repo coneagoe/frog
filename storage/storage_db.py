@@ -22,24 +22,32 @@ from common.const import (
     COL_CLOSE,
     COL_CN_SPELL,
     COL_CURR_TYPE,
+    COL_CUSTOD_NAME,
     COL_DATE,
     COL_DELISTING_DATE,
     COL_DOWN_LIMIT,
     COL_DV_RATIO,
     COL_DV_TTM,
     COL_ENNAME,
+    COL_ETF_EXT_NAME,
     COL_ETF_ID,
+    COL_ETF_NAME,
+    COL_ETF_TYPE,
     COL_EXCHANGE,
     COL_FLOAT_SHARE,
     COL_FREE_SHARE,
     COL_FULLNAME,
     COL_HIGH,
+    COL_INDEX_CODE,
+    COL_INDEX_NAME,
     COL_INDUSTRY,
     COL_IPO_DATE,
     COL_IS_HS,
     COL_LIST_STATUS,
     COL_LOW,
     COL_MARKET,
+    COL_MGR_NAME,
+    COL_MGT_FEE,
     COL_OPEN,
     COL_PB,
     COL_PE,
@@ -47,6 +55,7 @@ from common.const import (
     COL_PRE_CLOSE,
     COL_PS,
     COL_PS_TTM,
+    COL_SETUP_DATE,
     COL_STOCK_ID,
     COL_STOCK_NAME,
     COL_SUSPEND_TIMING,
@@ -68,6 +77,7 @@ from .model import (
     Base,
     tb_name_a_stock_basic,
     tb_name_daily_basic_a_stock,
+    tb_name_etf_basic,
     tb_name_general_info_etf,
     tb_name_general_info_ggt,
     tb_name_general_info_stock,
@@ -163,6 +173,24 @@ COL_MAP_FUND_DAILY = {
     "pct_chg": COL_CHANGE_RATE,
     "vol": COL_VOLUME,
     "amount": COL_AMOUNT,
+}
+
+
+COL_MAP_ETF_BASIC = {
+    "ts_code": COL_ETF_ID,
+    "csname": COL_ETF_NAME,
+    "extname": COL_ETF_EXT_NAME,
+    "cname": COL_FULLNAME,
+    "index_code": COL_INDEX_CODE,
+    "index_name": COL_INDEX_NAME,
+    "setup_date": COL_SETUP_DATE,
+    "list_date": COL_IPO_DATE,
+    "list_status": COL_LIST_STATUS,
+    "exchange": COL_EXCHANGE,
+    "mgr_name": COL_MGR_NAME,
+    "custod_name": COL_CUSTOD_NAME,
+    "mgt_fee": COL_MGT_FEE,
+    "etf_type": COL_ETF_TYPE,
 }
 
 
@@ -1292,6 +1320,62 @@ class StorageDb:
         df = pd.read_sql(sql, self.engine, params=(stock_ids,))  # type: ignore[arg-type]
         # df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d")
         return df
+
+    def save_etf_basic(self, df: pd.DataFrame) -> bool:
+        """
+        保存ETF基础信息数据到对应的数据库表
+
+        Args:
+            df: ETF基础信息数据DataFrame (from TuShare etf_basic接口)
+
+        Returns:
+            bool: 保存是否成功
+        """
+        try:
+            df = df.rename(columns=COL_MAP_ETF_BASIC)
+            # 提取ETF代码（去掉 .SH/.SZ 后缀）
+            df[COL_ETF_ID] = df[COL_ETF_ID].str.split(".").str[0]
+            df = df[list(COL_MAP_ETF_BASIC.values())]
+            # 转换日期为 date 类型
+            df[COL_SETUP_DATE] = pd.to_datetime(
+                df[COL_SETUP_DATE], format="%Y%m%d", errors="coerce"
+            ).dt.date
+            df[COL_IPO_DATE] = pd.to_datetime(
+                df[COL_IPO_DATE], format="%Y%m%d", errors="coerce"
+            ).dt.date
+            df.to_sql(
+                tb_name_etf_basic,
+                self.engine,
+                if_exists="replace",
+                index=False,
+                method="multi",
+            )
+            logger.info(f"ETF基础信息数据保存成功，数据条数: {len(df)}")
+            return True
+
+        except Exception as e:
+            logger.error(f"保存ETF基础信息数据失败: {str(e)}")
+            return False
+
+    def load_etf_basic(self) -> pd.DataFrame:
+        """
+        加载ETF基础信息数据
+
+        Returns:
+            pd.DataFrame: ETF基础信息数据。如果表不存在或加载失败则返回空DataFrame
+        """
+        try:
+            sql = f"""
+            SELECT * FROM {tb_name_etf_basic}
+            """
+
+            df = pd.read_sql(sql, self.engine)
+            logger.info(f"ETF基础信息数据加载成功，数据条数: {len(df)}")
+            return df
+
+        except Exception as e:
+            logger.error(f"加载ETF基础信息数据失败: {str(e)}")
+            return pd.DataFrame(columns=[COL_ETF_ID, COL_ETF_NAME])
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:

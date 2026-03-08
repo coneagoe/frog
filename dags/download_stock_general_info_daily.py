@@ -41,11 +41,19 @@ def download_stock_general_info_task(**context):
     etf_result = manager.download_general_info_etf()
     print("✅ ETF基础信息下载成功" if etf_result else "❌ ETF基础信息下载失败")
 
+    print("开始下载ETF基础信息(Tushare)...")
+    etf_basic_result = manager.download_etf_basic()
+    print(
+        "✅ ETF基础信息(Tushare)下载成功"
+        if etf_basic_result
+        else "❌ ETF基础信息(Tushare)下载失败"
+    )
+
     print("开始下载港股通基础信息...")
     hk_ggt_result = manager.download_general_info_hk_ggt()
     print("✅ 港股通基础信息下载成功" if hk_ggt_result else "❌ 港股通基础信息下载失败")
 
-    if stock_result or etf_result or hk_ggt_result:
+    if stock_result and etf_result and etf_basic_result and hk_ggt_result:
         return "基础信息下载任务完成"
 
     raise Exception("所有基础信息下载失败")

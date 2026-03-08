@@ -14,6 +14,8 @@ from .downloader_baostock import (
 from .downloader_tushare import (
     download_a_stock_basic,
     download_daily_basic_a_stock_ts,
+    download_etf_basic,
+    download_etf_daily,
     download_stk_limit,
     download_suspend_d,
 )
@@ -36,3 +38,5 @@ class Downloader:
     dl_stk_limit_a_stock = staticmethod(download_stk_limit)
     dl_suspend_d_a_stock = staticmethod(download_suspend_d)
     dl_a_stock_basic = staticmethod(download_a_stock_basic)
+    dl_etf_basic = staticmethod(download_etf_basic)
+    dl_etf_daily = staticmethod(download_etf_daily)
