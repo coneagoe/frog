@@ -23,6 +23,8 @@ BUSINESS_TABLES=(
   history_data_monthly_hk_stock_hfq
   stk_limit_a_stock
   suspend_d_a_stock
+  etf_basic
+  etf_daily
 )
 
 # Common database configuration defaults
