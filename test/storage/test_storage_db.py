@@ -26,6 +26,7 @@ from common.const import (  # noqa: E402
 )
 from storage.config import StorageConfig  # noqa: E402
 from storage.model import (  # noqa: E402
+    tb_name_etf_daily,
     tb_name_history_data_daily_a_stock_qfq,
     tb_name_history_data_weekly_a_stock_qfq,
     tb_name_ingredient_300,
@@ -833,6 +834,31 @@ class TestStorageDb:
             LIMIT 1
             """
         mock_cursor.execute.assert_called_once_with(expected_sql, ("000001",))
+
+    def test_get_last_record_uses_etf_id_column_for_etf_daily(self, storage_db):
+        """ETF日线表应使用基金代码列进行最新记录查询"""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+
+        expected_record = {
+            COL_DATE: "2024-01-15",
+            COL_ETF_ID: "159922",
+            COL_CLOSE: 1.234,
+        }
+        mock_cursor.fetchone.return_value = expected_record
+
+        result = storage_db.get_last_record(tb_name_etf_daily, "159922")
+
+        assert result == expected_record
+        expected_sql = f"""
+            SELECT * FROM {tb_name_etf_daily}
+            WHERE "{COL_ETF_ID}" = %s
+            ORDER BY "{COL_DATE}" DESC
+            LIMIT 1
+            """
+        mock_cursor.execute.assert_called_once_with(expected_sql, ("159922",))
 
     def test_get_last_record_with_connect_once_decorator(self, storage_db):
         """Test that get_last_record uses connect_once decorator properly"""

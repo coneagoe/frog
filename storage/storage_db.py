@@ -215,6 +215,12 @@ _storage_instances: Dict[int, "StorageDb"] = {}
 # Track which PIDs have already run metadata.create_all() to avoid repeated DDL checks
 _metadata_initialized_pids: Set[int] = set()
 
+# Tables keyed by ETF/fund code instead of stock code.
+ETF_ID_TABLES: Set[str] = {
+    tb_name_etf_daily,
+    tb_name_history_data_daily_fund,
+}
+
 
 def get_table_name(
     security_type: SecurityType, period: PeriodType, adjust: AdjustType
@@ -1130,11 +1136,13 @@ class StorageDb:
         try:
             assert self.cursor is not None, "Database cursor should not be None"
 
+            id_column = COL_ETF_ID if table_name in ETF_ID_TABLES else COL_STOCK_ID
+
             if stock_id:
                 sql = textwrap.dedent(
                     f"""\
                 SELECT * FROM {table_name}
-                WHERE "{COL_STOCK_ID}" = %s
+                WHERE "{id_column}" = %s
                 ORDER BY "{COL_DATE}" DESC
                 LIMIT 1
                 """

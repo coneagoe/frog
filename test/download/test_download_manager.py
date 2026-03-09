@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType  # noqa: E402
+from common.const import COL_DATE, COL_ETF_ID, AdjustType, PeriodType  # noqa: E402
 
 
 def _make_manager(monkeypatch):
@@ -32,7 +32,7 @@ class TestDownloadManager:
         mock_etf_data = pd.DataFrame(
             {
                 COL_DATE: ["2024-01-01", "2024-01-02"],
-                COL_STOCK_ID: ["510300", "510300"],
+                COL_ETF_ID: ["510300", "510300"],
                 "开盘": [4.5, 4.6],
                 "收盘": [4.6, 4.7],
                 "最高": [4.7, 4.8],
@@ -41,9 +41,9 @@ class TestDownloadManager:
             }
         )
 
-        downloader.dl_history_data_etf.return_value = mock_etf_data
+        downloader.dl_etf_daily.return_value = mock_etf_data
         storage.get_last_record.return_value = None
-        storage.save_history_data_etf.return_value = True
+        storage.save_etf_daily.return_value = True
 
         result = manager.download_etf_history(
             etf_id="510300",
@@ -54,15 +54,13 @@ class TestDownloadManager:
         )
 
         assert result is True
-        storage.get_last_record.assert_called_once_with(
-            "history_data_daily_etf_qfq", "510300"
+        storage.get_last_record.assert_called_once_with("etf_daily", "510300")
+        downloader.dl_etf_daily.assert_called_once_with(
+            ts_code="510300",
+            start_date="20240101",
+            end_date="20240102",
         )
-        downloader.dl_history_data_etf.assert_called_once_with(
-            "510300", "20240101", "20240102", PeriodType.DAILY, AdjustType.QFQ
-        )
-        storage.save_history_data_etf.assert_called_once_with(
-            mock_etf_data, PeriodType.DAILY, AdjustType.QFQ
-        )
+        storage.save_etf_daily.assert_called_once_with(mock_etf_data)
 
     def test_download_etf_history_success_weekly_hfq(self, monkeypatch):
         """测试ETF历史数据下载成功 - 周频后复权"""
@@ -71,7 +69,7 @@ class TestDownloadManager:
         mock_etf_data = pd.DataFrame(
             {
                 COL_DATE: ["2024-01-01", "2024-01-08"],
-                COL_STOCK_ID: ["510500", "510500"],
+                COL_ETF_ID: ["510500", "510500"],
                 "开盘": [5.5, 5.6],
                 "收盘": [5.6, 5.7],
                 "最高": [5.7, 5.8],
@@ -80,9 +78,9 @@ class TestDownloadManager:
             }
         )
 
-        downloader.dl_history_data_etf.return_value = mock_etf_data
+        downloader.dl_etf_daily.return_value = mock_etf_data
         storage.get_last_record.return_value = None
-        storage.save_history_data_etf.return_value = True
+        storage.save_etf_daily.return_value = True
 
         result = manager.download_etf_history(
             etf_id="510500",
@@ -93,15 +91,13 @@ class TestDownloadManager:
         )
 
         assert result is True
-        storage.get_last_record.assert_called_once_with(
-            "history_data_weekly_etf_hfq", "510500"
+        storage.get_last_record.assert_called_once_with("etf_daily", "510500")
+        downloader.dl_etf_daily.assert_called_once_with(
+            ts_code="510500",
+            start_date="20240101",
+            end_date="20240108",
         )
-        downloader.dl_history_data_etf.assert_called_once_with(
-            "510500", "20240101", "20240108", PeriodType.WEEKLY, AdjustType.HFQ
-        )
-        storage.save_history_data_etf.assert_called_once_with(
-            mock_etf_data, PeriodType.WEEKLY, AdjustType.HFQ
-        )
+        storage.save_etf_daily.assert_called_once_with(mock_etf_data)
 
     def test_download_etf_history_incremental_update(self, monkeypatch):
         """测试ETF历史数据增量更新"""
@@ -112,7 +108,7 @@ class TestDownloadManager:
         mock_etf_data = pd.DataFrame(
             {
                 COL_DATE: ["2024-01-16", "2024-01-17"],
-                COL_STOCK_ID: ["510300", "510300"],
+                COL_ETF_ID: ["510300", "510300"],
                 "开盘": [4.7, 4.8],
                 "收盘": [4.8, 4.9],
                 "最高": [4.9, 5.0],
@@ -121,8 +117,8 @@ class TestDownloadManager:
             }
         )
 
-        downloader.dl_history_data_etf.return_value = mock_etf_data
-        storage.save_history_data_etf.return_value = True
+        downloader.dl_etf_daily.return_value = mock_etf_data
+        storage.save_etf_daily.return_value = True
 
         result = manager.download_etf_history(
             etf_id="510300",
@@ -133,12 +129,12 @@ class TestDownloadManager:
         )
 
         assert result is True
-        downloader.dl_history_data_etf.assert_called_once_with(
-            "510300", "20240116", "20240117", PeriodType.DAILY, AdjustType.QFQ
+        downloader.dl_etf_daily.assert_called_once_with(
+            ts_code="510300",
+            start_date="20240116",
+            end_date="20240117",
         )
-        storage.save_history_data_etf.assert_called_once_with(
-            mock_etf_data, PeriodType.DAILY, AdjustType.QFQ
-        )
+        storage.save_etf_daily.assert_called_once_with(mock_etf_data)
 
     def test_download_etf_history_data_up_to_date(self, monkeypatch):
         """测试ETF数据已是最新，无需下载"""
@@ -155,15 +151,15 @@ class TestDownloadManager:
         )
 
         assert result is True
-        downloader.dl_history_data_etf.assert_not_called()
-        storage.save_history_data_etf.assert_not_called()
+        downloader.dl_etf_daily.assert_not_called()
+        storage.save_etf_daily.assert_not_called()
 
     def test_download_etf_history_no_new_data(self, monkeypatch):
         """测试ETF无新数据可下载"""
         manager, storage, _downloader = _make_manager(monkeypatch)
 
         storage.get_last_record.return_value = None
-        _downloader.dl_history_data_etf.return_value = pd.DataFrame()
+        _downloader.dl_etf_daily.return_value = pd.DataFrame()
 
         result = manager.download_etf_history(
             etf_id="510300",
@@ -174,45 +170,14 @@ class TestDownloadManager:
         )
 
         assert result is True
-        storage.save_history_data_etf.assert_not_called()
+        storage.save_etf_daily.assert_not_called()
 
     def test_download_etf_history_download_failure(self, monkeypatch):
         """测试ETF下载失败"""
         manager, storage, downloader = _make_manager(monkeypatch)
 
         storage.get_last_record.return_value = None
-        downloader.dl_history_data_etf.return_value = None
-
-        result = manager.download_etf_history(
-            etf_id="510300",
-            period=PeriodType.DAILY,
-            start_date="20240101",
-            end_date="20240102",
-            adjust=AdjustType.QFQ,
-        )
-
-        assert result is True
-        storage.save_history_data_etf.assert_not_called()
-
-    def test_download_etf_history_save_failure(self, monkeypatch):
-        """测试ETF保存失败"""
-        manager, storage, downloader = _make_manager(monkeypatch)
-
-        mock_etf_data = pd.DataFrame(
-            {
-                COL_DATE: ["2024-01-01", "2024-01-02"],
-                COL_STOCK_ID: ["510300", "510300"],
-                "开盘": [4.5, 4.6],
-                "收盘": [4.6, 4.7],
-                "最高": [4.7, 4.8],
-                "最低": [4.4, 4.5],
-                "成交量": [1000000, 1200000],
-            }
-        )
-
-        downloader.dl_history_data_etf.return_value = mock_etf_data
-        storage.get_last_record.return_value = None
-        storage.save_history_data_etf.return_value = False
+        downloader.dl_etf_daily.return_value = None
 
         result = manager.download_etf_history(
             etf_id="510300",
@@ -223,9 +188,38 @@ class TestDownloadManager:
         )
 
         assert result is False
-        storage.save_history_data_etf.assert_called_once_with(
-            mock_etf_data, PeriodType.DAILY, AdjustType.QFQ
+        storage.save_etf_daily.assert_not_called()
+
+    def test_download_etf_history_save_failure(self, monkeypatch):
+        """测试ETF保存失败"""
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        mock_etf_data = pd.DataFrame(
+            {
+                COL_DATE: ["2024-01-01", "2024-01-02"],
+                COL_ETF_ID: ["510300", "510300"],
+                "开盘": [4.5, 4.6],
+                "收盘": [4.6, 4.7],
+                "最高": [4.7, 4.8],
+                "最低": [4.4, 4.5],
+                "成交量": [1000000, 1200000],
+            }
         )
+
+        downloader.dl_etf_daily.return_value = mock_etf_data
+        storage.get_last_record.return_value = None
+        storage.save_etf_daily.return_value = False
+
+        result = manager.download_etf_history(
+            etf_id="510300",
+            period=PeriodType.DAILY,
+            start_date="20240101",
+            end_date="20240102",
+            adjust=AdjustType.QFQ,
+        )
+
+        assert result is False
+        storage.save_etf_daily.assert_called_once_with(mock_etf_data)
 
     def test_download_etf_history_exception_handling(self, monkeypatch):
         """测试ETF下载异常处理"""
@@ -242,8 +236,8 @@ class TestDownloadManager:
         )
 
         assert result is False
-        downloader.dl_history_data_etf.assert_not_called()
-        storage.save_history_data_etf.assert_not_called()
+        downloader.dl_etf_daily.assert_not_called()
+        storage.save_etf_daily.assert_not_called()
 
 
 if __name__ == "__main__":
