@@ -36,7 +36,7 @@ def _dl_etf_daily_wrapper(
     """Discard period and adjust parameters, delegate to dl_etf_daily."""
     downloader = Downloader()
     result = downloader.dl_etf_daily(
-        ts_code=etf_id,
+        etf_id=etf_id,
         start_date=start_date,
         end_date=end_date,
     )

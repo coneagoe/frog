@@ -281,6 +281,18 @@ def download_a_stock_basic(
     return df
 
 
+def _get_etf_suffix(etf_id: str) -> str:
+    """Get the exchange suffix for an ETF code.
+
+    Shanghai ETFs: 510xxx, 511xxx, 512xxx, 513xxx, 515xxx, 516xxx, 517xxx, 518xxx, 519xxx, 530xxx, 531xxx, 532xxx, 533xxx
+    Shenzhen ETFs: 159xxx, 160xxx, 161xxx, 162xxx, 163xxx, 164xxx
+    """
+    if etf_id.startswith(("159", "160", "161", "162", "163", "164")):
+        return ".SZ"
+    # Default to Shanghai for 510xxx, 511xxx, etc.
+    return ".SH"
+
+
 @retrying.retry(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
@@ -288,7 +300,7 @@ def download_a_stock_basic(
 )
 @get_pro
 def download_etf_daily(
-    ts_code: str = "",
+    etf_id: str = "",   # without suffix
     trade_date: str = "",
     start_date: str = "",
     end_date: str = "",
@@ -300,6 +312,10 @@ def download_etf_daily(
         start_date = convert_date(start_date)
     if end_date:
         end_date = convert_date(end_date)
+
+    # Add suffix based on ETF code
+    ts_code = etf_id + _get_etf_suffix(etf_id)
+
     client = require_pro_client(pro)
 
     df = client.fund_daily(
