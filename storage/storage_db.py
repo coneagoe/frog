@@ -1424,6 +1424,8 @@ class StorageDb:
         """
         try:
             df = df.rename(columns=COL_MAP_ETF_DAILY)
+            # 去除ETF代码的后缀（如 .SH, .SZ）
+            df[COL_ETF_ID] = df[COL_ETF_ID].str.split(".").str[0]
             # 转换日期格式
             df[COL_DATE] = pd.to_datetime(df[COL_DATE], format="%Y%m%d").dt.date
 
@@ -1461,11 +1463,13 @@ class StorageDb:
             pd.DataFrame: ETF日线数据
         """
         try:
+            # Use IN clause instead of ANY for simpler parameter handling
+            placeholders = ", ".join(["%s"] * len(etf_ids))
             sql = f"""
             SELECT * FROM {tb_name_etf_daily}
-            WHERE "{COL_ETF_ID}" = ANY(%s)
+            WHERE "{COL_ETF_ID}" IN ({placeholders})
             """
-            params: list[Any] = [etf_ids]
+            params: list[Any] = list(etf_ids)
 
             if start_date:
                 sql += f' AND "{COL_DATE}" >= %s'
