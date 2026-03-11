@@ -1447,7 +1447,7 @@ class StorageDb:
 
     def load_etf_daily(
         self,
-        etf_ids: list[str],
+        etf_id: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
     ) -> pd.DataFrame:
@@ -1455,7 +1455,6 @@ class StorageDb:
         加载ETF日线数据
 
         Args:
-            etf_ids: ETF代码列表
             start_date: 开始日期 (YYYY-MM-DD格式)
             end_date: 结束日期 (YYYY-MM-DD格式)
 
@@ -1463,13 +1462,11 @@ class StorageDb:
             pd.DataFrame: ETF日线数据
         """
         try:
-            # Use IN clause instead of ANY for simpler parameter handling
-            placeholders = ", ".join(["%s"] * len(etf_ids))
             sql = f"""
             SELECT * FROM {tb_name_etf_daily}
-            WHERE "{COL_ETF_ID}" IN ({placeholders})
+            WHERE "{COL_ETF_ID}" = %s
             """
-            params: list[Any] = list(etf_ids)
+            params: list[Any] = [etf_id]
 
             if start_date:
                 sql += f' AND "{COL_DATE}" >= %s'
@@ -1478,9 +1475,11 @@ class StorageDb:
                 sql += f' AND "{COL_DATE}" <= %s'
                 params.append(end_date)
 
-            sql += f' ORDER BY "{COL_ETF_ID}", "{COL_DATE}"'
+            sql += f' ORDER BY "{COL_DATE}"'
 
-            df = pd.read_sql(sql, self.engine, params=params)
+            # Convert list to tuple for pandas read_sql compatibility
+            sql_params = tuple(params) if params else None
+            df = pd.read_sql(sql, self.engine, params=sql_params)
             logger.info(f"ETF日线数据加载成功，数据条数: {len(df)}")
             return df
 

@@ -46,12 +46,30 @@ def load_history_data_etf(
     end_date: str,
     adjust: AdjustType = AdjustType.HFQ,
 ) -> pd.DataFrame:
-    return get_storage().load_history_data_etf(
-        etf_id=security_id,
-        period=period,
+    # Keep signature for compatibility; etf_daily backend does not support period/adjust.
+    if period != PeriodType.DAILY or adjust != AdjustType.HFQ:
+        logging.warning(
+            "load_history_data_etf now uses etf_daily only; period/adjust are ignored (%s, %s)",
+            period,
+            adjust,
+        )
+
+    return _load_etf_daily_wrapper(
+        security_id=security_id,
         start_date=start_date,
         end_date=end_date,
-        adjust=adjust,
+    )
+
+
+def _load_etf_daily_wrapper(
+    security_id: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    return get_storage().load_etf_daily(
+        etf_id=security_id,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
