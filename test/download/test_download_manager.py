@@ -56,7 +56,7 @@ class TestDownloadManager:
         assert result is True
         storage.get_last_record.assert_called_once_with("etf_daily", "510300")
         downloader.dl_etf_daily.assert_called_once_with(
-            ts_code="510300",
+            etf_id="510300",
             start_date="20240101",
             end_date="20240102",
         )
@@ -93,7 +93,7 @@ class TestDownloadManager:
         assert result is True
         storage.get_last_record.assert_called_once_with("etf_daily", "510500")
         downloader.dl_etf_daily.assert_called_once_with(
-            ts_code="510500",
+            etf_id="510500",
             start_date="20240101",
             end_date="20240108",
         )
@@ -130,7 +130,7 @@ class TestDownloadManager:
 
         assert result is True
         downloader.dl_etf_daily.assert_called_once_with(
-            ts_code="510300",
+            etf_id="510300",
             start_date="20240116",
             end_date="20240117",
         )

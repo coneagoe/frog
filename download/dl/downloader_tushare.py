@@ -284,7 +284,8 @@ def download_a_stock_basic(
 def _get_etf_suffix(etf_id: str) -> str:
     """Get the exchange suffix for an ETF code.
 
-    Shanghai ETFs: 510xxx, 511xxx, 512xxx, 513xxx, 515xxx, 516xxx, 517xxx, 518xxx, 519xxx, 530xxx, 531xxx, 532xxx, 533xxx
+    Shanghai ETFs: 510xxx, 511xxx, 512xxx, 513xxx, 515xxx, 516xxx, 517xxx,
+                   518xxx, 519xxx, 530xxx, 531xxx, 532xxx, 533xxx
     Shenzhen ETFs: 159xxx, 160xxx, 161xxx, 162xxx, 163xxx, 164xxx
     """
     if etf_id.startswith(("159", "160", "161", "162", "163", "164")):
@@ -300,7 +301,7 @@ def _get_etf_suffix(etf_id: str) -> str:
 )
 @get_pro
 def download_etf_daily(
-    etf_id: str = "",   # without suffix
+    etf_id: str = "",  # without suffix
     trade_date: str = "",
     start_date: str = "",
     end_date: str = "",
