@@ -224,6 +224,13 @@ class MyStrategy(bt.Strategy):
                         2,
                     )
                 else:
+                    # 处理 open_bar 可能为 None 的情况
+                    open_bar = self.context[i].open_bar
+                    close_bar = self.context[i].close_bar
+                    holding_time = (
+                        close_bar - open_bar if open_bar and close_bar else None
+                    )
+
                     new_trade = Trade(
                         open_price=self.context[i].open_price,
                         close_price=self.context[i].close_price,
@@ -232,11 +239,10 @@ class MyStrategy(bt.Strategy):
                             2,
                         ),
                         open_time=self.context[i].open_time,  # type: ignore
-                        open_bar=self.context[i].open_bar,  # type: ignore
+                        open_bar=open_bar,  # type: ignore
                         close_time=self.context[i].close_time,
-                        close_bar=self.context[i].close_bar,
-                        holding_time=self.context[i].close_bar  # type: ignore
-                        - self.context[i].open_bar,
+                        close_bar=close_bar,
+                        holding_time=holding_time,
                     )
                     self.trades[stock_name].append(new_trade)
                 self.context[i].reset()
