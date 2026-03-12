@@ -9,6 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import conf  # noqa: E402
 from backtest.bt_common import run  # noqa: E402
+from backtest.my_strategy import MyStrategy  # noqa: E402
 from common.const import (  # noqa: E402
     COL_DATE,
     COL_IPO_DATE,
@@ -53,7 +54,8 @@ def load_all_stocks(start_date: str, end_date: str) -> list:
     return df[COL_STOCK_ID].tolist()
 
 
-class SmallMarketCapitalStrategy(bt.Strategy):
+class SmallMarketCapitalStrategy(MyStrategy):
+    stocks: list[str] = []
     params = (
         ("top_n", 50),  # 按市值排序前N只
         ("buy_count", 20),  # 每次买入数量
@@ -61,12 +63,15 @@ class SmallMarketCapitalStrategy(bt.Strategy):
     )
 
     def __init__(self):
-        self.stock_ids = [d._name for d in self.datas]
+        self.stocks = [d._name for d in self.datas]
+        super().__init__()
         self.last_month = None
         self.last_year = None
         self.last_date = None
 
     def next(self):
+        super().next()
+
         current_date = self.datas[0].datetime.date(0)
         self.last_date = current_date
 
@@ -121,7 +126,7 @@ class SmallMarketCapitalStrategy(bt.Strategy):
         df = pd.read_sql(
             sql,
             storage.engine,
-            params=(current_date, current_date, self.stock_ids),  # type: ignore[arg-type]
+            params=(current_date, current_date, self.stocks),  # type: ignore[arg-type]
         )
 
         if df.empty:
@@ -165,9 +170,6 @@ class SmallMarketCapitalStrategy(bt.Strategy):
                 if data._name == stock:
                     self.order_target_percent(data, target=target_weight)
                     break
-
-    def stop(self):
-        print(f"Ending Value: {self.broker.getvalue():.2f}")
 
 
 if __name__ == "__main__":
