@@ -78,10 +78,13 @@ def calculate_daily_win_rate(df: pd.DataFrame, start_date: str, end_date: str) -
 
 
 def main():
-    # 股票代码: 青岛啤酒 600600, 重庆啤酒 600132
+    # 股票代码
     stocks = {
         "青岛啤酒": "600600",
         "重庆啤酒": "600132",
+        "燕京啤酒": "000729",
+        "惠泉啤酒": "600573",
+        "珠江啤酒": "002461",
     }
 
     start_date = "20100101"
