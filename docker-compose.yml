@@ -89,6 +89,12 @@ x-airflow-common: &airflow-common
     # Limit Celery worker concurrency to prevent Postgres connection exhaustion.
     # Each worker process creates its own DB connection pool; too many workers = too many clients.
     AIRFLOW__CELERY__WORKER_CONCURRENCY: "2"
+    # Prevent "Executor reports task instance finished (failed) although the task says it's queued":
+    # Default prefetch_multiplier=4 causes each worker to pre-claim 4x tasks; if the worker is
+    # OOM-killed, those pre-claimed tasks are marked FAILED by Celery while Airflow DB still shows
+    # "queued", triggering the mismatch error. Setting to 1 ensures each worker slot holds exactly
+    # 1 task at a time, so a worker crash affects at most 1 task per slot.
+    AIRFLOW__CELERY__WORKER_PREFETCH_MULTIPLIER: "1"
     # Make project packages (common/, download/, stock/, etc.) importable from DAGs
     PYTHONPATH: /opt/airflow/frog
     FROG_PROJECT_ROOT: /opt/airflow/frog
