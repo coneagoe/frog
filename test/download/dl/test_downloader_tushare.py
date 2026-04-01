@@ -179,5 +179,66 @@ def test_download_daily_basic_a_stock_ts_empty_result(
     assert len(result) == 0
 
 
+def test_download_stk_holdernumber_missing_token_raises(
+    downloader_ts_module, monkeypatch
+):
+    """无 token 时应抛出 ConnectionError。"""
+    module, ts_stub, _ = downloader_ts_module
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+
+    with pytest.raises(ConnectionError, match="Tushare token is missing"):
+        module.download_stk_holdernumber(ts_code="600600.SH")
+
+    ts_stub.pro_api.assert_not_called()
+
+
+def test_download_stk_holdernumber_success(downloader_ts_module, monkeypatch):
+    """正常调用时验证参数传递和返回值。"""
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    mock_data = pd.DataFrame(
+        {
+            "ts_code": ["600600.SH"] * 3,
+            "ann_date": ["20240101", "20230701", "20230101"],
+            "end_date": ["20231231", "20230630", "20221231"],
+            "holder_num": [120000, 118000, 115000],
+        }
+    )
+    pro_stub.stk_holdernumber = Mock(return_value=mock_data)
+
+    result = module.download_stk_holdernumber(
+        ts_code="600600.SH",
+        start_date="2023-01-01",
+        end_date="2024-01-01",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.stk_holdernumber.assert_called_once_with(
+        ts_code="600600.SH",
+        start_date="20230101",
+        end_date="20240101",
+        fields=module.stk_holdernumber_fields,
+    )
+    pd.testing.assert_frame_equal(result, mock_data)
+
+
+def test_download_stk_holdernumber_all_data(downloader_ts_module, monkeypatch):
+    """不传日期时 start_date/end_date 均为空字符串（获取全量历史）。"""
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    pro_stub.stk_holdernumber = Mock(return_value=pd.DataFrame())
+
+    module.download_stk_holdernumber(ts_code="600600.SH")
+
+    pro_stub.stk_holdernumber.assert_called_once_with(
+        ts_code="600600.SH",
+        start_date="",
+        end_date="",
+        fields=module.stk_holdernumber_fields,
+    )
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
