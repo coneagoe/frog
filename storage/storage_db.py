@@ -60,6 +60,9 @@ from common.const import (
     COL_STOCK_NAME,
     COL_SUSPEND_TIMING,
     COL_SUSPEND_TYPE,
+    COL_ANN_DATE,
+    COL_END_DATE,
+    COL_HOLDER_NUM,
     COL_TOTAL_MV,
     COL_TOTAL_SHARE,
     COL_TURNOVER_RATE,
@@ -97,6 +100,7 @@ from .model import (
     tb_name_ingredient_300,
     tb_name_ingredient_500,
     tb_name_stk_limit_a_stock,
+    tb_name_stk_holdernumber,
     tb_name_suspend_d_a_stock,
 )
 
@@ -139,6 +143,14 @@ COL_MAP_SUSPEND_D = {
     "trade_date": COL_DATE,
     "suspend_timing": COL_SUSPEND_TIMING,
     "suspend_type": COL_SUSPEND_TYPE,
+}
+
+
+COL_MAP_STK_HOLDERNUMBER = {
+    "ts_code": COL_STOCK_ID,
+    "ann_date": COL_ANN_DATE,
+    "end_date": COL_END_DATE,
+    "holder_num": COL_HOLDER_NUM,
 }
 
 
@@ -1271,6 +1283,69 @@ class StorageDb:
         except Exception as e:
             logger.error(f"保存停复牌数据失败: {str(e)}")
             return False
+
+    def save_stk_holdernumber(self, df: pd.DataFrame) -> bool:
+        """
+        保存股东人数数据到对应的数据库表
+
+        Args:
+            df: 股东人数数据DataFrame（来自TuShare stk_holdernumber接口）
+
+        Returns:
+            bool: 保存是否成功
+        """
+        try:
+            df = df.rename(columns=COL_MAP_STK_HOLDERNUMBER)
+            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
+            df = df[list(COL_MAP_STK_HOLDERNUMBER.values())]
+            # 转换公告日期和截止日期为 YYYY-MM-DD 格式
+            for col in [COL_ANN_DATE, COL_END_DATE]:
+                df[col] = pd.to_datetime(
+                    df[col], format="%Y%m%d", errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+            df.to_sql(
+                tb_name_stk_holdernumber,
+                self.engine,
+                if_exists="append",
+                index=False,
+                method="multi",
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"保存股东人数数据失败: {str(e)}")
+            return False
+
+    @connect_once
+    def get_last_stk_holdernumber_ann_date(self, stock_id: str) -> Optional[str]:
+        """
+        获取指定股票在 stk_holdernumber 表中最新的公告日期
+
+        Args:
+            stock_id: 股票代码（不含交易所后缀）
+
+        Returns:
+            日期字符串（YYYY-MM-DD），无记录时返回 None
+        """
+        try:
+            assert self.cursor is not None, "Database cursor should not be None"
+            sql = textwrap.dedent(
+                f"""\
+            SELECT "{COL_ANN_DATE}" FROM {tb_name_stk_holdernumber}
+            WHERE "{COL_STOCK_ID}" = %s
+            ORDER BY "{COL_ANN_DATE}" DESC
+            LIMIT 1
+            """
+            )
+            self.cursor.execute(sql, (stock_id,))
+            result = self.cursor.fetchone()
+            if result:
+                return str(result[COL_ANN_DATE])
+            return None
+
+        except Exception as e:
+            logger.error(f"获取股东人数最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}")
+            return None
 
     def save_a_stock_basic(self, df: pd.DataFrame) -> bool:
         """

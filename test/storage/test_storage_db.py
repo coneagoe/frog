@@ -9,12 +9,15 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 from common.const import (  # noqa: E402
     COL_AMOUNT,
+    COL_ANN_DATE,
     COL_CHANGE_RATE,
     COL_CLOSE,
     COL_DATE,
+    COL_END_DATE,
     COL_ETF_ID,
     COL_ETF_NAME,
     COL_HIGH,
+    COL_HOLDER_NUM,
     COL_LOW,
     COL_OPEN,
     COL_STOCK_ID,
@@ -31,6 +34,7 @@ from storage.model import (  # noqa: E402
     tb_name_history_data_weekly_a_stock_qfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
+    tb_name_stk_holdernumber,
 )
 from storage.storage_db import (  # noqa: E402
     ConnectionError,
@@ -2325,6 +2329,147 @@ class TestStorageDb:
         assert 'AND "日期" >= %s' not in sql_query  # 不应该有开始日期条件
         assert 'AND "日期" <= %s' in sql_query  # 使用实际的列名
         assert kwargs["params"] == ("00700", "2023-01-07")
+
+
+class TestSaveAndGetStkHoldernumber:
+    @pytest.fixture
+    def mock_config(self):
+        config = Mock(spec=StorageConfig)
+        config.get_db_host.return_value = "localhost"
+        config.get_db_port.return_value = 5432
+        config.get_db_name.return_value = "test_db"
+        config.get_db_username.return_value = "test_user"
+        config.get_db_password.return_value = "test_pass"
+        return config
+
+    @pytest.fixture
+    def storage_db(self, mock_config, monkeypatch):
+        reset_storage()
+        monkeypatch.setattr("storage.storage_db.create_engine", Mock())
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+        monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
+        return get_storage(mock_config)
+
+    @pytest.fixture
+    def sqlite_storage(self, tmp_path, monkeypatch):
+        """SQLite 引擎支持的 StorageDb，用于验证实际写入内容"""
+        from sqlalchemy import create_engine as real_create_engine
+
+        from storage.model import Base
+        from storage.storage_db import StorageDb
+
+        sqlite_url = f"sqlite:///{tmp_path}/test.db"
+        engine = real_create_engine(sqlite_url)
+        Base.metadata.create_all(engine)
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        monkeypatch.setattr(
+            "storage.storage_db.create_engine", lambda *a, **kw: engine
+        )
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+        monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        db = get_storage(mock_config)
+        db.engine = engine
+        return db, engine
+
+    def _make_raw_df(self):
+        """返回 TuShare 原始格式的 DataFrame（YYYYMMDD 日期，含交易所后缀）"""
+        return pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ", "600000.SH"],
+                "ann_date": ["20240315", "20240316"],
+                "end_date": ["20231231", "20231231"],
+                "holder_num": [450000, 320000],
+            }
+        )
+
+    def test_save_stk_holdernumber_success(self, storage_db):
+        """to_sql 被调用一次，使用正确的表名和参数"""
+        df = self._make_raw_df()
+        with patch.object(pd.DataFrame, "to_sql") as mock_to_sql:
+            result = storage_db.save_stk_holdernumber(df)
+            assert result is True
+            mock_to_sql.assert_called_once()
+            call_args = mock_to_sql.call_args
+            assert call_args[0][0] == tb_name_stk_holdernumber
+            assert call_args[1]["if_exists"] == "append"
+            assert call_args[1]["method"] == "multi"
+
+    def test_save_stk_holdernumber_converts_dates(self, sqlite_storage):
+        """ann_date 和 end_date 必须从 YYYYMMDD 转换为 YYYY-MM-DD"""
+        db, engine = sqlite_storage
+        df = self._make_raw_df()
+        result = db.save_stk_holdernumber(df)
+        assert result is True
+
+        saved = pd.read_sql(f"SELECT * FROM {tb_name_stk_holdernumber}", engine)
+        assert saved[COL_ANN_DATE].iloc[0] in ("2024-03-15", "2024-03-16")
+        assert saved[COL_END_DATE].iloc[0] == "2023-12-31"
+
+    def test_save_stk_holdernumber_strips_exchange_suffix(self, sqlite_storage):
+        """股票代码必须去掉 .SH/.SZ 后缀"""
+        db, engine = sqlite_storage
+        df = self._make_raw_df()
+        db.save_stk_holdernumber(df)
+
+        saved = pd.read_sql(f"SELECT * FROM {tb_name_stk_holdernumber}", engine)
+        codes = set(saved[COL_STOCK_ID].tolist())
+        assert "000001" in codes
+        assert "600000" in codes
+        assert not any("." in c for c in codes)
+
+    def test_save_stk_holdernumber_failure(self, storage_db):
+        """to_sql 抛出异常时应返回 False"""
+        df = self._make_raw_df()
+        with patch.object(pd.DataFrame, "to_sql", side_effect=Exception("DB error")):
+            result = storage_db.save_stk_holdernumber(df)
+            assert result is False
+
+    def test_get_last_stk_holdernumber_ann_date_success(self, storage_db):
+        """有记录时返回公告日期字符串"""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+        mock_cursor.fetchone.return_value = {COL_ANN_DATE: "2024-03-15"}
+
+        result = storage_db.get_last_stk_holdernumber_ann_date("000001")
+
+        assert result == "2024-03-15"
+        mock_cursor.execute.assert_called_once()
+        sql_called = mock_cursor.execute.call_args[0][0]
+        assert COL_ANN_DATE in sql_called
+        assert tb_name_stk_holdernumber in sql_called
+
+    def test_get_last_stk_holdernumber_ann_date_no_data(self, storage_db):
+        """无记录时返回 None"""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+        mock_cursor.fetchone.return_value = None
+
+        result = storage_db.get_last_stk_holdernumber_ann_date("000001")
+
+        assert result is None
+
+    def test_get_last_stk_holdernumber_ann_date_db_error(self, storage_db):
+        """数据库异常时返回 None"""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+        mock_cursor.execute.side_effect = Exception("connection lost")
+
+        result = storage_db.get_last_stk_holdernumber_ann_date("000001")
+
+        assert result is None
 
 
 if __name__ == "__main__":
