@@ -13,6 +13,7 @@ from .model import (
     tb_name_history_data_weekly_hk_stock_hfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
+    tb_name_stk_holdernumber,
     tb_name_stk_limit_a_stock,
 )
 from .storage_db import (
@@ -48,4 +49,5 @@ __all__ = [
     "tb_name_a_stock_basic",
     "tb_name_daily_basic_a_stock",
     "tb_name_stk_limit_a_stock",
+    "tb_name_stk_holdernumber",
 ]

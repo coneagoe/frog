@@ -68,6 +68,11 @@ COL_LIMIT_STATUS = "涨跌停状态"
 COL_SUSPEND_TIMING = "停牌时间段"
 COL_SUSPEND_TYPE = "停复牌类型"
 
+# TuShare stk_holdernumber
+COL_ANN_DATE = "公告日期"
+COL_END_DATE = "截止日期"
+COL_HOLDER_NUM = "股东人数"
+
 # TuShare stock_basic
 COL_TS_CODE = "TS代码"
 COL_AREA = "地域"

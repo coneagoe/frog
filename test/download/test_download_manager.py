@@ -240,5 +240,97 @@ class TestDownloadManager:
         storage.save_etf_daily.assert_not_called()
 
 
+class TestDownloadStkHoldernumberAStock:
+    def test_download_success_no_prior_data(self, monkeypatch):
+        """无历史记录时，从 default_start_date 开始下载并保存"""
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        mock_df = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ"],
+                "ann_date": ["20240315"],
+                "end_date": ["20231231"],
+                "holder_num": [450000],
+            }
+        )
+        storage.get_last_stk_holdernumber_ann_date.return_value = None
+        downloader.dl_stk_holdernumber.return_value = mock_df
+        storage.save_stk_holdernumber.return_value = True
+
+        result = manager.download_stk_holdernumber_a_stock(
+            "000001", default_start_date="2020-01-01", end_date="2024-03-20"
+        )
+
+        assert result is True
+        downloader.dl_stk_holdernumber.assert_called_once_with(
+            ts_code="000001.SZ", start_date="2020-01-01", end_date="2024-03-20"
+        )
+        storage.save_stk_holdernumber.assert_called_once_with(mock_df)
+
+    def test_download_incremental_from_last_ann_date(self, monkeypatch):
+        """有历史记录时，从 last_ann_date + 1 天开始下载"""
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        storage.get_last_stk_holdernumber_ann_date.return_value = "2024-03-10"
+        downloader.dl_stk_holdernumber.return_value = pd.DataFrame(
+            {"ts_code": ["000001.SZ"], "ann_date": ["20240315"], "end_date": ["20231231"], "holder_num": [460000]}
+        )
+        storage.save_stk_holdernumber.return_value = True
+
+        manager.download_stk_holdernumber_a_stock("000001", end_date="2024-03-20")
+
+        downloader.dl_stk_holdernumber.assert_called_once_with(
+            ts_code="000001.SZ", start_date="2024-03-11", end_date="2024-03-20"
+        )
+
+    def test_download_already_latest(self, monkeypatch):
+        """last_ann_date + 1 > end_date 时跳过下载"""
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        storage.get_last_stk_holdernumber_ann_date.return_value = "2024-03-20"
+
+        result = manager.download_stk_holdernumber_a_stock("000001", end_date="2024-03-20")
+
+        assert result is True
+        downloader.dl_stk_holdernumber.assert_not_called()
+        storage.save_stk_holdernumber.assert_not_called()
+
+    def test_download_empty_result_skipped(self, monkeypatch):
+        """下载返回空 DataFrame 时跳过，不调用 save"""
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        storage.get_last_stk_holdernumber_ann_date.return_value = None
+        downloader.dl_stk_holdernumber.return_value = pd.DataFrame()
+
+        result = manager.download_stk_holdernumber_a_stock("000001", end_date="2024-03-20")
+
+        assert result is True
+        storage.save_stk_holdernumber.assert_not_called()
+
+    def test_ts_code_sh_for_6_prefix(self, monkeypatch):
+        """以 6 开头的股票代码应使用 .SH 后缀"""
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        storage.get_last_stk_holdernumber_ann_date.return_value = None
+        downloader.dl_stk_holdernumber.return_value = pd.DataFrame()
+
+        manager.download_stk_holdernumber_a_stock("600000", end_date="2024-03-20")
+
+        call_kwargs = downloader.dl_stk_holdernumber.call_args[1]
+        assert call_kwargs["ts_code"] == "600000.SH"
+
+    def test_ts_code_sz_for_0_prefix(self, monkeypatch):
+        """以 0 开头的股票代码应使用 .SZ 后缀"""
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        storage.get_last_stk_holdernumber_ann_date.return_value = None
+        downloader.dl_stk_holdernumber.return_value = pd.DataFrame()
+
+        manager.download_stk_holdernumber_a_stock("000001", end_date="2024-03-20")
+
+        call_kwargs = downloader.dl_stk_holdernumber.call_args[1]
+        assert call_kwargs["ts_code"] == "000001.SZ"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
