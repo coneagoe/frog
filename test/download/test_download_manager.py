@@ -273,7 +273,12 @@ class TestDownloadStkHoldernumberAStock:
 
         storage.get_last_stk_holdernumber_ann_date.return_value = "2024-03-10"
         downloader.dl_stk_holdernumber.return_value = pd.DataFrame(
-            {"ts_code": ["000001.SZ"], "ann_date": ["20240315"], "end_date": ["20231231"], "holder_num": [460000]}
+            {
+                "ts_code": ["000001.SZ"],
+                "ann_date": ["20240315"],
+                "end_date": ["20231231"],
+                "holder_num": [460000],
+            }
         )
         storage.save_stk_holdernumber.return_value = True
 
@@ -289,7 +294,9 @@ class TestDownloadStkHoldernumberAStock:
 
         storage.get_last_stk_holdernumber_ann_date.return_value = "2024-03-20"
 
-        result = manager.download_stk_holdernumber_a_stock("000001", end_date="2024-03-20")
+        result = manager.download_stk_holdernumber_a_stock(
+            "000001", end_date="2024-03-20"
+        )
 
         assert result is True
         downloader.dl_stk_holdernumber.assert_not_called()
@@ -302,7 +309,9 @@ class TestDownloadStkHoldernumberAStock:
         storage.get_last_stk_holdernumber_ann_date.return_value = None
         downloader.dl_stk_holdernumber.return_value = pd.DataFrame()
 
-        result = manager.download_stk_holdernumber_a_stock("000001", end_date="2024-03-20")
+        result = manager.download_stk_holdernumber_a_stock(
+            "000001", end_date="2024-03-20"
+        )
 
         assert result is True
         storage.save_stk_holdernumber.assert_not_called()

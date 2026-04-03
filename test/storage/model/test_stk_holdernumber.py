@@ -32,14 +32,18 @@ class TestStkHoldernumberModel:
     def test_columns_exist(self, sqlite_engine):
         Base.metadata.create_all(sqlite_engine)
         inspector = inspect(sqlite_engine)
-        columns = [col["name"] for col in inspector.get_columns(tb_name_stk_holdernumber)]
+        columns = [
+            col["name"] for col in inspector.get_columns(tb_name_stk_holdernumber)
+        ]
         for expected in ["股票代码", "公告日期", "截止日期", "股东人数"]:
             assert expected in columns, f"列 '{expected}' 不存在"
 
     def test_primary_keys(self, sqlite_engine):
         Base.metadata.create_all(sqlite_engine)
         inspector = inspect(sqlite_engine)
-        pk_cols = inspector.get_pk_constraint(tb_name_stk_holdernumber)["constrained_columns"]
+        pk_cols = inspector.get_pk_constraint(tb_name_stk_holdernumber)[
+            "constrained_columns"
+        ]
         assert "股票代码" in pk_cols
         assert "公告日期" in pk_cols
 

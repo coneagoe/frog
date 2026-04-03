@@ -15,6 +15,7 @@ from common.const import (
     COL_ACT_ENT_TYPE,
     COL_ACT_NAME,
     COL_AMOUNT,
+    COL_ANN_DATE,
     COL_AREA,
     COL_CHANGE,
     COL_CHANGE_RATE,
@@ -28,6 +29,7 @@ from common.const import (
     COL_DOWN_LIMIT,
     COL_DV_RATIO,
     COL_DV_TTM,
+    COL_END_DATE,
     COL_ENNAME,
     COL_ETF_EXT_NAME,
     COL_ETF_ID,
@@ -38,6 +40,7 @@ from common.const import (
     COL_FREE_SHARE,
     COL_FULLNAME,
     COL_HIGH,
+    COL_HOLDER_NUM,
     COL_INDEX_CODE,
     COL_INDEX_NAME,
     COL_INDUSTRY,
@@ -60,9 +63,6 @@ from common.const import (
     COL_STOCK_NAME,
     COL_SUSPEND_TIMING,
     COL_SUSPEND_TYPE,
-    COL_ANN_DATE,
-    COL_END_DATE,
-    COL_HOLDER_NUM,
     COL_TOTAL_MV,
     COL_TOTAL_SHARE,
     COL_TURNOVER_RATE,
@@ -99,8 +99,8 @@ from .model import (
     tb_name_history_data_weekly_hk_stock_hfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
-    tb_name_stk_limit_a_stock,
     tb_name_stk_holdernumber,
+    tb_name_stk_limit_a_stock,
     tb_name_suspend_d_a_stock,
 )
 
@@ -1340,11 +1340,13 @@ class StorageDb:
             self.cursor.execute(sql, (stock_id,))
             result = self.cursor.fetchone()
             if result:
-                return str(result[COL_ANN_DATE])
+                return str(result[0])
             return None
 
         except Exception as e:
-            logger.error(f"获取股东人数最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}")
+            logger.error(
+                f"获取股东人数最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}"
+            )
             return None
 
     def save_a_stock_basic(self, df: pd.DataFrame) -> bool:

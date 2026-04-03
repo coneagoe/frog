@@ -17,7 +17,6 @@ from common.const import (  # noqa: E402
     COL_ETF_ID,
     COL_ETF_NAME,
     COL_HIGH,
-    COL_HOLDER_NUM,
     COL_LOW,
     COL_OPEN,
     COL_STOCK_ID,
@@ -2356,7 +2355,6 @@ class TestSaveAndGetStkHoldernumber:
         from sqlalchemy import create_engine as real_create_engine
 
         from storage.model import Base
-        from storage.storage_db import StorageDb
 
         sqlite_url = f"sqlite:///{tmp_path}/test.db"
         engine = real_create_engine(sqlite_url)
@@ -2364,9 +2362,7 @@ class TestSaveAndGetStkHoldernumber:
 
         reset_storage()
         mock_config = Mock(spec=StorageConfig)
-        monkeypatch.setattr(
-            "storage.storage_db.create_engine", lambda *a, **kw: engine
-        )
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
         monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
         monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
         mock_config.get_db_host.return_value = "localhost"
@@ -2437,7 +2433,7 @@ class TestSaveAndGetStkHoldernumber:
         mock_cursor = Mock()
         storage_db.connection = mock_connection
         storage_db.cursor = mock_cursor
-        mock_cursor.fetchone.return_value = {COL_ANN_DATE: "2024-03-15"}
+        mock_cursor.fetchone.return_value = ("2024-03-15",)
 
         result = storage_db.get_last_stk_holdernumber_ann_date("000001")
 

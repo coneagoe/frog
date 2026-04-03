@@ -12,7 +12,6 @@ from storage import (
     tb_name_general_info_stock,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
-    tb_name_stk_holdernumber,
 )
 from storage.model import (
     tb_name_a_stock_basic,
