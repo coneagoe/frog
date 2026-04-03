@@ -31,10 +31,7 @@ def download_stk_holdernumber_partition_task(*, partition_id: int, **context):
         AirflowSkipException: If partition is not active
         Exception: If any stock download fails
     """
-    from common_dags import (  # noqa: E402
-        get_partition_count,
-        get_partitioned_ids,
-    )
+    from common_dags import get_partition_count, get_partitioned_ids  # noqa: E402
 
     from common.const import COL_STOCK_ID  # noqa: E402
     from download import DownloadManager  # noqa: E402
