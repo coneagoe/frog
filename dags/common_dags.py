@@ -85,6 +85,11 @@ def get_partition_count() -> int:
     return DEFAULT_PARTITION_COUNT
 
 
+def get_partition_ids() -> range:
+    """Return the active partition ids derived from the partition count."""
+    return range(get_partition_count())
+
+
 def get_partitioned_ids(
     stock_ids: list[str], partition_id: int, partition_count: int
 ) -> list[str]:
