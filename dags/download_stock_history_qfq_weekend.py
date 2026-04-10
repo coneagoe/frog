@@ -3,7 +3,6 @@
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import Final
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -17,8 +16,13 @@ else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.const import AdjustType, PeriodType, SecurityType  # noqa: E402
-
-MAX_PARTITIONS: Final = 16
+from common_dags import (  # noqa: E402
+    LOCAL_TZ,
+    get_default_args,
+    get_partition_count,
+    get_partition_ids,
+    get_partitioned_ids,
+)
 
 
 def reset_stock_history_qfq_table(**context):
@@ -34,7 +38,7 @@ def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
     """Download A-share QFQ history data for a specific partition.
 
     Args:
-        partition_id: The partition identifier (0-15)
+        partition_id: The partition identifier (0-based)
 
     Returns:
         Success message with download statistics
@@ -43,17 +47,11 @@ def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
         AirflowSkipException: If partition is not active
         Exception: If download fails
     """
-    from common_dags import (  # noqa: E402
-        LOCAL_TZ,
-        get_partition_count,
-        get_partitioned_ids,
-    )
-
     from common.const import COL_STOCK_ID  # noqa: E402
     from download import DownloadManager  # noqa: E402
     from storage import get_storage  # noqa: E402
 
-    partition_count = min(get_partition_count(), MAX_PARTITIONS)
+    partition_count = get_partition_count()
     if partition_id >= partition_count:
         raise AirflowSkipException(
             f"partition_id={partition_id} >= partition_count={partition_count}, skip"
@@ -106,9 +104,7 @@ def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
 # Create DAG
 dag = DAG(
     "download_stock_history_qfq_weekend",
-    default_args=__import__(
-        "common_dags", fromlist=["get_default_args"]
-    ).get_default_args(),
+    default_args=get_default_args(),
     description="Weekend stock history QFQ download",
     schedule="0 3 * * 0",
     catchup=False,
@@ -123,7 +119,7 @@ task_reset_stock_history_qfq = PythonOperator(
 )
 
 # Create partition tasks with dependency on reset task
-for _pid in range(MAX_PARTITIONS):
+for _pid in get_partition_ids():
     task = PythonOperator(
         task_id=f"download_stock_history_qfq_p{_pid:02d}",
         python_callable=download_stock_history_qfq_partition_task,

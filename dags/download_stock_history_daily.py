@@ -3,7 +3,6 @@
 import os
 import sys
 from datetime import datetime
-from typing import Final
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -17,15 +16,20 @@ else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.const import AdjustType, PeriodType  # noqa: E402
-
-MAX_PARTITIONS: Final = 16
+from common_dags import (  # noqa: E402
+    LOCAL_TZ,
+    get_default_args,
+    get_partition_count,
+    get_partition_ids,
+    get_partitioned_ids,
+)
 
 
 def download_stock_history_hfq_partition_task(*, partition_id: int, **context):
     """Download A-share HFQ history data for a specific partition.
 
     Args:
-        partition_id: The partition identifier (0-15)
+        partition_id: The partition identifier (0-based)
 
     Returns:
         Success message with download statistics
@@ -34,12 +38,6 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, **context):
         AirflowSkipException: If market is closed or partition is not active
         Exception: If download fails
     """
-    from common_dags import (  # noqa: E402
-        LOCAL_TZ,
-        get_partition_count,
-        get_partitioned_ids,
-    )
-
     from common import is_a_market_open_today  # noqa: E402
     from common.const import COL_STOCK_ID  # noqa: E402
     from download import DownloadManager  # noqa: E402
@@ -48,7 +46,7 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, **context):
     if not is_a_market_open_today():
         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
 
-    partition_count = min(get_partition_count(), MAX_PARTITIONS)
+    partition_count = get_partition_count()
     if partition_id >= partition_count:
         raise AirflowSkipException(
             f"partition_id={partition_id} >= partition_count={partition_count}, skip"
@@ -101,9 +99,7 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, **context):
 # Create DAG
 dag = DAG(
     "download_stock_history_hfq_weekdays",
-    default_args=__import__(
-        "common_dags", fromlist=["get_default_args"]
-    ).get_default_args(),
+    default_args=get_default_args(),
     description="Weekdays stock history HFQ download",
     schedule="0 16 * * 1-5",
     catchup=False,
@@ -111,7 +107,7 @@ dag = DAG(
 )
 
 # Create partition tasks
-for _pid in range(MAX_PARTITIONS):
+for _pid in get_partition_ids():
     PythonOperator(
         task_id=f"download_stock_history_hfq_p{_pid:02d}",
         python_callable=download_stock_history_hfq_partition_task,
