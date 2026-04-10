@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 
@@ -15,4 +14,5 @@ def test_stock_partition_dags_use_shared_partition_source():
         source = path.read_text(encoding="utf-8")
         assert "MAX_PARTITIONS" not in source
         assert "min(get_partition_count(), MAX_PARTITIONS)" not in source
+        assert "partition_count = get_partition_count()" in source
         assert "get_partition_ids" in source
