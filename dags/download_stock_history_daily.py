@@ -15,7 +15,6 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common.const import AdjustType, PeriodType  # noqa: E402
 from common_dags import (  # noqa: E402
     LOCAL_TZ,
     get_default_args,
@@ -23,6 +22,8 @@ from common_dags import (  # noqa: E402
     get_partition_ids,
     get_partitioned_ids,
 )
+
+from common.const import AdjustType, PeriodType  # noqa: E402
 
 
 def download_stock_history_hfq_partition_task(*, partition_id: int, **context):
