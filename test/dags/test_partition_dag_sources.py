@@ -6,15 +6,32 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
-STOCK_TARGETS = [
-    ROOT / "dags/download_stock_history_daily.py",
-    ROOT / "dags/download_stock_history_qfq_weekend.py",
-    ROOT / "dags/download_stk_holdernumber_weekly.py",
-]
-
-SHARED_PARTITION_PATTERNS = [
-    r"MAX_PARTITIONS",
-    r"min\(get_partition_count\(\), MAX_PARTITIONS\)",
+PARTITION_DAG_SPECS = [
+    (
+        ROOT / "dags/download_stock_history_daily.py",
+        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
+        1,
+    ),
+    (
+        ROOT / "dags/download_stock_history_qfq_weekend.py",
+        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
+        1,
+    ),
+    (
+        ROOT / "dags/download_stk_holdernumber_weekly.py",
+        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
+        1,
+    ),
+    (
+        ROOT / "dags/download_etf_daily.py",
+        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
+        1,
+    ),
+    (
+        ROOT / "dags/download_hk_ggt_history_daily.py",
+        r"partition_tasks\s*=\s*\[\s*PythonOperator[\s\S]*?for\s+pid\s+in\s+get_partition_ids\s*\(\s*\)\s*\]",
+        2,
+    ),
 ]
 
 
@@ -22,35 +39,25 @@ def read_source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("path", STOCK_TARGETS)
-def test_stock_partition_dags_use_shared_partition_ids(path: Path):
+@pytest.mark.parametrize(
+    ("path", "task_pattern", "expected_get_partition_count_calls"),
+    PARTITION_DAG_SPECS,
+)
+def test_partition_dag_sources_follow_shared_partition_contract(
+    path: Path, task_pattern: str, expected_get_partition_count_calls: int
+):
     source = read_source(path)
 
-    for pattern in SHARED_PARTITION_PATTERNS:
-        assert pattern not in source
-    assert re.search(
-        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
-        source,
+    assert not re.search(r"\bMAX_PARTITIONS\b", source)
+    assert len(re.findall(r"\bget_partition_count\s*\(\s*\)", source)) == (
+        expected_get_partition_count_calls
     )
-
-
-def test_etf_partition_tasks_are_driven_by_shared_partition_ids():
-    source = read_source(ROOT / "dags/download_etf_daily.py")
-
-    for pattern in SHARED_PARTITION_PATTERNS:
-        assert pattern not in source
-    assert re.search(
-        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
-        source,
-    )
+    assert re.search(task_pattern, source)
 
 
 def test_hk_partition_dag_uses_shared_partition_count_everywhere():
     source = read_source(ROOT / "dags/download_hk_ggt_history_daily.py")
 
-    for pattern in SHARED_PARTITION_PATTERNS:
-        assert pattern not in source
-    assert len(re.findall(r"\bget_partition_count\s*\(\s*\)", source)) == 2
     assert re.search(
         r"def\s+download_hk_ggt_history_hfq_partition_task\b[\s\S]*?partition_count\s*=\s*get_partition_count\s*\(\s*\)",
         source,
