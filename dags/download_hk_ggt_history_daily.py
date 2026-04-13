@@ -49,7 +49,7 @@ def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, **context):
     """Download HK GGT HFQ history data for a specific partition.
 
     Args:
-        partition_id: The partition identifier (0-15)
+        partition_id: The 0-based partition identifier
 
     Returns:
         Success message with download statistics
