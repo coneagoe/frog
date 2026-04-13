@@ -58,7 +58,10 @@ def test_hk_partition_dag_uses_shared_partition_count_everywhere():
     source = read_source(ROOT / "dags/download_hk_ggt_history_daily.py")
 
     assert re.search(
-        r"def\s+download_hk_ggt_history_hfq_partition_task\b[\s\S]*?partition_count\s*=\s*get_partition_count\s*\(\s*\)",
+        (
+            r"def\s+download_hk_ggt_history_hfq_partition_task\b[\s\S]*?"
+            r"partition_count\s*=\s*get_partition_count\s*\(\s*\)"
+        ),
         source,
     )
     assert re.search(

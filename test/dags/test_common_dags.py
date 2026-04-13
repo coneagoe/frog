@@ -4,9 +4,11 @@ import types
 
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+sys.path.insert(
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../dags"))
+)
 
-from dags.common_dags import get_partition_count, get_partition_ids
+from common_dags import get_partition_count, get_partition_ids  # noqa: E402
 
 
 def test_get_partition_count_uses_download_process_count(monkeypatch):
@@ -37,8 +39,8 @@ def test_get_partition_count_falls_back_to_default_when_missing(monkeypatch):
         def get(name, default_var=None):
             return default_var
 
-    airflow_models_module.Variable = Variable
-    airflow_module.models = airflow_models_module
+    setattr(airflow_models_module, "Variable", Variable)
+    setattr(airflow_module, "models", airflow_models_module)
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
     monkeypatch.setitem(sys.modules, "airflow.models", airflow_models_module)
 
