@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -16,4 +17,5 @@ def test_all_partition_dags_use_shared_partition_source():
         source = path.read_text(encoding="utf-8")
         assert "MAX_PARTITIONS" not in source
         assert "min(get_partition_count(), MAX_PARTITIONS)" not in source
-        assert "get_partition_ids" in source
+        assert re.search(r"\bget_partition_count\s*\(\s*\)", source)
+        assert re.search(r"\bget_partition_ids\s*\(\s*\)", source)
