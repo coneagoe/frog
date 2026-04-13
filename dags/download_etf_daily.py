@@ -36,7 +36,7 @@ def download_etf_daily_partition_task(*, partition_id: int, **context):
     """Download ETF daily data for a specific partition.
 
     Args:
-        partition_id: The partition identifier (0-3)
+        partition_id: The 0-based partition identifier
 
     Returns:
         Success message with download statistics
