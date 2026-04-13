@@ -21,6 +21,7 @@ from common_dags import (  # noqa: E402
     LOCAL_TZ,
     get_default_args,
     get_partition_count,
+    get_partition_ids,
     get_partitioned_ids,
 )
 
@@ -35,7 +36,6 @@ from common.const import (  # noqa: E402
 from download import DownloadManager  # noqa: E402
 from storage import get_storage  # noqa: E402
 
-MAX_PARTITIONS: Final = 4
 DEFAULT_START_DATE: Final = "2010-01-01"
 
 
@@ -62,7 +62,7 @@ def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, **context):
     if not is_a_market_open_today():
         raise AirflowSkipException("港股市场今日休市，跳过下载任务")
 
-    partition_count = min(get_partition_count(), MAX_PARTITIONS)
+    partition_count = get_partition_count()
     if partition_id >= partition_count:
         raise AirflowSkipException(
             f"partition_id={partition_id} >= partition_count={partition_count}, skip"
@@ -111,7 +111,7 @@ def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, **context):
 
 def aggregate_and_save_result(**context):
     """Aggregate all partition results and save to Redis."""
-    partition_count = min(get_partition_count(), MAX_PARTITIONS)
+    partition_count = get_partition_count()
 
     # Collect results from XCom
     ti = context["ti"]
@@ -167,7 +167,7 @@ partition_tasks = [
         op_kwargs={"partition_id": pid},
         dag=dag,
     )
-    for pid in range(MAX_PARTITIONS)
+    for pid in get_partition_ids()
 ]
 
 # Aggregate task runs after all partitions complete
