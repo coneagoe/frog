@@ -1564,6 +1564,63 @@ class StorageDb:
             logger.error(f"加载ETF日线数据失败: {str(e)}")
             return pd.DataFrame()
 
+    def load_monitor_targets(self, frequency: Optional[str] = None) -> list:
+        """
+        加载所有启用的监控目标。
+
+        Args:
+            frequency: 可选，按频率过滤 ('daily' 或 'intraday')；None 则返回全部。
+        Returns:
+            StockMonitorTarget 对象列表。
+        """
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        session = self.Session()
+        try:
+            kwargs: dict = {"enabled": True}
+            if frequency:
+                kwargs["frequency"] = frequency
+            return session.query(StockMonitorTarget).filter_by(**kwargs).all()
+        finally:
+            session.close()
+
+    def update_monitor_target_state(
+        self,
+        target_id: int,
+        last_state: bool,
+        triggered_at=None,
+    ) -> None:
+        """
+        更新监控目标的状态（边沿触发字段）。
+
+        Args:
+            target_id: 目标 ID
+            last_state: 本次条件是否成立
+            triggered_at: 触发时间（条件刚触发时传入，否则为 None）
+        """
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        session = self.Session()
+        try:
+            target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+            if target is None:
+                return
+            target.last_state = last_state
+            if triggered_at is not None:
+                target.triggered_at = triggered_at
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def ensure_monitor_targets_table(self) -> None:
+        """建表（若不存在）。在 DAG 启动时调用一次。"""
+        from .model.stock_monitor_target import StockMonitorTarget  # noqa: F401
+
+        StockMonitorTarget.__table__.create(self.engine, checkfirst=True)
+
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
     """
