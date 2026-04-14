@@ -34,8 +34,8 @@ from .ingredient import (
 )
 from .stk_holdernumber import StkHoldernumber, tb_name_stk_holdernumber
 from .stk_limit_a_stock import StkLimitAStock, tb_name_stk_limit_a_stock
-from .suspend_d_a_stock import SuspendDAStock, tb_name_suspend_d_a_stock
 from .stock_monitor_target import StockMonitorTarget, tb_name_stock_monitor_target
+from .suspend_d_a_stock import SuspendDAStock, tb_name_suspend_d_a_stock
 
 __all__ = [
     "Base",
