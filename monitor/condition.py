@@ -16,12 +16,14 @@ class ConditionResult(Enum):
 
 
 def _compute_ma(series: pd.Series, period: int) -> float:
+    """Return the simple mean of the last `period` values, or NaN if insufficient data."""
     if len(series) < period:
         return np.nan
     return float(series.iloc[-period:].mean())
 
 
 def _compute_rsi(series: pd.Series, period: int) -> float:
+    """Compute Wilder RSI over `period` bars. Returns NaN if insufficient data."""
     if len(series) < period + 1:
         return np.nan
     delta = series.diff().dropna()
@@ -32,7 +34,11 @@ def _compute_rsi(series: pd.Series, period: int) -> float:
     if np.isnan(last_gain) or np.isnan(last_loss):
         return np.nan
     if last_loss == 0:
-        return 100.0 if last_gain > 0 else 50.0
+        # All gains, no losses → maximum relative strength
+        if last_gain > 0:
+            return 100.0
+        # Both gains and losses are zero → flat price series → neutral RSI
+        return 50.0
     return float(100 - (100 / (1 + last_gain / last_loss)))
 
 
