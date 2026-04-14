@@ -63,26 +63,21 @@ def get_partition_count() -> int:
 
     Priority:
     1. Environment variable DOWNLOAD_PROCESS_COUNT
-    2. Airflow Variable DOWNLOAD_PROCESS_COUNT (read at runtime)
-    3. Default value (4)
+    2. Default value (4)
     """
     env_value = os.getenv("DOWNLOAD_PROCESS_COUNT")
     parsed = parse_int(env_value)
     if parsed is not None:
         return max(1, parsed)
 
-    try:
-        from airflow.models import Variable
-
-        var_value = Variable.get("DOWNLOAD_PROCESS_COUNT", default_var=None)
-    except Exception:
-        var_value = None
-
-    parsed = parse_int(var_value)
-    if parsed is not None:
-        return max(1, parsed)
-
     return DEFAULT_PARTITION_COUNT
+
+
+def get_partition_ids(partition_count: int | None = None) -> range:
+    """Return the active partition ids derived from the partition count."""
+    if partition_count is None:
+        partition_count = get_partition_count()
+    return range(max(1, partition_count))
 
 
 def get_partitioned_ids(
