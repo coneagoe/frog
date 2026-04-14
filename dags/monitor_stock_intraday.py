@@ -2,7 +2,6 @@
 
 import os
 import sys
-from datetime import datetime
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -14,7 +13,8 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common_dags import LOCAL_TZ, get_default_args  # noqa: E402
+from common_dags import get_default_args  # noqa: E402
+
 from common import is_a_market_open_today  # noqa: E402
 
 
@@ -23,13 +23,15 @@ def run_intraday_monitor(**context):
     if not is_a_market_open_today():
         raise AirflowSkipException("非交易日，跳过盘中监控任务")
 
-    from zoneinfo import ZoneInfo
     from datetime import datetime as dt
+    from zoneinfo import ZoneInfo
 
     now_cn = dt.now(tz=ZoneInfo("Asia/Shanghai"))
     current_time = now_cn.strftime("%H:%M")
     if not ("09:30" <= current_time <= "15:00"):
-        raise AirflowSkipException(f"当前时间 {current_time} 不在交易时段 09:30-15:00，跳过")
+        raise AirflowSkipException(
+            f"当前时间 {current_time} 不在交易时段 09:30-15:00，跳过"
+        )
 
     from monitor.monitor_runner import run_monitor
 

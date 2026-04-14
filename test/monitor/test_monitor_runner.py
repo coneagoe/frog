@@ -1,16 +1,7 @@
-import os
-import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pandas as pd
-import pytest
-
-from common.const import COL_CLOSE
-from monitor.condition import ConditionResult
-from monitor.monitor_runner import run_monitor, MonitorSummary
+from monitor.monitor_runner import run_monitor
 
 
 def _make_target(
@@ -27,7 +18,11 @@ def _make_target(
     t.id = id
     t.stock_code = stock_code
     t.market = market
-    t.condition = condition or {"type": "price_threshold", "direction": "below", "value": 1500.0}
+    t.condition = condition or {
+        "type": "price_threshold",
+        "direction": "below",
+        "value": 1500.0,
+    }
     t.note = note
     t.frequency = frequency
     t.reset_mode = reset_mode
@@ -90,13 +85,17 @@ def test_run_monitor_auto_resets_state_when_condition_clears():
 
     with (
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
-        patch("monitor.monitor_runner.fetch_current_price", return_value=1600.0),  # above threshold
+        patch(
+            "monitor.monitor_runner.fetch_current_price", return_value=1600.0
+        ),  # above threshold
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
         patch("monitor.monitor_runner.send_email"),
     ):
         run_monitor(frequency="daily")
 
-    mock_storage.update_monitor_target_state.assert_called_with(1, False, triggered_at=None)
+    mock_storage.update_monitor_target_state.assert_called_with(
+        1, False, triggered_at=None
+    )
 
 
 def test_run_monitor_manual_mode_does_not_auto_reset():

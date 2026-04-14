@@ -67,7 +67,11 @@ def evaluate_condition(
         threshold = float(condition["value"])
         if current_price is None:
             return ConditionResult.INSUFFICIENT_DATA
-        triggered = current_price > threshold if direction == "above" else current_price < threshold
+        triggered = (
+            current_price > threshold
+            if direction == "above"
+            else current_price < threshold
+        )
         return ConditionResult.TRIGGERED if triggered else ConditionResult.NOT_TRIGGERED
 
     elif ctype == "price_cross_ma":
@@ -96,7 +100,9 @@ def evaluate_condition(
         threshold = float(condition["value"])
         if change_pct is None:
             return ConditionResult.INSUFFICIENT_DATA
-        triggered = change_pct > threshold if direction == "above" else change_pct < threshold
+        triggered = (
+            change_pct > threshold if direction == "above" else change_pct < threshold
+        )
         return ConditionResult.TRIGGERED if triggered else ConditionResult.NOT_TRIGGERED
 
     elif ctype == "rsi":

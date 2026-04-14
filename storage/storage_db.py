@@ -1565,7 +1565,7 @@ class StorageDb:
             logger.error(f"加载ETF日线数据失败: {str(e)}")
             return pd.DataFrame()
 
-    def load_monitor_targets(self, frequency: Optional[str] = None) -> list:
+    def load_monitor_targets(self, frequency: Optional[str] = None) -> List[Any]:
         """
         加载所有启用的监控目标。
 
@@ -1576,12 +1576,13 @@ class StorageDb:
         """
         from .model.stock_monitor_target import StockMonitorTarget
 
+        assert self.Session is not None
         session = self.Session()
         try:
             query = session.query(StockMonitorTarget).filter_by(enabled=True)
             if frequency:
                 query = query.filter_by(frequency=frequency)
-            return query.all()
+            return query.all()  # type: ignore[no-any-return]
         finally:
             session.close()
 
@@ -1601,6 +1602,7 @@ class StorageDb:
         """
         from .model.stock_monitor_target import StockMonitorTarget
 
+        assert self.Session is not None
         session = self.Session()
         try:
             target = session.query(StockMonitorTarget).filter_by(id=target_id).first()

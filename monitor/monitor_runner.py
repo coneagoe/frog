@@ -31,11 +31,17 @@ def _build_history_for_condition(condition: dict, stock_code: str, market: str):
     if ctype == "change_pct":
         return None  # uses change_pct kwarg, not history
     if ctype == "price_cross_ma":
-        return fetch_history_df(stock_code, market, min_periods=int(condition["period"]) + 5)
+        return fetch_history_df(
+            stock_code, market, min_periods=int(condition["period"]) + 5
+        )
     if ctype == "ma_cross":
-        return fetch_history_df(stock_code, market, min_periods=int(condition["slow"]) + 5)
+        return fetch_history_df(
+            stock_code, market, min_periods=int(condition["slow"]) + 5
+        )
     if ctype == "rsi":
-        return fetch_history_df(stock_code, market, min_periods=int(condition.get("period", 14)) + 5)
+        return fetch_history_df(
+            stock_code, market, min_periods=int(condition.get("period", 14)) + 5
+        )
     return None
 
 
@@ -69,12 +75,16 @@ def run_monitor(frequency: str = "daily") -> MonitorSummary:
     for target in targets:
         try:
             condition = target.condition
-            history_df = _build_history_for_condition(condition, target.stock_code, target.market)
+            history_df = _build_history_for_condition(
+                condition, target.stock_code, target.market
+            )
             current_price = fetch_current_price(target.stock_code, target.market)
 
             change_pct = None
             if condition.get("type") == "change_pct":
-                hist_for_pct = fetch_history_df(target.stock_code, target.market, min_periods=2)
+                hist_for_pct = fetch_history_df(
+                    target.stock_code, target.market, min_periods=2
+                )
                 change_pct = _compute_change_pct(current_price, hist_for_pct)
 
             result = evaluate_condition(
@@ -105,12 +115,16 @@ def run_monitor(frequency: str = "daily") -> MonitorSummary:
                     f"price={current_price}"
                 )
 
-            elif not condition_met and target.last_state and target.reset_mode == "auto":
+            elif (
+                not condition_met and target.last_state and target.reset_mode == "auto"
+            ):
                 storage.update_monitor_target_state(target.id, False, triggered_at=None)
                 logger.info(f"[monitor] 自动重置: {target.stock_code} 条件已恢复正常")
 
         except Exception as exc:
-            logger.error(f"[monitor] 处理 {target.stock_code} 出错: {exc}", exc_info=True)
+            logger.error(
+                f"[monitor] 处理 {target.stock_code} 出错: {exc}", exc_info=True
+            )
             summary.errors += 1
             summary.error_details.append(f"{target.stock_code}: {exc}")
 

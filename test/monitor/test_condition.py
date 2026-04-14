@@ -1,14 +1,17 @@
-import numpy as np
+from unittest.mock import MagicMock
+
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock, patch
 
 from common.const import COL_CLOSE
 from monitor.condition import ConditionResult, evaluate_condition
-from storage.model.stock_monitor_target import StockMonitorTarget, tb_name_stock_monitor_target
-
+from storage.model.stock_monitor_target import (
+    StockMonitorTarget,
+    tb_name_stock_monitor_target,
+)
 
 # ── Model smoke tests (keep from Task 1) ──────────────────────────────────────
+
 
 def test_model_table_name():
     assert tb_name_stock_monitor_target == "stock_monitor_targets"
@@ -16,13 +19,24 @@ def test_model_table_name():
 
 def test_model_has_required_columns():
     cols = [c.key for c in StockMonitorTarget.__table__.columns]
-    for required in ["id", "stock_code", "market", "condition", "note",
-                     "frequency", "reset_mode", "enabled",
-                     "last_state", "triggered_at", "created_at"]:
+    for required in [
+        "id",
+        "stock_code",
+        "market",
+        "condition",
+        "note",
+        "frequency",
+        "reset_mode",
+        "enabled",
+        "last_state",
+        "triggered_at",
+        "created_at",
+    ]:
         assert required in cols, f"Missing column: {required}"
 
 
 # ── CRUD smoke test (Task 2) ────────────────────────────────────────────────
+
 
 def test_load_monitor_targets_returns_list():
     """load_monitor_targets returns list of StockMonitorTarget objects."""
@@ -30,11 +44,18 @@ def test_load_monitor_targets_returns_list():
 
     mock_session = MagicMock()
     mock_target = StockMonitorTarget(
-        id=1, stock_code="600519", market="A",
+        id=1,
+        stock_code="600519",
+        market="A",
         condition={"type": "price_threshold", "direction": "below", "value": 1500.0},
-        frequency="daily", reset_mode="auto", enabled=True, last_state=False,
+        frequency="daily",
+        reset_mode="auto",
+        enabled=True,
+        last_state=False,
     )
-    mock_session.query.return_value.filter_by.return_value.filter_by.return_value.all.return_value = [mock_target]
+    mock_session.query.return_value.filter_by.return_value.filter_by.return_value.all.return_value = [
+        mock_target
+    ]
 
     db = StorageDb.__new__(StorageDb)
     db.Session = MagicMock(return_value=mock_session)
@@ -46,6 +67,7 @@ def test_load_monitor_targets_returns_list():
 
 
 # ── Condition evaluation tests ─────────────────────────────────────────────────
+
 
 def _make_prices(closes: list[float]) -> pd.DataFrame:
     """Helper: build a simple DataFrame with COL_CLOSE column."""
@@ -113,13 +135,17 @@ def test_ma_cross_death_triggers():
 
 def test_change_pct_above_triggers():
     cond = {"type": "change_pct", "direction": "above", "value": 5.0}
-    result = evaluate_condition(cond, current_price=None, history_df=None, change_pct=6.5)
+    result = evaluate_condition(
+        cond, current_price=None, history_df=None, change_pct=6.5
+    )
     assert result == ConditionResult.TRIGGERED
 
 
 def test_change_pct_below_triggers():
     cond = {"type": "change_pct", "direction": "below", "value": -5.0}
-    result = evaluate_condition(cond, current_price=None, history_df=None, change_pct=-6.0)
+    result = evaluate_condition(
+        cond, current_price=None, history_df=None, change_pct=-6.0
+    )
     assert result == ConditionResult.TRIGGERED
 
 
@@ -161,4 +187,3 @@ def test_unknown_condition_type_raises():
     cond = {"type": "unknown_type"}
     with pytest.raises(ValueError, match="Unknown condition type"):
         evaluate_condition(cond, current_price=100.0, history_df=None)
-
