@@ -1,5 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text, text
 from sqlalchemy.sql import func
 
 from .base import Base
@@ -19,7 +18,7 @@ class StockMonitorTarget(Base):
         server_default="A",
         comment="市场: A / HK / ETF",
     )
-    condition = Column(JSONB, nullable=False, comment="触发条件JSON")
+    condition = Column(JSON, nullable=False, comment="触发条件JSON")
     note = Column(Text, nullable=True, comment="用户备注")
     frequency = Column(
         String(10),
