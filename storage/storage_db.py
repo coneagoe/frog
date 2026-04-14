@@ -1,6 +1,7 @@
 import logging
 import os
 import textwrap
+from datetime import datetime
 from functools import wraps
 from typing import Any, Dict, List, Optional, Set
 
@@ -1577,10 +1578,10 @@ class StorageDb:
 
         session = self.Session()
         try:
-            kwargs: dict = {"enabled": True}
+            query = session.query(StockMonitorTarget).filter_by(enabled=True)
             if frequency:
-                kwargs["frequency"] = frequency
-            return session.query(StockMonitorTarget).filter_by(**kwargs).all()
+                query = query.filter_by(frequency=frequency)
+            return query.all()
         finally:
             session.close()
 
@@ -1588,7 +1589,7 @@ class StorageDb:
         self,
         target_id: int,
         last_state: bool,
-        triggered_at=None,
+        triggered_at: Optional[datetime] = None,
     ) -> None:
         """
         更新监控目标的状态（边沿触发字段）。
