@@ -12,11 +12,12 @@ Usage:
     poetry run python scripts/shareholder_number.py -c 600600.SH -x
 """
 
-import tushare as ts
-import pandas as pd
-import os
 import argparse
+import os
 from datetime import datetime
+
+import pandas as pd
+import tushare as ts
 
 
 def get_shareholder_number(
@@ -48,7 +49,9 @@ def get_shareholder_number(
     if end_date is None:
         end_date = datetime.now().strftime("%Y%m%d")
     if start_date is None:
-        start_date = (datetime.now().replace(year=datetime.now().year - 3)).strftime("%Y%m%d")
+        start_date = (datetime.now().replace(year=datetime.now().year - 3)).strftime(
+            "%Y%m%d"
+        )
 
     try:
         df = pro.stk_holdernumber(
@@ -69,13 +72,13 @@ def get_shareholder_number(
             df.to_csv(output_path, index=False, encoding="utf-8-sig")
             print(f"\n[导出] 已保存至: {output_path}")
 
-        return df
+        return pd.DataFrame(df)
 
     except Exception as e:
         error_msg = str(e)
         if "请指定正确的接口名" in error_msg or "权限" in error_msg.lower():
-            print(f"[错误] 接口权限不足，需要 600 积分")
-            print(f"       参考: https://tushare.pro/document/2?doc_id=166")
+            print("[错误] 接口权限不足，需要 600 积分")
+            print("       参考: https://tushare.pro/document/2?doc_id=166")
         else:
             print(f"[错误] 获取失败: {e}")
         return None
@@ -98,49 +101,46 @@ def analyze_trend(df: pd.DataFrame) -> None:
         change = holder_nums[-1] - holder_nums[-2]
         pct = change / holder_nums[-2] * 100
         direction = "↑" if change > 0 else "↓"
-        print(f"上期 ({dates[-2]}): {holder_nums[-2]:,} 户 {direction} {abs(change):,} ({pct:+.1f}%)")
+        print(
+            f"上期 ({dates[-2]}): {holder_nums[-2]:,} 户 {direction} {abs(change):,} ({pct:+.1f}%)"
+        )
 
     if len(df) >= 4:
         recent = holder_nums[-4:]
-        print(f"\n近四个季度股东人数:")
+        print("\n近四个季度股东人数:")
         for d, h in zip(dates[-4:], recent):
             print(f"  {d}: {h:>10,} 户")
 
         first, last = recent[0], recent[-1]
         total_change = (last - first) / first * 100
         if total_change > 0:
-            print(f"\n趋势: 筹码分散，股东数累计增长 {total_change:.1f}%（通常意味着散户入场、机构派发）")
+            print(
+                f"\n趋势: 筹码分散，股东数累计增长 {total_change:.1f}%（通常意味着散户入场、机构派发）"
+            )
         else:
-            print(f"\n趋势: 筹码集中，股东数累计减少 {abs(total_change):.1f}%（通常意味着机构吸筹）")
+            print(
+                f"\n趋势: 筹码集中，股东数累计减少 {abs(total_change):.1f}%（通常意味着机构吸筹）"
+            )
 
     max_idx = df["holder_num"].idxmax()
     min_idx = df["holder_num"].idxmin()
-    print(f"\n历史最高: {df.loc[max_idx, 'end_date']} {df.loc[max_idx, 'holder_num']:,} 户")
-    print(f"历史最低: {df.loc[min_idx, 'end_date']} {df.loc[min_idx, 'holder_num']:,} 户")
+    print(
+        f"\n历史最高: {df.loc[max_idx, 'end_date']} {df.loc[max_idx, 'holder_num']:,} 户"
+    )
+    print(
+        f"历史最低: {df.loc[min_idx, 'end_date']} {df.loc[min_idx, 'holder_num']:,} 户"
+    )
 
 
 def main():
     parser = argparse.ArgumentParser(description="查询上市公司股东人数")
     parser.add_argument(
-        "-c", "--ts_code", required=True,
-        help="股票代码，如 600600.SH、000001.SZ"
+        "-c", "--ts_code", required=True, help="股票代码，如 600600.SH、000001.SZ"
     )
-    parser.add_argument(
-        "-s", "--start_date", default=None,
-        help="开始日期 YYYYMMDD"
-    )
-    parser.add_argument(
-        "-e", "--end_date", default=None,
-        help="结束日期 YYYYMMDD"
-    )
-    parser.add_argument(
-        "-x", "--export", action="store_true",
-        help="导出为 CSV 文件"
-    )
-    parser.add_argument(
-        "-a", "--analyze", action="store_true",
-        help="显示趋势分析"
-    )
+    parser.add_argument("-s", "--start_date", default=None, help="开始日期 YYYYMMDD")
+    parser.add_argument("-e", "--end_date", default=None, help="结束日期 YYYYMMDD")
+    parser.add_argument("-x", "--export", action="store_true", help="导出为 CSV 文件")
+    parser.add_argument("-a", "--analyze", action="store_true", help="显示趋势分析")
 
     args = parser.parse_args()
 
@@ -151,7 +151,7 @@ def main():
         export_csv=args.export,
     )
 
-    if args.analyze:
+    if args.analyze and df is not None:
         analyze_trend(df)
 
 
