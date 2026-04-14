@@ -52,6 +52,9 @@ types-tqdm = "^4.67.0.20250809"
 types-psycopg2 = "^2.9.21.20251012"
 scipy-stubs = "^1.16.3.0"
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [tool.block]
 target-version = ["py311"]
 
