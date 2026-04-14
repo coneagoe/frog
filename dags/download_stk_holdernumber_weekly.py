@@ -21,6 +21,8 @@ from common_dags import (  # noqa: E402
     get_partitioned_ids,
 )
 
+PARTITION_COUNT = get_partition_count()
+
 
 def download_stk_holdernumber_partition_task(*, partition_id: int, **context):
     """Download A-share shareholder count data for a specific partition.
@@ -39,7 +41,7 @@ def download_stk_holdernumber_partition_task(*, partition_id: int, **context):
     from download import DownloadManager  # noqa: E402
     from storage import get_storage  # noqa: E402
 
-    partition_count = get_partition_count()
+    partition_count = PARTITION_COUNT
     if partition_id >= partition_count:
         raise AirflowSkipException(
             f"partition_id={partition_id} >= partition_count={partition_count}, skip"
@@ -91,7 +93,7 @@ dag = DAG(
 )
 
 # Create partition tasks
-for _pid in get_partition_ids():
+for _pid in get_partition_ids(PARTITION_COUNT):
     PythonOperator(
         task_id=f"download_stk_holdernumber_p{_pid:02d}",
         python_callable=download_stk_holdernumber_partition_task,

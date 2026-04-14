@@ -31,13 +31,20 @@ def test_get_partition_count_normalizes_non_positive_values(
 def test_get_partition_count_falls_back_to_default_when_missing(monkeypatch):
     monkeypatch.delenv("DOWNLOAD_PROCESS_COUNT", raising=False)
 
+    assert get_partition_count() == 4
+    assert list(get_partition_ids()) == [0, 1, 2, 3]
+
+
+def test_get_partition_count_ignores_airflow_variable_when_env_missing(monkeypatch):
+    monkeypatch.delenv("DOWNLOAD_PROCESS_COUNT", raising=False)
+
     airflow_module = types.ModuleType("airflow")
     airflow_models_module = types.ModuleType("airflow.models")
 
     class Variable:
         @staticmethod
         def get(name, default_var=None):
-            return default_var
+            return "9"
 
     setattr(airflow_models_module, "Variable", Variable)
     setattr(airflow_module, "models", airflow_models_module)

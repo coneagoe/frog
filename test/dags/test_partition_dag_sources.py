@@ -8,28 +8,26 @@ ROOT = Path(__file__).resolve().parents[2]
 PARTITION_DAG_SPECS = [
     (
         ROOT / "dags/download_stock_history_daily.py",
-        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
-        1,
+        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)\s*:",
     ),
     (
         ROOT / "dags/download_stock_history_qfq_weekend.py",
-        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
-        1,
+        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)\s*:",
     ),
     (
         ROOT / "dags/download_stk_holdernumber_weekly.py",
-        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
-        1,
+        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)\s*:",
     ),
     (
         ROOT / "dags/download_etf_daily.py",
-        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*\)\s*:",
-        1,
+        r"for\s+_pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)\s*:",
     ),
     (
         ROOT / "dags/download_hk_ggt_history_daily.py",
-        r"partition_tasks\s*=\s*\[\s*PythonOperator[\s\S]*?for\s+pid\s+in\s+get_partition_ids\s*\(\s*\)\s*\]",
-        2,
+        (
+            r"partition_tasks\s*=\s*\[\s*PythonOperator[\s\S]*?"
+            r"for\s+pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)\s*\]"
+        ),
     ),
 ]
 
@@ -38,34 +36,38 @@ def read_source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize(
-    ("path", "task_pattern", "expected_get_partition_count_calls"),
-    PARTITION_DAG_SPECS,
-)
-def test_partition_dag_sources_follow_shared_partition_contract(
-    path: Path, task_pattern: str, expected_get_partition_count_calls: int
+@pytest.mark.parametrize(("path", "task_pattern"), PARTITION_DAG_SPECS)
+def test_partition_dag_sources_freeze_shared_partition_count_once(
+    path: Path, task_pattern: str
 ):
     source = read_source(path)
 
     assert not re.search(r"\bMAX_PARTITIONS\b", source)
-    assert len(re.findall(r"\bget_partition_count\s*\(\s*\)", source)) == (
-        expected_get_partition_count_calls
+    assert len(re.findall(r"\bget_partition_count\s*\(\s*\)", source)) == 1
+    assert re.search(
+        r"^PARTITION_COUNT\s*=\s*get_partition_count\s*\(\s*\)", source, re.MULTILINE
     )
     assert re.search(task_pattern, source)
 
 
-def test_hk_partition_dag_uses_shared_partition_count_everywhere():
+def test_partition_dag_runtime_logic_uses_frozen_partition_count():
+    for path in PARTITION_DAG_SPECS[:-1]:
+        source = read_source(path[0])
+        assert "partition_count = PARTITION_COUNT" in source
+
+
+def test_hk_partition_dag_uses_frozen_partition_count_everywhere():
     source = read_source(ROOT / "dags/download_hk_ggt_history_daily.py")
 
     assert re.search(
         (
             r"def\s+download_hk_ggt_history_hfq_partition_task\b[\s\S]*?"
-            r"partition_count\s*=\s*get_partition_count\s*\(\s*\)"
+            r"partition_count\s*=\s*PARTITION_COUNT"
         ),
         source,
     )
     assert re.search(
-        r"def\s+aggregate_and_save_result\b[\s\S]*?partition_count\s*=\s*get_partition_count\s*\(\s*\)",
+        r"def\s+aggregate_and_save_result\b[\s\S]*?partition_count\s*=\s*PARTITION_COUNT",
         source,
     )
 

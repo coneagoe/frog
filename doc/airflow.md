@@ -114,8 +114,8 @@ docker compose up -d
 由于不能在 Celery task 里发起多进程（否则会触发 `daemonic processes are not allowed to have children`），所以我们用 **Airflow 分片并行**：
 
 - 分片数不再由 DAG 级 `MAX_PARTITIONS` 控制，而是统一读取共享的 `DOWNLOAD_PROCESS_COUNT`
-- 读取优先级为：环境变量 `DOWNLOAD_PROCESS_COUNT` → Airflow Variable `DOWNLOAD_PROCESS_COUNT` → 默认值 `4`
-- 分片任务仍会在运行时校验 `partition_id`，超出范围时自动 `skip`
+- `DOWNLOAD_PROCESS_COUNT` 是唯一配置来源；未设置时默认值为 `4`
+- 已迁移的 DAG 会在解析时冻结当前分片数，并在任务创建、运行期分片计算和港股汇总阶段复用同一个值
 
 1) 在仓库根目录 `.env` 增加（可选）：
 
