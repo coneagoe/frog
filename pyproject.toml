@@ -123,6 +123,10 @@ module = ["tushare.*"]
 ignore_missing_imports = true
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = ["airflow", "airflow.*"]
+ignore_missing_imports = true
+
 [[tool.poetry.source]]
 name = "ali"
 url = "https://mirrors.aliyun.com/pypi/simple/"
