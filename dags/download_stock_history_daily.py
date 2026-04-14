@@ -28,7 +28,9 @@ from common.const import AdjustType, PeriodType  # noqa: E402
 PARTITION_COUNT = get_partition_count()
 
 
-def download_stock_history_hfq_partition_task(*, partition_id: int, **context):
+def download_stock_history_hfq_partition_task(
+    *, partition_id: int, partition_count: int, **context
+):
     """Download A-share HFQ history data for a specific partition.
 
     Args:
@@ -49,7 +51,6 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, **context):
     if not is_a_market_open_today():
         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
 
-    partition_count = PARTITION_COUNT
     if partition_id >= partition_count:
         raise AirflowSkipException(
             f"partition_id={partition_id} >= partition_count={partition_count}, skip"
@@ -114,6 +115,6 @@ for _pid in get_partition_ids(PARTITION_COUNT):
     PythonOperator(
         task_id=f"download_stock_history_hfq_p{_pid:02d}",
         python_callable=download_stock_history_hfq_partition_task,
-        op_kwargs={"partition_id": _pid},
+        op_kwargs={"partition_id": _pid, "partition_count": PARTITION_COUNT},
         dag=dag,
     )

@@ -46,7 +46,9 @@ def get_redis_client() -> redis.Redis:
     return redis.Redis.from_url(redis_url, decode_responses=True)
 
 
-def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, **context):
+def download_hk_ggt_history_hfq_partition_task(
+    *, partition_id: int, partition_count: int, **context
+):
     """Download HK GGT HFQ history data for a specific partition.
 
     Args:
@@ -63,7 +65,6 @@ def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, **context):
     if not is_a_market_open_today():
         raise AirflowSkipException("港股市场今日休市，跳过下载任务")
 
-    partition_count = PARTITION_COUNT
     if partition_id >= partition_count:
         raise AirflowSkipException(
             f"partition_id={partition_id} >= partition_count={partition_count}, skip"
@@ -110,9 +111,8 @@ def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, **context):
     return f"partition={partition_id}, count={total}"
 
 
-def aggregate_and_save_result(**context):
+def aggregate_and_save_result(*, partition_count: int, **context):
     """Aggregate all partition results and save to Redis."""
-    partition_count = PARTITION_COUNT
 
     # Collect results from XCom
     ti = context["ti"]
@@ -165,7 +165,7 @@ partition_tasks = [
     PythonOperator(
         task_id=f"download_hk_ggt_history_hfq_p{pid:02d}",
         python_callable=download_hk_ggt_history_hfq_partition_task,
-        op_kwargs={"partition_id": pid},
+        op_kwargs={"partition_id": pid, "partition_count": PARTITION_COUNT},
         dag=dag,
     )
     for pid in get_partition_ids(PARTITION_COUNT)
@@ -175,6 +175,7 @@ partition_tasks = [
 aggregate_task = PythonOperator(
     task_id="aggregate_results",
     python_callable=aggregate_and_save_result,
+    op_kwargs={"partition_count": PARTITION_COUNT},
     dag=dag,
 )
 

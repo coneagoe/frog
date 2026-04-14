@@ -37,7 +37,9 @@ def reset_stock_history_qfq_table(**context):
     return f"cleared table: {table_name}"
 
 
-def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
+def download_stock_history_qfq_partition_task(
+    *, partition_id: int, partition_count: int, **context
+):
     """Download A-share QFQ history data for a specific partition.
 
     Args:
@@ -54,7 +56,6 @@ def download_stock_history_qfq_partition_task(*, partition_id: int, **context):
     from download import DownloadManager  # noqa: E402
     from storage import get_storage  # noqa: E402
 
-    partition_count = PARTITION_COUNT
     if partition_id >= partition_count:
         raise AirflowSkipException(
             f"partition_id={partition_id} >= partition_count={partition_count}, skip"
@@ -126,7 +127,7 @@ for _pid in get_partition_ids(PARTITION_COUNT):
     task = PythonOperator(
         task_id=f"download_stock_history_qfq_p{_pid:02d}",
         python_callable=download_stock_history_qfq_partition_task,
-        op_kwargs={"partition_id": _pid},
+        op_kwargs={"partition_id": _pid, "partition_count": PARTITION_COUNT},
         dag=dag,
     )
     task_reset_stock_history_qfq >> task
