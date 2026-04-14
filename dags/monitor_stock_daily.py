@@ -2,7 +2,6 @@
 
 import os
 import sys
-from datetime import datetime
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -14,7 +13,8 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common_dags import LOCAL_TZ, get_default_args  # noqa: E402
+from common_dags import get_default_args  # noqa: E402
+
 from common import is_a_market_open_today  # noqa: E402
 
 

@@ -1,17 +1,16 @@
-import os
-import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
 from unittest.mock import MagicMock, patch
+
 import pandas as pd
-import pytest
+
 from common.const import COL_CLOSE
 from monitor.price_fetcher import fetch_current_price, fetch_history_df
 
 
 def test_fetch_current_price_a_stock():
     """fetch_current_price calls EastMoney API for A-share."""
-    with patch("monitor.price_fetcher.fetch_close_price", return_value=1800.5) as mock_fn:
+    with patch(
+        "monitor.price_fetcher.fetch_close_price", return_value=1800.5
+    ) as mock_fn:
         price = fetch_current_price("600519", "A")
     mock_fn.assert_called_once_with("600519")
     assert price == 1800.5

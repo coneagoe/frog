@@ -49,7 +49,9 @@ def fetch_history_df(
     """
     storage = get_storage()
     end_date = date.today().isoformat()
-    start_date = (date.today() - timedelta(days=min_periods * _CALENDAR_MULTIPLIER)).isoformat()
+    start_date = (
+        date.today() - timedelta(days=min_periods * _CALENDAR_MULTIPLIER)
+    ).isoformat()
 
     if market == "ETF":
         df = storage.load_history_data_etf(
