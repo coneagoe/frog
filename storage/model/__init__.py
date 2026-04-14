@@ -35,6 +35,7 @@ from .ingredient import (
 from .stk_holdernumber import StkHoldernumber, tb_name_stk_holdernumber
 from .stk_limit_a_stock import StkLimitAStock, tb_name_stk_limit_a_stock
 from .suspend_d_a_stock import SuspendDAStock, tb_name_suspend_d_a_stock
+from .stock_monitor_target import StockMonitorTarget, tb_name_stock_monitor_target
 
 __all__ = [
     "Base",
@@ -79,4 +80,6 @@ __all__ = [
     "tb_name_history_data_weekly_etf_hfq",
     "HistoryDataDailyFund",
     "tb_name_history_data_daily_fund",
+    "StockMonitorTarget",
+    "tb_name_stock_monitor_target",
 ]
