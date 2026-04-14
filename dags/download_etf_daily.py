@@ -30,6 +30,7 @@ from download import DownloadManager  # noqa: E402
 from storage import get_storage  # noqa: E402
 
 DEFAULT_START_DATE: Final = "2010-01-01"
+PARTITION_COUNT = get_partition_count()
 
 
 def download_etf_daily_partition_task(*, partition_id: int, **context):
@@ -48,7 +49,7 @@ def download_etf_daily_partition_task(*, partition_id: int, **context):
     if not is_a_market_open_today():
         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
 
-    partition_count = get_partition_count()
+    partition_count = PARTITION_COUNT
     if partition_id >= partition_count:
         raise AirflowSkipException(
             f"partition_id={partition_id} >= partition_count={partition_count}, skip"
@@ -109,7 +110,7 @@ dag = DAG(
 )
 
 # Create partition tasks
-for _pid in get_partition_ids():
+for _pid in get_partition_ids(PARTITION_COUNT):
     PythonOperator(
         task_id=f"download_etf_daily_p{_pid:02d}",
         python_callable=download_etf_daily_partition_task,
