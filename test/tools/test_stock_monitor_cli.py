@@ -15,6 +15,7 @@ def test_add_command_parses_args_and_calls_service(capsys):
 
     exit_code = main(
         [
+            "target",
             "add",
             "--stock-code",
             "600519",
@@ -58,6 +59,7 @@ def test_add_command_json_output_uses_service_payload(capsys):
     exit_code = main(
         [
             "--json",
+            "target",
             "add",
             "--stock-code",
             "600519",
@@ -82,6 +84,7 @@ def test_add_command_returns_positive_exit_code_on_service_exception(capsys):
     exit_code = main(
         [
             "--json",
+            "target",
             "add",
             "--stock-code",
             "600519",
@@ -97,3 +100,42 @@ def test_add_command_returns_positive_exit_code_on_service_exception(capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is False
     assert payload["code"] == "INTERNAL_ERROR"
+
+
+def test_target_update_command_calls_service_update():
+    service = MagicMock()
+    service.update.return_value = {"success": True, "code": "OK", "message": "updated", "data": {"id": 1}}
+
+    exit_code = main(
+        [
+            "target",
+            "update",
+            "--target-id",
+            "1",
+            "--note",
+            "new-note",
+            "--disabled",
+        ],
+        service=service,
+    )
+
+    assert exit_code == 0
+    service.update.assert_called_once_with(1, note="new-note", enabled=False)
+
+
+def test_target_remove_list_get_and_status_commands_are_wired():
+    service = MagicMock()
+    service.remove.return_value = {"success": True, "code": "OK", "message": "removed", "data": {"id": 1}}
+    service.list.return_value = {"success": True, "code": "OK", "message": "listed", "data": []}
+    service.get.return_value = {"success": True, "code": "OK", "message": "fetched", "data": {"id": 1}}
+    service.get_status.return_value = {"success": True, "code": "OK", "message": "status", "data": {"total": 1}}
+
+    assert main(["target", "remove", "--target-id", "1"], service=service) == 0
+    assert main(["target", "list", "--frequency", "daily", "--enabled"], service=service) == 0
+    assert main(["target", "get", "--target-id", "1"], service=service) == 0
+    assert main(["status"], service=service) == 0
+
+    service.remove.assert_called_once_with(1)
+    service.list.assert_called_once_with(frequency="daily", enabled=True)
+    service.get.assert_called_once_with(1)
+    service.get_status.assert_called_once_with()
