@@ -27,3 +27,22 @@
 - `10`：参数/校验错误（`code=VALIDATION_ERROR`）
 - `11`：资源不存在（`code=NOT_FOUND`）
 - `12`：内部错误（`code=INTERNAL_ERROR` 或未知错误码）
+
+## OpenClaw 接入示例
+
+OpenClaw 可直接通过 shell 调用 CLI，并解析 `--json` 输出：
+
+```bash
+poetry run python -m tools.stock_monitor_cli --json target add \
+  --stock-code 600519 \
+  --market A \
+  --condition '{"type":"price_threshold","direction":"below","value":1400}' \
+  --frequency daily \
+  --reset-mode auto
+```
+
+期望：进程退出码 `0`，stdout 为可解析 JSON，例如：
+
+```json
+{"success": true, "code": "OK", "message": "target created", "data": {"id": 1}}
+```
