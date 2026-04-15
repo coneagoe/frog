@@ -53,9 +53,9 @@ def test_load_monitor_targets_returns_list():
         enabled=True,
         last_state=False,
     )
-    mock_session.query.return_value.filter_by.return_value.filter_by.return_value.all.return_value = [
-        mock_target
-    ]
+    (
+        mock_session.query.return_value.filter_by.return_value.filter_by.return_value.order_by.return_value.all.return_value
+    ) = [mock_target]
 
     db = StorageDb.__new__(StorageDb)
     db.Session = MagicMock(return_value=mock_session)

@@ -3,7 +3,7 @@ import os
 import textwrap
 from datetime import datetime
 from functools import wraps
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, cast
 
 import pandas as pd
 import psycopg2
@@ -1565,6 +1565,135 @@ class StorageDb:
             logger.error(f"加载ETF日线数据失败: {str(e)}")
             return pd.DataFrame()
 
+    def list_monitor_targets(
+        self, frequency: Optional[str] = None, enabled: Optional[bool] = None
+    ) -> List[Any]:
+        """
+        查询监控目标列表。
+
+        Args:
+            frequency: 可选，按频率过滤 ('daily' 或 'intraday')。
+            enabled: 可选，按启用状态过滤。
+        Returns:
+            StockMonitorTarget 对象列表。
+        """
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            query = session.query(StockMonitorTarget)
+            if enabled is not None:
+                query = query.filter_by(enabled=enabled)
+            if frequency:
+                query = query.filter_by(frequency=frequency)
+            return cast(List[Any], query.order_by(StockMonitorTarget.id.asc()).all())
+        finally:
+            session.close()
+
+    def get_monitor_target(self, target_id: int) -> Optional[Any]:
+        """按 ID 查询单个监控目标。"""
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return session.query(StockMonitorTarget).filter_by(id=target_id).first()
+        finally:
+            session.close()
+
+    def create_monitor_target(
+        self,
+        stock_code: str,
+        market: str,
+        condition: Dict[str, Any],
+        note: Optional[str] = None,
+        frequency: str = "daily",
+        reset_mode: str = "auto",
+        enabled: bool = True,
+        last_state: bool = False,
+    ) -> Any:
+        """创建监控目标。"""
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            target = StockMonitorTarget(
+                stock_code=stock_code,
+                market=market,
+                condition=condition,
+                note=note,
+                frequency=frequency,
+                reset_mode=reset_mode,
+                enabled=enabled,
+                last_state=last_state,
+            )
+            session.add(target)
+            session.commit()
+            session.refresh(target)
+            return target
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def update_monitor_target(self, target_id: int, **updates: Any) -> Optional[Any]:
+        """更新监控目标。目标不存在时返回 None。"""
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        allowed_fields = {
+            "stock_code",
+            "market",
+            "condition",
+            "note",
+            "frequency",
+            "reset_mode",
+            "enabled",
+            "last_state",
+            "triggered_at",
+        }
+        invalid_fields = set(updates) - allowed_fields
+        if invalid_fields:
+            raise ValueError(f"不支持更新字段: {sorted(invalid_fields)}")
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+            if target is None:
+                return None
+            for key, value in updates.items():
+                setattr(target, key, value)
+            session.commit()
+            session.refresh(target)
+            return target
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def delete_monitor_target(self, target_id: int) -> bool:
+        """删除监控目标。删除成功返回 True，目标不存在返回 False。"""
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+            if target is None:
+                return False
+            session.delete(target)
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def load_monitor_targets(self, frequency: Optional[str] = None) -> List[Any]:
         """
         加载所有启用的监控目标。
@@ -1574,17 +1703,7 @@ class StorageDb:
         Returns:
             StockMonitorTarget 对象列表。
         """
-        from .model.stock_monitor_target import StockMonitorTarget
-
-        assert self.Session is not None
-        session = self.Session()
-        try:
-            query = session.query(StockMonitorTarget).filter_by(enabled=True)
-            if frequency:
-                query = query.filter_by(frequency=frequency)
-            return query.all()  # type: ignore[no-any-return]
-        finally:
-            session.close()
+        return self.list_monitor_targets(frequency=frequency, enabled=True)
 
     def update_monitor_target_state(
         self,
