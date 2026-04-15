@@ -104,7 +104,12 @@ def test_add_command_returns_positive_exit_code_on_service_exception(capsys):
 
 def test_target_update_command_calls_service_update():
     service = MagicMock()
-    service.update.return_value = {"success": True, "code": "OK", "message": "updated", "data": {"id": 1}}
+    service.update.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "updated",
+        "data": {"id": 1},
+    }
 
     exit_code = main(
         [
@@ -125,13 +130,36 @@ def test_target_update_command_calls_service_update():
 
 def test_target_remove_list_get_and_status_commands_are_wired():
     service = MagicMock()
-    service.remove.return_value = {"success": True, "code": "OK", "message": "removed", "data": {"id": 1}}
-    service.list.return_value = {"success": True, "code": "OK", "message": "listed", "data": []}
-    service.get.return_value = {"success": True, "code": "OK", "message": "fetched", "data": {"id": 1}}
-    service.get_status.return_value = {"success": True, "code": "OK", "message": "status", "data": {"total": 1}}
+    service.remove.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "removed",
+        "data": {"id": 1},
+    }
+    service.list.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "listed",
+        "data": [],
+    }
+    service.get.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "fetched",
+        "data": {"id": 1},
+    }
+    service.get_status.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "status",
+        "data": {"total": 1},
+    }
 
     assert main(["target", "remove", "--target-id", "1"], service=service) == 0
-    assert main(["target", "list", "--frequency", "daily", "--enabled"], service=service) == 0
+    assert (
+        main(["target", "list", "--frequency", "daily", "--enabled"], service=service)
+        == 0
+    )
     assert main(["target", "get", "--target-id", "1"], service=service) == 0
     assert main(["status"], service=service) == 0
 

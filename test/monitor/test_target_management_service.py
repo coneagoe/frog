@@ -92,7 +92,10 @@ def test_get_target_returns_not_found_result():
 
 def test_list_targets_returns_serialized_targets():
     storage = MagicMock()
-    storage.list_monitor_targets.return_value = [_make_target(), _make_target(id=2, stock_code="000001")]
+    storage.list_monitor_targets.return_value = [
+        _make_target(),
+        _make_target(id=2, stock_code="000001"),
+    ]
     service = TargetManagementService(storage=storage)
 
     result = service.list_targets(frequency="daily", enabled=True)
@@ -100,7 +103,9 @@ def test_list_targets_returns_serialized_targets():
     assert result["success"] is True
     assert result["code"] == "OK"
     assert [item["id"] for item in result["data"]] == [1, 2]
-    storage.list_monitor_targets.assert_called_once_with(frequency="daily", enabled=True)
+    storage.list_monitor_targets.assert_called_once_with(
+        frequency="daily", enabled=True
+    )
 
 
 def test_new_method_aliases_are_wired_to_existing_behaviors():
@@ -172,7 +177,7 @@ def test_set_target_status_validates_and_updates_enabled_flag():
     storage.update_monitor_target.return_value = _make_target(enabled=False)
     service = TargetManagementService(storage=storage)
 
-    invalid = service.set_target_status(1, enabled="no")
+    invalid = service.set_target_status(1, enabled="no")  # type: ignore[arg-type]
     valid = service.set_target_status(1, enabled=False)
 
     assert invalid["success"] is False
@@ -213,7 +218,9 @@ def test_custom_errors_are_exposed_for_validation_and_not_found_paths():
 
 def test_service_uses_default_storage_when_not_provided():
     fake_storage = MagicMock()
-    with patch("monitor.target_management_service.get_storage", return_value=fake_storage):
+    with patch(
+        "monitor.target_management_service.get_storage", return_value=fake_storage
+    ):
         service = TargetManagementService()
 
     assert service.storage is fake_storage
