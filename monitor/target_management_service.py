@@ -131,6 +131,9 @@ class TargetManagementService:
         except TargetNotFoundError as exc:
             return self._result(False, "NOT_FOUND", str(exc), None)
 
+    def get(self, target_id: int) -> dict[str, Any]:
+        return self.get_target(target_id)
+
     def list_targets(
         self, frequency: Optional[str] = None, enabled: Optional[bool] = None
     ) -> dict[str, Any]:
@@ -144,6 +147,27 @@ class TargetManagementService:
             return self._result(True, "OK", "targets listed", data)
         except TargetValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
+
+    def list(self, frequency: Optional[str] = None, enabled: Optional[bool] = None) -> dict[str, Any]:
+        return self.list_targets(frequency=frequency, enabled=enabled)
+
+    def update(self, target_id: int, **updates: Any) -> dict[str, Any]:
+        return self.update_target(target_id, **updates)
+
+    def remove(self, target_id: int) -> dict[str, Any]:
+        return self.remove_target(target_id)
+
+    def get_status(self) -> dict[str, Any]:
+        targets = self.storage.list_monitor_targets(frequency=None, enabled=None)
+        data = {
+            "total": len(targets),
+            "enabled": sum(1 for target in targets if getattr(target, "enabled", False)),
+            "disabled": sum(1 for target in targets if not getattr(target, "enabled", False)),
+            "triggered": sum(1 for target in targets if getattr(target, "last_state", False)),
+            "daily": sum(1 for target in targets if getattr(target, "frequency", None) == "daily"),
+            "intraday": sum(1 for target in targets if getattr(target, "frequency", None) == "intraday"),
+        }
+        return self._result(True, "OK", "status fetched", data)
 
     def set_target_status(self, target_id: int, enabled: bool) -> dict[str, Any]:
         try:

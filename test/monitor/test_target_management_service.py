@@ -103,6 +103,44 @@ def test_list_targets_returns_serialized_targets():
     storage.list_monitor_targets.assert_called_once_with(frequency="daily", enabled=True)
 
 
+def test_new_method_aliases_are_wired_to_existing_behaviors():
+    storage = MagicMock()
+    storage.get_monitor_target.return_value = _make_target(id=1)
+    storage.list_monitor_targets.return_value = [_make_target(id=1)]
+    storage.update_monitor_target.return_value = _make_target(id=1, note="新备注")
+    storage.delete_monitor_target.return_value = True
+    service = TargetManagementService(storage=storage)
+
+    assert service.get(1)["success"] is True
+    assert service.list()["success"] is True
+    assert service.update(1, note="新备注")["success"] is True
+    assert service.remove(1)["success"] is True
+
+
+def test_get_status_returns_aggregate_counts():
+    storage = MagicMock()
+    storage.list_monitor_targets.return_value = [
+        _make_target(id=1, enabled=True, last_state=True, frequency="daily"),
+        _make_target(id=2, enabled=True, last_state=False, frequency="intraday"),
+        _make_target(id=3, enabled=False, last_state=False, frequency="daily"),
+    ]
+    service = TargetManagementService(storage=storage)
+
+    result = service.get_status()
+
+    assert result["success"] is True
+    assert result["code"] == "OK"
+    assert result["data"] == {
+        "total": 3,
+        "enabled": 2,
+        "disabled": 1,
+        "triggered": 1,
+        "daily": 2,
+        "intraday": 1,
+    }
+    storage.list_monitor_targets.assert_called_once_with(frequency=None, enabled=None)
+
+
 def test_update_target_returns_updated_data():
     storage = MagicMock()
     storage.update_monitor_target.return_value = _make_target(note="新备注")
