@@ -23,3 +23,31 @@ what changed and what did not need changes.
 - Update only docs that are directly affected by those changes.
 - Do not rewrite unrelated historical docs.
 - Do not create commits automatically.
+
+## Step 1: Understand the current state
+
+Run these in parallel:
+- `git --no-pager status --short` — see tracked and untracked changes
+- `git --no-pager diff HEAD` — inspect unstaged changes
+- `git --no-pager diff --cached` — inspect staged changes
+
+Read the changed files carefully before touching any docs.
+
+## Step 2: Decide which docs are affected
+
+Use these rules:
+- `README.md` — update when setup, usage, user-facing behavior, or architecture overview changed
+- `AGENTS.md` — update when repository workflow, skill guidance, or operating instructions changed
+- `CLAUDE.md` — update when repo-specific Claude workflow or coding instructions changed
+- `docs/` topic docs — update when a changed subsystem already has dedicated documentation
+
+If the correct doc target is ambiguous, stop and ask the user instead of guessing.
+If no docs need changes, say that explicitly.
+
+## Step 3: Report the result
+
+After editing, give the user a brief summary that includes:
+- which docs were updated
+- why each doc changed
+- which key docs were checked but did not need edits
+- whether the branch is now better prepared for a later commit flow
