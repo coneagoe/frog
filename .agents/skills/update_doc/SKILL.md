@@ -1,8 +1,8 @@
 ---
 name: update_doc
 description: >
-  Manually inspect current repository changes, update only the affected docs,
-  and summarize what changed before a later commit flow.
+  Inspect current repository changes, update only the affected docs, and
+  summarize what changed before or during a later commit flow.
 triggers:
   - 更新文档
   - 同步文档
@@ -18,7 +18,8 @@ what changed and what did not need changes.
 
 ## Scope
 
-- This skill is manually triggered. It does not run automatically.
+- This skill can be triggered directly by the user.
+- This skill can also be invoked automatically by the root commit workflow.
 - Focus on the current working tree and staged changes.
 - Update only docs that are directly affected by those changes.
 - Do not rewrite unrelated historical docs.
