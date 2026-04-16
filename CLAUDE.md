@@ -35,6 +35,10 @@ poetry run mypy                              # Type checking
 poetry run pytest test                       # Run all tests
 ```
 
+## Naming Conventions
+
+- Command names should use `_` instead of `-`.
+
 
 ## Architecture
 
