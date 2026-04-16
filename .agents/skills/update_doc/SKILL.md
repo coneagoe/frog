@@ -28,7 +28,7 @@ what changed and what did not need changes.
 
 Run these in parallel:
 - `git --no-pager status --short` — see tracked and untracked changes
-- `git --no-pager diff HEAD` — inspect unstaged changes
+- `git --no-pager diff` — inspect unstaged changes
 - `git --no-pager diff --cached` — inspect staged changes
 
 Read the changed files carefully before touching any docs.
