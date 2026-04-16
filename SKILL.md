@@ -1,7 +1,7 @@
 ---
 name: commit
 description: >
-  Group uncommitted git changes into logical commits with clear messages. Use when the user asks to commit changes, split mixed work into separate commits, or organize staging before committing. Before committing, check whether the current changes also require updates to README.md, CLAUDE.md, or AGENTS.md, and make those documentation edits in the same logical commit when needed.
+  Group uncommitted git changes into logical commits with clear messages. Use when the user asks to commit changes, split mixed work into separate commits, or organize staging before committing. Before grouping or committing, invoke the repository-local `update_doc` sub-skill so it can inspect the current changes and update any affected docs first.
 ---
 
 # Commit by Topic
