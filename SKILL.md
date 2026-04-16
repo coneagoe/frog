@@ -96,7 +96,7 @@ For each topic group, in a logical order (dependencies before dependents):
 
 1. Stage only the files for this group: `git add <specific files>`
    - For partial file staging when a file has changes belonging to different topics, use `git add -p <file>`
-2. Verify staged changes with `git diff --cached` — make sure only the right files are staged
+2. Verify staged changes with `git --no-pager diff --cached` — make sure only the right files are staged
 3. Commit with the message using a heredoc to preserve formatting:
 
 ```bash
@@ -113,7 +113,7 @@ EOF
 )"
 ```
 
-4. Confirm the commit succeeded with `git log --oneline -1`
+4. Confirm the commit succeeded with `git --no-pager log --oneline -1`
 
 Repeat for each topic group.
 
