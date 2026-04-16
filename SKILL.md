@@ -11,10 +11,10 @@ Your job is to analyze all uncommitted changes in the repository and commit them
 ## Step 1: Understand the current state
 
 Run these in parallel:
-- `git status` — see all tracked/untracked changes
-- `git diff HEAD` — see all unstaged changes in detail
-- `git diff --cached` — see already-staged changes
-- `git log --oneline -10` — understand the commit style of this repo
+- `git --no-pager status` — see all tracked/untracked changes
+- `git --no-pager diff` — see all unstaged changes in detail
+- `git --no-pager diff --cached` — see already-staged changes
+- `git --no-pager log --oneline -10` — understand the commit style of this repo
 
 Read the output carefully. You need to understand every changed file before proceeding.
 
