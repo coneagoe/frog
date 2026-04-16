@@ -3,7 +3,7 @@
 ## Command Rules
 - Critical: use `poetry run` for Python commands in this repo. Do not use bare `python` or `python3` for project tasks.
 - Prefer the AGENTS command set below over ad-hoc alternatives.
-- Repository-local agent skills live under `.agents/skills/`; use `update_doc` when you want to manually sync affected docs before a later commit flow.
+- Repository-local agent skills live under `.agents/skills/`; `update_doc` can still be used manually, and the root commit skill now invokes it automatically before Copilot-driven commits when doc sync is being checked.
 
 ## Build And Test
 ```bash
