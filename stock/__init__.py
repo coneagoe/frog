@@ -41,11 +41,12 @@ from .data import (
     load_ingredient_300,
     load_ingredient_500,
 )
-from .support_resistance import (
-    calculate_support_resistance,
-    get_support_resistance,
-    get_turning_points,
-)
+
+_SUPPORT_RESISTANCE_EXPORTS = {
+    "calculate_support_resistance",
+    "get_support_resistance",
+    "get_turning_points",
+}
 
 __all__ = [
     "get_etf_general_info_path",
@@ -92,3 +93,22 @@ __all__ = [
     "get_today_ma",
     "get_yesterday_ma",
 ]
+
+
+def __getattr__(name):
+    if name in _SUPPORT_RESISTANCE_EXPORTS:
+        from .support_resistance import (
+            calculate_support_resistance,
+            get_support_resistance,
+            get_turning_points,
+        )
+
+        support_resistance_exports = {
+            "calculate_support_resistance": calculate_support_resistance,
+            "get_support_resistance": get_support_resistance,
+            "get_turning_points": get_turning_points,
+        }
+        globals().update(support_resistance_exports)
+        return support_resistance_exports[name]
+
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
