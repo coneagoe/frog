@@ -1,32 +1,42 @@
 import os
 import sys
+from types import SimpleNamespace
 
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
+import tools.stock_return_report as stock_return_report  # noqa: E402
 from common.const import COL_CLOSE, COL_DATE, COL_STOCK_ID, COL_STOCK_NAME  # noqa: E402
-from tools.stock_return_report import main  # noqa: E402
 
 
-class FakeStorage:
-    def __init__(
-        self,
-        history_by_stock_id: dict[str, pd.DataFrame],
-        stock_info: pd.DataFrame | None = None,
-    ):
-        self._history_by_stock_id = history_by_stock_id
-        self._stock_info = stock_info if stock_info is not None else pd.DataFrame()
-        self.history_calls: list[str] = []
+def install_storage_stub(
+    monkeypatch,
+    history_by_stock_id: dict[str, pd.DataFrame],
+    stock_info: pd.DataFrame | None = None,
+):
+    storage = SimpleNamespace()
+    history_calls: list[str] = []
 
-    def load_general_info_stock(self) -> pd.DataFrame:
-        return self._stock_info
+    def load_general_info_stock() -> pd.DataFrame:
+        if stock_info is None:
+            return pd.DataFrame()
+        return stock_info
 
     def load_history_data_stock(
-        self, stock_id, period, adjust, start_date=None, end_date=None
+        stock_id, period, adjust, start_date=None, end_date=None
     ) -> pd.DataFrame:
-        self.history_calls.append(stock_id)
-        return self._history_by_stock_id.get(stock_id, pd.DataFrame())
+        history_calls.append(stock_id)
+        return history_by_stock_id.get(stock_id, pd.DataFrame())
+
+    monkeypatch.setattr(
+        storage, "load_general_info_stock", load_general_info_stock, raising=False
+    )
+    monkeypatch.setattr(
+        storage, "load_history_data_stock", load_history_data_stock, raising=False
+    )
+    monkeypatch.setattr(stock_return_report, "get_storage", lambda: storage)
+    return history_calls
 
 
 def make_history_df(closes: list[float]) -> pd.DataFrame:
@@ -42,14 +52,14 @@ def make_history_df(closes: list[float]) -> pd.DataFrame:
     )
 
 
-def test_main_reads_stock_id_from_csv_and_prints_returns(tmp_path, capsys):
+def test_main_reads_stock_id_from_csv_and_prints_returns(tmp_path, capsys, monkeypatch):
     csv_path = tmp_path / "stocks.csv"
     pd.DataFrame({"stock_id": ["600547"]}).to_csv(
         csv_path, index=False, encoding="utf-8-sig"
     )
-    storage = FakeStorage({"600547": make_history_df(list(range(1, 26)))})
+    install_storage_stub(monkeypatch, {"600547": make_history_df(list(range(1, 26)))})
 
-    exit_code = main(["--input-csv", str(csv_path)], storage=storage)
+    exit_code = stock_return_report.main(["--input-csv", str(csv_path)])
 
     assert exit_code == 0
     output = capsys.readouterr().out
@@ -58,7 +68,7 @@ def test_main_reads_stock_id_from_csv_and_prints_returns(tmp_path, capsys):
     assert "400.00" in output
 
 
-def test_main_resolves_name_column_via_general_info_stock(tmp_path):
+def test_main_resolves_name_column_via_general_info_stock(tmp_path, monkeypatch):
     csv_path = tmp_path / "stocks.csv"
     pd.DataFrame({"name": ["山东黄金"]}).to_csv(
         csv_path, index=False, encoding="utf-8-sig"
@@ -69,27 +79,28 @@ def test_main_resolves_name_column_via_general_info_stock(tmp_path):
             COL_STOCK_NAME: ["山东黄金"],
         }
     )
-    storage = FakeStorage(
-        {"600547": make_history_df(list(range(1, 26)))}, stock_info=stock_info
+    history_calls = install_storage_stub(
+        monkeypatch,
+        {"600547": make_history_df(list(range(1, 26)))},
+        stock_info=stock_info,
     )
 
-    exit_code = main(["--input-csv", str(csv_path)], storage=storage)
+    exit_code = stock_return_report.main(["--input-csv", str(csv_path)])
 
     assert exit_code == 0
-    assert storage.history_calls == ["600547"]
+    assert history_calls == ["600547"]
 
 
-def test_main_exports_csv_when_output_path_given(tmp_path):
+def test_main_exports_csv_when_output_path_given(tmp_path, monkeypatch):
     csv_path = tmp_path / "stocks.csv"
     output_path = tmp_path / "result.csv"
     pd.DataFrame({"stock_id": ["600547"]}).to_csv(
         csv_path, index=False, encoding="utf-8-sig"
     )
-    storage = FakeStorage({"600547": make_history_df(list(range(1, 26)))})
+    install_storage_stub(monkeypatch, {"600547": make_history_df(list(range(1, 26)))})
 
-    exit_code = main(
+    exit_code = stock_return_report.main(
         ["--input-csv", str(csv_path), "--output-csv", str(output_path)],
-        storage=storage,
     )
 
     assert exit_code == 0
@@ -100,14 +111,16 @@ def test_main_exports_csv_when_output_path_given(tmp_path):
     assert exported.loc[0, "monthly_return_pct"] == 400.0
 
 
-def test_main_marks_missing_returns_when_history_is_insufficient(tmp_path, capsys):
+def test_main_marks_missing_returns_when_history_is_insufficient(
+    tmp_path, capsys, monkeypatch
+):
     csv_path = tmp_path / "stocks.csv"
     pd.DataFrame({"stock_id": ["600547"]}).to_csv(
         csv_path, index=False, encoding="utf-8-sig"
     )
-    storage = FakeStorage({"600547": make_history_df([10, 11, 12, 13, 14])})
+    install_storage_stub(monkeypatch, {"600547": make_history_df([10, 11, 12, 13, 14])})
 
-    exit_code = main(["--input-csv", str(csv_path)], storage=storage)
+    exit_code = stock_return_report.main(["--input-csv", str(csv_path)])
 
     assert exit_code == 0
     output = capsys.readouterr().out
