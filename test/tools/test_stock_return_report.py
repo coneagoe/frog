@@ -126,3 +126,55 @@ def test_main_marks_missing_returns_when_history_is_insufficient(
     output = capsys.readouterr().out
     assert "600547" in output
     assert "历史数据不足" in output
+
+
+def test_build_report_sorts_by_weekly_return_ascending_by_default(tmp_path):
+    csv_path = tmp_path / "stocks.csv"
+    pd.DataFrame({"stock_id": ["600002", "600003", "600001"]}).to_csv(
+        csv_path, index=False, encoding="utf-8-sig"
+    )
+    storage = SimpleNamespace(
+        load_general_info_stock=lambda: pd.DataFrame(),
+        load_history_data_stock=lambda stock_id, period, adjust, start_date=None, end_date=None: {
+            "600001": make_history_df([10, 10, 10, 10, 10, 11]),
+            "600002": make_history_df([10, 10, 10, 10, 10, 12]),
+            "600003": make_history_df([10, 11, 12, 13, 14]),
+        }.get(
+            stock_id, pd.DataFrame()
+        ),
+    )
+
+    report_df = stock_return_report.build_report(str(csv_path), storage=storage)
+
+    assert report_df["stock_id"].tolist() == ["600001", "600002", "600003"]
+
+
+def test_main_honors_monthly_desc_sort_order_for_exported_csv(tmp_path, monkeypatch):
+    csv_path = tmp_path / "stocks.csv"
+    output_path = tmp_path / "result.csv"
+    pd.DataFrame({"stock_id": ["600002", "600003", "600001"]}).to_csv(
+        csv_path, index=False, encoding="utf-8-sig"
+    )
+    install_storage_stub(
+        monkeypatch,
+        {
+            "600001": make_history_df(list(range(1, 26))),
+            "600002": make_history_df(list(range(10, 35))),
+            "600003": make_history_df([10, 11, 12, 13, 14]),
+        },
+    )
+
+    exit_code = stock_return_report.main(
+        [
+            "--input-csv",
+            str(csv_path),
+            "--output-csv",
+            str(output_path),
+            "--sort-by",
+            "monthly_desc",
+        ]
+    )
+
+    assert exit_code == 0
+    exported = pd.read_csv(output_path, dtype={"stock_id": str})
+    assert exported["stock_id"].tolist() == ["600001", "600002", "600003"]

@@ -27,6 +27,12 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 WEEKLY_LOOKBACK = 5
 MONTHLY_LOOKBACK = 20
+SORT_OPTIONS = {
+    "weekly_asc": ("weekly_return_pct", True),
+    "weekly_desc": ("weekly_return_pct", False),
+    "monthly_asc": ("monthly_return_pct", True),
+    "monthly_desc": ("monthly_return_pct", False),
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["qfq", "hfq"],
         default="qfq",
         help="从 DB 读取的复权类型，默认 qfq",
+    )
+    parser.add_argument(
+        "--sort-by",
+        choices=tuple(SORT_OPTIONS),
+        default="weekly_asc",
+        help="结果排序方式，默认按周涨幅升序",
     )
     parser.add_argument("--output-csv", default=None, help="可选，导出结果 CSV 路径")
     return parser
@@ -93,12 +105,23 @@ def _format_for_print(report_df: pd.DataFrame) -> pd.DataFrame:
     return printable
 
 
+def _sort_report(report_df: pd.DataFrame, sort_by: str) -> pd.DataFrame:
+    sort_column, ascending = SORT_OPTIONS[sort_by]
+    return report_df.sort_values(
+        by=sort_column,
+        ascending=ascending,
+        na_position="last",
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+
 def build_report(
     csv_path: str,
     storage: Any,
     stock_id_column: str = "stock_id",
     name_column: str = "name",
     adjust: str = "qfq",
+    sort_by: str = "weekly_asc",
 ) -> pd.DataFrame:
     input_df = _read_input_csv(
         csv_path, stock_id_column=stock_id_column, name_column=name_column
@@ -184,7 +207,7 @@ def build_report(
 
         rows.append(result)
 
-    return pd.DataFrame(rows)
+    return _sort_report(pd.DataFrame(rows), sort_by)
 
 
 def main(argv: list[str] | None = None, storage: Any | None = None) -> int:
@@ -198,6 +221,7 @@ def main(argv: list[str] | None = None, storage: Any | None = None) -> int:
             stock_id_column=args.stock_id_column,
             name_column=args.name_column,
             adjust=args.adjust,
+            sort_by=args.sort_by,
         )
     except Exception as exc:
         print(f"[错误] {exc}")
