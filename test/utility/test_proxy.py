@@ -1,5 +1,5 @@
-import sys
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -84,5 +84,7 @@ def test_get_proxy_raises_after_bounded_request_failures(monkeypatch):
     )
     monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
 
-    with pytest.raises(ProxyError, match="Failed to get working proxy after 2 attempts"):
+    with pytest.raises(
+        ProxyError, match="Failed to get working proxy after 2 attempts"
+    ):
         proxy_module.get_proxy(max_attempts=2)
