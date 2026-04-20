@@ -6,35 +6,82 @@ from types import SimpleNamespace
 from common.obos_hk_runner import ObosHkSkip, run_obos_hk_backtest
 
 
-def test_skip_when_redis_not_success(monkeypatch):
-    def fake_run(*a, **k):
-        raise ObosHkSkip("download result is fail")
+def test_skip_when_redis_not_success():
+    """If Redis indicates the upstream download was not successful, the runner must
+    raise ObosHkSkip (Airflow skip semantics).
+    """
 
-    monkeypatch.setattr("common.obos_hk_runner.run_obos_hk_backtest", fake_run)
+    def fake_redis_get(key):
+        # return a non-success sentinel
+        return "fail"
 
+    # Call the real API with injected dependency
     with pytest.raises(ObosHkSkip):
-        run_obos_hk_backtest()
+        run_obos_hk_backtest(redis_get=fake_redis_get)
 
 
-def test_success_email_path(monkeypatch):
-    def fake_run(*a, **k):
-        return SimpleNamespace(status="success", email_subject="obos_hk_2024-11-01", email_body="OK")
+def test_success_email_path():
+    """When backtest subprocess succeeds, runner returns a success result and
+    sends an email. Dependencies are injected as callables.
+    """
 
-    monkeypatch.setattr("common.obos_hk_runner.run_obos_hk_backtest", fake_run)
+    def fake_redis_get(key):
+        return "success"
 
-    res = run_obos_hk_backtest()
+    def fake_is_market_open(date=None):
+        return True
+
+    def fake_run_subprocess(cmd, *a, **k):
+        # emulate successful subprocess
+        return SimpleNamespace(returncode=0, stdout="OK", stderr="")
+
+    sent = {}
+
+    def fake_send_email(subject, body, to=None):
+        sent['subject'] = subject
+        sent['body'] = body
+
+    res = run_obos_hk_backtest(
+        redis_get=fake_redis_get,
+        is_market_open=fake_is_market_open,
+        run_subprocess=fake_run_subprocess,
+        send_email=fake_send_email,
+    )
+
     assert res.status == "success"
-    assert "obos_hk_2024-11-01" in res.email_subject
+    assert "obos_hk" in res.email_subject
     assert "OK" in res.email_body
+    # ensure our fake email sender was used
+    assert "obos_hk" in sent.get('subject', '')
 
 
-def test_subprocess_failure_path(monkeypatch):
-    def fake_run(*a, **k):
-        return SimpleNamespace(status="failed", error="some error", email_body="Backtest failed with error: some error")
+def test_subprocess_failure_path():
+    """If the backtest subprocess fails, runner should return a failed result
+    including the subprocess error and the failure email should include the
+    error message.
+    """
 
-    monkeypatch.setattr("common.obos_hk_runner.run_obos_hk_backtest", fake_run)
+    def fake_redis_get(key):
+        return "success"
 
-    res = run_obos_hk_backtest()
+    def fake_run_subprocess(cmd, *a, **k):
+        # emulate failing subprocess
+        return SimpleNamespace(returncode=1, stdout="", stderr="some error")
+
+    sent = {}
+
+    def fake_send_email(subject, body, to=None):
+        sent['subject'] = subject
+        sent['body'] = body
+
+    res = run_obos_hk_backtest(
+        redis_get=fake_redis_get,
+        run_subprocess=fake_run_subprocess,
+        send_email=fake_send_email,
+    )
+
     assert res.status == "failed"
     assert "some error" in res.error
-    assert "Backtest failed with error: some error" in res.email_body
+    assert "some error" in res.email_body
+    # ensure failure email was sent
+    assert "failed" in sent.get('subject', '') or "failed" in sent.get('body', '')
