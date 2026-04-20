@@ -13,9 +13,13 @@ def test_skip_when_redis_not_success():
     raise ObosHkSkip (Airflow skip semantics). Ensure subprocess and email are not called.
     """
 
+    redis_called = False
+
     def fake_redis_get(key):
+        nonlocal redis_called
         # ensure the runner looks up the expected download key so we exercise the Redis branch
         assert "download_hk_ggt_history" in str(key)
+        redis_called = True
         return json.dumps({"result": "fail"})
 
     called = {"subprocess": False, "email": False}
