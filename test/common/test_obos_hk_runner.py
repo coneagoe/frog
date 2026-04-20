@@ -1,6 +1,7 @@
 import pytest
 from types import SimpleNamespace
 import json
+import sys
 
 # The tests now exercise the shared runner contract. Importing the runner
 # module is expected to fail for Task 1 (module not implemented yet).
@@ -9,16 +10,30 @@ from common.obos_hk_runner import ObosHkSkip, run_obos_hk_backtest
 
 def test_skip_when_redis_not_success():
     """If Redis indicates the upstream download was not successful, the runner must
-    raise ObosHkSkip (Airflow skip semantics).
+    raise ObosHkSkip (Airflow skip semantics). Ensure subprocess and email are not called.
     """
 
     def fake_redis_get(key):
         # return a non-success sentinel
         return json.dumps({"result": "fail"})
 
+    called = {"subprocess": False, "email": False}
+
+    def spy_run_subprocess(cmd, *a, **k):
+        # If invoked, mark and return a benign success
+        called["subprocess"] = True
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def spy_send_email(subject, body, to=None):
+        called["email"] = True
+
     # Call the real API with injected dependency
     with pytest.raises(ObosHkSkip):
-        run_obos_hk_backtest(redis_get=fake_redis_get)
+        run_obos_hk_backtest(redis_get=fake_redis_get, run_subprocess=spy_run_subprocess, send_email=spy_send_email)
+
+    # verify that side-effecting collaborators were not invoked
+    assert not called["subprocess"]
+    assert not called["email"]
 
 
 def test_success_email_path():
@@ -32,8 +47,11 @@ def test_success_email_path():
     def fake_is_market_open(date=None):
         return True
 
+    captured = {}
+
     def fake_run_subprocess(cmd, *a, **k):
-        # emulate successful subprocess
+        # capture the invoked command and emulate successful subprocess
+        captured['cmd'] = cmd
         return SimpleNamespace(returncode=0, stdout="OK", stderr="")
 
     sent = {}
@@ -57,6 +75,15 @@ def test_success_email_path():
     # validate actual email payload
     assert "OK" in sent.get('body', '')
 
+    # validate the subprocess command contains expected elements
+    cmd = captured.get('cmd')
+    assert cmd is not None, "subprocess was not invoked"
+    cmd_str = " ".join(cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
+    assert sys.executable in cmd_str
+    assert "backtest/obos_hk_9.py" in cmd_str
+    for a in ("-s", "-e", "-f"):
+        assert a in cmd_str
+
 
 def test_subprocess_failure_path():
     """If the backtest subprocess fails, runner should return a failed result
@@ -70,8 +97,11 @@ def test_subprocess_failure_path():
     def fake_is_market_open(date=None):
         return True
 
+    captured = {}
+
     def fake_run_subprocess(cmd, *a, **k):
-        # emulate failing subprocess
+        # capture the invoked command and emulate failing subprocess
+        captured['cmd'] = cmd
         return SimpleNamespace(returncode=1, stdout="", stderr="some error")
 
     sent = {}
@@ -94,3 +124,13 @@ def test_subprocess_failure_path():
     assert "some error" in sent.get('body', '')
     # ensure failure email subject indicates failure
     assert "failed" in sent.get('subject', '') or "failed" in sent.get('body', '')
+
+    # validate the subprocess command contains expected elements
+    cmd = captured.get('cmd')
+    assert cmd is not None, "subprocess was not invoked"
+    cmd_str = " ".join(cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
+    assert sys.executable in cmd_str
+    assert "backtest/obos_hk_9.py" in cmd_str
+    for a in ("-s", "-e", "-f"):
+        assert a in cmd_str
+
