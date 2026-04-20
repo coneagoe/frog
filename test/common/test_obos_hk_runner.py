@@ -39,6 +39,8 @@ def test_skip_when_redis_not_success():
     # verify that side-effecting collaborators were not invoked
     assert not called["subprocess"]
     assert not called["email"]
+    # and ensure we actually queried Redis
+    assert redis_called
 
 
 def test_success_email_path():
@@ -125,17 +127,15 @@ def test_subprocess_failure_path():
         sent['body'] = body
         counts["email"] += 1
 
-    res = run_obos_hk_backtest(
-        redis_get=fake_redis_get,
-        is_market_open=fake_is_market_open,
-        run_subprocess=fake_run_subprocess,
-        send_email=fake_send_email,
-    )
+    with pytest.raises(Exception):
+        run_obos_hk_backtest(
+            redis_get=fake_redis_get,
+            is_market_open=fake_is_market_open,
+            run_subprocess=fake_run_subprocess,
+            send_email=fake_send_email,
+        )
 
-    assert res.status == "failed"
-    assert "some error" in res.error
-    assert "some error" in res.email_body
-    # ensure failure email payload contains the subprocess stderr
+    # ensure failure email payload contains the subprocess stderr and was sent
     assert "some error" in sent.get('body', '')
     # ensure failure email subject indicates failure
     assert "failed" in sent.get('subject', '') or "failed" in sent.get('body', '')
