@@ -14,7 +14,8 @@ def test_skip_when_redis_not_success():
     """
 
     def fake_redis_get(key):
-        # return a non-success sentinel
+        # ensure the runner looks up the expected download key so we exercise the Redis branch
+        assert "download_hk_ggt_history" in str(key)
         return json.dumps({"result": "fail"})
 
     called = {"subprocess": False, "email": False}
@@ -27,9 +28,9 @@ def test_skip_when_redis_not_success():
     def spy_send_email(subject, body, to=None):
         called["email"] = True
 
-    # Call the real API with injected dependency
+    # Call the real API with injected dependency and a deterministic market-open check
     with pytest.raises(ObosHkSkip):
-        run_obos_hk_backtest(redis_get=fake_redis_get, run_subprocess=spy_run_subprocess, send_email=spy_send_email)
+        run_obos_hk_backtest(redis_get=fake_redis_get, is_market_open=lambda date=None: True, run_subprocess=spy_run_subprocess, send_email=spy_send_email)
 
     # verify that side-effecting collaborators were not invoked
     assert not called["subprocess"]
@@ -48,10 +49,12 @@ def test_success_email_path():
         return True
 
     captured = {}
+    counts = {"subprocess": 0, "email": 0}
 
     def fake_run_subprocess(cmd, *a, **k):
-        # capture the invoked command and emulate successful subprocess
+        # capture the invoked command, count invocation, and emulate successful subprocess
         captured['cmd'] = cmd
+        counts["subprocess"] += 1
         return SimpleNamespace(returncode=0, stdout="OK", stderr="")
 
     sent = {}
@@ -59,6 +62,7 @@ def test_success_email_path():
     def fake_send_email(subject, body, to=None):
         sent['subject'] = subject
         sent['body'] = body
+        counts["email"] += 1
 
     res = run_obos_hk_backtest(
         redis_get=fake_redis_get,
@@ -84,6 +88,10 @@ def test_success_email_path():
     for a in ("-s", "-e", "-f"):
         assert a in cmd_str
 
+    # enforce exactly one subprocess invocation and exactly one email sent
+    assert counts["subprocess"] == 1, f"expected 1 subprocess call, got {counts['subprocess']}"
+    assert counts["email"] == 1, f"expected 1 email sent, got {counts['email']}"
+
 
 def test_subprocess_failure_path():
     """If the backtest subprocess fails, runner should return a failed result
@@ -98,10 +106,12 @@ def test_subprocess_failure_path():
         return True
 
     captured = {}
+    counts = {"subprocess": 0, "email": 0}
 
     def fake_run_subprocess(cmd, *a, **k):
-        # capture the invoked command and emulate failing subprocess
+        # capture the invoked command, count invocation, and emulate failing subprocess
         captured['cmd'] = cmd
+        counts["subprocess"] += 1
         return SimpleNamespace(returncode=1, stdout="", stderr="some error")
 
     sent = {}
@@ -109,6 +119,7 @@ def test_subprocess_failure_path():
     def fake_send_email(subject, body, to=None):
         sent['subject'] = subject
         sent['body'] = body
+        counts["email"] += 1
 
     res = run_obos_hk_backtest(
         redis_get=fake_redis_get,
@@ -133,4 +144,8 @@ def test_subprocess_failure_path():
     assert "backtest/obos_hk_9.py" in cmd_str
     for a in ("-s", "-e", "-f"):
         assert a in cmd_str
+
+    # enforce exactly one subprocess invocation and exactly one email sent
+    assert counts["subprocess"] == 1, f"expected 1 subprocess call, got {counts['subprocess']}"
+    assert counts["email"] == 1, f"expected 1 email sent, got {counts['email']}"
 
