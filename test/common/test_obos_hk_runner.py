@@ -113,9 +113,8 @@ def test_success_email_path():
 
 
 def test_subprocess_failure_path():
-    """If the backtest subprocess fails, runner should return a failed result
-    including the subprocess error and the failure email should include the
-    error message.
+    """If the backtest subprocess fails, the runner must send a failure email
+    containing the subprocess error and then raise a RuntimeError carrying the subprocess stderr.
     """
 
     def fake_redis_get(key):
@@ -140,13 +139,15 @@ def test_subprocess_failure_path():
         sent['body'] = body
         counts["email"] += 1
 
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError) as exc:
         run_obos_hk_backtest(
             redis_get=fake_redis_get,
             is_market_open=fake_is_market_open,
             run_subprocess=fake_run_subprocess,
             send_email=fake_send_email,
         )
+    # the RuntimeError should carry the subprocess stderr
+    assert "some error" in str(exc.value)
 
     # ensure failure email payload contains the subprocess stderr and was sent
     assert "some error" in sent.get('body', '')
