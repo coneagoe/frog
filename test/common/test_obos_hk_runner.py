@@ -85,14 +85,27 @@ def test_success_email_path():
     # validate actual email payload
     assert "OK" in sent.get('body', '')
 
-    # validate the subprocess command contains expected elements
+    # validate the subprocess argv structure
     cmd = captured.get('cmd')
     assert cmd is not None, "subprocess was not invoked"
-    cmd_str = " ".join(cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
-    assert sys.executable in cmd_str
-    assert "backtest/obos_hk_9.py" in cmd_str
-    for a in ("-s", "-e", "-f"):
-        assert a in cmd_str
+    assert isinstance(cmd, (list, tuple)), f"expected argv list, got {type(cmd)}"
+    # lock argv[0] and argv[1]
+    assert cmd[0] == sys.executable
+    assert cmd[1] == "backtest/obos_hk_9.py"
+    # ensure options -s, -e, -f appear in order with paired values
+    def _find_opt(argv, opt):
+        try:
+            return argv.index(opt)
+        except ValueError:
+            return -1
+    i_s = _find_opt(cmd, "-s")
+    i_e = _find_opt(cmd, "-e")
+    i_f = _find_opt(cmd, "-f")
+    assert i_s != -1 and i_e != -1 and i_f != -1
+    assert i_s < i_e < i_f
+    for idx in (i_s, i_e, i_f):
+        assert idx + 1 < len(cmd)
+        assert cmd[idx + 1], "option value missing"
 
     # enforce exactly one subprocess invocation and exactly one email sent
     assert counts["subprocess"] == 1, f"expected 1 subprocess call, got {counts['subprocess']}"
@@ -140,14 +153,27 @@ def test_subprocess_failure_path():
     # ensure failure email subject indicates failure
     assert "failed" in sent.get('subject', '') or "failed" in sent.get('body', '')
 
-    # validate the subprocess command contains expected elements
+    # validate the subprocess argv structure
     cmd = captured.get('cmd')
     assert cmd is not None, "subprocess was not invoked"
-    cmd_str = " ".join(cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
-    assert sys.executable in cmd_str
-    assert "backtest/obos_hk_9.py" in cmd_str
-    for a in ("-s", "-e", "-f"):
-        assert a in cmd_str
+    assert isinstance(cmd, (list, tuple)), f"expected argv list, got {type(cmd)}"
+    # lock argv[0] and argv[1]
+    assert cmd[0] == sys.executable
+    assert cmd[1] == "backtest/obos_hk_9.py"
+    # ensure options -s, -e, -f appear in order with paired values
+    def _find_opt(argv, opt):
+        try:
+            return argv.index(opt)
+        except ValueError:
+            return -1
+    i_s = _find_opt(cmd, "-s")
+    i_e = _find_opt(cmd, "-e")
+    i_f = _find_opt(cmd, "-f")
+    assert i_s != -1 and i_e != -1 and i_f != -1
+    assert i_s < i_e < i_f
+    for idx in (i_s, i_e, i_f):
+        assert idx + 1 < len(cmd)
+        assert cmd[idx + 1], "option value missing"
 
     # enforce exactly one subprocess invocation and exactly one email sent
     assert counts["subprocess"] == 1, f"expected 1 subprocess call, got {counts['subprocess']}"
