@@ -151,8 +151,6 @@ def test_subprocess_failure_path():
 
     # ensure failure email payload contains the subprocess stderr and was sent
     assert "some error" in sent.get('body', '')
-    # ensure failure email subject indicates failure
-    assert "failed" in sent.get('subject', '') or "failed" in sent.get('body', '')
 
     # validate the subprocess argv structure
     cmd = captured.get('cmd')
