@@ -54,6 +54,8 @@ def test_success_email_path():
     assert "OK" in res.email_body
     # ensure our fake email sender was used
     assert "obos_hk" in sent.get('subject', '')
+    # validate actual email payload
+    assert "OK" in sent.get('body', '')
 
 
 def test_subprocess_failure_path():
@@ -64,6 +66,9 @@ def test_subprocess_failure_path():
 
     def fake_redis_get(key):
         return json.dumps({"result": "success"})
+
+    def fake_is_market_open(date=None):
+        return True
 
     def fake_run_subprocess(cmd, *a, **k):
         # emulate failing subprocess
@@ -77,6 +82,7 @@ def test_subprocess_failure_path():
 
     res = run_obos_hk_backtest(
         redis_get=fake_redis_get,
+        is_market_open=fake_is_market_open,
         run_subprocess=fake_run_subprocess,
         send_email=fake_send_email,
     )
@@ -84,5 +90,7 @@ def test_subprocess_failure_path():
     assert res.status == "failed"
     assert "some error" in res.error
     assert "some error" in res.email_body
-    # ensure failure email was sent
+    # ensure failure email payload contains the subprocess stderr
+    assert "some error" in sent.get('body', '')
+    # ensure failure email subject indicates failure
     assert "failed" in sent.get('subject', '') or "failed" in sent.get('body', '')
