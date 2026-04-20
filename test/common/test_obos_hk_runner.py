@@ -17,8 +17,9 @@ def test_skip_when_redis_not_success():
 
     def fake_redis_get(key):
         nonlocal redis_called
-        # ensure the runner looks up the expected download key so we exercise the Redis branch
-        assert "download_hk_ggt_history" in str(key)
+        # ensure the runner looks up the expected download key exactly
+        from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
         redis_called = True
         return json.dumps({"result": "fail"})
 
@@ -48,7 +49,14 @@ def test_success_email_path():
     sends an email. Dependencies are injected as callables.
     """
 
+    redis_called = False
+
     def fake_redis_get(key):
+        nonlocal redis_called
+        # exact Redis key contract
+        from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        redis_called = True
         return json.dumps({"result": "success"})
 
     def fake_is_market_open(date=None):
@@ -110,6 +118,8 @@ def test_success_email_path():
     # enforce exactly one subprocess invocation and exactly one email sent
     assert counts["subprocess"] == 1, f"expected 1 subprocess call, got {counts['subprocess']}"
     assert counts["email"] == 1, f"expected 1 email sent, got {counts['email']}"
+    # ensure we actually queried Redis
+    assert redis_called
 
 
 def test_subprocess_failure_path():
@@ -117,7 +127,14 @@ def test_subprocess_failure_path():
     containing the subprocess error and then raise a RuntimeError carrying the subprocess stderr.
     """
 
+    redis_called = False
+
     def fake_redis_get(key):
+        nonlocal redis_called
+        # exact Redis key contract
+        from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        redis_called = True
         return json.dumps({"result": "success"})
 
     def fake_is_market_open(date=None):
@@ -177,4 +194,6 @@ def test_subprocess_failure_path():
     # enforce exactly one subprocess invocation and exactly one email sent
     assert counts["subprocess"] == 1, f"expected 1 subprocess call, got {counts['subprocess']}"
     assert counts["email"] == 1, f"expected 1 email sent, got {counts['email']}"
+    # ensure we actually queried Redis
+    assert redis_called
 
