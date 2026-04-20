@@ -1,5 +1,6 @@
 import pytest
 from types import SimpleNamespace
+import json
 
 # The tests now exercise the shared runner contract. Importing the runner
 # module is expected to fail for Task 1 (module not implemented yet).
@@ -13,7 +14,7 @@ def test_skip_when_redis_not_success():
 
     def fake_redis_get(key):
         # return a non-success sentinel
-        return "fail"
+        return json.dumps({"result": "fail"})
 
     # Call the real API with injected dependency
     with pytest.raises(ObosHkSkip):
@@ -26,7 +27,7 @@ def test_success_email_path():
     """
 
     def fake_redis_get(key):
-        return "success"
+        return json.dumps({"result": "success"})
 
     def fake_is_market_open(date=None):
         return True
@@ -62,7 +63,7 @@ def test_subprocess_failure_path():
     """
 
     def fake_redis_get(key):
-        return "success"
+        return json.dumps({"result": "success"})
 
     def fake_run_subprocess(cmd, *a, **k):
         # emulate failing subprocess
