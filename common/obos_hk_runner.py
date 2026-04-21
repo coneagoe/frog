@@ -86,11 +86,14 @@ def run_obos_hk_backtest(
             data = json.loads(result)
             if not isinstance(data, dict):
                 raise TypeError("download result payload must be a JSON object")
+            download_result = data.get("result")
+            if not isinstance(download_result, str) or not download_result.strip():
+                raise TypeError("download result payload must contain a usable result field")
         except Exception as exc:
             raise RuntimeError(f"invalid download result: {exc}") from exc
 
-        if data.get("result") != "success":
-            raise ObosHkSkip(f"download result is {data.get('result')}")
+        if download_result != "success":
+            raise ObosHkSkip(f"download result is {download_result}")
     elif require_download_result:
         raise ObosHkSkip("download result missing")
 
