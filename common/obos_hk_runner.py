@@ -79,13 +79,13 @@ def run_obos_hk_backtest(
     try:
         result = redis_get(redis_key)
     except Exception as exc:
-        raise ObosHkSkip(f"failed to read Redis: {exc}") from exc
+        raise RuntimeError(f"failed to read Redis: {exc}") from exc
 
     if result:
         try:
             data = json.loads(result)
         except Exception as exc:
-            raise ObosHkSkip(f"invalid download result: {exc}") from exc
+            raise RuntimeError(f"invalid download result: {exc}") from exc
 
         if data.get("result") != "success":
             raise ObosHkSkip(f"download result is {data.get('result')}")

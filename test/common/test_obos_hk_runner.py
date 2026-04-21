@@ -113,6 +113,66 @@ def test_missing_redis_result_skips_when_required():
     assert not called["email"]
 
 
+def test_redis_read_failure_raises_runtimeerror():
+    """Redis read errors should hard-fail instead of being treated as Airflow skips."""
+
+    called = {"subprocess": False, "email": False}
+
+    def fake_redis_get(key):
+        from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+
+        assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        raise ConnectionError("redis unavailable")
+
+    def fake_run_subprocess(cmd, *a, **k):
+        called["subprocess"] = True
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_send_email(subject, body, to=None):
+        called["email"] = True
+
+    with pytest.raises(RuntimeError, match="failed to read Redis: redis unavailable"):
+        run_obos_hk_backtest(
+            redis_get=fake_redis_get,
+            is_market_open=lambda date=None: True,
+            run_subprocess=fake_run_subprocess,
+            send_email=fake_send_email,
+        )
+
+    assert not called["subprocess"]
+    assert not called["email"]
+
+
+def test_malformed_redis_payload_raises_runtimeerror():
+    """Malformed Redis payloads should hard-fail instead of being treated as skips."""
+
+    called = {"subprocess": False, "email": False}
+
+    def fake_redis_get(key):
+        from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+
+        assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        return "{not-json"
+
+    def fake_run_subprocess(cmd, *a, **k):
+        called["subprocess"] = True
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_send_email(subject, body, to=None):
+        called["email"] = True
+
+    with pytest.raises(RuntimeError, match="invalid download result"):
+        run_obos_hk_backtest(
+            redis_get=fake_redis_get,
+            is_market_open=lambda date=None: True,
+            run_subprocess=fake_run_subprocess,
+            send_email=fake_send_email,
+        )
+
+    assert not called["subprocess"]
+    assert not called["email"]
+
+
 def test_success_email_path():
     """When backtest subprocess succeeds, runner returns a success result and
     sends an email. Dependencies are injected as callables.
