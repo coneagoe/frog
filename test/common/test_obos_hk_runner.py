@@ -173,6 +173,37 @@ def test_malformed_redis_payload_raises_runtimeerror():
     assert not called["email"]
 
 
+@pytest.mark.parametrize("payload", [[], 123, "success"])
+def test_wrong_shape_redis_payload_raises_runtimeerror(payload):
+    """Valid JSON payloads must still be objects with a result field."""
+
+    called = {"subprocess": False, "email": False}
+
+    def fake_redis_get(key):
+        from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+
+        assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        return json.dumps(payload)
+
+    def fake_run_subprocess(cmd, *a, **k):
+        called["subprocess"] = True
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_send_email(subject, body, to=None):
+        called["email"] = True
+
+    with pytest.raises(RuntimeError, match="invalid download result"):
+        run_obos_hk_backtest(
+            redis_get=fake_redis_get,
+            is_market_open=lambda date=None: True,
+            run_subprocess=fake_run_subprocess,
+            send_email=fake_send_email,
+        )
+
+    assert not called["subprocess"]
+    assert not called["email"]
+
+
 def test_success_email_path():
     """When backtest subprocess succeeds, runner returns a success result and
     sends an email. Dependencies are injected as callables.

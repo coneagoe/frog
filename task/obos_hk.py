@@ -20,7 +20,3 @@ def obos_hk():
         if message == "Market is closed today.":
             return message
         return message if message.startswith("Skip:") else f"Skip: {message}"
-    except RuntimeError as exc:
-        return f"Backtest failed: {str(exc)}"
-    except Exception as exc:
-        return f"Exception occurred: {str(exc)}"

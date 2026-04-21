@@ -84,6 +84,8 @@ def run_obos_hk_backtest(
     if result:
         try:
             data = json.loads(result)
+            if not isinstance(data, dict):
+                raise TypeError("download result payload must be a JSON object")
         except Exception as exc:
             raise RuntimeError(f"invalid download result: {exc}") from exc
 
