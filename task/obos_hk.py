@@ -13,7 +13,7 @@ def obos_hk():
     conf.parse_config()
 
     try:
-        result = run_obos_hk_backtest()
+        result = run_obos_hk_backtest(require_download_result=False)
         return "Backtest success." if result.status == "success" else result.status
     except ObosHkSkip as exc:
         message = str(exc)
