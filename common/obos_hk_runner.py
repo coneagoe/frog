@@ -68,6 +68,7 @@ def run_obos_hk_backtest(
     stock_list: str = DEFAULT_STOCK_LIST,
     end_date_str: str | None = None,
     redis_key: str = REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY,
+    require_download_result: bool = False,
 ) -> ObosHkRunResult:
     redis_get = redis_get or get_redis_client().get
     is_market_open = is_market_open or is_hk_market_open_today
@@ -80,16 +81,16 @@ def run_obos_hk_backtest(
     except Exception as exc:
         raise ObosHkSkip(f"failed to read Redis: {exc}") from exc
 
-    if not result:
+    if result:
+        try:
+            data = json.loads(result)
+        except Exception as exc:
+            raise ObosHkSkip(f"invalid download result: {exc}") from exc
+
+        if data.get("result") != "success":
+            raise ObosHkSkip(f"download result is {data.get('result')}")
+    elif require_download_result:
         raise ObosHkSkip("download result missing")
-
-    try:
-        data = json.loads(result)
-    except Exception as exc:
-        raise ObosHkSkip(f"invalid download result: {exc}") from exc
-
-    if data.get("result") != "success":
-        raise ObosHkSkip(f"download result is {data.get('result')}")
 
     if not is_market_open():
         raise ObosHkSkip("Market is closed today.")

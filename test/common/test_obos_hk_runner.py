@@ -44,6 +44,75 @@ def test_skip_when_redis_not_success():
     assert redis_called
 
 
+def test_missing_redis_result_does_not_skip_by_default():
+    """Legacy Celery wrapper behavior should continue when the download marker is absent."""
+
+    redis_called = False
+    called = {"subprocess": False, "email": False}
+
+    def fake_redis_get(key):
+        nonlocal redis_called
+        from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+
+        assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        redis_called = True
+        return None
+
+    def fake_run_subprocess(cmd, *a, **k):
+        called["subprocess"] = True
+        return SimpleNamespace(returncode=0, stdout="OK", stderr="")
+
+    def fake_send_email(subject, body, to=None):
+        called["email"] = True
+
+    res = run_obos_hk_backtest(
+        redis_get=fake_redis_get,
+        is_market_open=lambda date=None: True,
+        run_subprocess=fake_run_subprocess,
+        send_email=fake_send_email,
+    )
+
+    assert res.status == "success"
+    assert redis_called
+    assert called["subprocess"]
+    assert called["email"]
+
+
+def test_missing_redis_result_skips_when_required():
+    """Explicit marker-required mode should skip when the download marker is absent."""
+
+    redis_called = False
+    called = {"subprocess": False, "email": False}
+
+    def fake_redis_get(key):
+        nonlocal redis_called
+        from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+
+        assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+        redis_called = True
+        return None
+
+    def fake_run_subprocess(cmd, *a, **k):
+        called["subprocess"] = True
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_send_email(subject, body, to=None):
+        called["email"] = True
+
+    with pytest.raises(ObosHkSkip, match="download result missing"):
+        run_obos_hk_backtest(
+            redis_get=fake_redis_get,
+            is_market_open=lambda date=None: True,
+            run_subprocess=fake_run_subprocess,
+            send_email=fake_send_email,
+            require_download_result=True,
+        )
+
+    assert redis_called
+    assert not called["subprocess"]
+    assert not called["email"]
+
+
 def test_success_email_path():
     """When backtest subprocess succeeds, runner returns a success result and
     sends an email. Dependencies are injected as callables.
@@ -196,4 +265,3 @@ def test_subprocess_failure_path():
     assert counts["email"] == 1, f"expected 1 email sent, got {counts['email']}"
     # ensure we actually queried Redis
     assert redis_called
-
