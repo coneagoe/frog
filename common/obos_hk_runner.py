@@ -81,7 +81,7 @@ def run_obos_hk_backtest(
     except Exception as exc:
         raise RuntimeError(f"failed to read Redis: {exc}") from exc
 
-    if result:
+    if result is not None:
         try:
             data = json.loads(result)
             if not isinstance(data, dict):
