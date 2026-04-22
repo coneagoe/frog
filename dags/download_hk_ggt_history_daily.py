@@ -33,6 +33,7 @@ from common.const import (  # noqa: E402
     AdjustType,
     PeriodType,
 )
+from common.obos_hk_runner import ObosHkSkip, run_obos_hk_backtest  # noqa: E402
 from download import DownloadManager  # noqa: E402
 from storage import get_storage  # noqa: E402
 
@@ -150,6 +151,20 @@ def aggregate_and_save_result(*, partition_count: int, **context):
     )
 
 
+def run_obos_hk_task(**context):
+    """Run the HK OBOS backtest after a successful aggregate step."""
+
+    try:
+        result = run_obos_hk_backtest(
+            python_executable=sys.executable,
+            require_download_result=True,
+        )
+    except ObosHkSkip as exc:
+        raise AirflowSkipException(str(exc)) from exc
+
+    return result.status
+
+
 # Create DAG
 dag = DAG(
     "download_hk_ggt_history_daily",
@@ -179,6 +194,14 @@ aggregate_task = PythonOperator(
     dag=dag,
 )
 
+run_obos_hk_operator = PythonOperator(
+    task_id="run_obos_hk",
+    python_callable=run_obos_hk_task,
+    dag=dag,
+)
+
 # Set dependency: aggregate runs after all partition tasks complete
 for task in partition_tasks:
     task >> aggregate_task
+
+aggregate_task >> run_obos_hk_operator
