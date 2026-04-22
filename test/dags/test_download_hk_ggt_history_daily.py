@@ -1,3 +1,5 @@
+# mypy: disable-error-code="attr-defined,arg-type"
+
 import importlib.util
 import os
 import sys
@@ -33,7 +35,9 @@ def load_dag_module_with_stubs(monkeypatch):
             self.task_dict[task.task_id] = task
 
     class FakePythonOperator:
-        def __init__(self, *, task_id, python_callable, op_kwargs=None, dag=None, **kwargs):
+        def __init__(
+            self, *, task_id, python_callable, op_kwargs=None, dag=None, **kwargs
+        ):
             self.task_id = task_id
             self.python_callable = python_callable
             self.op_kwargs = op_kwargs or {}
@@ -58,7 +62,9 @@ def load_dag_module_with_stubs(monkeypatch):
     common_dags_module.get_default_args = lambda: {}
     common_dags_module.get_partition_count = lambda: 1
     common_dags_module.get_partition_ids = lambda count=1: range(count)
-    common_dags_module.get_partitioned_ids = lambda ids, partition_id, partition_count: ids
+    common_dags_module.get_partitioned_ids = (
+        lambda ids, partition_id, partition_count: ids
+    )
 
     common_module = types.ModuleType("common")
     common_module.__path__ = []
@@ -95,7 +101,9 @@ def load_dag_module_with_stubs(monkeypatch):
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
     monkeypatch.setitem(sys.modules, "airflow.exceptions", airflow_exceptions_module)
     monkeypatch.setitem(sys.modules, "airflow.operators", airflow_operators_module)
-    monkeypatch.setitem(sys.modules, "airflow.operators.python", airflow_operators_python_module)
+    monkeypatch.setitem(
+        sys.modules, "airflow.operators.python", airflow_operators_python_module
+    )
     monkeypatch.setitem(sys.modules, "common_dags", common_dags_module)
     monkeypatch.setitem(sys.modules, "common", common_module)
     monkeypatch.setitem(sys.modules, "common.const", common_const_module)
@@ -108,9 +116,9 @@ def load_dag_module_with_stubs(monkeypatch):
         "testable_download_hk_ggt_history_daily",
         DAG_PATH,
     )
-    module = importlib.util.module_from_spec(spec)
     assert spec is not None
     assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module, AirflowSkipException, ObosHkSkip
 
@@ -120,10 +128,15 @@ def test_loaded_dag_wires_run_obos_hk_after_aggregate_task(monkeypatch):
 
     assert module.aggregate_task.task_id == "aggregate_results"
     assert module.aggregate_task.python_callable is module.aggregate_and_save_result
-    assert module.aggregate_task.op_kwargs == {"partition_count": module.PARTITION_COUNT}
+    assert module.aggregate_task.op_kwargs == {
+        "partition_count": module.PARTITION_COUNT
+    }
     assert module.aggregate_task.dag is module.dag
     assert module.partition_tasks
-    assert all(module.aggregate_task in task.downstream_tasks for task in module.partition_tasks)
+    assert all(
+        module.aggregate_task in task.downstream_tasks
+        for task in module.partition_tasks
+    )
 
     run_obos_hk_operator = module.dag.task_dict.get("run_obos_hk")
     assert run_obos_hk_operator is not None
@@ -142,7 +155,9 @@ def test_loaded_dag_wires_run_obos_hk_after_aggregate_task(monkeypatch):
 def test_run_obos_hk_task_maps_runner_skip_reasons_to_airflow_skip(
     monkeypatch, runner_skip_reason
 ):
-    module, airflow_skip_exception, obos_hk_skip = load_dag_module_with_stubs(monkeypatch)
+    module, airflow_skip_exception, obos_hk_skip = load_dag_module_with_stubs(
+        monkeypatch
+    )
 
     assert hasattr(module, "run_obos_hk_task")
 
@@ -162,7 +177,12 @@ def test_run_obos_hk_task_maps_runner_skip_reasons_to_airflow_skip(
     with pytest.raises(airflow_skip_exception, match=runner_skip_reason) as exc_info:
         module.run_obos_hk_task()
 
-    assert run_kwargs == [{"require_download_result": True}]
+    assert run_kwargs == [
+        {
+            "python_executable": module.sys.executable,
+            "require_download_result": True,
+        }
+    ]
     assert runner_skip_reason in str(exc_info.value)
 
 
@@ -187,4 +207,9 @@ def test_run_obos_hk_task_propagates_runtime_errors(monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         module.run_obos_hk_task()
 
-    assert run_kwargs == [{"require_download_result": True}]
+    assert run_kwargs == [
+        {
+            "python_executable": module.sys.executable,
+            "require_download_result": True,
+        }
+    ]

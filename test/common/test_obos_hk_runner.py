@@ -1,11 +1,16 @@
-import pytest
-from types import SimpleNamespace
 import json
 import sys
+from types import SimpleNamespace
+
+import pytest
 
 # The tests now exercise the shared runner contract. Importing the runner
 # module is expected to fail for Task 1 (module not implemented yet).
 from common.obos_hk_runner import ObosHkSkip, run_obos_hk_backtest
+
+
+def always_market_open() -> bool:
+    return True
 
 
 def test_skip_when_redis_not_success():
@@ -19,6 +24,7 @@ def test_skip_when_redis_not_success():
         nonlocal redis_called
         # ensure the runner looks up the expected download key exactly
         from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+
         assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
         redis_called = True
         return json.dumps({"result": "fail"})
@@ -35,7 +41,12 @@ def test_skip_when_redis_not_success():
 
     # Call the real API with injected dependency and a deterministic market-open check
     with pytest.raises(ObosHkSkip):
-        run_obos_hk_backtest(redis_get=fake_redis_get, is_market_open=lambda date=None: True, run_subprocess=spy_run_subprocess, send_email=spy_send_email)
+        run_obos_hk_backtest(
+            redis_get=fake_redis_get,
+            is_market_open=always_market_open,
+            run_subprocess=spy_run_subprocess,
+            send_email=spy_send_email,
+        )
 
     # verify that side-effecting collaborators were not invoked
     assert not called["subprocess"]
@@ -67,7 +78,7 @@ def test_missing_redis_result_does_not_skip_by_default():
 
     res = run_obos_hk_backtest(
         redis_get=fake_redis_get,
-        is_market_open=lambda date=None: True,
+        is_market_open=always_market_open,
         run_subprocess=fake_run_subprocess,
         send_email=fake_send_email,
     )
@@ -102,7 +113,7 @@ def test_missing_redis_result_skips_when_required():
     with pytest.raises(ObosHkSkip, match="download result missing"):
         run_obos_hk_backtest(
             redis_get=fake_redis_get,
-            is_market_open=lambda date=None: True,
+            is_market_open=always_market_open,
             run_subprocess=fake_run_subprocess,
             send_email=fake_send_email,
             require_download_result=True,
@@ -134,7 +145,7 @@ def test_redis_read_failure_raises_runtimeerror():
     with pytest.raises(RuntimeError, match="failed to read Redis: redis unavailable"):
         run_obos_hk_backtest(
             redis_get=fake_redis_get,
-            is_market_open=lambda date=None: True,
+            is_market_open=always_market_open,
             run_subprocess=fake_run_subprocess,
             send_email=fake_send_email,
         )
@@ -164,7 +175,7 @@ def test_malformed_redis_payload_raises_runtimeerror():
     with pytest.raises(RuntimeError, match="invalid download result"):
         run_obos_hk_backtest(
             redis_get=fake_redis_get,
-            is_market_open=lambda date=None: True,
+            is_market_open=always_market_open,
             run_subprocess=fake_run_subprocess,
             send_email=fake_send_email,
         )
@@ -194,7 +205,7 @@ def test_empty_string_redis_payload_raises_runtimeerror():
     with pytest.raises(RuntimeError, match="invalid download result"):
         run_obos_hk_backtest(
             redis_get=fake_redis_get,
-            is_market_open=lambda date=None: True,
+            is_market_open=always_market_open,
             run_subprocess=fake_run_subprocess,
             send_email=fake_send_email,
         )
@@ -225,7 +236,7 @@ def test_wrong_shape_redis_payload_raises_runtimeerror(payload):
     with pytest.raises(RuntimeError, match="invalid download result"):
         run_obos_hk_backtest(
             redis_get=fake_redis_get,
-            is_market_open=lambda date=None: True,
+            is_market_open=always_market_open,
             run_subprocess=fake_run_subprocess,
             send_email=fake_send_email,
         )
@@ -256,7 +267,7 @@ def test_object_payload_without_result_raises_runtimeerror(payload):
     with pytest.raises(RuntimeError, match="invalid download result"):
         run_obos_hk_backtest(
             redis_get=fake_redis_get,
-            is_market_open=lambda date=None: True,
+            is_market_open=always_market_open,
             run_subprocess=fake_run_subprocess,
             send_email=fake_send_email,
         )
@@ -276,32 +287,30 @@ def test_success_email_path():
         nonlocal redis_called
         # exact Redis key contract
         from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+
         assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
         redis_called = True
         return json.dumps({"result": "success"})
-
-    def fake_is_market_open(date=None):
-        return True
 
     captured = {}
     counts = {"subprocess": 0, "email": 0}
 
     def fake_run_subprocess(cmd, *a, **k):
         # capture the invoked command, count invocation, and emulate successful subprocess
-        captured['cmd'] = cmd
+        captured["cmd"] = cmd
         counts["subprocess"] += 1
         return SimpleNamespace(returncode=0, stdout="OK", stderr="")
 
     sent = {}
 
     def fake_send_email(subject, body, to=None):
-        sent['subject'] = subject
-        sent['body'] = body
+        sent["subject"] = subject
+        sent["body"] = body
         counts["email"] += 1
 
     res = run_obos_hk_backtest(
         redis_get=fake_redis_get,
-        is_market_open=fake_is_market_open,
+        is_market_open=always_market_open,
         run_subprocess=fake_run_subprocess,
         send_email=fake_send_email,
     )
@@ -310,23 +319,25 @@ def test_success_email_path():
     assert "obos_hk" in res.email_subject
     assert "OK" in res.email_body
     # ensure our fake email sender was used
-    assert "obos_hk" in sent.get('subject', '')
+    assert "obos_hk" in sent.get("subject", "")
     # validate actual email payload
-    assert "OK" in sent.get('body', '')
+    assert "OK" in sent.get("body", "")
 
     # validate the subprocess argv structure
-    cmd = captured.get('cmd')
+    cmd = captured.get("cmd")
     assert cmd is not None, "subprocess was not invoked"
     assert isinstance(cmd, (list, tuple)), f"expected argv list, got {type(cmd)}"
     # lock argv[0] and argv[1]
     assert cmd[0] == sys.executable
     assert cmd[1] == "backtest/obos_hk_9.py"
+
     # ensure options -s, -e, -f appear in order with paired values
     def _find_opt(argv, opt):
         try:
             return argv.index(opt)
         except ValueError:
             return -1
+
     i_s = _find_opt(cmd, "-s")
     i_e = _find_opt(cmd, "-e")
     i_f = _find_opt(cmd, "-f")
@@ -337,7 +348,9 @@ def test_success_email_path():
         assert cmd[idx + 1], "option value missing"
 
     # enforce exactly one subprocess invocation and exactly one email sent
-    assert counts["subprocess"] == 1, f"expected 1 subprocess call, got {counts['subprocess']}"
+    assert (
+        counts["subprocess"] == 1
+    ), f"expected 1 subprocess call, got {counts['subprocess']}"
     assert counts["email"] == 1, f"expected 1 email sent, got {counts['email']}"
     # ensure we actually queried Redis
     assert redis_called
@@ -354,33 +367,31 @@ def test_subprocess_failure_path():
         nonlocal redis_called
         # exact Redis key contract
         from common.const import REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
+
         assert str(key) == REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY
         redis_called = True
         return json.dumps({"result": "success"})
-
-    def fake_is_market_open(date=None):
-        return True
 
     captured = {}
     counts = {"subprocess": 0, "email": 0}
 
     def fake_run_subprocess(cmd, *a, **k):
         # capture the invoked command, count invocation, and emulate failing subprocess
-        captured['cmd'] = cmd
+        captured["cmd"] = cmd
         counts["subprocess"] += 1
         return SimpleNamespace(returncode=1, stdout="", stderr="some error")
 
     sent = {}
 
     def fake_send_email(subject, body, to=None):
-        sent['subject'] = subject
-        sent['body'] = body
+        sent["subject"] = subject
+        sent["body"] = body
         counts["email"] += 1
 
     with pytest.raises(RuntimeError) as exc:
         run_obos_hk_backtest(
             redis_get=fake_redis_get,
-            is_market_open=fake_is_market_open,
+            is_market_open=always_market_open,
             run_subprocess=fake_run_subprocess,
             send_email=fake_send_email,
         )
@@ -388,21 +399,23 @@ def test_subprocess_failure_path():
     assert "some error" in str(exc.value)
 
     # ensure failure email payload contains the subprocess stderr and was sent
-    assert "some error" in sent.get('body', '')
+    assert "some error" in sent.get("body", "")
 
     # validate the subprocess argv structure
-    cmd = captured.get('cmd')
+    cmd = captured.get("cmd")
     assert cmd is not None, "subprocess was not invoked"
     assert isinstance(cmd, (list, tuple)), f"expected argv list, got {type(cmd)}"
     # lock argv[0] and argv[1]
     assert cmd[0] == sys.executable
     assert cmd[1] == "backtest/obos_hk_9.py"
+
     # ensure options -s, -e, -f appear in order with paired values
     def _find_opt(argv, opt):
         try:
             return argv.index(opt)
         except ValueError:
             return -1
+
     i_s = _find_opt(cmd, "-s")
     i_e = _find_opt(cmd, "-e")
     i_f = _find_opt(cmd, "-f")
@@ -413,7 +426,9 @@ def test_subprocess_failure_path():
         assert cmd[idx + 1], "option value missing"
 
     # enforce exactly one subprocess invocation and exactly one email sent
-    assert counts["subprocess"] == 1, f"expected 1 subprocess call, got {counts['subprocess']}"
+    assert (
+        counts["subprocess"] == 1
+    ), f"expected 1 subprocess call, got {counts['subprocess']}"
     assert counts["email"] == 1, f"expected 1 email sent, got {counts['email']}"
     # ensure we actually queried Redis
     assert redis_called

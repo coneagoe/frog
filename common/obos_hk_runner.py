@@ -63,6 +63,7 @@ def run_obos_hk_backtest(
     is_market_open: Callable[[], bool] | None = None,
     run_subprocess: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     send_email: Callable[[str, str], object] | None = None,
+    python_executable: str | None = None,
     executable: str | None = None,
     start_date_str: str = DEFAULT_START_DATE,
     stock_list: str = DEFAULT_STOCK_LIST,
@@ -88,7 +89,9 @@ def run_obos_hk_backtest(
                 raise TypeError("download result payload must be a JSON object")
             download_result = data.get("result")
             if not isinstance(download_result, str) or not download_result.strip():
-                raise TypeError("download result payload must contain a usable result field")
+                raise TypeError(
+                    "download result payload must contain a usable result field"
+                )
         except Exception as exc:
             raise RuntimeError(f"invalid download result: {exc}") from exc
 
@@ -104,7 +107,7 @@ def run_obos_hk_backtest(
         start_date_str,
         end_date_str,
         stock_list,
-        executable=executable,
+        executable=python_executable or executable,
     )
     process = run_subprocess(command, capture_output=True, text=True)
     subject = f"obos_hk_{start_date_str}_{end_date_str}"
