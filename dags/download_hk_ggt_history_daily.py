@@ -154,7 +154,7 @@ def aggregate_and_save_result(*, partition_count: int, **context):
     )
 
 
-def run_obos_hk_backtest(*, python_executable: str | None = None, **kwargs):
+def run_obos_hk_backtest(*, executable: str | None = None, **kwargs):
     """Run the shared HK OBOS runner from the repository root."""
 
     runner_cwd = (
@@ -166,8 +166,8 @@ def run_obos_hk_backtest(*, python_executable: str | None = None, **kwargs):
 
     try:
         os.chdir(runner_cwd)
-        if python_executable is not None:
-            kwargs["executable"] = python_executable
+        if executable is not None:
+            kwargs["executable"] = executable
         return _shared_run_obos_hk_backtest(**kwargs)
     finally:
         os.chdir(previous_cwd)
@@ -178,7 +178,7 @@ def run_obos_hk_task(**context):
 
     try:
         result = run_obos_hk_backtest(
-            python_executable=sys.executable,
+            executable=sys.executable,
             require_download_result=True,
         )
     except ObosHkSkip as exc:
