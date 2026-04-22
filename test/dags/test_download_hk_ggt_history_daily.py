@@ -136,10 +136,10 @@ def test_run_obos_hk_task_maps_obos_skip_to_airflow_skip(monkeypatch):
 
     assert hasattr(module, "run_obos_hk_task")
 
-    call_count = {"value": 0}
+    run_kwargs = []
 
     def fake_run_obos_hk_backtest(**kwargs):
-        call_count["value"] += 1
+        run_kwargs.append(kwargs)
         raise obos_hk_skip("download result is fail")
 
     monkeypatch.setattr(
@@ -152,5 +152,29 @@ def test_run_obos_hk_task_maps_obos_skip_to_airflow_skip(monkeypatch):
     with pytest.raises(airflow_skip_exception) as exc_info:
         module.run_obos_hk_task()
 
-    assert call_count["value"] == 1
+    assert run_kwargs == [{"require_download_result": True}]
     assert "download result is fail" in str(exc_info.value)
+
+
+def test_run_obos_hk_task_propagates_runtime_errors(monkeypatch):
+    module, _, _ = load_dag_module_with_stubs(monkeypatch)
+
+    assert hasattr(module, "run_obos_hk_task")
+
+    run_kwargs = []
+
+    def fake_run_obos_hk_backtest(**kwargs):
+        run_kwargs.append(kwargs)
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        module,
+        "run_obos_hk_backtest",
+        fake_run_obos_hk_backtest,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        module.run_obos_hk_task()
+
+    assert run_kwargs == [{"require_download_result": True}]
