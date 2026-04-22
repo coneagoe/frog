@@ -33,7 +33,10 @@ from common.const import (  # noqa: E402
     AdjustType,
     PeriodType,
 )
-from common.obos_hk_runner import ObosHkSkip, run_obos_hk_backtest  # noqa: E402
+from common.obos_hk_runner import ObosHkSkip  # noqa: E402
+from common.obos_hk_runner import (  # noqa: E402
+    run_obos_hk_backtest as _shared_run_obos_hk_backtest,
+)
 from download import DownloadManager  # noqa: E402
 from storage import get_storage  # noqa: E402
 
@@ -149,6 +152,25 @@ def aggregate_and_save_result(*, partition_count: int, **context):
     return (
         f"Results saved to Redis: {REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY}, result={result}"
     )
+
+
+def run_obos_hk_backtest(*, python_executable: str | None = None, **kwargs):
+    """Run the shared HK OBOS runner from the repository root."""
+
+    runner_cwd = (
+        project_root
+        if os.path.isdir(project_root)
+        else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    )
+    previous_cwd = os.getcwd()
+
+    try:
+        os.chdir(runner_cwd)
+        if python_executable is not None:
+            kwargs["executable"] = python_executable
+        return _shared_run_obos_hk_backtest(**kwargs)
+    finally:
+        os.chdir(previous_cwd)
 
 
 def run_obos_hk_task(**context):

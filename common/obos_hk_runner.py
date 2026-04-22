@@ -63,7 +63,6 @@ def run_obos_hk_backtest(
     is_market_open: Callable[[], bool] | None = None,
     run_subprocess: Callable[..., subprocess.CompletedProcess[str]] | None = None,
     send_email: Callable[[str, str], object] | None = None,
-    python_executable: str | None = None,
     executable: str | None = None,
     start_date_str: str = DEFAULT_START_DATE,
     stock_list: str = DEFAULT_STOCK_LIST,
@@ -107,7 +106,7 @@ def run_obos_hk_backtest(
         start_date_str,
         end_date_str,
         stock_list,
-        executable=python_executable or executable,
+        executable=executable,
     )
     process = run_subprocess(command, capture_output=True, text=True)
     subject = f"obos_hk_{start_date_str}_{end_date_str}"

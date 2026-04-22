@@ -213,3 +213,39 @@ def test_run_obos_hk_task_propagates_runtime_errors(monkeypatch):
             "require_download_result": True,
         }
     ]
+
+
+def test_dag_runner_wrapper_uses_project_root_and_restores_cwd(monkeypatch):
+    module, _, _ = load_dag_module_with_stubs(monkeypatch)
+
+    original_cwd = ROOT / "test"
+    monkeypatch.chdir(original_cwd)
+    runner_calls: dict[str, object] = {}
+
+    def fake_shared_runner(**kwargs):
+        runner_calls["cwd"] = os.getcwd()
+        runner_calls["kwargs"] = kwargs
+        return types.SimpleNamespace(status="success")
+
+    monkeypatch.setattr(
+        module,
+        "_shared_run_obos_hk_backtest",
+        fake_shared_runner,
+        raising=False,
+    )
+    monkeypatch.setattr(module, "project_root", str(ROOT))
+
+    result = module.run_obos_hk_backtest(
+        python_executable=module.sys.executable,
+        require_download_result=True,
+    )
+
+    assert result.status == "success"
+    assert runner_calls == {
+        "cwd": str(ROOT),
+        "kwargs": {
+            "executable": module.sys.executable,
+            "require_download_result": True,
+        },
+    }
+    assert os.getcwd() == str(original_cwd)
