@@ -1,6 +1,5 @@
 import importlib.util
 import os
-import re
 import sys
 import types
 from pathlib import Path
@@ -11,24 +10,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 ROOT = Path(__file__).resolve().parents[2]
 DAG_PATH = ROOT / "dags/download_hk_ggt_history_daily.py"
-
-
-def read_source() -> str:
-    return DAG_PATH.read_text(encoding="utf-8")
-
-
-def test_source_wires_run_obos_hk_after_aggregate_task():
-    source = read_source()
-
-    assert re.search(
-        r'run_obos_hk_operator\s*=\s*PythonOperator\([\s\S]*?task_id\s*=\s*["\']run_obos_hk["\']',
-        source,
-    )
-    assert re.search(
-        r"run_obos_hk_operator\s*=\s*PythonOperator\([\s\S]*?python_callable\s*=\s*run_obos_hk_task",
-        source,
-    )
-    assert re.search(r"aggregate_task\s*>>\s*run_obos_hk_operator", source)
 
 
 def load_dag_module_with_stubs(monkeypatch):
@@ -46,6 +27,10 @@ def load_dag_module_with_stubs(monkeypatch):
         def __init__(self, *args, **kwargs):
             self.args = args
             self.kwargs = kwargs
+            self.task_dict = {}
+
+        def add_task(self, task):
+            self.task_dict[task.task_id] = task
 
     class FakePythonOperator:
         def __init__(self, *, task_id, python_callable, op_kwargs=None, dag=None, **kwargs):
@@ -56,6 +41,8 @@ def load_dag_module_with_stubs(monkeypatch):
             self.kwargs = kwargs
             self.upstream_tasks = []
             self.downstream_tasks = []
+            if dag is not None:
+                dag.add_task(self)
 
         def __rshift__(self, other):
             self.downstream_tasks.append(other)
@@ -128,17 +115,42 @@ def load_dag_module_with_stubs(monkeypatch):
     return module, AirflowSkipException, ObosHkSkip
 
 
+def test_loaded_dag_wires_run_obos_hk_after_aggregate_task(monkeypatch):
+    module, _, _ = load_dag_module_with_stubs(monkeypatch)
+
+    assert module.aggregate_task.task_id == "aggregate_results"
+    assert module.aggregate_task.python_callable is module.aggregate_and_save_result
+    assert module.aggregate_task.op_kwargs == {"partition_count": module.PARTITION_COUNT}
+    assert module.aggregate_task.dag is module.dag
+    assert module.partition_tasks
+    assert all(module.aggregate_task in task.downstream_tasks for task in module.partition_tasks)
+
+    run_obos_hk_operator = module.dag.task_dict.get("run_obos_hk")
+    assert run_obos_hk_operator is not None
+    assert run_obos_hk_operator.python_callable is module.run_obos_hk_task
+    assert module.aggregate_task.downstream_tasks == [run_obos_hk_operator]
+
+
 def test_run_obos_hk_task_maps_obos_skip_to_airflow_skip(monkeypatch):
     module, airflow_skip_exception, obos_hk_skip = load_dag_module_with_stubs(monkeypatch)
 
     assert hasattr(module, "run_obos_hk_task")
 
+    call_count = {"value": 0}
+
+    def fake_run_obos_hk_backtest(**kwargs):
+        call_count["value"] += 1
+        raise obos_hk_skip("download result is fail")
+
     monkeypatch.setattr(
         module,
         "run_obos_hk_backtest",
-        lambda **kwargs: (_ for _ in ()).throw(obos_hk_skip("download result is fail")),
+        fake_run_obos_hk_backtest,
         raising=False,
     )
 
-    with pytest.raises(airflow_skip_exception, match="download result is fail"):
+    with pytest.raises(airflow_skip_exception) as exc_info:
         module.run_obos_hk_task()
+
+    assert call_count["value"] == 1
+    assert "download result is fail" in str(exc_info.value)
