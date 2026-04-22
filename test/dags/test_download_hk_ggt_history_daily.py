@@ -179,7 +179,7 @@ def test_run_obos_hk_task_maps_runner_skip_reasons_to_airflow_skip(
 
     assert run_kwargs == [
         {
-            "python_executable": module.sys.executable,
+            "executable": module.sys.executable,
             "require_download_result": True,
         }
     ]
@@ -209,7 +209,7 @@ def test_run_obos_hk_task_propagates_runtime_errors(monkeypatch):
 
     assert run_kwargs == [
         {
-            "python_executable": module.sys.executable,
+            "executable": module.sys.executable,
             "require_download_result": True,
         }
     ]
@@ -236,7 +236,7 @@ def test_dag_runner_wrapper_uses_project_root_and_restores_cwd(monkeypatch):
     monkeypatch.setattr(module, "project_root", str(ROOT))
 
     result = module.run_obos_hk_backtest(
-        python_executable=module.sys.executable,
+        executable=module.sys.executable,
         require_download_result=True,
     )
 
