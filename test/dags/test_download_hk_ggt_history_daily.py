@@ -131,7 +131,17 @@ def test_loaded_dag_wires_run_obos_hk_after_aggregate_task(monkeypatch):
     assert module.aggregate_task.downstream_tasks == [run_obos_hk_operator]
 
 
-def test_run_obos_hk_task_maps_obos_skip_to_airflow_skip(monkeypatch):
+@pytest.mark.parametrize(
+    "runner_skip_reason",
+    [
+        "download result is fail",
+        "download result missing",
+        "Market is closed today.",
+    ],
+)
+def test_run_obos_hk_task_maps_runner_skip_reasons_to_airflow_skip(
+    monkeypatch, runner_skip_reason
+):
     module, airflow_skip_exception, obos_hk_skip = load_dag_module_with_stubs(monkeypatch)
 
     assert hasattr(module, "run_obos_hk_task")
@@ -140,7 +150,7 @@ def test_run_obos_hk_task_maps_obos_skip_to_airflow_skip(monkeypatch):
 
     def fake_run_obos_hk_backtest(**kwargs):
         run_kwargs.append(kwargs)
-        raise obos_hk_skip("download result is fail")
+        raise obos_hk_skip(runner_skip_reason)
 
     monkeypatch.setattr(
         module,
@@ -149,11 +159,11 @@ def test_run_obos_hk_task_maps_obos_skip_to_airflow_skip(monkeypatch):
         raising=False,
     )
 
-    with pytest.raises(airflow_skip_exception) as exc_info:
+    with pytest.raises(airflow_skip_exception, match=runner_skip_reason) as exc_info:
         module.run_obos_hk_task()
 
     assert run_kwargs == [{"require_download_result": True}]
-    assert "download result is fail" in str(exc_info.value)
+    assert runner_skip_reason in str(exc_info.value)
 
 
 def test_run_obos_hk_task_propagates_runtime_errors(monkeypatch):
