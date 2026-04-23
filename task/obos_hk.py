@@ -30,10 +30,16 @@ def obos_hk():
     try:
         r = get_redis_client()
         result = r.get(REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY)
-        if result:
-            data = json.loads(result)
-            if data.get("result") != "success":
-                return f"Skip: download result is {data.get('result')}"
+        if not result:
+            return "Skip: missing Redis download result."
+
+        data = json.loads(result)
+        today_str = date.today().strftime("%Y-%m-%d")
+        if data.get("date") != today_str:
+            return f"Skip: Redis download result date is {data.get('date')}"
+
+        if data.get("result") != "success":
+            return f"Skip: download result is {data.get('result')}"
     except Exception as e:
         return f"Skip: failed to read Redis: {e}"
 

@@ -25,7 +25,7 @@ from common_dags import (  # noqa: E402
     get_partitioned_ids,
 )
 
-from common import is_a_market_open_today  # noqa: E402
+from common import is_hk_market_open_today  # noqa: E402
 from common.const import (  # noqa: E402
     COL_STOCK_ID,
     DEFAULT_REDIS_URL,
@@ -62,7 +62,7 @@ def download_hk_ggt_history_hfq_partition_task(
         Exception: If download fails
     """
 
-    if not is_a_market_open_today():
+    if not is_hk_market_open_today():
         raise AirflowSkipException("港股市场今日休市，跳过下载任务")
 
     if partition_id >= partition_count:
