@@ -28,6 +28,7 @@ def downloader_ts_module(monkeypatch):
 
     pro_stub = types.SimpleNamespace()
     pro_stub.daily_basic = Mock()
+    pro_stub.hk_daily_adj = Mock()
 
     ts_stub.pro_api = Mock(return_value=pro_stub)
 
@@ -238,6 +239,98 @@ def test_download_stk_holdernumber_all_data(downloader_ts_module, monkeypatch):
         end_date="",
         fields=module.stk_holdernumber_fields,
     )
+
+
+def test_download_history_data_stock_hk_ts_missing_token_raises(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, _ = downloader_ts_module
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+
+    with pytest.raises(ConnectionError, match="Tushare token is missing"):
+        module.download_history_data_stock_hk_ts(
+            stock_id="00700",
+            start_date="2024-01-01",
+            end_date="2024-01-05",
+        )
+
+    ts_stub.pro_api.assert_not_called()
+
+
+def test_download_history_data_stock_hk_ts_success(downloader_ts_module, monkeypatch):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    pro_stub.hk_daily_adj.return_value = pd.DataFrame(
+        {
+            "ts_code": ["00700.HK", "00700.HK"],
+            "trade_date": ["20240105", "20240104"],
+            "open": [391.0, 388.2],
+            "high": [395.0, 390.5],
+            "low": [389.1, 386.9],
+            "close": [394.0, 389.5],
+            "change": [4.9, 1.4],
+            "pct_change": [1.26, 0.36],
+            "vol": [1020300, None],
+            "amount": [401020300.0, 398000000.0],
+            "turnover_ratio": [0.42, 0.35],
+        }
+    )
+
+    result = module.download_history_data_stock_hk_ts(
+        stock_id="00700",
+        start_date="2024-01-01",
+        end_date="2024/01/05",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_called_once_with(
+        ts_code="00700.HK",
+        trade_date="",
+        start_date="20240101",
+        end_date="20240105",
+        fields=module.hk_daily_adj_fields,
+    )
+    assert list(result.columns) == module.hk_history_columns
+    assert result[module.COL_STOCK_ID].tolist() == ["00700", "00700"]
+    assert pd.api.types.is_datetime64_any_dtype(result[module.COL_DATE])
+    assert result[module.COL_CHANGE_RATE].tolist() == [
+        pytest.approx(1.26),
+        pytest.approx(0.36),
+    ]
+    assert result[module.COL_TURNOVER_RATE].tolist() == [
+        pytest.approx(0.42),
+        pytest.approx(0.35),
+    ]
+    assert result[module.COL_VOLUME].tolist() == [1020300, 0]
+
+
+def test_download_history_data_stock_hk_ts_empty_result(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    pro_stub.hk_daily_adj.return_value = pd.DataFrame(
+        columns=module.hk_daily_adj_fields
+    )
+
+    result = module.download_history_data_stock_hk_ts(
+        stock_id="00700",
+        start_date="20240101",
+        end_date="20240105",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_called_once_with(
+        ts_code="00700.HK",
+        trade_date="",
+        start_date="20240101",
+        end_date="20240105",
+        fields=module.hk_daily_adj_fields,
+    )
+    assert list(result.columns) == module.hk_history_columns
+    assert result.empty
 
 
 if __name__ == "__main__":

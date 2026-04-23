@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime
 from functools import wraps
 from typing import Any, Callable, TypeVar, cast
@@ -6,6 +7,22 @@ from typing import Any, Callable, TypeVar, cast
 import pandas as pd
 import retrying
 import tushare as ts
+
+from common.const import (
+    COL_AMOUNT,
+    COL_CHANGE,
+    COL_CHANGE_RATE,
+    COL_CLOSE,
+    COL_DATE,
+    COL_HIGH,
+    COL_LOW,
+    COL_OPEN,
+    COL_STOCK_ID,
+    COL_TURNOVER_RATE,
+    COL_VOLUME,
+    AdjustType,
+    PeriodType,
+)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -133,6 +150,36 @@ fund_daily_fields = [
 ]
 
 
+hk_daily_adj_fields = [
+    "ts_code",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "change",
+    "pct_change",
+    "vol",
+    "amount",
+    "turnover_ratio",
+]
+
+
+hk_history_columns = [
+    COL_DATE,
+    COL_STOCK_ID,
+    COL_OPEN,
+    COL_CLOSE,
+    COL_HIGH,
+    COL_LOW,
+    COL_VOLUME,
+    COL_AMOUNT,
+    COL_CHANGE,
+    COL_CHANGE_RATE,
+    COL_TURNOVER_RATE,
+]
+
+
 etf_basic_fields = [
     "ts_code",
     "csname",
@@ -149,6 +196,11 @@ etf_basic_fields = [
     "mgt_fee",
     "etf_type",
 ]
+
+
+def _to_hk_ts_code(stock_id: str) -> str:
+    assert re.fullmatch(r"\d{5}", stock_id), "Stock ID must be 5 digits."
+    return f"{stock_id}.HK"
 
 
 @retrying.retry(
@@ -347,6 +399,71 @@ def download_etf_basic(
         list_status="L",
         fields=etf_basic_fields,
     )
+
+    return df
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
+def download_history_data_stock_hk_ts(
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    period: PeriodType = PeriodType.DAILY,
+    adjust: AdjustType = AdjustType.HFQ,
+    pro: Any | None = None,
+) -> pd.DataFrame | Any:
+    del period, adjust
+
+    client = require_pro_client(pro)
+    ts_code = _to_hk_ts_code(stock_id)
+    normalized_start_date = convert_date(start_date) if start_date else ""
+    normalized_end_date = convert_date(end_date) if end_date else ""
+
+    df = client.hk_daily_adj(
+        ts_code=ts_code,
+        trade_date="",
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        fields=hk_daily_adj_fields,
+    )
+
+    if df.empty:
+        return pd.DataFrame(columns=hk_history_columns)
+
+    numeric_columns = [
+        COL_OPEN,
+        COL_CLOSE,
+        COL_HIGH,
+        COL_LOW,
+        COL_VOLUME,
+        COL_AMOUNT,
+        COL_CHANGE,
+        COL_CHANGE_RATE,
+        COL_TURNOVER_RATE,
+    ]
+    df = df.rename(
+        columns={
+            "trade_date": COL_DATE,
+            "open": COL_OPEN,
+            "close": COL_CLOSE,
+            "high": COL_HIGH,
+            "low": COL_LOW,
+            "vol": COL_VOLUME,
+            "amount": COL_AMOUNT,
+            "change": COL_CHANGE,
+            "pct_change": COL_CHANGE_RATE,
+            "turnover_ratio": COL_TURNOVER_RATE,
+        }
+    )
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE], format="%Y%m%d")
+    df[COL_STOCK_ID] = stock_id
+    df = df.reindex(columns=hk_history_columns)
+    df[numeric_columns] = df[numeric_columns].fillna(0)
 
     return df
 
