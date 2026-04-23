@@ -305,6 +305,24 @@ def test_download_history_data_stock_hk_ts_success(downloader_ts_module, monkeyp
     assert result[module.COL_VOLUME].tolist() == [1020300, 0]
 
 
+def test_download_history_data_stock_hk_ts_unsupported_period_raises(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    with pytest.raises(ValueError, match="Only daily period is supported"):
+        module.download_history_data_stock_hk_ts(
+            stock_id="00700",
+            start_date="20240101",
+            end_date="20240105",
+            period=module.PeriodType.WEEKLY,
+        )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_not_called()
+
+
 def test_download_history_data_stock_hk_ts_empty_result(
     downloader_ts_module, monkeypatch
 ):
@@ -331,6 +349,20 @@ def test_download_history_data_stock_hk_ts_empty_result(
     )
     assert list(result.columns) == module.hk_history_columns
     assert result.empty
+    assert pd.api.types.is_datetime64_any_dtype(result[module.COL_DATE])
+    assert result[module.COL_STOCK_ID].dtype == object
+    for column in [
+        module.COL_OPEN,
+        module.COL_CLOSE,
+        module.COL_HIGH,
+        module.COL_LOW,
+        module.COL_VOLUME,
+        module.COL_AMOUNT,
+        module.COL_CHANGE,
+        module.COL_CHANGE_RATE,
+        module.COL_TURNOVER_RATE,
+    ]:
+        assert pd.api.types.is_numeric_dtype(result[column]), column
 
 
 if __name__ == "__main__":

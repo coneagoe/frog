@@ -75,6 +75,10 @@ def require_pro_client(pro: Any | None) -> Any:
     return pro
 
 
+def retry_on_non_validation_errors(exception: Exception) -> bool:
+    return not isinstance(exception, ValueError)
+
+
 daily_basic_fields = [
     "ts_code",
     "trade_date",
@@ -178,6 +182,38 @@ hk_history_columns = [
     COL_CHANGE_RATE,
     COL_TURNOVER_RATE,
 ]
+
+
+hk_history_numeric_columns = [
+    COL_OPEN,
+    COL_CLOSE,
+    COL_HIGH,
+    COL_LOW,
+    COL_VOLUME,
+    COL_AMOUNT,
+    COL_CHANGE,
+    COL_CHANGE_RATE,
+    COL_TURNOVER_RATE,
+]
+
+
+def _empty_hk_history_dataframe() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            COL_DATE: pd.Series(dtype="datetime64[ns]"),
+            COL_STOCK_ID: pd.Series(dtype="object"),
+            COL_OPEN: pd.Series(dtype="float64"),
+            COL_CLOSE: pd.Series(dtype="float64"),
+            COL_HIGH: pd.Series(dtype="float64"),
+            COL_LOW: pd.Series(dtype="float64"),
+            COL_VOLUME: pd.Series(dtype="float64"),
+            COL_AMOUNT: pd.Series(dtype="float64"),
+            COL_CHANGE: pd.Series(dtype="float64"),
+            COL_CHANGE_RATE: pd.Series(dtype="float64"),
+            COL_TURNOVER_RATE: pd.Series(dtype="float64"),
+        },
+        columns=hk_history_columns,
+    )
 
 
 etf_basic_fields = [
@@ -407,6 +443,7 @@ def download_etf_basic(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
     stop_max_attempt_number=3,
+    retry_on_exception=retry_on_non_validation_errors,
 )
 @get_pro
 def download_history_data_stock_hk_ts(
@@ -417,9 +454,13 @@ def download_history_data_stock_hk_ts(
     adjust: AdjustType = AdjustType.HFQ,
     pro: Any | None = None,
 ) -> pd.DataFrame | Any:
-    del period, adjust
-
     client = require_pro_client(pro)
+    if period != PeriodType.DAILY:
+        raise ValueError(
+            "Only daily period is supported for HK Tushare history downloads."
+        )
+
+    del adjust  # Kept in the signature for compatibility; hk_daily_adj is the only supported backend.
     ts_code = _to_hk_ts_code(stock_id)
     normalized_start_date = convert_date(start_date) if start_date else ""
     normalized_end_date = convert_date(end_date) if end_date else ""
@@ -433,19 +474,8 @@ def download_history_data_stock_hk_ts(
     )
 
     if df.empty:
-        return pd.DataFrame(columns=hk_history_columns)
+        return _empty_hk_history_dataframe()
 
-    numeric_columns = [
-        COL_OPEN,
-        COL_CLOSE,
-        COL_HIGH,
-        COL_LOW,
-        COL_VOLUME,
-        COL_AMOUNT,
-        COL_CHANGE,
-        COL_CHANGE_RATE,
-        COL_TURNOVER_RATE,
-    ]
     df = df.rename(
         columns={
             "trade_date": COL_DATE,
@@ -463,7 +493,9 @@ def download_history_data_stock_hk_ts(
     df[COL_DATE] = pd.to_datetime(df[COL_DATE], format="%Y%m%d")
     df[COL_STOCK_ID] = stock_id
     df = df.reindex(columns=hk_history_columns)
-    df[numeric_columns] = df[numeric_columns].fillna(0)
+    df[hk_history_numeric_columns] = (
+        df[hk_history_numeric_columns].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+    )
 
     return df
 
