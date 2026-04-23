@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from requests.exceptions import ConnectionError, ProxyError
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -179,3 +180,68 @@ def test_download_history_data_stock_hk_returns_correct_data(
 
     # 验证日期列已被转换为 datetime 类型
     assert pd.api.types.is_datetime64_any_dtype(result[module.COL_DATE])
+
+
+def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
+    monkeypatch,
+):
+    module_name = "download.dl.downloader_akshare"
+    sys.modules.pop(module_name, None)
+    sys.modules.pop("akshare", None)
+    sys.modules.pop("retrying", None)
+    sys.modules.pop("utility", None)
+
+    get_proxy_calls = 0
+
+    ak_stub = types.SimpleNamespace()
+
+    def fail_with_proxy_error():
+        raise ConnectionError("proxy failed")
+
+    ak_stub.stock_info_a_code_name = fail_with_proxy_error
+    monkeypatch.setitem(sys.modules, "akshare", ak_stub)
+
+    def retry_decorator(*args, **kwargs):
+        max_attempts = kwargs.get("stop_max_attempt_number", 1)
+        retry_on_exception = kwargs.get("retry_on_exception", lambda exc: True)
+
+        def decorator(func):
+            def wrapped(*f_args, **f_kwargs):
+                attempts = 0
+                while True:
+                    try:
+                        return func(*f_args, **f_kwargs)
+                    except Exception as exc:
+                        attempts += 1
+                        if attempts >= max_attempts or not retry_on_exception(exc):
+                            raise
+
+            return wrapped
+
+        return decorator
+
+    retrying_stub = types.ModuleType("retrying")
+    retrying_stub.retry = retry_decorator  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "retrying", retrying_stub)
+
+    from utility import proxy as proxy_module
+
+    def fake_get_proxy():
+        nonlocal get_proxy_calls
+        get_proxy_calls += 1
+        return {"http": "http://new:8080", "https": "http://new:8080"}
+
+    monkeypatch.setattr(proxy_module, "get_proxy", fake_get_proxy)
+    monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
+
+    utility_stub = types.ModuleType("utility")
+    utility_stub.change_proxy = proxy_module.change_proxy  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "utility", utility_stub)
+
+    module = importlib.import_module(module_name)
+    module = importlib.reload(module)
+
+    with pytest.raises(ProxyError, match="Maximum proxy retry attempts exceeded"):
+        module.download_general_info_stock_ak()
+
+    assert get_proxy_calls == 3
