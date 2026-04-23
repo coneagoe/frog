@@ -3,6 +3,7 @@ import re
 import akshare as ak
 import pandas as pd
 import retrying
+from requests.exceptions import ProxyError
 
 from common.const import (
     COL_CHANGE_RATE,
@@ -23,7 +24,15 @@ from utility import change_proxy
 pattern_a_stock_id = r"60|00|30|68"
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+def _retry_non_proxy_errors(wait_fixed: int, stop_max_attempt_number: int):
+    return retrying.retry(
+        wait_fixed=wait_fixed,
+        stop_max_attempt_number=stop_max_attempt_number,
+        retry_on_exception=lambda exc: not isinstance(exc, ProxyError),
+    )
+
+
+@_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
 def download_general_info_stock_ak() -> pd.DataFrame:
     df = ak.stock_info_a_code_name()
@@ -33,7 +42,7 @@ def download_general_info_stock_ak() -> pd.DataFrame:
     return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
 def download_general_info_etf_ak() -> pd.DataFrame:
     df = ak.fund_name_em()
@@ -41,7 +50,7 @@ def download_general_info_etf_ak() -> pd.DataFrame:
     return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
 def download_general_info_hk_ggt_stock_ak() -> pd.DataFrame:
     df = ak.stock_hk_ggt_components_em()
@@ -51,7 +60,7 @@ def download_general_info_hk_ggt_stock_ak() -> pd.DataFrame:
     return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
 def download_history_data_etf_ak(
     etf_id: str,
@@ -105,7 +114,7 @@ def download_history_data_etf_ak(
     return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
 def download_history_data_us_index_ak(
     index: str, period: PeriodType = PeriodType.DAILY
@@ -127,7 +136,7 @@ def download_history_data_us_index_ak(
     return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
 def download_history_data_stock_ak(
     stock_id: str,
@@ -149,7 +158,7 @@ def download_history_data_stock_ak(
     return df
 
 
-@retrying.retry(wait_fixed=5000, stop_max_attempt_number=5)
+@_retry_non_proxy_errors(wait_fixed=5000, stop_max_attempt_number=5)
 @change_proxy
 def download_history_data_stock_hk_ak(
     stock_id: str,
@@ -181,7 +190,7 @@ def download_history_data_stock_hk_ak(
     return df
 
 
-@retrying.retry(wait_fixed=1000, stop_max_attempt_number=3)
+@_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
 def download_history_data_a_index_ak(
     index: str, start_date: str, end_date: str
