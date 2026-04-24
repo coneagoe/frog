@@ -333,6 +333,43 @@ def test_download_history_data_stock_hk_ts_unsupported_period_raises(
     pro_stub.hk_daily_adj.assert_not_called()
 
 
+@pytest.mark.parametrize("adjust", [pytest.param(""), pytest.param("qfq")])
+def test_download_history_data_stock_hk_ts_unsupported_adjust_raises(
+    downloader_ts_module, monkeypatch, adjust
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    with pytest.raises(ValueError, match="Only HFQ adjust is supported"):
+        module.download_history_data_stock_hk_ts(
+            stock_id="00700",
+            start_date="20240101",
+            end_date="20240105",
+            adjust=module.AdjustType(adjust),
+        )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_not_called()
+
+
+@pytest.mark.parametrize("stock_id", ["700", "0700", "00700.HK"])
+def test_download_history_data_stock_hk_ts_invalid_stock_id_raises(
+    downloader_ts_module, monkeypatch, stock_id
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    with pytest.raises(ValueError, match="Stock ID must be 5 digits."):
+        module.download_history_data_stock_hk_ts(
+            stock_id=stock_id,
+            start_date="20240101",
+            end_date="20240105",
+        )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_not_called()
+
+
 def test_download_history_data_stock_hk_ts_empty_result(
     downloader_ts_module, monkeypatch
 ):
