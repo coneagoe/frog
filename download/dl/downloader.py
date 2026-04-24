@@ -3,7 +3,6 @@ from .downloader_akshare import (
     download_general_info_hk_ggt_stock_ak,
     download_general_info_stock_ak,
     download_history_data_etf_ak,
-    download_history_data_stock_hk_ak,
     download_history_data_us_index_ak,
 )
 from .downloader_baostock import (
