@@ -12,6 +12,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _expected_hk_history_dtypes(module):
+    return {
+        module.COL_DATE: "datetime64[ns]",
+        module.COL_STOCK_ID: "object",
+        module.COL_OPEN: "float64",
+        module.COL_CLOSE: "float64",
+        module.COL_HIGH: "float64",
+        module.COL_LOW: "float64",
+        module.COL_VOLUME: "float64",
+        module.COL_AMOUNT: "float64",
+        module.COL_CHANGE: "float64",
+        module.COL_CHANGE_RATE: "float64",
+        module.COL_TURNOVER_RATE: "float64",
+    }
+
+
 @pytest.fixture(scope="function")
 def downloader_ts_module(monkeypatch):
     module_name = "download.dl.downloader_tushare"
@@ -265,15 +281,15 @@ def test_download_history_data_stock_hk_ts_success(downloader_ts_module, monkeyp
         {
             "ts_code": ["00700.HK", "00700.HK"],
             "trade_date": ["20240105", "20240104"],
-            "open": [391.0, 388.2],
-            "high": [395.0, 390.5],
-            "low": [389.1, 386.9],
-            "close": [394.0, 389.5],
-            "change": [4.9, 1.4],
-            "pct_change": [1.26, 0.36],
-            "vol": [1020300, None],
-            "amount": [401020300.0, 398000000.0],
-            "turnover_ratio": [0.42, 0.35],
+            "open": [391, 388],
+            "high": [395, 390],
+            "low": [389, 386],
+            "close": [394, 389],
+            "change": [5, 1],
+            "pct_change": [1, 0],
+            "vol": [1020300, 980000],
+            "amount": [401020300, 398000000],
+            "turnover_ratio": [1, 0],
         }
     )
 
@@ -292,17 +308,11 @@ def test_download_history_data_stock_hk_ts_success(downloader_ts_module, monkeyp
         fields=module.hk_daily_adj_fields,
     )
     assert list(result.columns) == module.hk_history_columns
+    assert result.dtypes.apply(str).to_dict() == _expected_hk_history_dtypes(module)
     assert result[module.COL_STOCK_ID].tolist() == ["00700", "00700"]
-    assert pd.api.types.is_datetime64_any_dtype(result[module.COL_DATE])
-    assert result[module.COL_CHANGE_RATE].tolist() == [
-        pytest.approx(1.26),
-        pytest.approx(0.36),
-    ]
-    assert result[module.COL_TURNOVER_RATE].tolist() == [
-        pytest.approx(0.42),
-        pytest.approx(0.35),
-    ]
-    assert result[module.COL_VOLUME].tolist() == [1020300, 0]
+    assert result[module.COL_CHANGE_RATE].tolist() == [1.0, 0.0]
+    assert result[module.COL_TURNOVER_RATE].tolist() == [1.0, 0.0]
+    assert result[module.COL_VOLUME].tolist() == [1020300.0, 980000.0]
 
 
 def test_download_history_data_stock_hk_ts_unsupported_period_raises(
@@ -349,20 +359,7 @@ def test_download_history_data_stock_hk_ts_empty_result(
     )
     assert list(result.columns) == module.hk_history_columns
     assert result.empty
-    assert pd.api.types.is_datetime64_any_dtype(result[module.COL_DATE])
-    assert result[module.COL_STOCK_ID].dtype == object
-    for column in [
-        module.COL_OPEN,
-        module.COL_CLOSE,
-        module.COL_HIGH,
-        module.COL_LOW,
-        module.COL_VOLUME,
-        module.COL_AMOUNT,
-        module.COL_CHANGE,
-        module.COL_CHANGE_RATE,
-        module.COL_TURNOVER_RATE,
-    ]:
-        assert pd.api.types.is_numeric_dtype(result[column]), column
+    assert result.dtypes.apply(str).to_dict() == _expected_hk_history_dtypes(module)
 
 
 if __name__ == "__main__":

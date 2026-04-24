@@ -494,7 +494,10 @@ def download_history_data_stock_hk_ts(
     df[COL_STOCK_ID] = stock_id
     df = df.reindex(columns=hk_history_columns)
     df[hk_history_numeric_columns] = (
-        df[hk_history_numeric_columns].apply(pd.to_numeric, errors="coerce").fillna(0.0)
+        df[hk_history_numeric_columns]
+        .apply(pd.to_numeric, errors="coerce")
+        .fillna(0.0)
+        .astype("float64")
     )
 
     return df
