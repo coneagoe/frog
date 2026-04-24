@@ -235,7 +235,8 @@ etf_basic_fields = [
 
 
 def _to_hk_ts_code(stock_id: str) -> str:
-    assert re.fullmatch(r"\d{5}", stock_id), "Stock ID must be 5 digits."
+    if not re.fullmatch(r"\d{5}", stock_id):
+        raise ValueError("Stock ID must be 5 digits.")
     return f"{stock_id}.HK"
 
 
@@ -459,8 +460,10 @@ def download_history_data_stock_hk_ts(
         raise ValueError(
             "Only daily period is supported for HK Tushare history downloads."
         )
-
-    del adjust  # Kept in the signature for compatibility; hk_daily_adj is the only supported backend.
+    if adjust != AdjustType.HFQ:
+        raise ValueError(
+            "Only HFQ adjust is supported for HK Tushare history downloads."
+        )
     ts_code = _to_hk_ts_code(stock_id)
     normalized_start_date = convert_date(start_date) if start_date else ""
     normalized_end_date = convert_date(end_date) if end_date else ""
