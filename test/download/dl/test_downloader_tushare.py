@@ -329,7 +329,7 @@ def test_download_history_data_stock_hk_ts_unsupported_period_raises(
             period=module.PeriodType.WEEKLY,
         )
 
-    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    ts_stub.pro_api.assert_not_called()
     pro_stub.hk_daily_adj.assert_not_called()
 
 
@@ -348,7 +348,7 @@ def test_download_history_data_stock_hk_ts_unsupported_adjust_raises(
             adjust=module.AdjustType(adjust),
         )
 
-    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    ts_stub.pro_api.assert_not_called()
     pro_stub.hk_daily_adj.assert_not_called()
 
 
@@ -366,7 +366,7 @@ def test_download_history_data_stock_hk_ts_invalid_stock_id_raises(
             end_date="20240105",
         )
 
-    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    ts_stub.pro_api.assert_not_called()
     pro_stub.hk_daily_adj.assert_not_called()
 
 

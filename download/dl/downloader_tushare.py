@@ -27,6 +27,15 @@ from common.const import (
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+def _create_pro_client() -> Any:
+    token = os.getenv("TUSHARE_TOKEN")
+    if not token:
+        raise ConnectionError(
+            "Tushare token is missing. Please set env var TUSHARE_TOKEN."
+        )
+    return ts.pro_api(token=token)
+
+
 def get_pro(func: F) -> F:
     """Decorator to create a TuShare pro client and inject it into function.
 
@@ -40,12 +49,7 @@ def get_pro(func: F) -> F:
 
     @wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        token = os.getenv("TUSHARE_TOKEN")
-        if not token:
-            raise ConnectionError(
-                "Tushare token is missing. Please set env var TUSHARE_TOKEN."
-            )
-        kwargs["pro"] = ts.pro_api(token=token)
+        kwargs["pro"] = _create_pro_client()
 
         return func(*args, **kwargs)
 
@@ -446,7 +450,6 @@ def download_etf_basic(
     stop_max_attempt_number=3,
     retry_on_exception=retry_on_non_validation_errors,
 )
-@get_pro
 def download_history_data_stock_hk_ts(
     stock_id: str,
     start_date: str,
@@ -455,7 +458,6 @@ def download_history_data_stock_hk_ts(
     adjust: AdjustType = AdjustType.HFQ,
     pro: Any | None = None,
 ) -> pd.DataFrame | Any:
-    client = require_pro_client(pro)
     if period != PeriodType.DAILY:
         raise ValueError(
             "Only daily period is supported for HK Tushare history downloads."
@@ -467,6 +469,7 @@ def download_history_data_stock_hk_ts(
     ts_code = _to_hk_ts_code(stock_id)
     normalized_start_date = convert_date(start_date) if start_date else ""
     normalized_end_date = convert_date(end_date) if end_date else ""
+    client = require_pro_client(pro) if pro is not None else _create_pro_client()
 
     df = client.hk_daily_adj(
         ts_code=ts_code,
