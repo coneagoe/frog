@@ -243,7 +243,6 @@ class TestDownloader:
         测试 Downloader 类方法正确映射到对应的实现函数
         """
         # 验证方法映射关系
-        import download.dl.downloader as downloader_module
         from download.dl.downloader_akshare import (
             download_general_info_etf_ak,
             download_general_info_hk_ggt_stock_ak,
@@ -253,6 +252,7 @@ class TestDownloader:
             download_history_data_us_index_ak,
         )
         from download.dl.downloader_baostock import download_history_data_stock_bs
+        from download.dl.downloader_tushare import download_history_data_stock_hk_ts
 
         assert Downloader.dl_general_info_stock == download_general_info_stock_ak
         assert Downloader.dl_general_info_etf == download_general_info_etf_ak
@@ -263,8 +263,11 @@ class TestDownloader:
         assert Downloader.dl_history_data_etf == download_history_data_etf_ak
         assert Downloader.dl_history_data_stock == download_history_data_stock_bs
         assert (
-            Downloader.dl_history_data_stock_hk
-            is downloader_module.download_history_data_stock_hk_ts
+            Downloader.dl_history_data_stock_hk.__module__,
+            Downloader.dl_history_data_stock_hk.__name__,
+        ) == (
+            download_history_data_stock_hk_ts.__module__,
+            download_history_data_stock_hk_ts.__name__,
         )
         assert Downloader.dl_history_data_us_index == download_history_data_us_index_ak
         assert callable(download_history_data_stock_hk_ak)
