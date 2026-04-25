@@ -12,6 +12,22 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _expected_hk_history_dtypes(module):
+    return {
+        module.COL_DATE: "datetime64[ns]",
+        module.COL_STOCK_ID: "object",
+        module.COL_OPEN: "float64",
+        module.COL_CLOSE: "float64",
+        module.COL_HIGH: "float64",
+        module.COL_LOW: "float64",
+        module.COL_VOLUME: "float64",
+        module.COL_AMOUNT: "float64",
+        module.COL_CHANGE: "float64",
+        module.COL_CHANGE_RATE: "float64",
+        module.COL_TURNOVER_RATE: "float64",
+    }
+
+
 @pytest.fixture(scope="function")
 def downloader_ts_module(monkeypatch):
     module_name = "download.dl.downloader_tushare"
@@ -28,6 +44,7 @@ def downloader_ts_module(monkeypatch):
 
     pro_stub = types.SimpleNamespace()
     pro_stub.daily_basic = Mock()
+    pro_stub.hk_daily_adj = Mock()
 
     ts_stub.pro_api = Mock(return_value=pro_stub)
 
@@ -238,6 +255,148 @@ def test_download_stk_holdernumber_all_data(downloader_ts_module, monkeypatch):
         end_date="",
         fields=module.stk_holdernumber_fields,
     )
+
+
+def test_download_history_data_stock_hk_ts_missing_token_raises(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, _ = downloader_ts_module
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+
+    with pytest.raises(ConnectionError, match="Tushare token is missing"):
+        module.download_history_data_stock_hk_ts(
+            stock_id="00700",
+            start_date="2024-01-01",
+            end_date="2024-01-05",
+        )
+
+    ts_stub.pro_api.assert_not_called()
+
+
+def test_download_history_data_stock_hk_ts_success(downloader_ts_module, monkeypatch):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    pro_stub.hk_daily_adj.return_value = pd.DataFrame(
+        {
+            "ts_code": ["00700.HK", "00700.HK"],
+            "trade_date": ["20240105", "20240104"],
+            "open": [391, 388],
+            "high": [395, 390],
+            "low": [389, 386],
+            "close": [394, 389],
+            "change": [5, 1],
+            "pct_change": [1, 0],
+            "vol": [1020300, 980000],
+            "amount": [401020300, 398000000],
+            "turnover_ratio": [1, 0],
+        }
+    )
+
+    result = module.download_history_data_stock_hk_ts(
+        stock_id="00700",
+        start_date="2024-01-01",
+        end_date="2024/01/05",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_called_once_with(
+        ts_code="00700.HK",
+        trade_date="",
+        start_date="20240101",
+        end_date="20240105",
+        fields=module.hk_daily_adj_fields,
+    )
+    assert list(result.columns) == module.hk_history_columns
+    assert result.dtypes.apply(str).to_dict() == _expected_hk_history_dtypes(module)
+    assert result[module.COL_STOCK_ID].tolist() == ["00700", "00700"]
+    assert result[module.COL_CHANGE_RATE].tolist() == [1.0, 0.0]
+    assert result[module.COL_TURNOVER_RATE].tolist() == [1.0, 0.0]
+    assert result[module.COL_VOLUME].tolist() == [1020300.0, 980000.0]
+
+
+def test_download_history_data_stock_hk_ts_unsupported_period_raises(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    with pytest.raises(ValueError, match="Only daily period is supported"):
+        module.download_history_data_stock_hk_ts(
+            stock_id="00700",
+            start_date="20240101",
+            end_date="20240105",
+            period=module.PeriodType.WEEKLY,
+        )
+
+    ts_stub.pro_api.assert_not_called()
+    pro_stub.hk_daily_adj.assert_not_called()
+
+
+@pytest.mark.parametrize("adjust", [pytest.param(""), pytest.param("qfq")])
+def test_download_history_data_stock_hk_ts_unsupported_adjust_raises(
+    downloader_ts_module, monkeypatch, adjust
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    with pytest.raises(ValueError, match="Only HFQ adjust is supported"):
+        module.download_history_data_stock_hk_ts(
+            stock_id="00700",
+            start_date="20240101",
+            end_date="20240105",
+            adjust=module.AdjustType(adjust),
+        )
+
+    ts_stub.pro_api.assert_not_called()
+    pro_stub.hk_daily_adj.assert_not_called()
+
+
+@pytest.mark.parametrize("stock_id", ["700", "0700", "00700.HK"])
+def test_download_history_data_stock_hk_ts_invalid_stock_id_raises(
+    downloader_ts_module, monkeypatch, stock_id
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    with pytest.raises(ValueError, match="Stock ID must be 5 digits."):
+        module.download_history_data_stock_hk_ts(
+            stock_id=stock_id,
+            start_date="20240101",
+            end_date="20240105",
+        )
+
+    ts_stub.pro_api.assert_not_called()
+    pro_stub.hk_daily_adj.assert_not_called()
+
+
+def test_download_history_data_stock_hk_ts_empty_result(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    pro_stub.hk_daily_adj.return_value = pd.DataFrame(
+        columns=module.hk_daily_adj_fields
+    )
+
+    result = module.download_history_data_stock_hk_ts(
+        stock_id="00700",
+        start_date="20240101",
+        end_date="20240105",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_called_once_with(
+        ts_code="00700.HK",
+        trade_date="",
+        start_date="20240101",
+        end_date="20240105",
+        fields=module.hk_daily_adj_fields,
+    )
+    assert list(result.columns) == module.hk_history_columns
+    assert result.empty
+    assert result.dtypes.apply(str).to_dict() == _expected_hk_history_dtypes(module)
 
 
 if __name__ == "__main__":
