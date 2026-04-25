@@ -251,6 +251,7 @@ class TestDownloader:
             download_history_data_us_index_ak,
         )
         from download.dl.downloader_baostock import download_history_data_stock_bs
+        from download.dl.downloader_tushare import download_history_data_stock_hk_ts
 
         assert Downloader.dl_general_info_stock == download_general_info_stock_ak
         assert Downloader.dl_general_info_etf == download_general_info_etf_ak
@@ -260,6 +261,7 @@ class TestDownloader:
         )
         assert Downloader.dl_history_data_etf == download_history_data_etf_ak
         assert Downloader.dl_history_data_stock == download_history_data_stock_bs
+        assert Downloader.dl_history_data_stock_hk == download_history_data_stock_hk_ts
         assert Downloader.dl_history_data_us_index == download_history_data_us_index_ak
 
 
