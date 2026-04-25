@@ -60,7 +60,7 @@ def small_market_capital_2():
     if not is_first_trading_day_of_month(today):
         return f"Skip: {today_str} is not the first trading day of the month."
 
-    start_date_str = "2020-01-01"
+    start_date_str = "2025-10-01"
 
     try:
         subject = f"small_market_capital_2_{start_date_str}_{today_str}"
