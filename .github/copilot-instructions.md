@@ -44,6 +44,7 @@
 - Airflow code assumes the project may be mounted at `/opt/airflow/frog`; DAG helpers also honor `FROG_PROJECT_ROOT` when resolving imports.
 - `DOWNLOAD_PROCESS_COUNT` controls DAG partition fan-out. `dags/common_dags.py` treats the environment variable as the source of truth and falls back to `4`.
 - Command and task names use underscores rather than hyphens.
+- When generating Git commit messages, extract the core change from the diff as the title, then use the body to list the concrete modification points instead of relying on a generic summary.
 - Chinese comments, messages, and column names are common and acceptable in this codebase.
 - When changing DAGs, avoid altering schedules, retries, dependencies, task boundaries, or SLA behavior unless the user explicitly asks for that.
 - Prefer preserving the existing script-style entrypoints in `tools/`, `task/`, and `backtest/`; many of them are invoked by subprocess from other modules.
