@@ -123,4 +123,5 @@ class SecurityType(Enum):
 
 # Redis keys
 REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY = "download_hk_ggt_history"
+REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY = "download_stock_history_daily"
 DEFAULT_REDIS_URL = "redis://redis:6379/0"

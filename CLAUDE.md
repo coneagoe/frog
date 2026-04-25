@@ -38,6 +38,7 @@ poetry run pytest test                       # Run all tests
 ## Naming Conventions
 
 - Command names should use `_` instead of `-`.
+- When generating Git commit messages, extract the core change from the diff as the title, then use the body to list the concrete modification points instead of relying on a generic summary.
 
 
 ## Architecture

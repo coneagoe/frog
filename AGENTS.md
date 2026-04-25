@@ -38,6 +38,7 @@ poetry run pytest test/download/dl/test_downloader.py::TestDownloader::test_dl_g
 - Formatting: Black with 120-char line length.
 - Imports: isort with Black profile; stdlib, third-party, local grouping.
 - Naming: `snake_case` for functions/variables/files, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.
+- When generating Git commit messages, extract the core change from the diff as the title, then use the body to list the concrete modification points instead of relying on a generic summary.
 - Domain conventions: Chinese comments/messages and Chinese column names are acceptable and common.
 - Config entry point: `conf.parse_config()`.
 

@@ -26,11 +26,6 @@ PARTITION_DAG_SPECS = [
         "download_etf_daily_partition_task",
         "etf_ids",
     ),
-    (
-        ROOT / "dags/download_hk_ggt_history_daily.py",
-        "download_hk_ggt_history_hfq_partition_task",
-        "stock_ids",
-    ),
 ]
 
 
@@ -83,6 +78,9 @@ def test_partition_dag_runtime_logic_uses_explicit_partition_count_argument():
 def test_hk_partition_dag_uses_frozen_partition_count_everywhere():
     source = read_source(ROOT / "dags/download_hk_ggt_history_daily.py")
 
+    # PARTITION_COUNT is hardcoded to 1; get_partition_count() must NOT be called
+    assert not re.search(r"\bget_partition_count\s*\(\s*\)", source)
+    assert re.search(r"^PARTITION_COUNT\s*=\s*1\b", source, re.MULTILINE)
     assert re.search(
         build_task_signature_pattern("download_hk_ggt_history_hfq_partition_task"),
         source,

@@ -1,5 +1,8 @@
+import fcntl
 import os
 import re
+import tempfile
+import time
 from datetime import datetime
 from functools import wraps
 from typing import Any, Callable, TypeVar, cast
@@ -25,6 +28,13 @@ from common.const import (
 )
 
 F = TypeVar("F", bound=Callable[..., Any])
+_HK_DAILY_ADJ_CACHE_BY_TRADE_DATE: dict[str, pd.DataFrame] = {}
+_HK_DAILY_ADJ_RATE_LIMIT_LOCK_PATH = os.path.join(
+    tempfile.gettempdir(), "frog_hk_daily_adj.lock"
+)
+_HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH = os.path.join(
+    tempfile.gettempdir(), "frog_hk_daily_adj.last_call"
+)
 
 
 def _create_pro_client() -> Any:
@@ -218,6 +228,106 @@ def _empty_hk_history_dataframe() -> pd.DataFrame:
         },
         columns=hk_history_columns,
     )
+
+
+def _get_hk_daily_adj_min_interval_seconds() -> float:
+    value = os.getenv("TUSHARE_HK_DAILY_ADJ_MIN_INTERVAL_SECONDS", "31")
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        return 31.0
+
+
+def _normalize_hk_history_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return _empty_hk_history_dataframe()
+
+    normalized = df.rename(
+        columns={
+            "trade_date": COL_DATE,
+            "open": COL_OPEN,
+            "close": COL_CLOSE,
+            "high": COL_HIGH,
+            "low": COL_LOW,
+            "vol": COL_VOLUME,
+            "amount": COL_AMOUNT,
+            "change": COL_CHANGE,
+            "pct_change": COL_CHANGE_RATE,
+            "turnover_ratio": COL_TURNOVER_RATE,
+        }
+    ).copy()
+    normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], format="%Y%m%d")
+    if "ts_code" in normalized.columns:
+        normalized[COL_STOCK_ID] = (
+            normalized["ts_code"].astype(str).str.replace(".HK", "", regex=False)
+        )
+    normalized = normalized.reindex(columns=hk_history_columns)
+    normalized[hk_history_numeric_columns] = (
+        normalized[hk_history_numeric_columns]
+        .apply(pd.to_numeric, errors="coerce")
+        .fillna(0.0)
+        .astype("float64")
+    )
+    return normalized
+
+
+def _call_hk_daily_adj_throttled(client: Any, **kwargs: Any) -> pd.DataFrame | Any:
+    """Call client.hk_daily_adj with cross-process rate-limit enforcement."""
+    min_interval = _get_hk_daily_adj_min_interval_seconds()
+    with open(_HK_DAILY_ADJ_RATE_LIMIT_LOCK_PATH, "a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            last_called_at = 0.0
+            if os.path.exists(_HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH):
+                with open(
+                    _HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH, encoding="utf-8"
+                ) as state_file:
+                    raw_value = state_file.read().strip()
+                    if raw_value:
+                        last_called_at = float(raw_value)
+            remaining = min_interval - (time.time() - last_called_at)
+            if remaining > 0:
+                time.sleep(remaining)
+            # Record the call time BEFORE the API call so that even a failed call
+            # (e.g. rate-limit exception) counts toward the interval. This prevents
+            # @retrying.retry from immediately re-entering the throttle on retry.
+            with open(
+                _HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH, "w", encoding="utf-8"
+            ) as state_file:
+                state_file.write(str(time.time()))
+            return client.hk_daily_adj(**kwargs)
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _call_hk_daily_adj_for_trade_date(
+    client: Any, trade_date: str
+) -> pd.DataFrame | Any:
+    return _call_hk_daily_adj_throttled(
+        client,
+        ts_code="",
+        trade_date=trade_date,
+        start_date="",
+        end_date=trade_date,
+        fields=hk_daily_adj_fields,
+    )
+
+
+def _load_hk_history_by_trade_date(
+    trade_date: str, stock_id: str, pro: Any | None = None
+) -> pd.DataFrame:
+    cached = _HK_DAILY_ADJ_CACHE_BY_TRADE_DATE.get(trade_date)
+    if cached is None:
+        client = require_pro_client(pro) if pro is not None else _create_pro_client()
+        cached = _normalize_hk_history_dataframe(
+            _call_hk_daily_adj_for_trade_date(client, trade_date)
+        )
+        _HK_DAILY_ADJ_CACHE_BY_TRADE_DATE[trade_date] = cached
+
+    filtered = cached.loc[cached[COL_STOCK_ID] == stock_id].copy()
+    if filtered.empty:
+        return _empty_hk_history_dataframe()
+    return filtered
 
 
 etf_basic_fields = [
@@ -469,9 +579,18 @@ def download_history_data_stock_hk_ts(
     ts_code = _to_hk_ts_code(stock_id)
     normalized_start_date = convert_date(start_date) if start_date else ""
     normalized_end_date = convert_date(end_date) if end_date else ""
+
+    if (
+        normalized_start_date
+        and normalized_end_date
+        and normalized_start_date == normalized_end_date
+    ):
+        return _load_hk_history_by_trade_date(normalized_end_date, stock_id, pro)
+
     client = require_pro_client(pro) if pro is not None else _create_pro_client()
 
-    df = client.hk_daily_adj(
+    df = _call_hk_daily_adj_throttled(
+        client,
         ts_code=ts_code,
         trade_date="",
         start_date=normalized_start_date,
@@ -482,31 +601,9 @@ def download_history_data_stock_hk_ts(
     if df.empty:
         return _empty_hk_history_dataframe()
 
-    df = df.rename(
-        columns={
-            "trade_date": COL_DATE,
-            "open": COL_OPEN,
-            "close": COL_CLOSE,
-            "high": COL_HIGH,
-            "low": COL_LOW,
-            "vol": COL_VOLUME,
-            "amount": COL_AMOUNT,
-            "change": COL_CHANGE,
-            "pct_change": COL_CHANGE_RATE,
-            "turnover_ratio": COL_TURNOVER_RATE,
-        }
-    )
-    df[COL_DATE] = pd.to_datetime(df[COL_DATE], format="%Y%m%d")
-    df[COL_STOCK_ID] = stock_id
-    df = df.reindex(columns=hk_history_columns)
-    df[hk_history_numeric_columns] = (
-        df[hk_history_numeric_columns]
-        .apply(pd.to_numeric, errors="coerce")
-        .fillna(0.0)
-        .astype("float64")
-    )
-
-    return df
+    normalized = _normalize_hk_history_dataframe(df)
+    normalized[COL_STOCK_ID] = stock_id
+    return normalized
 
 
 stk_holdernumber_fields = [
