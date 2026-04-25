@@ -1,7 +1,7 @@
 ---
 name: commit
 description: >
-  Group uncommitted git changes into logical commits with clear messages. Use when the user asks to commit changes, split mixed work into separate commits, or organize staging before committing. Before committing, check whether the current changes also require updates to README.md, CLAUDE.md, or AGENTS.md, and make those documentation edits in the same logical commit when needed.
+  Group uncommitted git changes into logical commits with clear messages. Use when the user asks to commit changes, split mixed work into separate commits, or organize staging before committing. Before grouping or committing, invoke the repository-local `update_doc` sub-skill so it can inspect the current changes and update any affected docs first.
 ---
 
 # Commit by Topic
@@ -18,18 +18,22 @@ Run these in parallel:
 
 Read the output carefully. You need to understand every changed file before proceeding.
 
-## Step 2: Check whether repository docs need updates
+## Step 2: Invoke `update_doc` before committing
 
-Before grouping or committing anything, explicitly decide whether the current changes also require updates to `README.md`, `CLAUDE.md`, or `AGENTS.md`.
+Before grouping or committing anything, invoke the repository-local `update_doc`
+skill.
 
-Use this checklist:
-- `README.md` — update when setup, usage, commands, architecture overview, or user-facing behavior changed
-- `CLAUDE.md` — update when repo-specific workflow, coding conventions, review or commit expectations, or agent instructions changed
-- `AGENTS.md` — update when agent workflow, skill guidance, project architecture, or repository operating instructions changed
+`update_doc` is the required documentation sub-skill for this commit workflow.
+Let it inspect the current changes, update any affected docs, and report which
+key docs were checked and did not need edits.
 
-If any of those docs are now inaccurate or incomplete because of the current changes, edit them before committing. Treat the documentation update as part of the same topic as the code, config, or process change that caused it. Do not leave known doc drift behind just because the user asked to commit.
+After `update_doc` completes:
+- continue grouping changes by topic
+- include any doc edits from `update_doc` in the same logical commit as the
+  underlying code, config, or workflow change
+- if `update_doc` reports that no docs needed changes, continue normally
 
-If you are unsure, read the relevant doc files before proceeding and make a deliberate call. Prefer a small accurate doc update over committing stale instructions.
+Do not skip this step just because the user asked only to commit code.
 
 ## Step 3: Group changes by topic
 
@@ -92,7 +96,7 @@ For each topic group, in a logical order (dependencies before dependents):
 
 1. Stage only the files for this group: `git add <specific files>`
    - For partial file staging when a file has changes belonging to different topics, use `git add -p <file>`
-2. Verify staged changes with `git diff --cached` — make sure only the right files are staged
+2. Verify staged changes with `git --no-pager diff --cached` — make sure only the right files are staged
 3. Commit with the message using a heredoc to preserve formatting:
 
 ```bash
@@ -109,7 +113,7 @@ EOF
 )"
 ```
 
-4. Confirm the commit succeeded with `git log --oneline -1`
+4. Confirm the commit succeeded with `git --no-pager log --oneline -1`
 
 Repeat for each topic group.
 
