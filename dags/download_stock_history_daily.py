@@ -1,9 +1,11 @@
 """DAG for downloading stock history (HFQ) on weekdays."""
 
+import json
 import os
 import sys
 from datetime import datetime
 
+import redis
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
@@ -23,7 +25,19 @@ from common_dags import (  # noqa: E402
     get_partitioned_ids,
 )
 
-from common.const import AdjustType, PeriodType  # noqa: E402
+from common.const import (  # noqa: E402
+    DEFAULT_REDIS_URL,
+    REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY,
+    AdjustType,
+    PeriodType,
+)
+
+
+def get_redis_client() -> redis.Redis:
+    """Get Redis client for storing results."""
+    redis_url = os.getenv("REDIS_URL", DEFAULT_REDIS_URL)
+    return redis.Redis.from_url(redis_url, decode_responses=True)
+
 
 PARTITION_COUNT = get_partition_count()
 
@@ -100,6 +114,32 @@ def download_stock_history_hfq_partition_task(
     )
 
 
+def save_download_result_to_redis(*, partition_count: int, **context):
+    """Aggregate partition results and write success/fail to Redis."""
+    ti = context["ti"]
+    total_count = 0
+
+    for pid in range(partition_count):
+        task_id = f"download_stock_history_hfq_p{pid:02d}"
+        result = ti.xcom_pull(task_ids=task_id)
+        if result and "count=" in result:
+            count = int(result.split("count=")[1].split(",")[0])
+            total_count += count
+
+    r = get_redis_client()
+    execution_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
+    result_str = "success" if total_count > 0 else "fail"
+    summary = {"date": execution_date, "result": result_str}
+
+    r.set(
+        REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY,
+        json.dumps(summary, ensure_ascii=False),
+        ex=86400,
+    )
+
+    return f"Results saved to Redis: {REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY}, result={result_str}"
+
+
 # Create DAG
 dag = DAG(
     "download_stock_history_hfq_weekdays",
@@ -111,10 +151,23 @@ dag = DAG(
 )
 
 # Create partition tasks
-for _pid in get_partition_ids(PARTITION_COUNT):
+partition_tasks = [
     PythonOperator(
         task_id=f"download_stock_history_hfq_p{_pid:02d}",
         python_callable=download_stock_history_hfq_partition_task,
         op_kwargs={"partition_id": _pid, "partition_count": PARTITION_COUNT},
         dag=dag,
     )
+    for _pid in get_partition_ids(PARTITION_COUNT)
+]
+
+# Aggregate task runs after all partitions complete
+aggregate_task = PythonOperator(
+    task_id="save_download_result_to_redis",
+    python_callable=save_download_result_to_redis,
+    op_kwargs={"partition_count": PARTITION_COUNT},
+    dag=dag,
+)
+
+for _task in partition_tasks:
+    _task >> aggregate_task
