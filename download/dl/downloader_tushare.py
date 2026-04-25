@@ -288,12 +288,14 @@ def _call_hk_daily_adj_throttled(client: Any, **kwargs: Any) -> pd.DataFrame | A
             remaining = min_interval - (time.time() - last_called_at)
             if remaining > 0:
                 time.sleep(remaining)
-            df = client.hk_daily_adj(**kwargs)
+            # Record the call time BEFORE the API call so that even a failed call
+            # (e.g. rate-limit exception) counts toward the interval. This prevents
+            # @retrying.retry from immediately re-entering the throttle on retry.
             with open(
                 _HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH, "w", encoding="utf-8"
             ) as state_file:
                 state_file.write(str(time.time()))
-            return df
+            return client.hk_daily_adj(**kwargs)
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 

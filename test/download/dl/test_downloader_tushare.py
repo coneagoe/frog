@@ -529,5 +529,38 @@ def test_download_history_data_stock_hk_ts_multi_day_uses_throttle(
     assert result[module.COL_STOCK_ID].tolist() == ["00700", "00700"]
 
 
+def test_throttle_records_timestamp_even_on_failed_api_call(
+    downloader_ts_module, monkeypatch, tmp_path
+):
+    """A failed API call must still update the state file so @retrying.retry respects the throttle."""
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    monkeypatch.setenv("TUSHARE_HK_DAILY_ADJ_MIN_INTERVAL_SECONDS", "0")
+
+    state_path = str(tmp_path / "last_call")
+    lock_path = str(tmp_path / "lock")
+    monkeypatch.setattr(module, "_HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH", state_path)
+    monkeypatch.setattr(module, "_HK_DAILY_ADJ_RATE_LIMIT_LOCK_PATH", lock_path)
+
+    pro_stub.hk_daily_adj.side_effect = RuntimeError("频率超限")
+
+    with pytest.raises(RuntimeError, match="频率超限"):
+        module._call_hk_daily_adj_throttled(
+            pro_stub,
+            ts_code="",
+            trade_date="20240101",
+            start_date="",
+            end_date="20240101",
+            fields=module.hk_daily_adj_fields,
+        )
+
+    # State file must be written even though the API call raised — so retries wait properly
+    assert (
+        tmp_path / "last_call"
+    ).exists(), "State file must be written on failed call"
+    recorded = float((tmp_path / "last_call").read_text())
+    assert recorded > 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
