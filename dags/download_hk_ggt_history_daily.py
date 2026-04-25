@@ -20,12 +20,11 @@ else:
 from common_dags import (  # noqa: E402
     LOCAL_TZ,
     get_default_args,
-    get_partition_count,
     get_partition_ids,
     get_partitioned_ids,
 )
 
-from common import is_hk_market_open_today  # noqa: E402
+from common import is_hk_market_open_today  # noqa: E402,F401
 from common.const import (  # noqa: E402
     COL_STOCK_ID,
     DEFAULT_REDIS_URL,
@@ -37,7 +36,8 @@ from download import DownloadManager  # noqa: E402
 from storage import get_storage  # noqa: E402
 
 DEFAULT_START_DATE: Final = "2010-01-01"
-PARTITION_COUNT = get_partition_count()
+# hk_daily_adj API 限制 2次/分钟，跨进程文件锁已将调用串行化，多分片无法提升吞吐，故固定为 1
+PARTITION_COUNT = 1
 
 
 def get_redis_client() -> redis.Redis:
@@ -62,8 +62,8 @@ def download_hk_ggt_history_hfq_partition_task(
         Exception: If download fails
     """
 
-    if not is_hk_market_open_today():
-        raise AirflowSkipException("港股市场今日休市，跳过下载任务")
+    #     if not is_hk_market_open_today():
+    #         raise AirflowSkipException("港股市场今日休市，跳过下载任务")
 
     if partition_id >= partition_count:
         raise AirflowSkipException(
