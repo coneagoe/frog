@@ -399,5 +399,135 @@ def test_download_history_data_stock_hk_ts_empty_result(
     assert result.dtypes.apply(str).to_dict() == _expected_hk_history_dtypes(module)
 
 
+def test_download_history_data_stock_hk_ts_single_day_uses_trade_date(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    monkeypatch.setenv("TUSHARE_HK_DAILY_ADJ_MIN_INTERVAL_SECONDS", "0")
+
+    pro_stub.hk_daily_adj.return_value = pd.DataFrame(
+        {
+            "ts_code": ["00700.HK", "00005.HK"],
+            "trade_date": ["20240105", "20240105"],
+            "open": [391, 61],
+            "high": [395, 62],
+            "low": [389, 60],
+            "close": [394, 61.5],
+            "change": [5, 0.5],
+            "pct_change": [1, 0.8],
+            "vol": [1020300, 880000],
+            "amount": [401020300, 53800000],
+            "turnover_ratio": [1, 0.4],
+        }
+    )
+
+    result = module.download_history_data_stock_hk_ts(
+        stock_id="00700",
+        start_date="2024/01/05",
+        end_date="2024-01-05",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_called_once_with(
+        ts_code="",
+        trade_date="20240105",
+        start_date="",
+        end_date="20240105",
+        fields=module.hk_daily_adj_fields,
+    )
+    assert list(result.columns) == module.hk_history_columns
+    assert result.dtypes.apply(str).to_dict() == _expected_hk_history_dtypes(module)
+    assert result[module.COL_STOCK_ID].tolist() == ["00700"]
+
+
+def test_download_history_data_stock_hk_ts_single_day_reuses_trade_date_cache(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    monkeypatch.setenv("TUSHARE_HK_DAILY_ADJ_MIN_INTERVAL_SECONDS", "0")
+
+    pro_stub.hk_daily_adj.return_value = pd.DataFrame(
+        {
+            "ts_code": ["00700.HK", "00005.HK"],
+            "trade_date": ["20240105", "20240105"],
+            "open": [391, 61],
+            "high": [395, 62],
+            "low": [389, 60],
+            "close": [394, 61.5],
+            "change": [5, 0.5],
+            "pct_change": [1, 0.8],
+            "vol": [1020300, 880000],
+            "amount": [401020300, 53800000],
+            "turnover_ratio": [1, 0.4],
+        }
+    )
+
+    first = module.download_history_data_stock_hk_ts(
+        stock_id="00700",
+        start_date="20240105",
+        end_date="20240105",
+    )
+    second = module.download_history_data_stock_hk_ts(
+        stock_id="00005",
+        start_date="20240105",
+        end_date="20240105",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.hk_daily_adj.assert_called_once_with(
+        ts_code="",
+        trade_date="20240105",
+        start_date="",
+        end_date="20240105",
+        fields=module.hk_daily_adj_fields,
+    )
+    assert first[module.COL_STOCK_ID].tolist() == ["00700"]
+    assert second[module.COL_STOCK_ID].tolist() == ["00005"]
+
+
+def test_download_history_data_stock_hk_ts_multi_day_uses_throttle(
+    downloader_ts_module, monkeypatch
+):
+    """Multi-day path must go through the rate-limit throttle."""
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    monkeypatch.setenv("TUSHARE_HK_DAILY_ADJ_MIN_INTERVAL_SECONDS", "0")
+
+    pro_stub.hk_daily_adj.return_value = pd.DataFrame(
+        {
+            "ts_code": ["00700.HK", "00700.HK"],
+            "trade_date": ["20240101", "20240102"],
+            "open": [380, 382],
+            "high": [390, 391],
+            "low": [378, 380],
+            "close": [385, 388],
+            "change": [5, 3],
+            "pct_change": [1.3, 0.8],
+            "vol": [1000000, 1100000],
+            "amount": [385000000, 426800000],
+            "turnover_ratio": [0.9, 1.0],
+        }
+    )
+
+    result = module.download_history_data_stock_hk_ts(
+        stock_id="00700",
+        start_date="20240101",
+        end_date="20240102",
+    )
+
+    # Multi-day path: ts_code=stock, trade_date="" — must go through throttled helper
+    pro_stub.hk_daily_adj.assert_called_once_with(
+        ts_code="00700.HK",
+        trade_date="",
+        start_date="20240101",
+        end_date="20240102",
+        fields=module.hk_daily_adj_fields,
+    )
+    assert list(result.columns) == module.hk_history_columns
+    assert result[module.COL_STOCK_ID].tolist() == ["00700", "00700"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
