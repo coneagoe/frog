@@ -1,8 +1,10 @@
 """Fetch current price and historical OHLCV data for monitor conditions."""
 
 from datetime import date, timedelta
-from typing import Optional
+from typing import Optional, Iterable
 
+import os
+import numpy as np
 import pandas as pd
 
 from common.const import AdjustType, PeriodType
@@ -14,20 +16,113 @@ from storage import get_storage
 _CALENDAR_MULTIPLIER = 3
 
 
+def _create_tushare_client():
+    token = os.getenv("TUSHARE_TOKEN")
+    if not token:
+        return None
+
+    try:
+        import tushare as ts
+    except Exception:
+        return None
+
+    try:
+        return ts.pro_api(token=token)
+    except Exception:
+        # If pro_api raises during creation, treat as unavailable
+        return None
+
+
+def _to_ts_code(stock_code: str, market: str) -> str | None:
+    normalized = stock_code.strip()
+    if market == "HK":
+        return f"{normalized.zfill(5)}.HK"
+    if market == "ETF":
+        suffix = ".SH" if normalized.startswith("5") else ".SZ"
+        return f"{normalized}{suffix}"
+    if market == "A":
+        suffix = ".SH" if normalized.startswith(("5", "6", "9")) else ".SZ"
+        return f"{normalized}{suffix}"
+    return None
+
+
+def _fetch_rt_k_map(pro, ts_codes: list[str]) -> dict[str, float]:
+    if not ts_codes:
+        return {}
+
+    try:
+        df = pro.rt_k(ts_code=",".join(ts_codes))
+    except Exception:
+        return {}
+
+    if df is None or df.empty or "ts_code" not in df.columns or "close" not in df.columns:
+        return {}
+
+    return (
+        df[["ts_code", "close"]]
+        .dropna(subset=["ts_code", "close"])
+        .assign(close=lambda frame: pd.to_numeric(frame["close"], errors="coerce"))
+        .dropna(subset=["close"])
+        .set_index("ts_code")["close"]
+        .astype(float)
+        .to_dict()
+    )
+
+
+def _fetch_rt_hk_k_map(pro, ts_codes: list[str]) -> dict[str, float]:
+    if not ts_codes:
+        return {}
+
+    result = {}
+    for ts_code in ts_codes:
+        try:
+            df = pro.rt_hk_k(ts_code=ts_code)
+        except Exception:
+            continue
+        if df is None or df.empty or "close" not in df.columns:
+            continue
+        close = pd.to_numeric(df.iloc[-1]["close"], errors="coerce")
+        if pd.notna(close):
+            result[ts_code] = float(close)
+    return result
+
+
+def fetch_price_map(items: Iterable[tuple[str, str]]) -> dict[tuple[str, str], float]:
+    pairs = list(items)
+    result = {(stock_code, market): np.nan for stock_code, market in pairs}
+    pro = _create_tushare_client()
+    if pro is None:
+        return result
+
+    a_etf_codes = []
+    hk_codes = []
+    reverse_lookup = {}
+
+    for stock_code, market in pairs:
+        ts_code = _to_ts_code(stock_code, market)
+        if ts_code is None:
+            continue
+        reverse_lookup[ts_code] = (stock_code, market)
+        if market == "HK":
+            hk_codes.append(ts_code)
+        else:
+            a_etf_codes.append(ts_code)
+
+    for ts_code, price in _fetch_rt_k_map(pro, a_etf_codes).items():
+        result[reverse_lookup[ts_code]] = price
+
+    for ts_code, price in _fetch_rt_hk_k_map(pro, hk_codes).items():
+        result[reverse_lookup[ts_code]] = price
+
+    return result
+
+
+def fetch_price(stock_code: str, market: str) -> float:
+    return fetch_price_map([(stock_code, market)]).get((stock_code, market), np.nan)
+
+
 def fetch_current_price(stock_code: str, market: str) -> float:
-    """
-    Fetch the latest real-time price for a stock/ETF/HK share.
-
-    Uses EastMoney API (same as existing monitor_fallback_stock task).
-
-    Args:
-        stock_code: Stock/ETF code (e.g. '600519', '510300', '00700').
-        market: 'A', 'ETF', or 'HK'.
-
-    Returns:
-        Current price as float (np.nan on failure).
-    """
-    return fetch_close_price(stock_code)
+    return fetch_price(stock_code, market)
 
 
 def fetch_history_df(
