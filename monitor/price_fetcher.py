@@ -1,14 +1,13 @@
 """Fetch current price and historical OHLCV data for monitor conditions."""
 
-from datetime import date, timedelta
-from typing import Optional, Iterable
-
 import os
+from datetime import date, timedelta
+from typing import Iterable, Optional
+
 import numpy as np
 import pandas as pd
 
 from common.const import AdjustType, PeriodType
-from stock.data.eastmoney.fetch_close_price import fetch_close_price
 from storage import get_storage
 
 # How many calendar days to fetch per requested trading period
@@ -41,7 +40,8 @@ def _to_ts_code(stock_code: str, market: str) -> str | None:
         suffix = ".SH" if normalized.startswith("5") else ".SZ"
         return f"{normalized}{suffix}"
     if market == "A":
-        suffix = ".SH" if normalized.startswith(("5", "6", "9")) else ".SZ"
+        # A-share: 6 and 9 are Shanghai; 5-prefixes are ETF-style and should be handled by market="ETF".
+        suffix = ".SH" if normalized.startswith(("6", "9")) else ".SZ"
         return f"{normalized}{suffix}"
     return None
 
@@ -55,18 +55,23 @@ def _fetch_rt_k_map(pro, ts_codes: list[str]) -> dict[str, float]:
     except Exception:
         return {}
 
-    if df is None or df.empty or "ts_code" not in df.columns or "close" not in df.columns:
+    if (
+        df is None
+        or df.empty
+        or "ts_code" not in df.columns
+        or "close" not in df.columns
+    ):
         return {}
 
-    return (
+    series = (
         df[["ts_code", "close"]]
         .dropna(subset=["ts_code", "close"])
         .assign(close=lambda frame: pd.to_numeric(frame["close"], errors="coerce"))
         .dropna(subset=["close"])
         .set_index("ts_code")["close"]
         .astype(float)
-        .to_dict()
     )
+    return {str(k): float(v) for k, v in series.to_dict().items()}
 
 
 def _fetch_rt_hk_k_map(pro, ts_codes: list[str]) -> dict[str, float]:
