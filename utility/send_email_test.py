@@ -1,10 +1,12 @@
-import os
 import sys
+from pathlib import Path
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from send_email import send_email  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import conf  # noqa: E402
+from utility import send_email  # noqa: E402
 
 conf.parse_config()
 
