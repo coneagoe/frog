@@ -153,12 +153,12 @@ dag = DAG(
 # Create partition tasks
 partition_tasks = [
     PythonOperator(
-        task_id=f"download_stock_history_hfq_p{_pid:02d}",
+        task_id=f"download_stock_history_hfq_p{pid:02d}",
         python_callable=download_stock_history_hfq_partition_task,
-        op_kwargs={"partition_id": _pid, "partition_count": PARTITION_COUNT},
+        op_kwargs={"partition_id": pid, "partition_count": PARTITION_COUNT},
         dag=dag,
     )
-    for _pid in get_partition_ids(PARTITION_COUNT)
+    for pid in get_partition_ids(PARTITION_COUNT)
 ]
 
 # Aggregate task runs after all partitions complete
