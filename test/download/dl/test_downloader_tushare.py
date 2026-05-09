@@ -196,6 +196,73 @@ def test_download_daily_basic_a_stock_ts_empty_result(
     assert len(result) == 0
 
 
+def test_download_history_data_etf_ts_missing_token_raises(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, _ = downloader_ts_module
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+
+    with pytest.raises(ConnectionError, match="Tushare token is missing"):
+        module.download_history_data_etf_ts(
+            etf_id="510300", start_date="2024-01-01", end_date="2024-01-05"
+        )
+
+    ts_stub.pro_api.assert_not_called()
+
+
+def test_download_history_data_etf_ts_success_ignores_period_adjust(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    mock_data = pd.DataFrame(
+        {
+            "ts_code": ["510300.SH", "510300.SH"],
+            "trade_date": ["20240101", "20240102"],
+            "open": [3.1, 3.2],
+            "high": [3.3, 3.4],
+            "low": [3.0, 3.1],
+            "close": [3.2, 3.3],
+            "pre_close": [3.0, 3.2],
+            "change": [0.2, 0.1],
+            "pct_chg": [6.67, 3.12],
+            "vol": [500000, 600000],
+            "amount": [1500000, 1800000],
+        }
+    )
+    pro_stub.fund_daily = Mock(return_value=mock_data)
+
+    result = module.download_history_data_etf_ts(
+        etf_id="510300",
+        start_date="2024-01-01",
+        end_date="2024-01-02",
+        period=module.PeriodType.WEEKLY,
+        adjust=module.AdjustType.HFQ,
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.fund_daily.assert_called_once_with(
+        ts_code="510300.SH",
+        trade_date="",
+        start_date="20240101",
+        end_date="20240102",
+        fields=module.fund_daily_fields,
+    )
+
+    assert list(result.columns) == [
+        module.COL_DATE,
+        module.COL_STOCK_ID,
+        module.COL_OPEN,
+        module.COL_CLOSE,
+        module.COL_HIGH,
+        module.COL_LOW,
+        module.COL_VOLUME,
+    ]
+    assert result[module.COL_STOCK_ID].tolist() == ["510300", "510300"]
+    assert result[module.COL_DATE].tolist() == ["2024-01-01", "2024-01-02"]
+
+
 def test_download_stk_holdernumber_missing_token_raises(
     downloader_ts_module, monkeypatch
 ):

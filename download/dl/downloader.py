@@ -2,7 +2,6 @@ from .downloader_akshare import (
     download_general_info_etf_ak,
     download_general_info_hk_ggt_stock_ak,
     download_general_info_stock_ak,
-    download_history_data_etf_ak,
     download_history_data_us_index_ak,
 )
 from .downloader_baostock import (
@@ -15,6 +14,7 @@ from .downloader_tushare import (
     download_daily_basic_a_stock_ts,
     download_etf_basic,
     download_etf_daily,
+    download_history_data_etf_ts,
     download_history_data_stock_hk_ts,
     download_stk_holdernumber,
     download_stk_limit,
@@ -27,7 +27,7 @@ class Downloader:
     dl_general_info_etf = staticmethod(download_general_info_etf_ak)
     dl_general_info_hk_ggt_stock = staticmethod(download_general_info_hk_ggt_stock_ak)
 
-    dl_history_data_etf = staticmethod(download_history_data_etf_ak)
+    dl_history_data_etf = staticmethod(download_history_data_etf_ts)
     dl_history_data_us_index = staticmethod(download_history_data_us_index_ak)
     dl_history_data_stock = staticmethod(download_history_data_stock_bs)
     dl_history_data_stock_hk = staticmethod(download_history_data_stock_hk_ts)

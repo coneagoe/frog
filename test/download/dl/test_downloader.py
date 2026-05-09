@@ -1,5 +1,6 @@
 import os
 import sys
+from importlib import import_module
 from unittest.mock import Mock
 
 import pandas as pd
@@ -31,9 +32,9 @@ class TestDownloader:
             {"code": ["000001", "600000"], "name": ["平安银行", "浦发银行"]}
         )
         mock_ak_stock_info_a_code_name = Mock(return_value=mock_data)
+        ak_client = import_module("download.dl.downloader_akshare").ak
         monkeypatch.setattr(
-            "download.dl.downloader_akshare.ak.stock_info_a_code_name",
-            mock_ak_stock_info_a_code_name,
+            ak_client, "stock_info_a_code_name", mock_ak_stock_info_a_code_name
         )
 
         result = Downloader.dl_general_info_stock()
@@ -56,9 +57,8 @@ class TestDownloader:
             }
         )
         mock_ak_fund_name_em = Mock(return_value=mock_data)
-        monkeypatch.setattr(
-            "download.dl.downloader_akshare.ak.fund_name_em", mock_ak_fund_name_em
-        )
+        ak_client = import_module("download.dl.downloader_akshare").ak
+        monkeypatch.setattr(ak_client, "fund_name_em", mock_ak_fund_name_em)
 
         result = Downloader.dl_general_info_etf()
 
@@ -84,8 +84,10 @@ class TestDownloader:
             }
         )
         mock_ak_stock_hk_ggt_components_em = Mock(return_value=mock_data)
+        ak_client = import_module("download.dl.downloader_akshare").ak
         monkeypatch.setattr(
-            "download.dl.downloader_akshare.ak.stock_hk_ggt_components_em",
+            ak_client,
+            "stock_hk_ggt_components_em",
             mock_ak_stock_hk_ggt_components_em,
         )
 
@@ -158,21 +160,28 @@ class TestDownloader:
         """
         测试 Downloader.dl_history_data_etf
         """
-        # 准备模拟数据 - ETF历史数据
+        # 准备模拟数据 - ETF历史数据（Tushare 原始字段）
         mock_data = pd.DataFrame(
             {
-                "日期": ["2024-01-01", "2024-01-02"],
-                "开盘": [3.0, 3.1],
-                "收盘": [3.2, 3.3],
-                "最高": [3.3, 3.4],
-                "最低": [2.9, 3.0],
-                "成交量": [500000, 600000],
+                "ts_code": ["510300.SH", "510300.SH"],
+                "trade_date": ["20240101", "20240102"],
+                "open": [3.0, 3.1],
+                "high": [3.3, 3.4],
+                "low": [2.9, 3.0],
+                "close": [3.2, 3.3],
+                "pre_close": [2.9, 3.2],
+                "change": [0.3, 0.1],
+                "pct_chg": [10.34, 3.13],
+                "vol": [500000, 600000],
+                "amount": [1200000, 1500000],
             }
         )
-        mock_ak_fund_etf_hist_em = Mock(return_value=mock_data)
+        mock_tushare_client = Mock()
+        mock_tushare_client.fund_daily = Mock(return_value=mock_data)
+        monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
         monkeypatch.setattr(
-            "download.dl.downloader_akshare.ak.fund_etf_hist_em",
-            mock_ak_fund_etf_hist_em,
+            "tushare.pro_api",
+            Mock(return_value=mock_tushare_client),
         )
 
         # 调用被测试的方法
@@ -180,10 +189,12 @@ class TestDownloader:
             etf_id="510300", start_date="2024-01-01", end_date="2024-01-02"
         )
 
-        # 断言 akshare 函数被调用
-        mock_ak_fund_etf_hist_em.assert_called_once_with(
-            symbol="510300", period="daily", adjust="qfq"
-        )
+        mock_tushare_client.fund_daily.assert_called_once()
+        call_kwargs = mock_tushare_client.fund_daily.call_args.kwargs
+        assert call_kwargs["ts_code"] == "510300.SH"
+        assert call_kwargs["trade_date"] == ""
+        assert call_kwargs["start_date"] == "20240101"
+        assert call_kwargs["end_date"] == "20240102"
 
         # 验证返回的数据框结构正确
         assert isinstance(result, pd.DataFrame)
@@ -213,9 +224,9 @@ class TestDownloader:
             }
         )
         mock_ak_index_us_stock_sina = Mock(return_value=mock_data)
+        ak_client = import_module("download.dl.downloader_akshare").ak
         monkeypatch.setattr(
-            "download.dl.downloader_akshare.ak.index_us_stock_sina",
-            mock_ak_index_us_stock_sina,
+            ak_client, "index_us_stock_sina", mock_ak_index_us_stock_sina
         )
 
         # 调用被测试的方法
@@ -243,26 +254,28 @@ class TestDownloader:
         测试 Downloader 类方法正确映射到对应的实现函数
         """
         # 验证方法映射关系
-        from download.dl.downloader_akshare import (
-            download_general_info_etf_ak,
-            download_general_info_hk_ggt_stock_ak,
-            download_general_info_stock_ak,
-            download_history_data_etf_ak,
-            download_history_data_us_index_ak,
-        )
-        from download.dl.downloader_baostock import download_history_data_stock_bs
-        from download.dl.downloader_tushare import download_history_data_stock_hk_ts
-
-        assert Downloader.dl_general_info_stock == download_general_info_stock_ak
-        assert Downloader.dl_general_info_etf == download_general_info_etf_ak
         assert (
-            Downloader.dl_general_info_hk_ggt_stock
-            == download_general_info_hk_ggt_stock_ak
+            Downloader.dl_general_info_stock.__name__
+            == "download_general_info_stock_ak"
         )
-        assert Downloader.dl_history_data_etf == download_history_data_etf_ak
-        assert Downloader.dl_history_data_stock == download_history_data_stock_bs
-        assert Downloader.dl_history_data_stock_hk == download_history_data_stock_hk_ts
-        assert Downloader.dl_history_data_us_index == download_history_data_us_index_ak
+        assert Downloader.dl_general_info_etf.__name__ == "download_general_info_etf_ak"
+        assert (
+            Downloader.dl_general_info_hk_ggt_stock.__name__
+            == "download_general_info_hk_ggt_stock_ak"
+        )
+        assert Downloader.dl_history_data_etf.__name__ == "download_history_data_etf_ts"
+        assert (
+            Downloader.dl_history_data_stock.__name__
+            == "download_history_data_stock_bs"
+        )
+        assert (
+            Downloader.dl_history_data_stock_hk.__name__
+            == "download_history_data_stock_hk_ts"
+        )
+        assert (
+            Downloader.dl_history_data_us_index.__name__
+            == "download_history_data_us_index_ak"
+        )
 
 
 if __name__ == "__main__":

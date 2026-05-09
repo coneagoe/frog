@@ -503,6 +503,85 @@ def _get_etf_suffix(etf_id: str) -> str:
     stop_max_attempt_number=3,
 )
 @get_pro
+def download_history_data_etf_ts(
+    etf_id: str,
+    start_date: str,
+    end_date: str,
+    period: PeriodType = PeriodType.DAILY,
+    adjust: AdjustType = AdjustType.QFQ,
+    pro: Any | None = None,
+) -> pd.DataFrame | Any:
+    # fund_daily is daily-only; keep signature compatibility with history downloader.
+    del period, adjust
+
+    normalized_start_date = convert_date(start_date) if start_date else ""
+    normalized_end_date = convert_date(end_date) if end_date else ""
+    ts_code = etf_id + _get_etf_suffix(etf_id)
+
+    client = require_pro_client(pro)
+    df = client.fund_daily(
+        **{
+            "ts_code": ts_code,
+            "trade_date": "",
+            "start_date": normalized_start_date,
+            "end_date": normalized_end_date,
+        },
+        fields=fund_daily_fields,
+    )
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                COL_DATE,
+                COL_STOCK_ID,
+                COL_OPEN,
+                COL_CLOSE,
+                COL_HIGH,
+                COL_LOW,
+                COL_VOLUME,
+            ]
+        )
+
+    normalized = (
+        df.rename(
+            columns={
+                "trade_date": COL_DATE,
+                "ts_code": COL_STOCK_ID,
+                "open": COL_OPEN,
+                "close": COL_CLOSE,
+                "high": COL_HIGH,
+                "low": COL_LOW,
+                "vol": COL_VOLUME,
+            }
+        )
+        .copy()
+        .loc[
+            :,
+            [
+                COL_DATE,
+                COL_STOCK_ID,
+                COL_OPEN,
+                COL_CLOSE,
+                COL_HIGH,
+                COL_LOW,
+                COL_VOLUME,
+            ],
+        ]
+    )
+    normalized[COL_STOCK_ID] = (
+        normalized[COL_STOCK_ID].astype(str).str.split(".").str[0]
+    )
+    normalized[COL_DATE] = pd.to_datetime(
+        normalized[COL_DATE], format="%Y%m%d", errors="coerce"
+    ).dt.strftime("%Y-%m-%d")
+    return normalized.dropna(subset=[COL_DATE])
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
 def download_etf_daily(
     etf_id: str = "",  # without suffix
     trade_date: str = "",
