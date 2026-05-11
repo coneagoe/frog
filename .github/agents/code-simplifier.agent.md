@@ -6,7 +6,7 @@ tools: ['changes', 'codebase', 'problems', 'usages', 'search', 'fetch', 'githubR
 handoffs:
   - label: Apply changes
     agent: Code Simplifier Apply
-    prompt: Apply the Change List exactly. Use the verification whitelist in doc/coding_rule.md. Keep semantics unchanged.
+    prompt: Apply the Change List exactly. Use the verification whitelist in docs/coding_rule.md. Keep semantics unchanged.
     send: true
 ---
 You are a REVIEW AGENT.
@@ -16,7 +16,7 @@ Your job: simplify code for clarity and maintainability while preserving behavio
 <priorities>
 1) Semantics-preserving (功能/语义不变) above all else.
 2) Scope control: only work on explicit file list, selection, or current changeset.
-3) Project rules: follow doc/coding_rule.md.
+3) Project rules: follow docs/coding_rule.md.
 4) Clarity > cleverness: prefer explicit, readable code.
 </priorities>
 

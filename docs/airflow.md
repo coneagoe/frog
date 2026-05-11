@@ -85,7 +85,7 @@ docker compose down
 - `docker compose down -v/--volumes`
 - `docker system prune --volumes`
 否则会删除数据卷导致数据丢失。
-更多细节见 [doc/docker.md](doc/docker.md)。
+更多细节见 [docker.md](docker.md)。
 
 ## 工作原理
 

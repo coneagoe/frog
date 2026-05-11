@@ -1,1 +1,1 @@
-# Use Docker Compose for Airflow runtime (see doc/docker.md)
+# Use Docker Compose for Airflow runtime (see docs/docker.md)
