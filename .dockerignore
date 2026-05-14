@@ -1,0 +1,17 @@
+.git/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+logs/
+*.log
+celerybeat-schedule
+
+data/
+backups/
+.pytest_cache/
+.mypy_cache/
+docs/
+test/
+
