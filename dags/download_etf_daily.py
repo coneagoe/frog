@@ -19,7 +19,6 @@ else:
 from common_dags import (  # noqa: E402
     LOCAL_TZ,
     get_default_args,
-    get_partition_count,
     get_partition_ids,
     get_partitioned_ids,
 )
@@ -30,7 +29,7 @@ from download import DownloadManager  # noqa: E402
 from storage import get_storage  # noqa: E402
 
 DEFAULT_START_DATE: Final = "2010-01-01"
-PARTITION_COUNT = get_partition_count()
+PARTITION_COUNT = 1
 
 
 def download_etf_daily_partition_task(

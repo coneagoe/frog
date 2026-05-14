@@ -21,11 +21,6 @@ PARTITION_DAG_SPECS = [
         "download_stk_holdernumber_partition_task",
         "stock_ids",
     ),
-    (
-        ROOT / "dags/download_etf_daily.py",
-        "download_etf_daily_partition_task",
-        "etf_ids",
-    ),
 ]
 
 
@@ -99,6 +94,23 @@ def test_hk_partition_dag_uses_frozen_partition_count_everywhere():
         ),
         source,
     )
+    assert "partition_count = PARTITION_COUNT" not in source
+
+
+def test_etf_partition_dag_uses_frozen_partition_count_everywhere():
+    source = read_source(ROOT / "dags/download_etf_daily.py")
+
+    assert not re.search(r"\bget_partition_count\s*\(\s*\)", source)
+    assert re.search(r"^PARTITION_COUNT\s*=\s*1\b", source, re.MULTILINE)
+    assert re.search(
+        build_task_signature_pattern("download_etf_daily_partition_task"),
+        source,
+    )
+    assert re.search(
+        r"for\s+_?pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)", source
+    )
+    assert re.search(build_partition_kwargs_pattern(source), source)
+    assert "get_partitioned_ids(etf_ids, partition_id, partition_count)" in source
     assert "partition_count = PARTITION_COUNT" not in source
 
 

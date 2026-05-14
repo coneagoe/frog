@@ -13,6 +13,21 @@ WORKDIR /app
 COPY poetry.lock pyproject.toml ./
 RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
 
-COPY . .
+COPY celery_app.py celery_config.py start_celery.sh config.py config.ini ./
+COPY *.csv ./
+COPY common ./common
+COPY conf ./conf
+COPY backtest ./backtest
+COPY download ./download
+COPY fund ./fund
+COPY indicator ./indicator
+COPY monitor ./monitor
+COPY ocr ./ocr
+COPY stock ./stock
+COPY storage ./storage
+COPY task ./task
+COPY tools ./tools
+COPY trigger ./trigger
+COPY utility ./utility
 
 CMD ["bash", "start_celery.sh"]
