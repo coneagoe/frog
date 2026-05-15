@@ -22,7 +22,7 @@ from common.const import (  # noqa: E402
     AdjustType,
     PeriodType,
 )
-from indicator.obos import COL_OBOS, compute_overbuy_oversell  # noqa: E402
+from factor.obos import COL_OBOS, compute_overbuy_oversell  # noqa: E402
 from storage import get_storage  # noqa: E402
 
 try:
@@ -85,7 +85,7 @@ def _normalize_history_df(history_df: pd.DataFrame, stock_id: str) -> pd.DataFra
     normalized["symbol"] = stock_id
     normalized["close"] = pd.to_numeric(normalized[COL_CLOSE], errors="coerce")
     normalized = normalized.dropna(subset=["close"]).copy()
-    return normalized[["datetime", "symbol", "close", COL_OBOS]]
+    return normalized.loc[:, ["datetime", "symbol", "close", COL_OBOS]].copy()
 
 
 def load_obos_panel_from_db(

@@ -13,7 +13,7 @@ from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: 
 import conf  # noqa: E402
 from backtest.bt_common import drop_suspended, run  # noqa: E402
 from common.const import COL_STOCK_ID, SecurityType  # noqa: E402
-from indicator import OBOS_OVERBUY_THRESHOLD, OBOS_OVERSELL_THRESHOLD  # noqa: E402
+from factor.obos import OBOS_OVERBUY_THRESHOLD, OBOS_OVERSELL_THRESHOLD  # noqa: E402
 from stock import load_general_info_hk_ggt  # noqa: E402
 
 conf.parse_config()
