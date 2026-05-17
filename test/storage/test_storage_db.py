@@ -17,8 +17,11 @@ from common.const import (  # noqa: E402
     COL_ETF_ID,
     COL_ETF_NAME,
     COL_FLOAT_HOLDER_HOLD_AMOUNT,
+    COL_FLOAT_HOLDER_HOLD_CHANGE,
+    COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
     COL_FLOAT_HOLDER_HOLD_RATIO,
     COL_FLOAT_HOLDER_NAME,
+    COL_FLOAT_HOLDER_TYPE,
     COL_HIGH,
     COL_LOW,
     COL_OPEN,
@@ -2524,6 +2527,9 @@ class TestSaveAndGetTop10Floatholders:
                 "holder_name": ["股东A", "股东B"],
                 "hold_amount": [12000.5, 9800.0],
                 "hold_ratio": [2.13, 1.27],
+                "hold_float_ratio": [3.45, 2.01],
+                "hold_change": [150.0, -80.0],
+                "holder_type": ["机构", "个人"],
             }
         )
 
@@ -2557,6 +2563,9 @@ class TestSaveAndGetTop10Floatholders:
         assert COL_FLOAT_HOLDER_NAME in saved.columns
         assert COL_FLOAT_HOLDER_HOLD_AMOUNT in saved.columns
         assert COL_FLOAT_HOLDER_HOLD_RATIO in saved.columns
+        assert COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO in saved.columns
+        assert COL_FLOAT_HOLDER_HOLD_CHANGE in saved.columns
+        assert COL_FLOAT_HOLDER_TYPE in saved.columns
 
     def test_save_top10_floatholders_failure(self, storage_db):
         df = self._make_raw_df()
@@ -2578,6 +2587,9 @@ class TestSaveAndGetTop10Floatholders:
                 "holder_name": ["股东A"],
                 "hold_amount": [12000.5],
                 "hold_ratio": [2.13],
+                "hold_float_ratio": [3.45],
+                "hold_change": [150.0],
+                "holder_type": ["机构"],
             }
         )
         second_df = pd.DataFrame(
@@ -2588,6 +2600,9 @@ class TestSaveAndGetTop10Floatholders:
                 "holder_name": ["股东A", "股东B"],
                 "hold_amount": [12000.5, 9800.0],
                 "hold_ratio": [2.13, 1.27],
+                "hold_float_ratio": [3.45, 2.01],
+                "hold_change": [150.0, -80.0],
+                "holder_type": ["机构", "个人"],
             }
         )
 
