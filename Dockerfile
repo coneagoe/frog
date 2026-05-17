@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN pip install poetry
 
-RUN apk add --no-cache procps bash
+RUN apk add --no-cache procps bash gcc g++ musl-dev linux-headers
 
 WORKDIR /app
 
