@@ -16,6 +16,9 @@ from common.const import (  # noqa: E402
     COL_END_DATE,
     COL_ETF_ID,
     COL_ETF_NAME,
+    COL_FLOAT_HOLDER_HOLD_AMOUNT,
+    COL_FLOAT_HOLDER_HOLD_RATIO,
+    COL_FLOAT_HOLDER_NAME,
     COL_HIGH,
     COL_LOW,
     COL_OPEN,
@@ -34,6 +37,7 @@ from storage.model import (  # noqa: E402
     tb_name_ingredient_300,
     tb_name_ingredient_500,
     tb_name_stk_holdernumber,
+    tb_name_top10_floatholders,
 )
 from storage.storage_db import (  # noqa: E402
     ConnectionError,
@@ -2465,6 +2469,171 @@ class TestSaveAndGetStkHoldernumber:
 
         result = storage_db.get_last_stk_holdernumber_ann_date("000001")
 
+        assert result is None
+
+
+class TestSaveAndGetTop10Floatholders:
+    @pytest.fixture
+    def mock_config(self):
+        config = Mock(spec=StorageConfig)
+        config.get_db_host.return_value = "localhost"
+        config.get_db_port.return_value = 5432
+        config.get_db_name.return_value = "test_db"
+        config.get_db_username.return_value = "test_user"
+        config.get_db_password.return_value = "test_pass"
+        return config
+
+    @pytest.fixture
+    def storage_db(self, mock_config, monkeypatch):
+        reset_storage()
+        monkeypatch.setattr("storage.storage_db.create_engine", Mock())
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+        monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
+        return get_storage(mock_config)
+
+    @pytest.fixture
+    def sqlite_storage(self, tmp_path, monkeypatch):
+        from sqlalchemy import create_engine as real_create_engine
+
+        from storage.model import Base
+
+        sqlite_url = f"sqlite:///{tmp_path}/test.db"
+        engine = real_create_engine(sqlite_url)
+        Base.metadata.create_all(engine)
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+        monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        db = get_storage(mock_config)
+        db.engine = engine
+        return db, engine
+
+    def _make_raw_df(self):
+        return pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ", "600000.SH"],
+                "ann_date": ["20240315", "20240316"],
+                "end_date": ["20231231", "20231231"],
+                "holder_name": ["股东A", "股东B"],
+                "hold_amount": [12000.5, 9800.0],
+                "hold_ratio": [2.13, 1.27],
+            }
+        )
+
+    def test_save_top10_floatholders_converts_dates(self, sqlite_storage):
+        db, engine = sqlite_storage
+        df = self._make_raw_df()
+        result = db.save_top10_floatholders(df)
+        assert result is True
+
+        saved = pd.read_sql(f"SELECT * FROM {tb_name_top10_floatholders}", engine)
+        assert saved[COL_ANN_DATE].iloc[0] in ("2024-03-15", "2024-03-16")
+        assert saved[COL_END_DATE].iloc[0] == "2023-12-31"
+
+    def test_save_top10_floatholders_strips_exchange_suffix(self, sqlite_storage):
+        db, engine = sqlite_storage
+        df = self._make_raw_df()
+        db.save_top10_floatholders(df)
+
+        saved = pd.read_sql(f"SELECT * FROM {tb_name_top10_floatholders}", engine)
+        codes = set(saved[COL_STOCK_ID].tolist())
+        assert "000001" in codes
+        assert "600000" in codes
+        assert not any("." in c for c in codes)
+
+    def test_save_top10_floatholders_keeps_holder_fields(self, sqlite_storage):
+        db, engine = sqlite_storage
+        df = self._make_raw_df()
+        db.save_top10_floatholders(df)
+
+        saved = pd.read_sql(f"SELECT * FROM {tb_name_top10_floatholders}", engine)
+        assert COL_FLOAT_HOLDER_NAME in saved.columns
+        assert COL_FLOAT_HOLDER_HOLD_AMOUNT in saved.columns
+        assert COL_FLOAT_HOLDER_HOLD_RATIO in saved.columns
+
+    def test_save_top10_floatholders_failure(self, storage_db):
+        df = self._make_raw_df()
+        with patch.object(
+            storage_db.engine, "begin", side_effect=Exception("DB error")
+        ):
+            result = storage_db.save_top10_floatholders(df)
+            assert result is False
+
+    def test_save_top10_floatholders_is_idempotent_for_same_primary_key(
+        self, sqlite_storage
+    ):
+        db, engine = sqlite_storage
+        initial_df = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ"],
+                "ann_date": ["20240315"],
+                "end_date": ["20231231"],
+                "holder_name": ["股东A"],
+                "hold_amount": [12000.5],
+                "hold_ratio": [2.13],
+            }
+        )
+        second_df = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ", "000001.SZ"],
+                "ann_date": ["20240315", "20240315"],
+                "end_date": ["20231231", "20231231"],
+                "holder_name": ["股东A", "股东B"],
+                "hold_amount": [12000.5, 9800.0],
+                "hold_ratio": [2.13, 1.27],
+            }
+        )
+
+        assert db.save_top10_floatholders(initial_df) is True
+        assert db.save_top10_floatholders(second_df) is True
+
+        saved = pd.read_sql(
+            f'SELECT * FROM {tb_name_top10_floatholders} WHERE "{COL_STOCK_ID}" = "000001"',
+            engine,
+        )
+        assert len(saved) == 2
+        assert set(saved[COL_FLOAT_HOLDER_NAME].tolist()) == {"股东A", "股东B"}
+
+    def test_get_last_top10_floatholders_ann_date_success(self, storage_db):
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+        mock_cursor.fetchone.return_value = ("2024-03-15",)
+
+        result = storage_db.get_last_top10_floatholders_ann_date("000001")
+
+        assert result == "2024-03-15"
+        mock_cursor.execute.assert_called_once()
+        sql_called = mock_cursor.execute.call_args[0][0]
+        assert COL_ANN_DATE in sql_called
+        assert tb_name_top10_floatholders in sql_called
+
+    def test_get_last_top10_floatholders_ann_date_no_data(self, storage_db):
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+        mock_cursor.fetchone.return_value = None
+
+        result = storage_db.get_last_top10_floatholders_ann_date("000001")
+        assert result is None
+
+    def test_get_last_top10_floatholders_ann_date_db_error(self, storage_db):
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+        mock_cursor.execute.side_effect = Exception("connection lost")
+
+        result = storage_db.get_last_top10_floatholders_ann_date("000001")
         assert result is None
 
 

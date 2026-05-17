@@ -73,6 +73,11 @@ COL_ANN_DATE = "公告日期"
 COL_END_DATE = "截止日期"
 COL_HOLDER_NUM = "股东人数"
 
+# TuShare top10_floatholders
+COL_FLOAT_HOLDER_NAME = "股东名称"
+COL_FLOAT_HOLDER_HOLD_AMOUNT = "持有数量（万股）"
+COL_FLOAT_HOLDER_HOLD_RATIO = "占总流通股本持股比例"
+
 # TuShare stock_basic
 COL_TS_CODE = "TS代码"
 COL_AREA = "地域"

@@ -10,6 +10,8 @@ import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import sessionmaker
 
 from common.const import (
@@ -37,6 +39,9 @@ from common.const import (
     COL_ETF_NAME,
     COL_ETF_TYPE,
     COL_EXCHANGE,
+    COL_FLOAT_HOLDER_HOLD_AMOUNT,
+    COL_FLOAT_HOLDER_HOLD_RATIO,
+    COL_FLOAT_HOLDER_NAME,
     COL_FLOAT_SHARE,
     COL_FREE_SHARE,
     COL_FULLNAME,
@@ -103,6 +108,7 @@ from .model import (
     tb_name_stk_holdernumber,
     tb_name_stk_limit_a_stock,
     tb_name_suspend_d_a_stock,
+    tb_name_top10_floatholders,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,6 +158,16 @@ COL_MAP_STK_HOLDERNUMBER = {
     "ann_date": COL_ANN_DATE,
     "end_date": COL_END_DATE,
     "holder_num": COL_HOLDER_NUM,
+}
+
+
+COL_MAP_TOP10_FLOATHOLDERS = {
+    "ts_code": COL_STOCK_ID,
+    "ann_date": COL_ANN_DATE,
+    "end_date": COL_END_DATE,
+    "holder_name": COL_FLOAT_HOLDER_NAME,
+    "hold_amount": COL_FLOAT_HOLDER_HOLD_AMOUNT,
+    "hold_ratio": COL_FLOAT_HOLDER_HOLD_RATIO,
 }
 
 
@@ -1317,6 +1333,60 @@ class StorageDb:
             logger.error(f"保存股东人数数据失败: {str(e)}")
             return False
 
+    def save_top10_floatholders(self, df: pd.DataFrame) -> bool:
+        """
+        保存前十大流通股东数据到对应的数据库表
+
+        Args:
+            df: 前十大流通股东数据DataFrame（来自TuShare top10_floatholders接口）
+
+        Returns:
+            bool: 保存是否成功
+        """
+        try:
+            df = df.rename(columns=COL_MAP_TOP10_FLOATHOLDERS)
+            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
+            df = df[list(COL_MAP_TOP10_FLOATHOLDERS.values())]
+            for col in [COL_ANN_DATE, COL_END_DATE]:
+                df[col] = pd.to_datetime(
+                    df[col], format="%Y%m%d", errors="coerce"
+                ).dt.date
+
+            if self.engine is None:
+                raise ConnectionError("SQLAlchemy引擎未初始化")
+
+            table = Base.metadata.tables[tb_name_top10_floatholders]
+            records = df.to_dict(orient="records")
+            if not records:
+                return True
+
+            primary_keys = list(table.primary_key.columns.keys())
+            if self.engine.dialect.name == "postgresql":
+                stmt = (
+                    pg_insert(table)
+                    .values(records)
+                    .on_conflict_do_nothing(index_elements=primary_keys)
+                )
+            elif self.engine.dialect.name == "sqlite":
+                stmt = (
+                    sqlite_insert(table)
+                    .values(records)
+                    .on_conflict_do_nothing(index_elements=primary_keys)
+                )
+            else:
+                raise ConnectionError(
+                    f"Unsupported database dialect: {self.engine.dialect.name}"
+                )
+
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"保存前十大流通股东数据失败: {str(e)}")
+            return False
+
     @connect_once
     def get_last_stk_holdernumber_ann_date(self, stock_id: str) -> Optional[str]:
         """
@@ -1347,6 +1417,39 @@ class StorageDb:
         except Exception as e:
             logger.error(
                 f"获取股东人数最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}"
+            )
+            return None
+
+    @connect_once
+    def get_last_top10_floatholders_ann_date(self, stock_id: str) -> Optional[str]:
+        """
+        获取指定股票在 top10_floatholders 表中最新的公告日期
+
+        Args:
+            stock_id: 股票代码（不含交易所后缀）
+
+        Returns:
+            日期字符串（YYYY-MM-DD），无记录时返回 None
+        """
+        try:
+            assert self.cursor is not None, "Database cursor should not be None"
+            sql = textwrap.dedent(
+                f"""\
+            SELECT "{COL_ANN_DATE}" FROM {tb_name_top10_floatholders}
+            WHERE "{COL_STOCK_ID}" = %s
+            ORDER BY "{COL_ANN_DATE}" DESC
+            LIMIT 1
+            """
+            )
+            self.cursor.execute(sql, (stock_id,))
+            result = self.cursor.fetchone()
+            if result:
+                return str(result[0])
+            return None
+
+        except Exception as e:
+            logger.error(
+                f"获取前十大流通股东最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}"
             )
             return None
 

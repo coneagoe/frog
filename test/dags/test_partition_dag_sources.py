@@ -21,6 +21,11 @@ PARTITION_DAG_SPECS = [
         "download_stk_holdernumber_partition_task",
         "stock_ids",
     ),
+    (
+        ROOT / "dags/download_top10_floatholders_weekly.py",
+        "download_top10_floatholders_partition_task",
+        "stock_ids",
+    ),
 ]
 
 

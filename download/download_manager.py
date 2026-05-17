@@ -753,3 +753,47 @@ class DownloadManager:
             return True
 
         return get_storage().save_stk_holdernumber(df)
+
+    def download_top10_floatholders_a_stock(
+        self,
+        stock_id: str,
+        default_start_date: str = "2020-01-01",
+        end_date: str | None = None,
+    ) -> bool:
+        """
+        下载单只A股前十大流通股东历史数据（per-stock 增量）
+
+        Args:
+            stock_id: 股票代码（不含交易所后缀，6位数字）
+            default_start_date: 无历史记录时的起始日期，默认 2020-01-01
+            end_date: 截止日期，默认为当天
+
+        Returns:
+            bool: 是否成功下载并保存
+        """
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+
+        last_ann_date = get_storage().get_last_top10_floatholders_ann_date(stock_id)
+        if last_ann_date is not None:
+            actual_start = pd.Timestamp(last_ann_date).strftime("%Y-%m-%d")
+            if pd.Timestamp(actual_start) > pd.Timestamp(end_date):
+                logging.info(f"[{stock_id}] 前十大流通股东数据已是最新，无需下载")
+                return True
+        else:
+            actual_start = default_start_date
+
+        ts_code = _get_a_stock_ts_code(stock_id)
+        try:
+            df = self.downloader.dl_top10_floatholders(
+                ts_code=ts_code, start_date=actual_start, end_date=end_date
+            )
+        except Exception as e:
+            logging.error(f"[{stock_id}] 下载前十大流通股东数据时出错: {e}")
+            return False
+
+        if df is None or df.empty:
+            logging.info(f"[{stock_id}] 无新增前十大流通股东数据，跳过")
+            return True
+
+        return get_storage().save_top10_floatholders(df)

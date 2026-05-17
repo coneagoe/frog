@@ -36,6 +36,7 @@ from .stk_holdernumber import StkHoldernumber, tb_name_stk_holdernumber
 from .stk_limit_a_stock import StkLimitAStock, tb_name_stk_limit_a_stock
 from .stock_monitor_target import StockMonitorTarget, tb_name_stock_monitor_target
 from .suspend_d_a_stock import SuspendDAStock, tb_name_suspend_d_a_stock
+from .top10_floatholders import Top10Floatholders, tb_name_top10_floatholders
 
 __all__ = [
     "Base",
@@ -53,6 +54,7 @@ __all__ = [
     "StkLimitAStock",
     "StkHoldernumber",
     "SuspendDAStock",
+    "Top10Floatholders",
     "Ingredient300",
     "Ingredient500",
     "tb_name_general_info_etf",
@@ -66,6 +68,7 @@ __all__ = [
     "tb_name_stk_limit_a_stock",
     "tb_name_stk_holdernumber",
     "tb_name_suspend_d_a_stock",
+    "tb_name_top10_floatholders",
     "tb_name_a_stock_basic",
     "tb_name_etf_basic",
     "tb_name_etf_daily",

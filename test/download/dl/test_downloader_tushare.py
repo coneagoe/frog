@@ -324,6 +324,66 @@ def test_download_stk_holdernumber_all_data(downloader_ts_module, monkeypatch):
     )
 
 
+def test_download_top10_floatholders_missing_token_raises(
+    downloader_ts_module, monkeypatch
+):
+    module, ts_stub, _ = downloader_ts_module
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+
+    with pytest.raises(ConnectionError, match="Tushare token is missing"):
+        module.download_top10_floatholders(ts_code="600600.SH")
+
+    ts_stub.pro_api.assert_not_called()
+
+
+def test_download_top10_floatholders_success(downloader_ts_module, monkeypatch):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    mock_data = pd.DataFrame(
+        {
+            "ts_code": ["600600.SH"] * 2,
+            "ann_date": ["20240315", "20231201"],
+            "end_date": ["20231231", "20230930"],
+            "holder_name": ["股东A", "股东B"],
+            "hold_amount": [12345.6, 9999.0],
+            "hold_ratio": [3.21, 2.1],
+        }
+    )
+    pro_stub.top10_floatholders = Mock(return_value=mock_data)
+
+    result = module.download_top10_floatholders(
+        ts_code="600600.SH",
+        start_date="2023-01-01",
+        end_date="2024-03-20",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.top10_floatholders.assert_called_once_with(
+        ts_code="600600.SH",
+        start_date="20230101",
+        end_date="20240320",
+        fields=module.top10_floatholders_fields,
+    )
+    pd.testing.assert_frame_equal(result, mock_data)
+
+
+def test_download_top10_floatholders_all_data(downloader_ts_module, monkeypatch):
+    module, _ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    pro_stub.top10_floatholders = Mock(return_value=pd.DataFrame())
+
+    module.download_top10_floatholders(ts_code="600600.SH")
+
+    pro_stub.top10_floatholders.assert_called_once_with(
+        ts_code="600600.SH",
+        start_date="",
+        end_date="",
+        fields=module.top10_floatholders_fields,
+    )
+
+
 def test_download_history_data_stock_hk_ts_missing_token_raises(
     downloader_ts_module, monkeypatch
 ):

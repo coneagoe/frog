@@ -693,6 +693,16 @@ stk_holdernumber_fields = [
 ]
 
 
+top10_floatholders_fields = [
+    "ts_code",
+    "ann_date",
+    "end_date",
+    "holder_name",
+    "hold_amount",
+    "hold_ratio",
+]
+
+
 @retrying.retry(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
@@ -718,6 +728,36 @@ def download_stk_holdernumber(
             "end_date": end_date,
         },
         fields=stk_holdernumber_fields,
+    )
+
+    return df
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
+def download_top10_floatholders(
+    ts_code: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    pro: Any | None = None,
+) -> pd.DataFrame | Any:
+    if start_date:
+        start_date = convert_date(start_date)
+    if end_date:
+        end_date = convert_date(end_date)
+    client = require_pro_client(pro)
+
+    df = client.top10_floatholders(
+        **{
+            "ts_code": ts_code,
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        fields=top10_floatholders_fields,
     )
 
     return df

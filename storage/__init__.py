@@ -15,6 +15,7 @@ from .model import (
     tb_name_ingredient_500,
     tb_name_stk_holdernumber,
     tb_name_stk_limit_a_stock,
+    tb_name_top10_floatholders,
 )
 from .storage_db import (
     ConnectionError,
@@ -50,4 +51,5 @@ __all__ = [
     "tb_name_daily_basic_a_stock",
     "tb_name_stk_limit_a_stock",
     "tb_name_stk_holdernumber",
+    "tb_name_top10_floatholders",
 ]

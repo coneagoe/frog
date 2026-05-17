@@ -19,6 +19,7 @@ from .downloader_tushare import (
     download_stk_holdernumber,
     download_stk_limit,
     download_suspend_d,
+    download_top10_floatholders,
 )
 
 
@@ -42,3 +43,4 @@ class Downloader:
     dl_etf_basic = staticmethod(download_etf_basic)
     dl_etf_daily = staticmethod(download_etf_daily)
     dl_stk_holdernumber = staticmethod(download_stk_holdernumber)
+    dl_top10_floatholders = staticmethod(download_top10_floatholders)

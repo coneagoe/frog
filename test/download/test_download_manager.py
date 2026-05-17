@@ -341,5 +341,85 @@ class TestDownloadStkHoldernumberAStock:
         assert call_kwargs["ts_code"] == "000001.SZ"
 
 
+class TestDownloadTop10FloatholdersAStock:
+    def test_download_success_no_prior_data(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        mock_df = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ"],
+                "ann_date": ["20240315"],
+                "end_date": ["20231231"],
+                "holder_name": ["股东A"],
+                "hold_amount": [12345.0],
+                "hold_ratio": [2.34],
+            }
+        )
+        storage.get_last_top10_floatholders_ann_date.return_value = None
+        downloader.dl_top10_floatholders.return_value = mock_df
+        storage.save_top10_floatholders.return_value = True
+
+        result = manager.download_top10_floatholders_a_stock(
+            "000001", default_start_date="2020-01-01", end_date="2024-03-20"
+        )
+
+        assert result is True
+        downloader.dl_top10_floatholders.assert_called_once_with(
+            ts_code="000001.SZ", start_date="2020-01-01", end_date="2024-03-20"
+        )
+        storage.save_top10_floatholders.assert_called_once_with(mock_df)
+
+    def test_download_incremental_from_last_ann_date(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        storage.get_last_top10_floatholders_ann_date.return_value = "2024-03-10"
+        downloader.dl_top10_floatholders.return_value = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ"],
+                "ann_date": ["20240315"],
+                "end_date": ["20231231"],
+                "holder_name": ["股东A"],
+                "hold_amount": [12345.0],
+                "hold_ratio": [2.34],
+            }
+        )
+        storage.save_top10_floatholders.return_value = True
+
+        manager.download_top10_floatholders_a_stock("000001", end_date="2024-03-20")
+
+        downloader.dl_top10_floatholders.assert_called_once_with(
+            ts_code="000001.SZ", start_date="2024-03-10", end_date="2024-03-20"
+        )
+
+    def test_download_already_latest(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        storage.get_last_top10_floatholders_ann_date.return_value = "2024-03-20"
+        downloader.dl_top10_floatholders.return_value = pd.DataFrame()
+
+        result = manager.download_top10_floatholders_a_stock(
+            "000001", end_date="2024-03-20"
+        )
+
+        assert result is True
+        downloader.dl_top10_floatholders.assert_called_once_with(
+            ts_code="000001.SZ", start_date="2024-03-20", end_date="2024-03-20"
+        )
+        storage.save_top10_floatholders.assert_not_called()
+
+    def test_download_empty_result_skipped(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+
+        storage.get_last_top10_floatholders_ann_date.return_value = None
+        downloader.dl_top10_floatholders.return_value = pd.DataFrame()
+
+        result = manager.download_top10_floatholders_a_stock(
+            "000001", end_date="2024-03-20"
+        )
+
+        assert result is True
+        storage.save_top10_floatholders.assert_not_called()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
