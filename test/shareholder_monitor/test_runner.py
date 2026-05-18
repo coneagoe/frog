@@ -235,7 +235,9 @@ def test_run_ssf_change_alert_marks_no_signal_candidates_processed():
     mock_storage.list_ssf_change_signal_candidates.return_value = [
         ("000001", "2024-03-31")
     ]
-    mock_storage.load_top10_floatholders_history.return_value = make_non_ssf_history_df()
+    mock_storage.load_top10_floatholders_history.return_value = (
+        make_non_ssf_history_df()
+    )
     mock_storage.save_ssf_change_signals.return_value = []
     mock_storage.mark_ssf_change_candidates_processed.return_value = [7]
     mock_storage.list_pending_ssf_change_signals.return_value = []
