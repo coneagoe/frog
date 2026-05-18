@@ -73,6 +73,22 @@ def test_run_ssf_change_alert_skips_email_when_no_pending():
     assert summary.emailed == 0
 
 
+def test_run_ssf_change_alert_skips_email_when_nothing_new():
+    mock_storage = MagicMock()
+    mock_storage.list_ssf_change_signal_candidates.return_value = []
+    mock_storage.list_pending_ssf_change_signals.return_value = []
+
+    with (
+        patch("shareholder_monitor.runner.get_storage", return_value=mock_storage),
+        patch("shareholder_monitor.runner.send_email") as mock_email,
+    ):
+        summary = run_ssf_change_alert()
+
+    mock_email.assert_not_called()
+    assert summary.inserted == 0
+    assert summary.emailed == 0
+
+
 def test_run_ssf_change_alert_sends_and_marks_pending_by_ann_date():
     mock_storage = MagicMock()
     mock_storage.list_ssf_change_signal_candidates.return_value = []

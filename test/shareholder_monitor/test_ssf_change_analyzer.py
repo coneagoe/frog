@@ -113,6 +113,24 @@ def test_analyze_ssf_change_returns_negative_score_when_all_ssf_holders_exit():
     assert signal["score"] == -50.0
 
 
+def test_analyze_ssf_change_returns_exit_signal_when_latest_period_has_no_ssf_holder():
+    history = pd.DataFrame(
+        {
+            "股票代码": ["000001", "000001"],
+            "公告日期": pd.to_datetime(["2024-03-31", "2023-12-31"]),
+            "股东名称": ["香港中央结算有限公司", "全国社保基金四零六组合"],
+            "持有数量（万股）": [2000.0, 900.0],
+            "占总流通股本持股比例": [2.0, 1.1],
+            "持股变动": [0.0, 0.0],
+        }
+    )
+
+    signal = analyze_ssf_change("000001", history)
+
+    assert signal is not None
+    assert signal["event_types"] == ["exit"]
+
+
 def test_analyze_ssf_change_aggregates_duplicate_holder_rows_per_period():
     history = pd.DataFrame(
         {
