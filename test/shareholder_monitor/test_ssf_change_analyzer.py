@@ -1,9 +1,19 @@
+from typing import Any
+
 import pandas as pd
 
 from shareholder_monitor.ssf_change_analyzer import (
     SSFChangeAnalysisOutcome,
     analyze_ssf_change,
 )
+
+
+def _assert_signal_payload(
+    signal: dict[str, Any] | None | SSFChangeAnalysisOutcome,
+) -> dict[str, Any]:
+    assert signal is not None
+    assert signal is not SSFChangeAnalysisOutcome.INSUFFICIENT_HISTORY
+    return signal
 
 
 def test_analyze_ssf_change_builds_rankable_stock_signal():
@@ -24,9 +34,7 @@ def test_analyze_ssf_change_builds_rankable_stock_signal():
         }
     )
 
-    signal = analyze_ssf_change("000001", history)
-
-    assert signal is not None
+    signal = _assert_signal_payload(analyze_ssf_change("000001", history))
     assert signal["stock_id"] == "000001"
     assert signal["event_types"] == ["new_entry", "increase", "exit"]
     assert signal["ssf_holder_count_now"] == 2
@@ -51,9 +59,7 @@ def test_analyze_ssf_change_ignores_holders_with_nan_amounts_in_aggregates():
         }
     )
 
-    signal = analyze_ssf_change("000001", history)
-
-    assert signal is not None
+    signal = _assert_signal_payload(analyze_ssf_change("000001", history))
     assert signal["event_types"] == ["new_entry", "exit"]
     assert signal["ssf_holder_count_now"] == 1
     assert signal["ssf_holder_count_prev"] == 1
@@ -110,9 +116,7 @@ def test_analyze_ssf_change_returns_negative_score_when_all_ssf_holders_exit():
         }
     )
 
-    signal = analyze_ssf_change("000001", history)
-
-    assert signal is not None
+    signal = _assert_signal_payload(analyze_ssf_change("000001", history))
     assert signal["event_types"] == ["exit"]
     assert signal["ssf_holder_count_now"] == 0
     assert signal["ssf_holder_count_prev"] == 1
@@ -131,9 +135,7 @@ def test_analyze_ssf_change_returns_exit_signal_when_latest_period_has_no_ssf_ho
         }
     )
 
-    signal = analyze_ssf_change("000001", history)
-
-    assert signal is not None
+    signal = _assert_signal_payload(analyze_ssf_change("000001", history))
     assert signal["event_types"] == ["exit"]
 
 
@@ -155,9 +157,7 @@ def test_analyze_ssf_change_aggregates_duplicate_holder_rows_per_period():
         }
     )
 
-    signal = analyze_ssf_change("000001", history)
-
-    assert signal is not None
+    signal = _assert_signal_payload(analyze_ssf_change("000001", history))
     assert signal["event_types"] == ["increase", "exit"]
     assert signal["ssf_holder_count_now"] == 1
     assert signal["ssf_holder_count_prev"] == 2
