@@ -29,7 +29,7 @@
 2. 新增两期 `top10_floatholders` 差分分析逻辑。
 3. 新增股票级评分与排序逻辑。
 4. 新增社保持仓变动信号表及对应存取方法。
-5. 新增周更分析入口与汇总邮件发送逻辑。
+5. 在现有周更 top10 DAG 末尾追加分析入口与汇总邮件发送逻辑。
 6. 新增相关单元测试 / 任务层测试。
 
 本次改动不包含：
@@ -39,6 +39,7 @@
 - 图形化看板、自定义权重界面、多渠道推送。
 - 复杂机器学习评分或市场因子混合模型。
 - 改动 `download_top10_floatholders_weekly` 的既有 schedule、重试、并发分片策略。
+- 新建第二个独立定时分析 DAG 作为默认实现。
 
 ## 设计原则
 
@@ -54,12 +55,12 @@
 
 ### 数据驱动优于日历空跑
 
-当前 `top10_floatholders` 是周更数据，因此分析任务应在周更下载完成后触发，而不是每日固定空跑。
+当前 `top10_floatholders` 是周更数据，因此分析任务应在现有周更下载完成后触发，而不是每日固定空跑。
 
 推荐节奏：
 
-1. 周更下载完成
-2. 立刻运行社保持仓变动分析
+1. 现有周更 DAG 的分片下载任务全部完成
+2. 同一 DAG 末尾立刻运行一个社保持仓变动分析 task
 3. 若本轮有新增信号，则发送一封汇总邮件
 
 ### 股票级结果优于股东级碎片结果
@@ -177,7 +178,7 @@ score = 50 * event_score + 20 * count_score + 30 * concentration_score
 
 提醒策略采用“**每轮分析最多一封汇总邮件**”：
 
-1. 周更 top10 下载完成后运行 analyzer
+1. 现有 `download_top10_floatholders_weekly` DAG 的全部下载分片成功后运行 analyzer
 2. analyzer 只处理尚未生成过信号的最新公告期股票
 3. 若本轮新增信号数为 0，则不发邮件
 4. 若本轮新增信号数大于 0，则发送一封汇总邮件
@@ -216,11 +217,12 @@ score = 50 * event_score + 20 * count_score + 30 * concentration_score
 - `storage/storage_db.py`
   - 信号表建表、保存、查询方法
 - `task/` 或 `tools/`
-  - 暴露分析入口，供 DAG 或命令行复用
-- `dags/`
-  - 新增一个挂在 `download_top10_floatholders_weekly` 之后的周度分析任务 / DAG
+  - 暴露分析入口，供现有 DAG 或命令行复用
+- `dags/download_top10_floatholders_weekly.py`
+  - 在现有分片下载任务之后追加一个单一 analysis task
+  - 该 task 依赖全部分片任务成功完成后再执行
 
-目录名可以在实现时根据仓库现有结构微调，但原则是不侵入当前 `monitor` 的 price-based runner。
+目录名可以在实现时根据仓库现有结构微调，但原则是不侵入当前 `monitor` 的 price-based runner，也不新增第二个定时分析 DAG 作为默认路径。
 
 ## 错误处理
 
@@ -265,7 +267,7 @@ score = 50 * event_score + 20 * count_score + 30 * concentration_score
 
 满足以下条件即视为完成：
 
-1. 周更 top10 下载完成后，能自动运行社保持仓变动分析。
+1. 现有周更 top10 DAG 分片任务完成后，能自动运行一个下游社保持仓变动分析 task。
 2. 能识别新进、增持、减持、退出四类社保基金事件。
 3. 能按股票输出综合分与排序结果。
 4. 同一股票同一公告期不会重复生成信号。
