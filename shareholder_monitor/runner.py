@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 
 from storage import get_storage
@@ -38,9 +39,15 @@ def run_ssf_change_alert() -> SSFAlertSummary:
     if not pending:
         return summary
 
-    ann_date = str(max(item.ann_date for item in pending))
-    subject, body = build_ssf_change_alert_email(pending, ann_date)
-    send_email(subject, body)
-    storage.mark_ssf_change_signals_alerted([item.id for item in pending])
+    pending_by_ann_date = defaultdict(list)
+    for item in pending:
+        pending_by_ann_date[item.ann_date].append(item)
+
+    for ann_date in sorted(pending_by_ann_date, reverse=True):
+        grouped_pending = pending_by_ann_date[ann_date]
+        subject, body = build_ssf_change_alert_email(grouped_pending, str(ann_date))
+        send_email(subject, body)
+        storage.mark_ssf_change_signals_alerted([item.id for item in grouped_pending])
+
     summary.emailed = len(pending)
     return summary
