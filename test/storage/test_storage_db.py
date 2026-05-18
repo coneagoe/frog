@@ -2742,8 +2742,9 @@ class TestSSFChangeSignalStorage:
                 }
             )
         )
-        db.save_ssf_change_signals([self._make_signal_payload()])
+        assert db.list_ssf_change_signal_candidates() == [("000001", "2024-03-31")]
 
+        db.save_ssf_change_signals([self._make_signal_payload()])
         assert db.list_ssf_change_signal_candidates() == []
 
     def test_save_ssf_change_signals_is_idempotent_for_duplicate_payloads(
