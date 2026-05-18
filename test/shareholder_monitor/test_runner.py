@@ -150,7 +150,36 @@ def test_run_ssf_change_alert_sends_and_marks_pending_by_ann_date():
     assert summary.emailed == 3
 
 
-def test_run_ssf_change_alert_does_not_duplicate_email_when_marking_retries():
+def test_run_ssf_change_alert_leaves_pending_when_email_send_fails():
+    mock_storage = MagicMock()
+    mock_storage.list_ssf_change_signal_candidates.return_value = []
+    mock_storage.save_ssf_change_signals.return_value = []
+    mock_storage.list_pending_ssf_change_signals.return_value = [
+        MagicMock(
+            id=11,
+            stock_id="000001",
+            ann_date=date(2024, 3, 31),
+            score=88.0,
+            event_types=["increase"],
+            ssf_holder_count_change=1,
+            ssf_total_hold_ratio_change=0.8,
+            detail_json={"holders": []},
+        )
+    ]
+    with (
+        patch("shareholder_monitor.runner.get_storage", return_value=mock_storage),
+        patch(
+            "shareholder_monitor.runner.send_email",
+            side_effect=RuntimeError("smtp failed"),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="smtp failed"):
+            run_ssf_change_alert()
+
+    mock_storage.mark_ssf_change_signals_alerted.assert_not_called()
+
+
+def test_run_ssf_change_alert_may_resend_when_alert_marking_retries():
     mock_storage = MagicMock()
     mock_storage.list_ssf_change_signal_candidates.return_value = []
     mock_storage.save_ssf_change_signals.return_value = []
@@ -184,7 +213,7 @@ def test_run_ssf_change_alert_does_not_duplicate_email_when_marking_retries():
         call([11]),
         call([11]),
     ]
-    mock_email.assert_called_once()
+    assert mock_email.call_count == 2
     assert summary.emailed == 1
 
 

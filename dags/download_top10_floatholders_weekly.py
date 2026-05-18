@@ -107,6 +107,7 @@ partition_tasks = [
 analysis_task = PythonOperator(
     task_id="analyze_ssf_change_signals",
     python_callable=run_ssf_change_alert,
+    do_xcom_push=False,
     dag=dag,
 )
 
