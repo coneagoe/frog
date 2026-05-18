@@ -9,7 +9,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import sessionmaker
@@ -1714,6 +1714,38 @@ class StorageDb:
             (row["stock_id"], pd.Timestamp(row["ann_date"]).strftime("%Y-%m-%d"))
             for _, row in df.iterrows()
         ]
+
+    def load_top10_floatholders_history(
+        self, stock_id: str, limit_ann_dates: int = 2
+    ) -> pd.DataFrame:
+        sql = textwrap.dedent(
+            f"""\
+            SELECT *
+            FROM {tb_name_top10_floatholders}
+            WHERE "{COL_STOCK_ID}" = :stock_id
+              AND "{COL_ANN_DATE}" IN (
+                  SELECT DISTINCT "{COL_ANN_DATE}"
+                  FROM {tb_name_top10_floatholders}
+                  WHERE "{COL_STOCK_ID}" = :stock_id
+                  ORDER BY "{COL_ANN_DATE}" DESC
+                  LIMIT :limit_ann_dates
+              )
+            ORDER BY "{COL_ANN_DATE}" DESC, "{COL_FLOAT_HOLDER_NAME}"
+            """
+        )
+        assert self.engine is not None
+        params: dict[str, str | int] = {
+            "stock_id": stock_id,
+            "limit_ann_dates": limit_ann_dates,
+        }
+        df = pd.read_sql(
+            text(sql),
+            self.engine,
+            params=params,
+        )
+        if COL_ANN_DATE in df.columns:
+            df[COL_ANN_DATE] = pd.to_datetime(df[COL_ANN_DATE])
+        return df
 
     def save_ssf_change_signals(self, records: List[Dict[str, Any]]) -> List[int]:
         """保存 SSF 变动信号，已存在的 `(stock_id, ann_date)` 记录会跳过。"""

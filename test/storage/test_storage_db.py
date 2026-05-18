@@ -2747,6 +2747,37 @@ class TestSSFChangeSignalStorage:
         db.save_ssf_change_signals([self._make_signal_payload()])
         assert db.list_ssf_change_signal_candidates() == []
 
+    def test_load_top10_floatholders_history_loads_latest_ann_dates(
+        self, sqlite_storage
+    ):
+        db = sqlite_storage
+        db.save_top10_floatholders(
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ"] * 3,
+                    "ann_date": ["20240331", "20231231", "20230930"],
+                    "end_date": ["20240331", "20231231", "20230930"],
+                    "holder_name": [
+                        "全国社保基金一一八组合",
+                        "全国社保基金一一八组合",
+                        "全国社保基金五零三组合",
+                    ],
+                    "hold_amount": [1000.0, 900.0, 800.0],
+                    "hold_ratio": [1.2, 1.0, 0.8],
+                    "hold_float_ratio": [1.2, 1.0, 0.8],
+                    "hold_change": [100.0, 0.0, 0.0],
+                    "holder_type": ["机构", "机构", "机构"],
+                }
+            )
+        )
+
+        history = db.load_top10_floatholders_history("000001", limit_ann_dates=2)
+
+        assert history["公告日期"].dt.strftime("%Y-%m-%d").unique().tolist() == [
+            "2024-03-31",
+            "2023-12-31",
+        ]
+
     def test_save_ssf_change_signals_is_idempotent_for_duplicate_payloads(
         self, sqlite_storage
     ):
