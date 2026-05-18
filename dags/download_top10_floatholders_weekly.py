@@ -20,6 +20,7 @@ from common_dags import (  # noqa: E402
     get_partition_ids,
     get_partitioned_ids,
 )
+from shareholder_monitor import run_ssf_change_alert  # noqa: E402
 
 PARTITION_COUNT = get_partition_count()
 
@@ -92,10 +93,21 @@ dag = DAG(
     max_active_runs=1,
 )
 
-for _pid in get_partition_ids(PARTITION_COUNT):
+partition_tasks = [
     PythonOperator(
-        task_id=f"download_top10_floatholders_p{_pid:02d}",
+        task_id=f"download_top10_floatholders_p{pid:02d}",
         python_callable=download_top10_floatholders_partition_task,
-        op_kwargs={"partition_id": _pid, "partition_count": PARTITION_COUNT},
+        op_kwargs={"partition_id": pid, "partition_count": PARTITION_COUNT},
         dag=dag,
     )
+    for pid in get_partition_ids(PARTITION_COUNT)
+]
+
+analysis_task = PythonOperator(
+    task_id="analyze_ssf_change_signals",
+    python_callable=run_ssf_change_alert,
+    dag=dag,
+)
+
+for task in partition_tasks:
+    task >> analysis_task
