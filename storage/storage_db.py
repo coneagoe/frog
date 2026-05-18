@@ -9,7 +9,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import sessionmaker
@@ -116,6 +116,9 @@ from .model import (
 )
 
 logger = logging.getLogger(__name__)
+
+SSF_CHANGE_SIGNAL_STATUS_SIGNAL = "signal"
+SSF_CHANGE_SIGNAL_STATUS_NO_SIGNAL = "no_signal"
 
 
 COL_MAP_DAILY_BASIC = {
@@ -1687,6 +1690,26 @@ class StorageDb:
         from .model.ssf_change_signal import SSFChangeSignal  # noqa: F401
 
         SSFChangeSignal.__table__.create(self.engine, checkfirst=True)
+        self._ensure_ssf_change_signals_status_column()
+
+    def _ensure_ssf_change_signals_status_column(self) -> None:
+        assert self.engine is not None
+        columns = {
+            column["name"]
+            for column in inspect(self.engine).get_columns(tb_name_ssf_change_signal)
+        }
+        if "status" in columns:
+            return
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"""
+                    ALTER TABLE {tb_name_ssf_change_signal}
+                    ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'signal'
+                    """
+                )
+            )
 
     def list_ssf_change_signal_candidates(self) -> List[tuple[str, str]]:
         """列出尚未生成 SSF 变动信号的最新公告股票列表。"""
@@ -1749,6 +1772,36 @@ class StorageDb:
 
     def save_ssf_change_signals(self, records: List[Dict[str, Any]]) -> List[int]:
         """保存 SSF 变动信号，已存在的 `(stock_id, ann_date)` 记录会跳过。"""
+        normalized_records = []
+        for payload in records:
+            normalized_payload = dict(payload)
+            normalized_payload["status"] = SSF_CHANGE_SIGNAL_STATUS_SIGNAL
+            normalized_records.append(normalized_payload)
+        return self._save_ssf_change_signal_records(normalized_records)
+
+    def mark_ssf_change_candidates_processed(
+        self, records: List[Dict[str, Any]]
+    ) -> List[int]:
+        normalized_records = []
+        for payload in records:
+            normalized_records.append(
+                {
+                    "stock_id": payload["stock_id"],
+                    "ann_date": payload["ann_date"],
+                    "prev_ann_date": payload.get("prev_ann_date")
+                    or payload["ann_date"],
+                    "status": SSF_CHANGE_SIGNAL_STATUS_NO_SIGNAL,
+                    "event_types": [],
+                    "score": 0.0,
+                    "detail_json": {"holders": []},
+                    "alert_sent_at": datetime.now(timezone.utc),
+                }
+            )
+        return self._save_ssf_change_signal_records(normalized_records)
+
+    def _save_ssf_change_signal_records(
+        self, records: List[Dict[str, Any]]
+    ) -> List[int]:
         from .model.ssf_change_signal import SSFChangeSignal
 
         assert self.engine is not None
@@ -1764,6 +1817,7 @@ class StorageDb:
 
         inserted: List[int] = []
         optional_fields = [
+            "status",
             "ssf_holder_count_now",
             "ssf_holder_count_prev",
             "ssf_holder_count_change",
@@ -1808,6 +1862,7 @@ class StorageDb:
             return cast(
                 List[Any],
                 session.query(SSFChangeSignal)
+                .filter(SSFChangeSignal.status == SSF_CHANGE_SIGNAL_STATUS_SIGNAL)
                 .filter(SSFChangeSignal.alert_sent_at.is_(None))
                 .order_by(SSFChangeSignal.score.desc(), SSFChangeSignal.stock_id.asc())
                 .all(),

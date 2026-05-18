@@ -26,6 +26,13 @@ class SSFChangeSignal(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     stock_id = Column(String(6), nullable=False, comment="股票代码")
     ann_date = Column(Date, nullable=False, comment="最新公告日期")
+    status = Column(
+        String(20),
+        nullable=False,
+        default="signal",
+        server_default="signal",
+        comment="处理状态: signal/no_signal",
+    )
     prev_ann_date = Column(Date, nullable=False, comment="上期公告日期")
     event_types = Column(JSON, nullable=False, comment="股票级事件类型列表")
     score = Column(Float, nullable=False, comment="综合分")

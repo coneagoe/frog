@@ -2747,6 +2747,42 @@ class TestSSFChangeSignalStorage:
         db.save_ssf_change_signals([self._make_signal_payload()])
         assert db.list_ssf_change_signal_candidates() == []
 
+    def test_mark_ssf_change_candidates_processed_excludes_no_signal_candidates(
+        self, sqlite_storage
+    ):
+        db = sqlite_storage
+        db.ensure_ssf_change_signals_table()
+        db.save_top10_floatholders(
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "000001.SZ"],
+                    "ann_date": ["20240331", "20231231"],
+                    "end_date": ["20240331", "20231231"],
+                    "holder_name": ["香港中央结算有限公司", "香港中央结算有限公司"],
+                    "hold_amount": [1000.0, 900.0],
+                    "hold_ratio": [1.2, 1.0],
+                    "hold_float_ratio": [1.2, 1.0],
+                    "hold_change": [100.0, 0.0],
+                    "holder_type": ["机构", "机构"],
+                }
+            )
+        )
+        assert db.list_ssf_change_signal_candidates() == [("000001", "2024-03-31")]
+
+        marker_ids = db.mark_ssf_change_candidates_processed(
+            [
+                {
+                    "stock_id": "000001",
+                    "ann_date": "2024-03-31",
+                    "prev_ann_date": "2023-12-31",
+                }
+            ]
+        )
+
+        assert len(marker_ids) == 1
+        assert db.list_ssf_change_signal_candidates() == []
+        assert db.list_pending_ssf_change_signals() == []
+
     def test_load_top10_floatholders_history_loads_latest_ann_dates(
         self, sqlite_storage
     ):

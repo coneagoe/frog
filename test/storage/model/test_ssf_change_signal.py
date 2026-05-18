@@ -34,6 +34,7 @@ def test_ssf_change_signal_schema(sqlite_engine):
         "id",
         "stock_id",
         "ann_date",
+        "status",
         "prev_ann_date",
         "event_types",
         "score",
