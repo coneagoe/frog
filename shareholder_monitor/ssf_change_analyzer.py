@@ -22,22 +22,31 @@ EVENT_WEIGHTS = {
 EVENT_ORDER = ["new_entry", "increase", "decrease", "exit"]
 
 
+def _aggregate_period_ssf(period_df: pd.DataFrame) -> pd.DataFrame:
+    return period_df.groupby(COL_FLOAT_HOLDER_NAME, as_index=False)[
+        [COL_FLOAT_HOLDER_HOLD_AMOUNT, COL_FLOAT_HOLDER_HOLD_RATIO]
+    ].sum()
+
+
 def analyze_ssf_change(
     stock_id: str, history_df: pd.DataFrame
 ) -> dict[str, Any] | None:
-    ann_dates = sorted(
-        pd.to_datetime(history_df[COL_ANN_DATE]).dt.date.unique(), reverse=True
-    )
+    """Compare the latest two SSF disclosure periods and rank meaningful changes.
+
+    Score combines three bounded components:
+    - event_score: average event weight in [-1, 1] for entry/increase/decrease/exit
+    - count_score: normalized latest holder presence plus holder-count delta in [0, 1]
+    - concentration_score: normalized latest SSF ratio plus ratio delta in [0, 1]
+    """
+
+    ann_date_series = pd.to_datetime(history_df[COL_ANN_DATE]).dt.date
+    ann_dates = sorted(ann_date_series.unique(), reverse=True)
     if len(ann_dates) < 2:
         return None
 
     latest_ann_date, prev_ann_date = ann_dates[:2]
-    latest_df = history_df[
-        pd.to_datetime(history_df[COL_ANN_DATE]).dt.date == latest_ann_date
-    ]
-    prev_df = history_df[
-        pd.to_datetime(history_df[COL_ANN_DATE]).dt.date == prev_ann_date
-    ]
+    latest_df = history_df[ann_date_series == latest_ann_date]
+    prev_df = history_df[ann_date_series == prev_ann_date]
 
     latest_ssf = latest_df[
         latest_df[COL_FLOAT_HOLDER_NAME].map(is_social_security_holder)
@@ -46,15 +55,25 @@ def analyze_ssf_change(
     if latest_ssf.empty and prev_ssf.empty:
         return None
 
-    latest_ssf = latest_ssf[latest_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].notna()]
-    prev_ssf = prev_ssf[prev_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].notna()]
+    latest_ssf = _aggregate_period_ssf(
+        latest_ssf[latest_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].notna()]
+    )
+    prev_ssf = _aggregate_period_ssf(
+        prev_ssf[prev_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].notna()]
+    )
 
-    latest_map = latest_ssf.set_index(COL_FLOAT_HOLDER_NAME)[
-        COL_FLOAT_HOLDER_HOLD_AMOUNT
-    ].to_dict()
-    prev_map = prev_ssf.set_index(COL_FLOAT_HOLDER_NAME)[
-        COL_FLOAT_HOLDER_HOLD_AMOUNT
-    ].to_dict()
+    latest_map = dict(
+        zip(
+            latest_ssf[COL_FLOAT_HOLDER_NAME].astype(str),
+            latest_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].astype(float),
+        )
+    )
+    prev_map = dict(
+        zip(
+            prev_ssf[COL_FLOAT_HOLDER_NAME].astype(str),
+            prev_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].astype(float),
+        )
+    )
 
     event_types: list[str] = []
     detail_rows: list[dict[str, Any]] = []
@@ -90,7 +109,9 @@ def analyze_ssf_change(
     count_prev = int(len(prev_ssf))
 
     event_score = sum(EVENT_WEIGHTS[event] for event in event_types) / len(event_types)
+    # Favor a higher current SSF holder count, then adjust by quarter-over-quarter change.
     count_score = min(max((count_now - count_prev) + count_now, 0), 5) / 5
+    # Favor a higher current SSF holding ratio, then adjust by quarter-over-quarter change.
     concentration_score = (
         min(max(latest_ratio - prev_ratio + latest_ratio, 0.0), 5.0) / 5.0
     )
