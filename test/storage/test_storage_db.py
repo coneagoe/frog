@@ -17,8 +17,11 @@ from common.const import (  # noqa: E402
     COL_ETF_ID,
     COL_ETF_NAME,
     COL_FLOAT_HOLDER_HOLD_AMOUNT,
+    COL_FLOAT_HOLDER_HOLD_CHANGE,
+    COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
     COL_FLOAT_HOLDER_HOLD_RATIO,
     COL_FLOAT_HOLDER_NAME,
+    COL_FLOAT_HOLDER_TYPE,
     COL_HIGH,
     COL_LOW,
     COL_OPEN,
@@ -2524,6 +2527,9 @@ class TestSaveAndGetTop10Floatholders:
                 "holder_name": ["股东A", "股东B"],
                 "hold_amount": [12000.5, 9800.0],
                 "hold_ratio": [2.13, 1.27],
+                "hold_float_ratio": [3.45, 2.01],
+                "hold_change": [150.0, -80.0],
+                "holder_type": ["机构", "个人"],
             }
         )
 
@@ -2554,9 +2560,41 @@ class TestSaveAndGetTop10Floatholders:
         db.save_top10_floatholders(df)
 
         saved = pd.read_sql(f"SELECT * FROM {tb_name_top10_floatholders}", engine)
+        row = saved.loc[saved[COL_FLOAT_HOLDER_NAME] == "股东A"].iloc[0]
         assert COL_FLOAT_HOLDER_NAME in saved.columns
         assert COL_FLOAT_HOLDER_HOLD_AMOUNT in saved.columns
         assert COL_FLOAT_HOLDER_HOLD_RATIO in saved.columns
+        assert COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO in saved.columns
+        assert COL_FLOAT_HOLDER_HOLD_CHANGE in saved.columns
+        assert COL_FLOAT_HOLDER_TYPE in saved.columns
+        assert row[COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO] == pytest.approx(3.45)
+        assert row[COL_FLOAT_HOLDER_HOLD_CHANGE] == pytest.approx(150.0)
+        assert row[COL_FLOAT_HOLDER_TYPE] == "机构"
+
+    def test_save_top10_floatholders_allows_missing_optional_fields(
+        self, sqlite_storage
+    ):
+        db, engine = sqlite_storage
+        df = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ"],
+                "ann_date": ["20240315"],
+                "end_date": ["20231231"],
+                "holder_name": ["股东A"],
+                "hold_amount": [12000.5],
+                "hold_ratio": [2.13],
+            }
+        )
+
+        result = db.save_top10_floatholders(df)
+
+        assert result is True
+        saved = pd.read_sql(f"SELECT * FROM {tb_name_top10_floatholders}", engine)
+        assert len(saved) == 1
+        row = saved.iloc[0]
+        assert pd.isna(row[COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO])
+        assert pd.isna(row[COL_FLOAT_HOLDER_HOLD_CHANGE])
+        assert pd.isna(row[COL_FLOAT_HOLDER_TYPE])
 
     def test_save_top10_floatholders_failure(self, storage_db):
         df = self._make_raw_df()
@@ -2578,6 +2616,9 @@ class TestSaveAndGetTop10Floatholders:
                 "holder_name": ["股东A"],
                 "hold_amount": [12000.5],
                 "hold_ratio": [2.13],
+                "hold_float_ratio": [3.45],
+                "hold_change": [150.0],
+                "holder_type": ["机构"],
             }
         )
         second_df = pd.DataFrame(
@@ -2588,6 +2629,9 @@ class TestSaveAndGetTop10Floatholders:
                 "holder_name": ["股东A", "股东B"],
                 "hold_amount": [12000.5, 9800.0],
                 "hold_ratio": [2.13, 1.27],
+                "hold_float_ratio": [3.45, 2.01],
+                "hold_change": [150.0, -80.0],
+                "holder_type": ["机构", "个人"],
             }
         )
 

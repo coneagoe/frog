@@ -700,6 +700,9 @@ top10_floatholders_fields = [
     "holder_name",
     "hold_amount",
     "hold_ratio",
+    "hold_float_ratio",
+    "hold_change",
+    "holder_type",
 ]
 
 

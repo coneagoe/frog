@@ -340,6 +340,19 @@ def test_download_top10_floatholders_success(downloader_ts_module, monkeypatch):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
 
+    expected_fields = [
+        "ts_code",
+        "ann_date",
+        "end_date",
+        "holder_name",
+        "hold_amount",
+        "hold_ratio",
+        "hold_float_ratio",
+        "hold_change",
+        "holder_type",
+    ]
+    assert module.top10_floatholders_fields == expected_fields
+
     mock_data = pd.DataFrame(
         {
             "ts_code": ["600600.SH"] * 2,
@@ -348,6 +361,9 @@ def test_download_top10_floatholders_success(downloader_ts_module, monkeypatch):
             "holder_name": ["股东A", "股东B"],
             "hold_amount": [12345.6, 9999.0],
             "hold_ratio": [3.21, 2.1],
+            "hold_float_ratio": [4.56, 3.2],
+            "hold_change": [100.0, -50.0],
+            "holder_type": ["机构", "个人"],
         }
     )
     pro_stub.top10_floatholders = Mock(return_value=mock_data)

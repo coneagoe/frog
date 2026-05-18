@@ -40,8 +40,11 @@ from common.const import (
     COL_ETF_TYPE,
     COL_EXCHANGE,
     COL_FLOAT_HOLDER_HOLD_AMOUNT,
+    COL_FLOAT_HOLDER_HOLD_CHANGE,
+    COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
     COL_FLOAT_HOLDER_HOLD_RATIO,
     COL_FLOAT_HOLDER_NAME,
+    COL_FLOAT_HOLDER_TYPE,
     COL_FLOAT_SHARE,
     COL_FREE_SHARE,
     COL_FULLNAME,
@@ -168,6 +171,9 @@ COL_MAP_TOP10_FLOATHOLDERS = {
     "holder_name": COL_FLOAT_HOLDER_NAME,
     "hold_amount": COL_FLOAT_HOLDER_HOLD_AMOUNT,
     "hold_ratio": COL_FLOAT_HOLDER_HOLD_RATIO,
+    "hold_float_ratio": COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
+    "hold_change": COL_FLOAT_HOLDER_HOLD_CHANGE,
+    "holder_type": COL_FLOAT_HOLDER_TYPE,
 }
 
 
@@ -1346,6 +1352,13 @@ class StorageDb:
         try:
             df = df.rename(columns=COL_MAP_TOP10_FLOATHOLDERS)
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
+            for optional_col in [
+                COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
+                COL_FLOAT_HOLDER_HOLD_CHANGE,
+                COL_FLOAT_HOLDER_TYPE,
+            ]:
+                if optional_col not in df.columns:
+                    df[optional_col] = pd.NA
             df = df[list(COL_MAP_TOP10_FLOATHOLDERS.values())]
             for col in [COL_ANN_DATE, COL_END_DATE]:
                 df[col] = pd.to_datetime(

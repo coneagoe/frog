@@ -4,8 +4,11 @@ from common.const import (
     COL_ANN_DATE,
     COL_END_DATE,
     COL_FLOAT_HOLDER_HOLD_AMOUNT,
+    COL_FLOAT_HOLDER_HOLD_CHANGE,
+    COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
     COL_FLOAT_HOLDER_HOLD_RATIO,
     COL_FLOAT_HOLDER_NAME,
+    COL_FLOAT_HOLDER_TYPE,
     COL_STOCK_ID,
 )
 
@@ -39,4 +42,22 @@ class Top10Floatholders(Base):
         Float,
         nullable=True,
         comment="占总流通股本持股比例",
+    )
+    占流通股本比例 = Column(
+        COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
+        Float,
+        nullable=True,
+        comment="占流通股本比例",
+    )
+    持股变动 = Column(
+        COL_FLOAT_HOLDER_HOLD_CHANGE,
+        Float,
+        nullable=True,
+        comment="持股变动",
+    )
+    股东类型 = Column(
+        COL_FLOAT_HOLDER_TYPE,
+        String(50),
+        nullable=True,
+        comment="股东类型",
     )

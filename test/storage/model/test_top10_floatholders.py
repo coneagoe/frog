@@ -42,6 +42,9 @@ class TestTop10FloatholdersModel:
             "股东名称",
             "持有数量（万股）",
             "占总流通股本持股比例",
+            "占流通股本比例",
+            "持股变动",
+            "股东类型",
         ]:
             assert expected in columns, f"列 '{expected}' 不存在"
 
