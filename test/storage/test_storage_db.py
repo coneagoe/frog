@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
+from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 from common.const import (  # noqa: E402
@@ -2379,6 +2380,7 @@ class TestSaveAndGetStkHoldernumber:
         mock_config.get_db_password.return_value = "test_pass"
         db = get_storage(mock_config)
         db.engine = engine
+        db.Session = sessionmaker(bind=engine)
         return db, engine
 
     def _make_raw_df(self):
@@ -2679,6 +2681,88 @@ class TestSaveAndGetTop10Floatholders:
 
         result = storage_db.get_last_top10_floatholders_ann_date("000001")
         assert result is None
+
+
+class TestSSFChangeSignalStorage:
+    @pytest.fixture
+    def sqlite_storage(self, tmp_path, monkeypatch):
+        from sqlalchemy import create_engine as real_create_engine
+
+        from storage.model import Base
+
+        sqlite_url = f"sqlite:///{tmp_path}/test.db"
+        engine = real_create_engine(sqlite_url)
+        Base.metadata.create_all(engine)
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+        monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        db = get_storage(mock_config)
+        db.engine = engine
+        db.Session = sessionmaker(bind=engine)
+        return db
+
+    def test_list_ssf_change_signal_candidates_excludes_existing_signal(
+        self, sqlite_storage
+    ):
+        db = sqlite_storage
+        db.ensure_ssf_change_signals_table()
+        db.save_top10_floatholders(
+            pd.DataFrame(
+                {
+                    "ts_code": ["000001.SZ", "000001.SZ"],
+                    "ann_date": ["20240331", "20231231"],
+                    "end_date": ["20240331", "20231231"],
+                    "holder_name": ["全国社保基金一一八组合", "全国社保基金一一八组合"],
+                    "hold_amount": [1000.0, 900.0],
+                    "hold_ratio": [1.2, 1.0],
+                    "hold_float_ratio": [1.2, 1.0],
+                    "hold_change": [100.0, 0.0],
+                    "holder_type": ["机构", "机构"],
+                }
+            )
+        )
+        db.save_ssf_change_signals(
+            [
+                {
+                    "stock_id": "000001",
+                    "ann_date": "2024-03-31",
+                    "prev_ann_date": "2023-12-31",
+                    "event_types": ["increase"],
+                    "score": 78.0,
+                    "detail_json": {"holders": []},
+                }
+            ]
+        )
+
+        assert db.list_ssf_change_signal_candidates() == []
+
+    def test_mark_ssf_change_signals_alerted_sets_timestamp(self, sqlite_storage):
+        db = sqlite_storage
+        db.ensure_ssf_change_signals_table()
+        ids = db.save_ssf_change_signals(
+            [
+                {
+                    "stock_id": "000001",
+                    "ann_date": "2024-03-31",
+                    "prev_ann_date": "2023-12-31",
+                    "event_types": ["increase"],
+                    "score": 78.0,
+                    "detail_json": {"holders": []},
+                }
+            ]
+        )
+
+        db.mark_ssf_change_signals_alerted(ids)
+        pending = db.list_pending_ssf_change_signals()
+        assert pending == []
 
 
 if __name__ == "__main__":

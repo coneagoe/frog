@@ -32,6 +32,7 @@ from .ingredient import (
     tb_name_ingredient_300,
     tb_name_ingredient_500,
 )
+from .ssf_change_signal import SSFChangeSignal, tb_name_ssf_change_signal
 from .stk_holdernumber import StkHoldernumber, tb_name_stk_holdernumber
 from .stk_limit_a_stock import StkLimitAStock, tb_name_stk_limit_a_stock
 from .stock_monitor_target import StockMonitorTarget, tb_name_stock_monitor_target
@@ -53,6 +54,7 @@ __all__ = [
     "DailyBasicAStock",
     "StkLimitAStock",
     "StkHoldernumber",
+    "SSFChangeSignal",
     "SuspendDAStock",
     "Top10Floatholders",
     "Ingredient300",
@@ -67,6 +69,7 @@ __all__ = [
     "tb_name_daily_basic_a_stock",
     "tb_name_stk_limit_a_stock",
     "tb_name_stk_holdernumber",
+    "tb_name_ssf_change_signal",
     "tb_name_suspend_d_a_stock",
     "tb_name_top10_floatholders",
     "tb_name_a_stock_basic",

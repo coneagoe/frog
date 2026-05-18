@@ -1,7 +1,7 @@
 import logging
 import os
 import textwrap
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Dict, List, Optional, Set, cast
 
@@ -108,6 +108,7 @@ from .model import (
     tb_name_history_data_weekly_hk_stock_hfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
+    tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
     tb_name_stk_limit_a_stock,
     tb_name_suspend_d_a_stock,
@@ -1680,6 +1681,112 @@ class StorageDb:
         except Exception as e:
             logger.error(f"加载ETF日线数据失败: {str(e)}")
             return pd.DataFrame()
+
+    def ensure_ssf_change_signals_table(self) -> None:
+        """建表（若不存在），供 SSF 变动信号流程初始化使用。"""
+        from .model.ssf_change_signal import SSFChangeSignal  # noqa: F401
+
+        SSFChangeSignal.__table__.create(self.engine, checkfirst=True)
+
+    def list_ssf_change_signal_candidates(self) -> List[tuple[str, str]]:
+        """列出尚未生成 SSF 变动信号的最新公告股票列表。"""
+        sql = textwrap.dedent(
+            f"""\
+            SELECT DISTINCT t."{COL_STOCK_ID}" AS stock_id, t."{COL_ANN_DATE}" AS ann_date
+            FROM {tb_name_top10_floatholders} t
+            JOIN (
+                SELECT "{COL_STOCK_ID}" AS stock_id, MAX("{COL_ANN_DATE}") AS ann_date
+                FROM {tb_name_top10_floatholders}
+                GROUP BY "{COL_STOCK_ID}"
+            ) latest
+              ON t."{COL_STOCK_ID}" = latest.stock_id
+             AND t."{COL_ANN_DATE}" = latest.ann_date
+            LEFT JOIN {tb_name_ssf_change_signal} s
+              ON s.stock_id = latest.stock_id
+             AND s.ann_date = latest.ann_date
+            WHERE s.id IS NULL
+            ORDER BY latest.ann_date DESC, latest.stock_id
+            """
+        )
+        assert self.engine is not None
+        df = pd.read_sql(sql, self.engine)
+        return [
+            (row["stock_id"], pd.Timestamp(row["ann_date"]).strftime("%Y-%m-%d"))
+            for _, row in df.iterrows()
+        ]
+
+    def save_ssf_change_signals(self, records: List[Dict[str, Any]]) -> List[int]:
+        """保存 SSF 变动信号，已存在的 `(stock_id, ann_date)` 记录会跳过。"""
+        from .model.ssf_change_signal import SSFChangeSignal
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            inserted: List[int] = []
+            for payload in records:
+                ann_date = pd.to_datetime(payload["ann_date"]).date()
+                existing = (
+                    session.query(SSFChangeSignal)
+                    .filter_by(stock_id=payload["stock_id"], ann_date=ann_date)
+                    .first()
+                )
+                if existing is not None:
+                    continue
+
+                signal_payload = dict(payload)
+                signal_payload["ann_date"] = ann_date
+                signal_payload["prev_ann_date"] = pd.to_datetime(
+                    payload["prev_ann_date"]
+                ).date()
+                signal = SSFChangeSignal(**signal_payload)
+                session.add(signal)
+                session.flush()
+                inserted.append(cast(int, signal.id))
+            session.commit()
+            return inserted
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def list_pending_ssf_change_signals(self) -> List[Any]:
+        """查询尚未发送汇总提醒的 SSF 变动信号。"""
+        from .model.ssf_change_signal import SSFChangeSignal
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return cast(
+                List[Any],
+                session.query(SSFChangeSignal)
+                .filter(SSFChangeSignal.alert_sent_at.is_(None))
+                .order_by(SSFChangeSignal.score.desc(), SSFChangeSignal.stock_id.asc())
+                .all(),
+            )
+        finally:
+            session.close()
+
+    def mark_ssf_change_signals_alerted(self, ids: List[int]) -> None:
+        """将指定 SSF 变动信号标记为已发送提醒。"""
+        from .model.ssf_change_signal import SSFChangeSignal
+
+        if not ids:
+            return
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            session.query(SSFChangeSignal).filter(SSFChangeSignal.id.in_(ids)).update(
+                {"alert_sent_at": datetime.now(timezone.utc)},
+                synchronize_session=False,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def list_monitor_targets(
         self, frequency: Optional[str] = None, enabled: Optional[bool] = None
