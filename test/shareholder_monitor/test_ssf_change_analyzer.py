@@ -1,6 +1,9 @@
 import pandas as pd
 
-from shareholder_monitor.ssf_change_analyzer import analyze_ssf_change
+from shareholder_monitor.ssf_change_analyzer import (
+    SSFChangeAnalysisOutcome,
+    analyze_ssf_change,
+)
 
 
 def test_analyze_ssf_change_builds_rankable_stock_signal():
@@ -57,7 +60,7 @@ def test_analyze_ssf_change_ignores_holders_with_nan_amounts_in_aggregates():
     assert len(signal["detail_json"]["holders"]) == 2
 
 
-def test_analyze_ssf_change_returns_none_with_fewer_than_two_periods():
+def test_analyze_ssf_change_reports_insufficient_history_with_fewer_than_two_periods():
     history = pd.DataFrame(
         {
             "股票代码": ["000001"],
@@ -69,7 +72,10 @@ def test_analyze_ssf_change_returns_none_with_fewer_than_two_periods():
         }
     )
 
-    assert analyze_ssf_change("000001", history) is None
+    assert (
+        analyze_ssf_change("000001", history)
+        is SSFChangeAnalysisOutcome.INSUFFICIENT_HISTORY
+    )
 
 
 def test_analyze_ssf_change_returns_none_when_ssf_holders_are_unchanged():

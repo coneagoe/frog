@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 
 import pandas as pd
@@ -22,6 +23,10 @@ EVENT_WEIGHTS = {
 EVENT_ORDER = ["new_entry", "increase", "decrease", "exit"]
 
 
+class SSFChangeAnalysisOutcome(Enum):
+    INSUFFICIENT_HISTORY = "insufficient_history"
+
+
 def _aggregate_period_ssf(period_df: pd.DataFrame) -> pd.DataFrame:
     return period_df.groupby(COL_FLOAT_HOLDER_NAME, as_index=False)[
         [COL_FLOAT_HOLDER_HOLD_AMOUNT, COL_FLOAT_HOLDER_HOLD_RATIO]
@@ -30,7 +35,7 @@ def _aggregate_period_ssf(period_df: pd.DataFrame) -> pd.DataFrame:
 
 def analyze_ssf_change(
     stock_id: str, history_df: pd.DataFrame
-) -> dict[str, Any] | None:
+) -> dict[str, Any] | None | SSFChangeAnalysisOutcome:
     """Compare the latest two SSF disclosure periods and rank meaningful changes.
 
     Score combines three bounded components:
@@ -42,7 +47,7 @@ def analyze_ssf_change(
     ann_date_series = pd.to_datetime(history_df[COL_ANN_DATE]).dt.date
     ann_dates = sorted(ann_date_series.unique(), reverse=True)
     if len(ann_dates) < 2:
-        return None
+        return SSFChangeAnalysisOutcome.INSUFFICIENT_HISTORY
 
     latest_ann_date, prev_ann_date = ann_dates[:2]
     latest_df = history_df[ann_date_series == latest_ann_date]

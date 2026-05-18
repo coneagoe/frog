@@ -10,7 +10,7 @@ from storage import get_storage
 from utility import send_email
 
 from .ssf_alert import build_ssf_change_alert_email
-from .ssf_change_analyzer import analyze_ssf_change
+from .ssf_change_analyzer import SSFChangeAnalysisOutcome, analyze_ssf_change
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,9 @@ def run_ssf_change_alert() -> SSFAlertSummary:
         try:
             history_df = storage.load_top10_floatholders_history(stock_id)
             signal = analyze_ssf_change(stock_id, history_df)
+            if signal is SSFChangeAnalysisOutcome.INSUFFICIENT_HISTORY:
+                continue
+
             if signal is not None:
                 signal_payloads.append(signal)
                 continue
@@ -67,8 +70,9 @@ def run_ssf_change_alert() -> SSFAlertSummary:
 
     inserted_ids = storage.save_ssf_change_signals(signal_payloads)
     summary.inserted = len(inserted_ids)
-    no_signal_ids = storage.mark_ssf_change_candidates_processed(no_signal_markers)
-    summary.no_signal = len(no_signal_ids)
+    if no_signal_markers:
+        no_signal_ids = storage.mark_ssf_change_candidates_processed(no_signal_markers)
+        summary.no_signal = len(no_signal_ids)
 
     pending = storage.list_pending_ssf_change_signals()
     if not pending:

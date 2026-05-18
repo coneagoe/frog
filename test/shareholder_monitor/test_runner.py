@@ -26,6 +26,19 @@ def make_history_df():
     )
 
 
+def make_non_ssf_history_df():
+    return pd.DataFrame(
+        {
+            "股票代码": ["000001", "000001"],
+            "公告日期": pd.to_datetime(["2024-03-31", "2023-12-31"]),
+            "股东名称": ["香港中央结算有限公司", "香港中央结算有限公司"],
+            "持有数量（万股）": [1200.0, 1000.0],
+            "占总流通股本持股比例": [1.5, 1.2],
+            "持股变动": [200.0, 0.0],
+        }
+    )
+
+
 def test_run_ssf_change_alert_saves_sends_and_marks():
     mock_storage = MagicMock()
     mock_storage.list_ssf_change_signal_candidates.return_value = [
@@ -222,14 +235,13 @@ def test_run_ssf_change_alert_marks_no_signal_candidates_processed():
     mock_storage.list_ssf_change_signal_candidates.return_value = [
         ("000001", "2024-03-31")
     ]
-    mock_storage.load_top10_floatholders_history.return_value = make_history_df()
+    mock_storage.load_top10_floatholders_history.return_value = make_non_ssf_history_df()
     mock_storage.save_ssf_change_signals.return_value = []
     mock_storage.mark_ssf_change_candidates_processed.return_value = [7]
     mock_storage.list_pending_ssf_change_signals.return_value = []
 
     with (
         patch("shareholder_monitor.runner.get_storage", return_value=mock_storage),
-        patch("shareholder_monitor.runner.analyze_ssf_change", return_value=None),
         patch("shareholder_monitor.runner.send_email") as mock_email,
     ):
         summary = run_ssf_change_alert()
@@ -248,7 +260,7 @@ def test_run_ssf_change_alert_marks_no_signal_candidates_processed():
     assert summary.emailed == 0
 
 
-def test_run_ssf_change_alert_marks_empty_history_candidates_processed():
+def test_run_ssf_change_alert_leaves_insufficient_history_candidates_retryable():
     mock_storage = MagicMock()
     mock_storage.list_ssf_change_signal_candidates.return_value = [
         ("000001", "2024-03-31")
@@ -262,21 +274,12 @@ def test_run_ssf_change_alert_marks_empty_history_candidates_processed():
 
     with (
         patch("shareholder_monitor.runner.get_storage", return_value=mock_storage),
-        patch("shareholder_monitor.runner.analyze_ssf_change", return_value=None),
         patch("shareholder_monitor.runner.send_email"),
     ):
         summary = run_ssf_change_alert()
 
-    mock_storage.mark_ssf_change_candidates_processed.assert_called_once_with(
-        [
-            {
-                "stock_id": "000001",
-                "ann_date": "2024-03-31",
-                "prev_ann_date": "2024-03-31",
-            }
-        ]
-    )
-    assert summary.no_signal == 1
+    mock_storage.mark_ssf_change_candidates_processed.assert_not_called()
+    assert summary.no_signal == 0
     assert summary.failed == 0
 
 
