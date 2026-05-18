@@ -1719,36 +1719,52 @@ class StorageDb:
         """保存 SSF 变动信号，已存在的 `(stock_id, ann_date)` 记录会跳过。"""
         from .model.ssf_change_signal import SSFChangeSignal
 
-        assert self.Session is not None
-        session = self.Session()
-        try:
-            inserted: List[int] = []
-            for payload in records:
-                ann_date = pd.to_datetime(payload["ann_date"]).date()
-                existing = (
-                    session.query(SSFChangeSignal)
-                    .filter_by(stock_id=payload["stock_id"], ann_date=ann_date)
-                    .first()
-                )
-                if existing is not None:
-                    continue
+        assert self.engine is not None
+        table = SSFChangeSignal.__table__
+        if self.engine.dialect.name == "postgresql":
+            insert_fn = pg_insert
+        elif self.engine.dialect.name == "sqlite":
+            insert_fn = sqlite_insert
+        else:
+            raise ConnectionError(
+                f"Unsupported database dialect: {self.engine.dialect.name}"
+            )
 
-                signal_payload = dict(payload)
-                signal_payload["ann_date"] = ann_date
-                signal_payload["prev_ann_date"] = pd.to_datetime(
-                    payload["prev_ann_date"]
-                ).date()
-                signal = SSFChangeSignal(**signal_payload)
-                session.add(signal)
-                session.flush()
-                inserted.append(cast(int, signal.id))
-            session.commit()
-            return inserted
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        inserted: List[int] = []
+        optional_fields = [
+            "ssf_holder_count_now",
+            "ssf_holder_count_prev",
+            "ssf_holder_count_change",
+            "ssf_total_hold_ratio_now",
+            "ssf_total_hold_ratio_prev",
+            "ssf_total_hold_ratio_change",
+            "alert_sent_at",
+        ]
+        with self.engine.begin() as conn:
+            for payload in records:
+                signal_payload = {
+                    "stock_id": payload["stock_id"],
+                    "ann_date": pd.to_datetime(payload["ann_date"]).date(),
+                    "prev_ann_date": pd.to_datetime(payload["prev_ann_date"]).date(),
+                    "event_types": payload["event_types"],
+                    "score": payload["score"],
+                    "detail_json": payload["detail_json"],
+                }
+                for field in optional_fields:
+                    if field in payload:
+                        signal_payload[field] = payload[field]
+
+                stmt = (
+                    insert_fn(table)
+                    .values(**signal_payload)
+                    .on_conflict_do_nothing(index_elements=["stock_id", "ann_date"])
+                    .returning(table.c.id)
+                )
+                inserted_id = conn.execute(stmt).scalar_one_or_none()
+                if inserted_id is not None:
+                    inserted.append(cast(int, inserted_id))
+
+        return inserted
 
     def list_pending_ssf_change_signals(self) -> List[Any]:
         """查询尚未发送汇总提醒的 SSF 变动信号。"""

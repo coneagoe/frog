@@ -2684,6 +2684,19 @@ class TestSaveAndGetTop10Floatholders:
 
 
 class TestSSFChangeSignalStorage:
+    @staticmethod
+    def _make_signal_payload(**overrides):
+        payload = {
+            "stock_id": "000001",
+            "ann_date": "2024-03-31",
+            "prev_ann_date": "2023-12-31",
+            "event_types": ["increase"],
+            "score": 78.0,
+            "detail_json": {"holders": []},
+        }
+        payload.update(overrides)
+        return payload
+
     @pytest.fixture
     def sqlite_storage(self, tmp_path, monkeypatch):
         from sqlalchemy import create_engine as real_create_engine
@@ -2729,36 +2742,55 @@ class TestSSFChangeSignalStorage:
                 }
             )
         )
-        db.save_ssf_change_signals(
-            [
-                {
-                    "stock_id": "000001",
-                    "ann_date": "2024-03-31",
-                    "prev_ann_date": "2023-12-31",
-                    "event_types": ["increase"],
-                    "score": 78.0,
-                    "detail_json": {"holders": []},
-                }
-            ]
-        )
+        db.save_ssf_change_signals([self._make_signal_payload()])
 
         assert db.list_ssf_change_signal_candidates() == []
+
+    def test_save_ssf_change_signals_skips_conflict_when_duplicate_insert_races(
+        self, sqlite_storage
+    ):
+        db = sqlite_storage
+        db.ensure_ssf_change_signals_table()
+        real_session_factory = db.Session
+
+        class AlwaysMissingQuery:
+            def filter_by(self, **kwargs):
+                return self
+
+            def first(self):
+                return None
+
+        def stale_session_factory():
+            session = real_session_factory()
+            session.query = lambda *args, **kwargs: AlwaysMissingQuery()
+            return session
+
+        db.Session = stale_session_factory
+
+        payload = self._make_signal_payload()
+        first_ids = db.save_ssf_change_signals([payload])
+        second_ids = db.save_ssf_change_signals([payload])
+
+        assert len(first_ids) == 1
+        assert second_ids == []
+
+    def test_save_ssf_change_signals_ignores_unknown_payload_keys(self, sqlite_storage):
+        db = sqlite_storage
+        db.ensure_ssf_change_signals_table()
+
+        inserted_ids = db.save_ssf_change_signals(
+            [self._make_signal_payload(unexpected_field="ignored")]
+        )
+
+        assert len(inserted_ids) == 1
 
     def test_mark_ssf_change_signals_alerted_sets_timestamp(self, sqlite_storage):
         db = sqlite_storage
         db.ensure_ssf_change_signals_table()
-        ids = db.save_ssf_change_signals(
-            [
-                {
-                    "stock_id": "000001",
-                    "ann_date": "2024-03-31",
-                    "prev_ann_date": "2023-12-31",
-                    "event_types": ["increase"],
-                    "score": 78.0,
-                    "detail_json": {"holders": []},
-                }
-            ]
-        )
+        ids = db.save_ssf_change_signals([self._make_signal_payload()])
+
+        pending = db.list_pending_ssf_change_signals()
+        assert [signal.id for signal in pending] == ids
 
         db.mark_ssf_change_signals_alerted(ids)
         pending = db.list_pending_ssf_change_signals()
