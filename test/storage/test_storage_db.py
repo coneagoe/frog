@@ -2844,6 +2844,35 @@ class TestSSFChangeSignalStorage:
 
         assert len(inserted_ids) == 1
 
+    def test_save_ssf_change_signals_keeps_valid_rows_when_one_payload_is_bad(
+        self, sqlite_storage
+    ):
+        from sqlalchemy import text
+
+        db = sqlite_storage
+        db.ensure_ssf_change_signals_table()
+
+        inserted_ids = db.save_ssf_change_signals(
+            [
+                self._make_signal_payload(),
+                self._make_signal_payload(
+                    stock_id="000002",
+                    ann_date="2024-06-30",
+                    prev_ann_date=None,
+                ),
+            ]
+        )
+
+        with db.engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT stock_id, ann_date FROM ssf_change_signals ORDER BY stock_id ASC"
+                )
+            ).all()
+
+        assert len(inserted_ids) == 1
+        assert rows == [("000001", "2024-03-31")]
+
     def test_mark_ssf_change_signals_alerted_sets_timestamp(self, sqlite_storage):
         db = sqlite_storage
         db.ensure_ssf_change_signals_table()

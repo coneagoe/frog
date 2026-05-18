@@ -81,8 +81,8 @@ def run_ssf_change_alert() -> SSFAlertSummary:
     for ann_date in sorted(pending_by_ann_date, reverse=True):
         grouped_pending = pending_by_ann_date[ann_date]
         subject, body = build_ssf_change_alert_email(grouped_pending, str(ann_date))
-        send_email(subject, body)
         storage.mark_ssf_change_signals_alerted([item.id for item in grouped_pending])
+        send_email(subject, body)
 
     summary.emailed = len(pending)
     return summary

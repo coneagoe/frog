@@ -12,6 +12,7 @@ from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from common.const import (
@@ -1826,8 +1827,8 @@ class StorageDb:
             "ssf_total_hold_ratio_change",
             "alert_sent_at",
         ]
-        with self.engine.begin() as conn:
-            for payload in records:
+        for payload in records:
+            try:
                 signal_payload = {
                     "stock_id": payload["stock_id"],
                     "ann_date": pd.to_datetime(payload["ann_date"]).date(),
@@ -1846,9 +1847,15 @@ class StorageDb:
                     .on_conflict_do_nothing(index_elements=["stock_id", "ann_date"])
                     .returning(table.c.id)
                 )
-                inserted_id = conn.execute(stmt).scalar_one_or_none()
+                with self.engine.begin() as conn:
+                    inserted_id = conn.execute(stmt).scalar_one_or_none()
                 if inserted_id is not None:
                     inserted.append(cast(int, inserted_id))
+            except (AttributeError, KeyError, TypeError, ValueError, SQLAlchemyError):
+                logger.exception(
+                    "Failed to persist SSF change signal for stock %s",
+                    payload.get("stock_id"),
+                )
 
         return inserted
 
