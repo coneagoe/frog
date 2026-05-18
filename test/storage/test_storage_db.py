@@ -2746,33 +2746,25 @@ class TestSSFChangeSignalStorage:
 
         assert db.list_ssf_change_signal_candidates() == []
 
-    def test_save_ssf_change_signals_skips_conflict_when_duplicate_insert_races(
+    def test_save_ssf_change_signals_is_idempotent_for_duplicate_payloads(
         self, sqlite_storage
     ):
+        from sqlalchemy import text
+
         db = sqlite_storage
         db.ensure_ssf_change_signals_table()
-        real_session_factory = db.Session
-
-        class AlwaysMissingQuery:
-            def filter_by(self, **kwargs):
-                return self
-
-            def first(self):
-                return None
-
-        def stale_session_factory():
-            session = real_session_factory()
-            session.query = lambda *args, **kwargs: AlwaysMissingQuery()
-            return session
-
-        db.Session = stale_session_factory
 
         payload = self._make_signal_payload()
         first_ids = db.save_ssf_change_signals([payload])
         second_ids = db.save_ssf_change_signals([payload])
+        with db.engine.connect() as conn:
+            row_count = conn.execute(
+                text("SELECT COUNT(*) FROM ssf_change_signals")
+            ).scalar_one()
 
         assert len(first_ids) == 1
         assert second_ids == []
+        assert row_count == 1
 
     def test_save_ssf_change_signals_ignores_unknown_payload_keys(self, sqlite_storage):
         db = sqlite_storage
