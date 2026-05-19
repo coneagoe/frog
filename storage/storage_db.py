@@ -436,6 +436,64 @@ class StorageDb:
             logger.error(f"fail to disconnect DB: {str(e)}")
             return False
 
+    def _require_engine(self):
+        if self.engine is None:
+            raise ConnectionError("SQLAlchemy引擎未初始化")
+        return self.engine
+
+    def _normalize_code_column(self, df: pd.DataFrame, code_column: Optional[str]) -> pd.DataFrame:
+        if code_column and code_column in df.columns:
+            df[code_column] = df[code_column].astype(str).str.split(".").str[0]
+        return df
+
+    def _normalize_date_columns(
+        self,
+        df: pd.DataFrame,
+        date_columns: dict[str, str],
+    ) -> pd.DataFrame:
+        for column, output in date_columns.items():
+            converted = pd.to_datetime(df[column], format="%Y%m%d", errors="coerce")
+            if output == "date":
+                df[column] = converted.dt.date
+            else:
+                df[column] = converted.dt.strftime("%Y-%m-%d")
+        return df
+
+    def _prepare_dataframe_for_save(
+        self,
+        df: pd.DataFrame,
+        *,
+        column_map: dict[str, str],
+        code_column: Optional[str] = None,
+        date_columns: Optional[dict[str, str]] = None,
+        optional_columns: Optional[list[str]] = None,
+        output_columns: Optional[list[str]] = None,
+    ) -> pd.DataFrame:
+        prepared = df.rename(columns=column_map).copy()
+        for column in optional_columns or []:
+            if column not in prepared.columns:
+                prepared[column] = pd.NA
+        prepared = self._normalize_code_column(prepared, code_column)
+        ordered_columns = output_columns or list(column_map.values())
+        prepared = prepared[ordered_columns]
+        if date_columns:
+            prepared = self._normalize_date_columns(prepared, date_columns)
+        return prepared
+
+    def _write_dataframe(
+        self,
+        df: pd.DataFrame,
+        table_name: str,
+        *,
+        if_exists: str,
+        method: Optional[str] = None,
+    ) -> None:
+        engine = self._require_engine()
+        kwargs: dict[str, object] = {"if_exists": if_exists, "index": False}
+        if method is not None:
+            kwargs["method"] = method
+        df.to_sql(table_name, engine, **kwargs)
+
     def save_history_data_stock(
         self, df: pd.DataFrame, period: PeriodType, adjust: AdjustType
     ) -> bool:
@@ -568,32 +626,23 @@ class StorageDb:
             bool: 保存是否成功
         """
         try:
-            # 重命名列
-            df = df.rename(columns=COL_MAP_FUND_DAILY)
+            prepared = self._prepare_dataframe_for_save(
+                df,
+                column_map=COL_MAP_FUND_DAILY,
+                code_column=COL_ETF_ID,
+                date_columns={COL_DATE: "str"},
+                output_columns=list(COL_MAP_FUND_DAILY.values()),
+            )
 
-            # 提取基金代码（去掉 .SH/.SZ 后缀）
-            if COL_ETF_ID in df.columns:
-                df[COL_ETF_ID] = df[COL_ETF_ID].str.split(".").str[0]
-
-            # 选择需要的列
-            df = df[list(COL_MAP_FUND_DAILY.values())]
-
-            # 转换日期为 YYYY-MM-DD 格式
-            df[COL_DATE] = pd.to_datetime(
-                df[COL_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.strftime("%Y-%m-%d")
-
-            # 保存到数据库
-            df.to_sql(
+            self._write_dataframe(
+                prepared,
                 tb_name_history_data_daily_fund,
-                self.engine,
                 if_exists="append",
-                index=False,
                 method="multi",
             )
 
             logger.info(
-                f"基金日线行情数据保存成功: {tb_name_history_data_daily_fund}, 数据条数: {len(df)}"
+                f"基金日线行情数据保存成功: {tb_name_history_data_daily_fund}, 数据条数: {len(prepared)}"
             )
             return True
 
@@ -1323,19 +1372,18 @@ class StorageDb:
             bool: 保存是否成功
         """
         try:
-            df = df.rename(columns=COL_MAP_STK_HOLDERNUMBER)
-            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
-            df = df[list(COL_MAP_STK_HOLDERNUMBER.values())]
-            # 转换公告日期和截止日期为 YYYY-MM-DD 格式
-            for col in [COL_ANN_DATE, COL_END_DATE]:
-                df[col] = pd.to_datetime(
-                    df[col], format="%Y%m%d", errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
-            df.to_sql(
+            prepared = self._prepare_dataframe_for_save(
+                df,
+                column_map=COL_MAP_STK_HOLDERNUMBER,
+                code_column=COL_STOCK_ID,
+                date_columns={COL_ANN_DATE: "str", COL_END_DATE: "str"},
+                output_columns=list(COL_MAP_STK_HOLDERNUMBER.values()),
+            )
+
+            self._write_dataframe(
+                prepared,
                 tb_name_stk_holdernumber,
-                self.engine,
                 if_exists="append",
-                index=False,
                 method="multi",
             )
             return True

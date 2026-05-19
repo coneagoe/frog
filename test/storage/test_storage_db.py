@@ -305,6 +305,74 @@ class TestStorageDb:
                 "test_etf_table", storage_db.engine, if_exists="replace", index=False
             )
 
+    def test_save_history_data_fund_normalizes_code_and_trade_date(self, storage_db):
+        raw_df = pd.DataFrame(
+            {
+                "ts_code": ["510300.SH"],
+                "trade_date": ["20240315"],
+                "open": [3.12],
+                "high": [3.20],
+                "low": [3.08],
+                "close": [3.18],
+                "pre_close": [3.10],
+                "change": [0.08],
+                "pct_chg": [2.58],
+                "vol": [123456],
+                "amount": [9876543],
+            }
+        )
+        captured: dict[str, object] = {}
+
+        def fake_to_sql(self, table_name, engine, **kwargs):
+            captured["df"] = self.copy()
+            captured["table_name"] = table_name
+            captured["engine"] = engine
+            captured["kwargs"] = kwargs
+
+        with patch("pandas.DataFrame.to_sql", new=fake_to_sql):
+            assert storage_db.save_history_data_fund(raw_df) is True
+
+        written_df = captured["df"]
+        assert captured["table_name"] == "history_data_daily_fund"
+        assert captured["engine"] == storage_db.engine
+        assert captured["kwargs"] == {
+            "if_exists": "append",
+            "index": False,
+            "method": "multi",
+        }
+        assert written_df[COL_ETF_ID].tolist() == ["510300"]
+        assert written_df[COL_DATE].tolist() == ["2024-03-15"]
+
+    def test_save_stk_holdernumber_normalizes_multiple_date_columns(self, storage_db):
+        raw_df = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ"],
+                "ann_date": ["20240315"],
+                "end_date": ["20231231"],
+                "holder_num": [12345],
+            }
+        )
+        captured: dict[str, object] = {}
+
+        def fake_to_sql(self, table_name, engine, **kwargs):
+            captured["df"] = self.copy()
+            captured["table_name"] = table_name
+            captured["kwargs"] = kwargs
+
+        with patch("pandas.DataFrame.to_sql", new=fake_to_sql):
+            assert storage_db.save_stk_holdernumber(raw_df) is True
+
+        written_df = captured["df"]
+        assert captured["table_name"] == tb_name_stk_holdernumber
+        assert captured["kwargs"] == {
+            "if_exists": "append",
+            "index": False,
+            "method": "multi",
+        }
+        assert written_df[COL_STOCK_ID].tolist() == ["000001"]
+        assert written_df[COL_ANN_DATE].tolist() == ["2024-03-15"]
+        assert written_df[COL_END_DATE].tolist() == ["2023-12-31"]
+
     def test_load_general_info_etf_success(self, storage_db):
         """Test successful load_general_info_etf"""
         # 创建测试数据
