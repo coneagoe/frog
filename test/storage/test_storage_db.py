@@ -2783,6 +2783,20 @@ class TestSSFChangeSignalStorage:
         assert db.list_ssf_change_signal_candidates() == []
         assert db.list_pending_ssf_change_signals() == []
 
+    def test_list_ssf_change_signal_candidates_orders_by_selected_columns(
+        self, sqlite_storage
+    ):
+        with patch("storage.storage_db.pd.read_sql") as mock_read_sql:
+            mock_read_sql.return_value = pd.DataFrame(
+                [{"stock_id": "000001", "ann_date": "2024-03-31"}]
+            )
+
+            sqlite_storage.list_ssf_change_signal_candidates()
+
+        sql = str(mock_read_sql.call_args.args[0])
+        assert "ORDER BY ann_date DESC, stock_id" in sql
+        assert "ORDER BY latest.ann_date DESC, latest.stock_id" not in sql
+
     def test_load_top10_floatholders_history_loads_latest_ann_dates(
         self, sqlite_storage
     ):

@@ -1729,7 +1729,7 @@ class StorageDb:
               ON s.stock_id = latest.stock_id
              AND s.ann_date = latest.ann_date
             WHERE s.id IS NULL
-            ORDER BY latest.ann_date DESC, latest.stock_id
+            ORDER BY ann_date DESC, stock_id
             """
         )
         assert self.engine is not None
