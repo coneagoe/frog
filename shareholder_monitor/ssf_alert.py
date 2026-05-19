@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, datetime
 from collections.abc import Mapping
+from datetime import date, datetime
 from typing import Any
 
 
@@ -33,7 +33,9 @@ def build_ssf_change_alert_email(signals: list[Any]) -> tuple[str, str]:
         key=lambda item: float(_read_signal_value(item, "score")),
         reverse=True,
     )
-    ann_dates = [_parse_ann_date(_read_signal_value(item, "ann_date")) for item in ranked]
+    ann_dates = [
+        _parse_ann_date(_read_signal_value(item, "ann_date")) for item in ranked
+    ]
     if ann_dates:
         unique_ann_dates = {d.isoformat() for d in ann_dates}
         ann_date_range = (
