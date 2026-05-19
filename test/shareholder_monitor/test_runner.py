@@ -105,7 +105,7 @@ def test_run_ssf_change_alert_skips_email_when_nothing_new():
     assert summary.emailed == 0
 
 
-def test_run_ssf_change_alert_sends_and_marks_pending_by_ann_date():
+def test_run_ssf_change_alert_sends_one_weekly_report_and_marks_all_pending():
     mock_storage = MagicMock()
     mock_storage.list_ssf_change_signal_candidates.return_value = []
     mock_storage.save_ssf_change_signals.return_value = []
@@ -148,18 +148,22 @@ def test_run_ssf_change_alert_sends_and_marks_pending_by_ann_date():
     ):
         summary = run_ssf_change_alert()
 
-    assert mock_email.call_count == 2
-    newer_subject, newer_body = mock_email.call_args_list[0].args
-    older_subject, older_body = mock_email.call_args_list[1].args
-    assert "2024-06-30" in newer_subject
-    assert "000002" in newer_body
-    assert "2024-03-31" in older_subject
-    assert "000001" in older_body
-    assert "000003" in older_body
-    assert "2024-06-30" not in older_subject
-    mock_storage.mark_ssf_change_signals_alerted.assert_has_calls(
-        [call([12]), call([11, 13])]
+    mock_email.assert_called_once()
+    subject, body = mock_email.call_args.args
+    assert subject == "[社保持仓周报] 本周新增 3 只，按综合分排序"
+    assert "待发送信号数: 3" in body
+    assert "公告日期范围: 2024-03-31 ~ 2024-06-30" in body
+    assert body.index(
+        "1. 000002 | ann_date=2024-06-30 | score=92.0 | events=new_entry | count_change=1 | ratio_change=1.2"
+    ) < body.index(
+        "2. 000001 | ann_date=2024-03-31 | score=88.0 | events=increase | count_change=1 | ratio_change=0.8"
     )
+    assert body.index(
+        "2. 000001 | ann_date=2024-03-31 | score=88.0 | events=increase | count_change=1 | ratio_change=0.8"
+    ) < body.index(
+        "3. 000003 | ann_date=2024-03-31 | score=61.0 | events=decrease | count_change=-1 | ratio_change=-0.5"
+    )
+    mock_storage.mark_ssf_change_signals_alerted.assert_called_once_with([11, 12, 13])
     assert summary.emailed == 3
 
 

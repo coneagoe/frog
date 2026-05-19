@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from dataclasses import dataclass
 
 import pandas as pd
@@ -78,18 +77,8 @@ def run_ssf_change_alert() -> SSFAlertSummary:
     if not pending:
         return summary
 
-    pending_by_ann_date = defaultdict(list)
-    for item in pending:
-        pending_by_ann_date[item.ann_date].append(item)
-
-    for ann_date in sorted(pending_by_ann_date, reverse=True):
-        grouped_pending = pending_by_ann_date[ann_date]
-        subject, body = build_ssf_change_alert_email(grouped_pending, str(ann_date))
-        send_email(subject, body)
-        # We only mark rows after send_email succeeds so delivery failures stay pending
-        # for retry. The tradeoff is that a later DB failure can cause one resend on retry,
-        # which is safer than silently losing the alert summary.
-        storage.mark_ssf_change_signals_alerted([item.id for item in grouped_pending])
-
+    subject, body = build_ssf_change_alert_email(pending)
+    send_email(subject, body)
+    storage.mark_ssf_change_signals_alerted([item.id for item in pending])
     summary.emailed = len(pending)
     return summary
