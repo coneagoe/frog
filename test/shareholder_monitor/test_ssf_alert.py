@@ -1,5 +1,5 @@
 from inspect import signature
-from datetime import date
+from datetime import date, datetime
 
 from shareholder_monitor.ssf_alert import build_ssf_change_alert_email
 
@@ -33,7 +33,7 @@ def test_build_ssf_change_alert_email_formats_unified_weekly_report():
                 "event_types": ["decrease"],
                 "ssf_holder_count_change": -1,
                 "ssf_total_hold_ratio_change": -0.5,
-                "ann_date": date(2024, 4, 3),
+                "ann_date": datetime(2024, 4, 3, 9, 30),
             },
             SignalObject(
                 stock_id="000003",
