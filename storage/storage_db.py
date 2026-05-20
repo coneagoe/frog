@@ -3,7 +3,7 @@ import os
 import textwrap
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Dict, List, Optional, Set, cast
+from typing import Any, Dict, List, Literal, Optional, Set, cast
 
 import pandas as pd
 import psycopg2
@@ -441,9 +441,13 @@ class StorageDb:
             raise ConnectionError("SQLAlchemy引擎未初始化")
         return self.engine
 
-    def _normalize_code_column(self, df: pd.DataFrame, code_column: Optional[str]) -> pd.DataFrame:
+    def _normalize_code_column(
+        self, df: pd.DataFrame, code_column: Optional[str]
+    ) -> pd.DataFrame:
         if code_column and code_column in df.columns:
-            df[code_column] = df[code_column].astype(str).str.split(".").str[0]
+            df[code_column] = (
+                df[code_column].astype("string").str.split(".", n=1).str[0]
+            )
         return df
 
     def _normalize_date_columns(
@@ -485,34 +489,62 @@ class StorageDb:
         df: pd.DataFrame,
         table_name: str,
         *,
-        if_exists: str,
-        method: Optional[str] = None,
+        if_exists: Literal["append", "replace"],
+        method: Optional[Literal["multi"]] = None,
     ) -> None:
         engine = self._require_engine()
-        kwargs: dict[str, object] = {"if_exists": if_exists, "index": False}
-        if method is not None:
-            kwargs["method"] = method
-        df.to_sql(table_name, engine, **kwargs)
+        if method is None:
+            df.to_sql(table_name, engine, if_exists=if_exists, index=False)
+            return
+
+        df.to_sql(
+            table_name,
+            engine,
+            if_exists=if_exists,
+            index=False,
+            method=method,
+        )
+
+    def _get_history_table_name(
+        self, security_type: SecurityType, period: PeriodType, adjust: AdjustType
+    ) -> str:
+        return get_table_name(security_type, period, adjust)
+
+    def _build_code_date_range_query(
+        self,
+        *,
+        table_name: str,
+        code_column: str,
+        code_value: str,
+        date_column: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        order: str = "ASC",
+    ) -> tuple[str, tuple[Any, ...]]:
+        sql_lines = [
+            f"SELECT * FROM {table_name}",
+            f'WHERE "{code_column}" = %s',
+        ]
+        params: list[Any] = [code_value]
+
+        if start_date:
+            sql_lines.append(f'AND "{date_column}" >= %s')
+            params.append(start_date)
+        if end_date:
+            sql_lines.append(f'AND "{date_column}" <= %s')
+            params.append(end_date)
+
+        sql_lines.append(f'ORDER BY "{date_column}" {order}')
+        return "\n".join(sql_lines), tuple(params)
 
     def save_history_data_stock(
         self, df: pd.DataFrame, period: PeriodType, adjust: AdjustType
     ) -> bool:
-        if period == PeriodType.DAILY:
-            if adjust == AdjustType.QFQ:
-                table_name = tb_name_history_data_daily_a_stock_qfq
-            elif adjust == AdjustType.HFQ:
-                table_name = tb_name_history_data_daily_a_stock_hfq
-        elif period == PeriodType.WEEKLY:
-            if adjust == AdjustType.QFQ:
-                table_name = tb_name_history_data_weekly_a_stock_qfq
-            elif adjust == AdjustType.HFQ:
-                table_name = tb_name_history_data_weekly_a_stock_hfq
-
-        df.to_sql(
+        table_name = self._get_history_table_name(SecurityType.STOCK, period, adjust)
+        self._write_dataframe(
+            df,
             table_name,
-            self.engine,
             if_exists="append",
-            index=False,
             method="multi",
         )
 
@@ -533,23 +565,18 @@ class StorageDb:
             bool: 保存是否成功
         """
         try:
-            # 根据周期选择对应的港股表名（港股只支持后复权）
-            if period == PeriodType.DAILY:
-                table_name = tb_name_history_data_daily_hk_stock_hfq
-            elif period == PeriodType.WEEKLY:
-                table_name = tb_name_history_data_weekly_hk_stock_hfq
-            elif period == PeriodType.MONTHLY:
-                table_name = tb_name_history_data_monthly_hk_stock_hfq
-            else:
+            try:
+                table_name = self._get_history_table_name(
+                    SecurityType.HK_GGT_STOCK, period, AdjustType.HFQ
+                )
+            except ValueError:
                 logger.error(f"不支持的港股数据周期: {period}")
                 return False
 
-            # 保存数据到对应的港股历史数据表
-            df.to_sql(
+            self._write_dataframe(
+                df,
                 table_name,
-                self.engine,
                 if_exists="append",
-                index=False,
                 method="multi",
             )
 
@@ -578,33 +605,22 @@ class StorageDb:
             bool: 保存是否成功
         """
         try:
-            # 根据周期和复权类型选择对应的ETF表名
-            if period == PeriodType.DAILY:
-                if adjust == AdjustType.QFQ:
-                    table_name = tb_name_history_data_daily_etf_qfq
-                elif adjust == AdjustType.HFQ:
-                    table_name = tb_name_history_data_daily_etf_hfq
-                else:
-                    logger.error(f"不支持的ETF复权类型: {adjust}")
-                    return False
-            elif period == PeriodType.WEEKLY:
-                if adjust == AdjustType.QFQ:
-                    table_name = tb_name_history_data_weekly_etf_qfq
-                elif adjust == AdjustType.HFQ:
-                    table_name = tb_name_history_data_weekly_etf_hfq
-                else:
-                    logger.error(f"不支持的ETF复权类型: {adjust}")
-                    return False
-            else:
+            if period not in {PeriodType.DAILY, PeriodType.WEEKLY}:
                 logger.error(f"不支持的ETF数据周期: {period}")
                 return False
 
-            # 保存数据到对应的ETF历史数据表
-            df.to_sql(
+            try:
+                table_name = self._get_history_table_name(
+                    SecurityType.ETF, period, adjust
+                )
+            except ValueError:
+                logger.error(f"不支持的ETF复权类型: {adjust}")
+                return False
+
+            self._write_dataframe(
+                df,
                 table_name,
-                self.engine,
                 if_exists="append",
-                index=False,
                 method="multi",
             )
 
@@ -668,28 +684,14 @@ class StorageDb:
             pd.DataFrame: 基金日线行情数据，如果表不存在或加载失败则返回空DataFrame
         """
         try:
-            table_name = tb_name_history_data_daily_fund
-
-            # 构建SQL查询
-            sql = f"""
-            SELECT * FROM {table_name}
-            WHERE "{COL_ETF_ID}" = %s
-            """
-
-            params: List[Any] = [fund_id]
-
-            # 添加日期范围条件
-            if start_date:
-                sql += f' AND "{COL_DATE}" >= %s'
-                params.append(start_date)
-            if end_date:
-                sql += f' AND "{COL_DATE}" <= %s'
-                params.append(end_date)
-
-            sql += f' ORDER BY "{COL_DATE}" ASC'
-
-            # Convert list to tuple for pandas read_sql compatibility
-            sql_params = tuple(params) if params else None
+            sql, sql_params = self._build_code_date_range_query(
+                table_name=tb_name_history_data_daily_fund,
+                code_column=COL_ETF_ID,
+                code_value=fund_id,
+                date_column=COL_DATE,
+                start_date=start_date,
+                end_date=end_date,
+            )
             df = pd.read_sql(sql, self.engine, params=sql_params)
             logger.info(f"基金日线行情数据加载成功: {fund_id}, 数据条数: {len(df)}")
             return df
@@ -1709,23 +1711,14 @@ class StorageDb:
             pd.DataFrame: ETF日线数据
         """
         try:
-            sql = f"""
-            SELECT * FROM {tb_name_etf_daily}
-            WHERE "{COL_ETF_ID}" = %s
-            """
-            params: list[Any] = [etf_id]
-
-            if start_date:
-                sql += f' AND "{COL_DATE}" >= %s'
-                params.append(start_date)
-            if end_date:
-                sql += f' AND "{COL_DATE}" <= %s'
-                params.append(end_date)
-
-            sql += f' ORDER BY "{COL_DATE}"'
-
-            # Convert list to tuple for pandas read_sql compatibility
-            sql_params = tuple(params) if params else None
+            sql, sql_params = self._build_code_date_range_query(
+                table_name=tb_name_etf_daily,
+                code_column=COL_ETF_ID,
+                code_value=etf_id,
+                date_column=COL_DATE,
+                start_date=start_date,
+                end_date=end_date,
+            )
             df = pd.read_sql(sql, self.engine, params=sql_params)
             logger.info(f"ETF日线数据加载成功，数据条数: {len(df)}")
             return df
