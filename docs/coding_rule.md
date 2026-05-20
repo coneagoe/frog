@@ -1,6 +1,6 @@
-# Coding Rules / 编码规范（Code Simplifier）
+# Coding Rules / 编码规范（gem-code-simplifier）
 
-本文档用于配合仓库内的 Copilot Chat 自定义 agents（Code Simplifier / Apply）工作，目标是：**在不改变外部行为（Semantics-Preserving）的前提下提升可读性与可维护性**。
+本文档用于配合仓库内的 Copilot Chat 自定义 agent `gem-code-simplifier` 工作，目标是：**在不改变外部行为（Semantics-Preserving）的前提下提升可读性与可维护性**。
 
 ## Scope / 范围
 
@@ -53,7 +53,7 @@
 - 约束：
   - 不改变默认配置语义与运行时行为。
 
-## Verification Whitelist / 验证白名单（Apply Agent 仅允许执行这些命令）
+## Verification Whitelist / 验证白名单（简化类 agent 仅允许执行这些命令）
 
 只允许执行以下三条命令（不启用 autoApprove，每次运行需人工审批）：
 
@@ -65,7 +65,7 @@
 
 ## VS Code Usage / 在 VS Code 中使用
 
-- 将自定义 agent 文件放在 `.github/agents/` 下（例如 `code-simplifier.agent.md`），VS Code Copilot Chat 会自动识别并在 agent 选择器中显示。
+- 将自定义 agent 文件放在 `.github/agents/` 下（例如 `gem-code-simplifier.agent.md`），VS Code Copilot Chat 会自动识别并在 agent 选择器中显示。
 - 推荐工作流：
-  1) 先使用 Code Simplifier（Review）生成 Change List。
-  2) 点击 handoff 按钮交给 Code Simplifier Apply（Apply）落地修改并跑白名单验证。
+  1) 先明确目标文件、当前选区或当前 changeset，避免 agent 扩大修改范围。
+  2) 再在 agent 选择器中使用 `gem-code-simplifier`，按本文档约束落地修改并跑白名单验证。
