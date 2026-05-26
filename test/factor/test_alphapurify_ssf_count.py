@@ -25,7 +25,11 @@ def _make_top10_history() -> pd.DataFrame:
         {
             "股票代码": ["000001", "000001", "000001"],
             "公告日期": pd.to_datetime(["2024-03-31", "2024-03-31", "2023-12-31"]),
-            "股东名称": ["全国社保基金一一八组合", "全国社保基金五零三组合", "全国社保基金一一八组合"],
+            "股东名称": [
+                "全国社保基金一一八组合",
+                "全国社保基金五零三组合",
+                "全国社保基金一一八组合",
+            ],
             "占总流通股本持股比例": [1.5, 0.6, 1.2],
         }
     )
@@ -69,7 +73,9 @@ def test_main_loads_ssf_count_panel_and_writes_report(tmp_path, monkeypatch):
     monkeypatch.setattr(alphapurify_ssf_count, "FactorAnalyzer", FakeFactorAnalyzer)
 
     output_path = tmp_path / "ssf_count_ic.html"
-    code = alphapurify_ssf_count.main(["--max-stocks", "1", "--report-html", str(output_path)])
+    code = alphapurify_ssf_count.main(
+        ["--max-stocks", "1", "--report-html", str(output_path)]
+    )
 
     assert code == 0
     assert captured["run_called"] is True

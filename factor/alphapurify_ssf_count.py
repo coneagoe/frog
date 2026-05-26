@@ -14,7 +14,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from common.const import COL_CLOSE, COL_DATE  # noqa: E402
-from factor.alphapurify_ssf_common import SSF_FACTOR_COUNT, build_ssf_factor_panel_from_db  # noqa: E402
+from factor.alphapurify_ssf_common import (  # noqa: E402
+    SSF_FACTOR_COUNT,
+    build_ssf_factor_panel_from_db,
+)
 from storage import get_storage  # noqa: E402
 
 try:
