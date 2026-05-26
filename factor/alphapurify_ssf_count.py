@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
+import importlib
 
 import pandas as pd
 
@@ -15,7 +16,6 @@ if str(ROOT) not in sys.path:
 
 from storage import get_storage  # noqa: E402
 from factor.alphapurify_ssf_common import SSF_FACTOR_COUNT  # noqa: E402
-import importlib
 
 from common.const import COL_DATE, COL_CLOSE  # noqa: E402
 
@@ -70,7 +70,7 @@ def load_ssf_count_panel_from_db(
         max_stocks=max_stocks,
         adjust=adjust,
     )
-    if panel is None or panel.empty:
+    if panel.empty:
         return pd.DataFrame()
 
     df = panel.copy()
