@@ -14,11 +14,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from storage import get_storage  # noqa: E402
-from factor.alphapurify_ssf_common import (
+from factor.alphapurify_ssf_common import (  # noqa: E402
     build_ssf_factor_panel_from_db,
     SSF_FACTOR_COUNT,
-)  # noqa: E402
-from common.const import COL_DATE, COL_CLOSE, COL_STOCK_ID, AdjustType  # noqa: E402
+)
+from common.const import COL_DATE, COL_CLOSE  # noqa: E402
 
 try:
     from alphapurify import FactorAnalyzer
@@ -80,13 +80,13 @@ def load_ssf_count_panel_from_db(
     if COL_CLOSE in df.columns:
         df = df.rename(columns={COL_CLOSE: "close"})
 
-    # ensure factor column is named 'ssf_count' for downstream analyzer
-    requested_factor_name = "ssf_count"
-    if requested_factor_name not in df.columns and SSF_FACTOR_COUNT in df.columns:
-        df = df.rename(columns={SSF_FACTOR_COUNT: requested_factor_name})
+    # SSF_FACTOR_COUNT now matches the downstream expected name, so no renaming needed
+    # but keep the logic to ensure the factor column exists
+    if SSF_FACTOR_COUNT not in df.columns:
+        raise ValueError(f"Expected factor column '{SSF_FACTOR_COUNT}' not found in panel")
 
     # select and order columns if present
-    cols = [c for c in ["datetime", "symbol", "close", requested_factor_name] if c in df.columns]
+    cols = [c for c in ["datetime", "symbol", "close", SSF_FACTOR_COUNT] if c in df.columns]
     return df.loc[:, cols].copy()
 
 

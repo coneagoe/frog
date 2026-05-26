@@ -8,27 +8,30 @@ from common.const import (
     COL_FLOAT_HOLDER_HOLD_RATIO,
     COL_FLOAT_HOLDER_NAME,
     COL_STOCK_ID,
+    AdjustType,
+    PeriodType,
 )
+from shareholder_monitor.ssf_detector import is_social_security_holder
 
 # exported factor names
-SSF_FACTOR_COUNT = "ssf_factor_count"
-SSF_FACTOR_RATIO = "ssf_factor_ratio"
-SSF_FACTOR_RATIO_CHANGE = "ssf_factor_ratio_change"
+SSF_FACTOR_COUNT = "ssf_count"
+SSF_FACTOR_RATIO = "ssf_total_hold_ratio"
+SSF_FACTOR_RATIO_CHANGE = "ssf_total_hold_ratio_change"
 
 
 def build_ssf_factor_history(history_df: pd.DataFrame) -> pd.DataFrame:
     """
     Given top10 floatholders history records, compute per-announcement-date SSF counts,
     total SSF holding ratio, and ratio change vs previous announcement.
-    We identify SSF holders by presence of the substring "社保基金" in the holder name.
+    We identify SSF holders using shareholder_monitor.ssf_detector.is_social_security_holder.
     Returns a dataframe with columns: COL_ANN_DATE, SSF_FACTOR_COUNT, SSF_FACTOR_RATIO, SSF_FACTOR_RATIO_CHANGE
     """
     if history_df is None or history_df.empty:
         return pd.DataFrame(columns=[COL_ANN_DATE, SSF_FACTOR_COUNT, SSF_FACTOR_RATIO, SSF_FACTOR_RATIO_CHANGE])
 
     df = history_df.copy()
-    # identify SSF holders by substring
-    mask = df[COL_FLOAT_HOLDER_NAME].astype(str).str.contains("社保基金")
+    # identify SSF holders using shared detector
+    mask = df[COL_FLOAT_HOLDER_NAME].map(is_social_security_holder)
     ssf = df[mask]
 
     if ssf.empty:
@@ -113,9 +116,21 @@ def build_ssf_factor_panel_from_db(
         if factor_history is None or factor_history.empty:
             continue
 
-        # call storage.load_history_data_stock with positional args to match various implementations
-        history = storage.load_history_data_stock(stock_id, "daily", adjust, start_date, end_date)
-        stock_panel = build_stock_factor_panel(history_df=history, stock_id=stock_id, factor_history_df=factor_history, factor_name=factor_name)
+        # normalize adjust to AdjustType enum value if possible
+        adjust_value = (
+            AdjustType[adjust.upper()].value
+            if adjust.upper() in AdjustType.__members__
+            else adjust
+        )
+        history = storage.load_history_data_stock(
+            stock_id, PeriodType.DAILY.value, adjust_value, start_date, end_date
+        )
+        stock_panel = build_stock_factor_panel(
+            history_df=history,
+            stock_id=stock_id,
+            factor_history_df=factor_history,
+            factor_name=factor_name,
+        )
         if stock_panel is None or stock_panel.empty:
             continue
 

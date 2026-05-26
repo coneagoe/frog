@@ -47,7 +47,16 @@ def test_main_loads_ssf_count_panel_and_writes_report(tmp_path, monkeypatch):
             Path(path).write_text("ok", encoding="utf-8")
 
     class FakeFactorAnalyzer:
-        def __init__(self, base_df, trade_date_col, symbol_col, price_col, factor_name, research_cfg=None, analysis_cfg=None):
+        def __init__(
+            self,
+            base_df,
+            trade_date_col,
+            symbol_col,
+            price_col,
+            factor_name,
+            research_cfg=None,
+            analysis_cfg=None,
+        ):
             captured["base_df"] = base_df.copy()
             captured["factor_name"] = factor_name
 
