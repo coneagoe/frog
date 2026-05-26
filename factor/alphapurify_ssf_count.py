@@ -6,7 +6,6 @@ import argparse
 import sys
 from pathlib import Path
 from typing import Any
-import importlib
 
 import pandas as pd
 
@@ -14,10 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from common.const import COL_CLOSE, COL_DATE  # noqa: E402
+from factor.alphapurify_ssf_common import SSF_FACTOR_COUNT, build_ssf_factor_panel_from_db  # noqa: E402
 from storage import get_storage  # noqa: E402
-from factor.alphapurify_ssf_common import SSF_FACTOR_COUNT  # noqa: E402
-
-from common.const import COL_DATE, COL_CLOSE  # noqa: E402
 
 try:
     from alphapurify import FactorAnalyzer
@@ -61,8 +59,7 @@ def load_ssf_count_panel_from_db(
 ) -> pd.DataFrame:
     # build using a stable factor name expected by downstream analysis
     # build using the canonical factor name from common
-    mod = importlib.import_module("factor.alphapurify_ssf_common")
-    panel: pd.DataFrame = mod.build_ssf_factor_panel_from_db(
+    panel: pd.DataFrame = build_ssf_factor_panel_from_db(
         storage=storage,
         factor_name=SSF_FACTOR_COUNT,
         start_date=start_date,
@@ -83,10 +80,14 @@ def load_ssf_count_panel_from_db(
     # SSF_FACTOR_COUNT now matches the downstream expected name, so no renaming needed
     # but keep the logic to ensure the factor column exists
     if SSF_FACTOR_COUNT not in df.columns:
-        raise ValueError(f"Expected factor column '{SSF_FACTOR_COUNT}' not found in panel")
+        raise ValueError(
+            f"Expected factor column '{SSF_FACTOR_COUNT}' not found in panel"
+        )
 
     # select and order columns if present
-    cols = [c for c in ["datetime", "symbol", "close", SSF_FACTOR_COUNT] if c in df.columns]
+    cols = [
+        c for c in ["datetime", "symbol", "close", SSF_FACTOR_COUNT] if c in df.columns
+    ]
     return df.loc[:, cols].copy()
 
 
