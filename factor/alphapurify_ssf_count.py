@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -14,10 +14,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from storage import get_storage  # noqa: E402
-from factor.alphapurify_ssf_common import (  # noqa: E402
-    build_ssf_factor_panel_from_db,
-    SSF_FACTOR_COUNT,
-)
+from factor.alphapurify_ssf_common import SSF_FACTOR_COUNT  # noqa: E402
+import importlib
+
 from common.const import COL_DATE, COL_CLOSE  # noqa: E402
 
 try:
@@ -62,7 +61,8 @@ def load_ssf_count_panel_from_db(
 ) -> pd.DataFrame:
     # build using a stable factor name expected by downstream analysis
     # build using the canonical factor name from common
-    panel = build_ssf_factor_panel_from_db(
+    mod = importlib.import_module("factor.alphapurify_ssf_common")
+    panel: pd.DataFrame = mod.build_ssf_factor_panel_from_db(
         storage=storage,
         factor_name=SSF_FACTOR_COUNT,
         start_date=start_date,
@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None, storage: Any | None = None) -> int:
             max_stocks=args.max_stocks,
             adjust=args.adjust,
         )
-        if panel_df is None or panel_df.empty:
+        if panel_df.empty:
             print("[错误] 未从 DB 构造出有效的社保基金个数因子面板数据")
             return EXIT_ERROR
 

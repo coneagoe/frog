@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
 
@@ -95,8 +95,8 @@ def build_stock_factor_panel(
 def build_ssf_factor_panel_from_db(
     storage,
     factor_name: str,
-    start_date: str,
-    end_date: str,
+    start_date: Optional[str],
+    end_date: Optional[str],
     max_stocks: int = 100,
     adjust: str = "qfq",
 ) -> pd.DataFrame:
