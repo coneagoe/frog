@@ -104,7 +104,7 @@ def run_analysis(
         trade_date_col="datetime",
         symbol_col="symbol",
         price_col="close",
-        factor_name="ssf_count",
+        factor_name=SSF_FACTOR_COUNT,
     )
     analyzer.run()
 
