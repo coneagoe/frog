@@ -87,11 +87,17 @@ def load_ssf_ratio_panel_from_db(
             f"Expected factor column '{SSF_FACTOR_RATIO}' not found in panel"
         )
 
-    # select and order columns if present
-    cols = [
-        c for c in ["datetime", "symbol", "close", SSF_FACTOR_RATIO] if c in df.columns
-    ]
-    return df.loc[:, cols].copy()
+    # validate required panel columns before selecting
+    required_cols = ["datetime", "symbol", "close", SSF_FACTOR_RATIO]
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"Missing required panel columns: {missing_cols}. "
+            f"FactorAnalyzer requires datetime, symbol, close, and {SSF_FACTOR_RATIO}"
+        )
+
+    # select and order columns
+    return df.loc[:, required_cols].copy()
 
 
 def run_analysis(
