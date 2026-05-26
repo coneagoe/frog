@@ -3,7 +3,7 @@
 ## 1. 测试口径
 
 - 因子定义：`ssf_total_hold_ratio` = 社保基金在该股票十大流通股东中的总持股比例之和
-- 数据来源：从 `top10_floatholder` 表读取最近 12 期公告数据
+- 数据来源：从 `top10_floatholders` 表读取最近 12 期公告数据
 - 持有人识别：基于 `shareholder_monitor.ssf_detector.is_social_security_holder`
 - 时间对齐：使用公告日期（`ann_date`），对每个交易日向前填充最近一次公告的因子值
 - 脚本：`factor/alphapurify_ssf_ratio.py`
