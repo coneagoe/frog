@@ -550,3 +550,123 @@ def test_service_uses_default_storage_when_not_provided():
         service = BlackroomManagementService()
 
     assert service.storage is fake_storage
+
+
+# ---------------------------------------------------------------------------
+# Public short aliases
+# ---------------------------------------------------------------------------
+
+
+def test_alias_add_delegates_to_add_record():
+    storage = MagicMock()
+    storage.create_blackroom_record.return_value = _make_record()
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.add(stock_code="600519", market="A", ban_days=30)
+
+    assert result["success"] is True
+    assert result["code"] == "OK"
+    storage.create_blackroom_record.assert_called_once()
+
+
+def test_alias_get_delegates_to_get_record():
+    storage = MagicMock()
+    storage.get_blackroom_record.return_value = _make_record(id=7)
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.get(7)
+
+    assert result["success"] is True
+    assert result["data"]["id"] == 7
+    storage.get_blackroom_record.assert_called_once_with(7)
+
+
+def test_alias_list_delegates_to_list_records():
+    storage = MagicMock()
+    storage.list_blackroom_records.return_value = [_make_record(id=1)]
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.list(market="A", enabled=True)
+
+    assert result["success"] is True
+    assert len(result["data"]) == 1
+    storage.list_blackroom_records.assert_called_once_with(market="A", enabled=True)
+
+
+def test_alias_update_delegates_to_update_record():
+    storage = MagicMock()
+    storage.update_blackroom_record.return_value = _make_record(note="aliased")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.update(1, note="aliased")
+
+    assert result["success"] is True
+    assert result["data"]["note"] == "aliased"
+    storage.update_blackroom_record.assert_called_once_with(1, note="aliased")
+
+
+def test_alias_remove_delegates_to_remove_record():
+    storage = MagicMock()
+    storage.delete_blackroom_record.return_value = True
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.remove(3)
+
+    assert result["success"] is True
+    assert result["data"] == {"id": 3, "deleted": True}
+    storage.delete_blackroom_record.assert_called_once_with(3)
+
+
+def test_alias_filter_delegates_to_filter_buy_candidates():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.return_value = [_make_record(stock_code="600519")]
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.filter(candidates=["600519", "600036"], market="A")
+
+    assert result["success"] is True
+    assert result["data"]["allowed"] == ["600036"]
+    assert result["data"]["banned"] == ["600519"]
+    storage.list_active_blackroom_records.assert_called_once_with(market="A")
+
+
+# ---------------------------------------------------------------------------
+# filter_buy_candidates – element type validation
+# ---------------------------------------------------------------------------
+
+
+def test_filter_buy_candidates_rejects_non_string_elements():
+    service = BlackroomManagementService(storage=MagicMock())
+
+    for bad_candidates in (
+        [123, "600519"],
+        [None, "600519"],
+        [["600519"]],
+        [True],
+    ):
+        result = service.filter_buy_candidates(candidates=bad_candidates, market="A")  # type: ignore[arg-type]
+        assert result["success"] is False, f"Expected failure for candidates={bad_candidates!r}"
+        assert result["code"] == "VALIDATION_ERROR"
+
+
+def test_filter_buy_candidates_accepts_all_string_elements():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.return_value = []
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.filter_buy_candidates(candidates=["600519", "000001"], market="A")
+
+    assert result["success"] is True
+    assert result["data"]["allowed"] == ["600519", "000001"]
+
+
+def test_filter_buy_candidates_accepts_empty_list():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.return_value = []
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.filter_buy_candidates(candidates=[], market="A")
+
+    assert result["success"] is True
+    assert result["data"]["allowed"] == []
+    assert result["data"]["banned"] == []

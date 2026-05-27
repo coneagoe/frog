@@ -164,6 +164,11 @@ class BlackroomManagementService:
         try:
             if not isinstance(candidates, list):
                 raise BlackroomValidationError("candidates 必须是列表")
+            for item in candidates:
+                if not isinstance(item, str):
+                    raise BlackroomValidationError(
+                        f"candidates 中的每个元素必须是字符串, 得到: {type(item).__name__}"
+                    )
             self._validate_market(market)
 
             active = self.storage.list_active_blackroom_records(market=market)
@@ -198,6 +203,49 @@ class BlackroomManagementService:
             )
         except BlackroomValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
+
+    # ------------------------------------------------------------------
+    # Public short aliases (mirrors target-management-service pattern)
+    # ------------------------------------------------------------------
+
+    def add(
+        self,
+        stock_code: str,
+        market: str,
+        ban_days: Optional[int] = None,
+        start_at: Optional[datetime] = None,
+        source: str = "manual",
+        note: Optional[str] = None,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        return self.add_record(
+            stock_code=stock_code,
+            market=market,
+            ban_days=ban_days,
+            start_at=start_at,
+            source=source,
+            note=note,
+            enabled=enabled,
+        )
+
+    def update(self, record_id: int, **updates: Any) -> dict[str, Any]:
+        return self.update_record(record_id, **updates)
+
+    def list(
+        self,
+        market: Optional[str] = None,
+        enabled: Optional[bool] = None,
+    ) -> dict[str, Any]:
+        return self.list_records(market=market, enabled=enabled)
+
+    def get(self, record_id: int) -> dict[str, Any]:
+        return self.get_record(record_id)
+
+    def remove(self, record_id: int) -> dict[str, Any]:
+        return self.remove_record(record_id)
+
+    def filter(self, candidates: List[str], market: str) -> dict[str, Any]:
+        return self.filter_buy_candidates(candidates=candidates, market=market)
 
     # ------------------------------------------------------------------
     # Status
