@@ -750,3 +750,213 @@ def test_get_status_error_payload_does_not_raise():
 
         assert result["success"] is False, f"Expected failure for exc_cls={exc_cls}"
         assert result["code"] == "STORAGE_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# Regression: storage failures must return stable payload (not leak exceptions)
+# ---------------------------------------------------------------------------
+
+
+def test_add_record_returns_storage_error_on_storage_failure():
+    storage = MagicMock()
+    storage.create_blackroom_record.side_effect = RuntimeError("DB unavailable")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.add_record(stock_code="600519", market="A", ban_days=30)
+
+    assert list(result.keys()) == ["success", "code", "message", "data"]
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert "DB unavailable" in result["message"]
+    assert result["data"] is None
+
+
+def test_get_record_returns_storage_error_on_storage_failure():
+    storage = MagicMock()
+    storage.get_blackroom_record.side_effect = OSError("connection reset")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.get_record(1)
+
+    assert list(result.keys()) == ["success", "code", "message", "data"]
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert result["data"] is None
+
+
+def test_list_records_returns_storage_error_on_storage_failure():
+    storage = MagicMock()
+    storage.list_blackroom_records.side_effect = RuntimeError("timeout")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.list_records()
+
+    assert list(result.keys()) == ["success", "code", "message", "data"]
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert result["data"] is None
+
+
+def test_update_record_returns_storage_error_on_storage_failure():
+    storage = MagicMock()
+    storage.update_blackroom_record.side_effect = RuntimeError("write failed")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.update_record(1, note="x")
+
+    assert list(result.keys()) == ["success", "code", "message", "data"]
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert result["data"] is None
+
+
+def test_remove_record_returns_storage_error_on_storage_failure():
+    storage = MagicMock()
+    storage.delete_blackroom_record.side_effect = RuntimeError("lock timeout")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.remove_record(1)
+
+    assert list(result.keys()) == ["success", "code", "message", "data"]
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert result["data"] is None
+
+
+def test_filter_buy_candidates_returns_storage_error_on_storage_failure():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.side_effect = RuntimeError("index error")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.filter_buy_candidates(candidates=["600519"], market="A")
+
+    assert list(result.keys()) == ["success", "code", "message", "data"]
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert result["data"] is None
+
+
+def test_is_buy_banned_returns_storage_error_on_storage_failure():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.side_effect = ConnectionError("lost")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.is_buy_banned(stock_code="600519", market="A")
+
+    assert list(result.keys()) == ["success", "code", "message", "data"]
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert result["data"] is None
+
+
+# ---------------------------------------------------------------------------
+# check() alias for is_buy_banned()
+# ---------------------------------------------------------------------------
+
+
+def test_check_alias_delegates_to_is_buy_banned_banned():
+    now = datetime.now(timezone.utc)
+    storage = MagicMock()
+    storage.list_active_blackroom_records.return_value = [
+        _make_record(stock_code="600519", market="A", expire_at=now + timedelta(days=1))
+    ]
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.check(stock_code="600519", market="A")
+
+    assert result["success"] is True
+    assert result["data"]["banned"] is True
+    storage.list_active_blackroom_records.assert_called_once_with(market="A")
+
+
+def test_check_alias_delegates_to_is_buy_banned_not_banned():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.return_value = []
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.check(stock_code="000001", market="A")
+
+    assert result["success"] is True
+    assert result["data"]["banned"] is False
+
+
+def test_check_alias_returns_validation_error_on_bad_market():
+    service = BlackroomManagementService(storage=MagicMock())
+
+    result = service.check(stock_code="600519", market="INVALID")
+
+    assert result["success"] is False
+    assert result["code"] == "VALIDATION_ERROR"
+
+
+def test_check_alias_returns_storage_error_on_storage_failure():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.side_effect = RuntimeError("down")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.check(stock_code="600519", market="A")
+
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+
+
+# ---------------------------------------------------------------------------
+# status() alias for get_status()
+# ---------------------------------------------------------------------------
+
+
+def test_status_alias_delegates_to_get_status():
+    now = datetime.now(timezone.utc)
+    storage = MagicMock()
+    storage.list_blackroom_records.return_value = [
+        _make_record(id=1, enabled=True, expire_at=now + timedelta(days=1)),
+        _make_record(id=2, enabled=False, expire_at=now + timedelta(days=1)),
+    ]
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.status()
+
+    assert result["success"] is True
+    assert result["code"] == "OK"
+    assert result["data"]["total"] == 2
+    assert result["data"]["enabled"] == 1
+    assert result["data"]["disabled"] == 1
+    storage.list_blackroom_records.assert_called_once_with(market=None, enabled=None)
+
+
+def test_status_alias_returns_storage_error_on_failure():
+    storage = MagicMock()
+    storage.list_blackroom_records.side_effect = RuntimeError("DB gone")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.status()
+
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert "DB gone" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# ban_days is required in add/add_record (no default)
+# ---------------------------------------------------------------------------
+
+
+def test_add_record_ban_days_is_required_parameter():
+    """ban_days has no default – omitting it must raise TypeError at call time."""
+    import inspect
+
+    sig = inspect.signature(BlackroomManagementService.add_record)
+    param = sig.parameters["ban_days"]
+    assert param.default is inspect.Parameter.empty, (
+        "ban_days must be a required parameter with no default in add_record"
+    )
+
+
+def test_add_alias_ban_days_is_required_parameter():
+    import inspect
+
+    sig = inspect.signature(BlackroomManagementService.add)
+    param = sig.parameters["ban_days"]
+    assert param.default is inspect.Parameter.empty, (
+        "ban_days must be a required parameter with no default in add"
+    )

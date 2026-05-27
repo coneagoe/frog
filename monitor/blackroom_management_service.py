@@ -41,7 +41,7 @@ class BlackroomManagementService:
         self,
         stock_code: str,
         market: str,
-        ban_days: Optional[int] = None,
+        ban_days: int,
         start_at: Optional[datetime] = None,
         source: str = "manual",
         note: Optional[str] = None,
@@ -70,6 +70,8 @@ class BlackroomManagementService:
             return self._result(True, "OK", "record created", self._serialize(record))
         except BlackroomValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
 
     def get_record(self, record_id: int) -> dict[str, Any]:
         try:
@@ -82,6 +84,8 @@ class BlackroomManagementService:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
         except BlackroomNotFoundError as exc:
             return self._result(False, "NOT_FOUND", str(exc), None)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
 
     def list_records(
         self,
@@ -98,6 +102,8 @@ class BlackroomManagementService:
             return self._result(True, "OK", "records listed", data)
         except BlackroomValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
 
     def update_record(self, record_id: int, **updates: Any) -> dict[str, Any]:
         try:
@@ -140,6 +146,8 @@ class BlackroomManagementService:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
         except BlackroomNotFoundError as exc:
             return self._result(False, "NOT_FOUND", str(exc), None)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
 
     def remove_record(self, record_id: int) -> dict[str, Any]:
         try:
@@ -152,6 +160,8 @@ class BlackroomManagementService:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
         except BlackroomNotFoundError as exc:
             return self._result(False, "NOT_FOUND", str(exc), None)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
 
     # ------------------------------------------------------------------
     # Buy-ban query helpers
@@ -184,6 +194,8 @@ class BlackroomManagementService:
             )
         except BlackroomValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
 
     def is_buy_banned(self, stock_code: str, market: str) -> dict[str, Any]:
         try:
@@ -202,6 +214,8 @@ class BlackroomManagementService:
             )
         except BlackroomValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
 
     # ------------------------------------------------------------------
     # Public short aliases (mirrors target-management-service pattern)
@@ -211,7 +225,7 @@ class BlackroomManagementService:
         self,
         stock_code: str,
         market: str,
-        ban_days: Optional[int] = None,
+        ban_days: int,
         start_at: Optional[datetime] = None,
         source: str = "manual",
         note: Optional[str] = None,
@@ -245,6 +259,12 @@ class BlackroomManagementService:
 
     def filter(self, candidates: List[str], market: str) -> dict[str, Any]:
         return self.filter_buy_candidates(candidates=candidates, market=market)
+
+    def check(self, stock_code: str, market: str) -> dict[str, Any]:
+        return self.is_buy_banned(stock_code=stock_code, market=market)
+
+    def status(self) -> dict[str, Any]:
+        return self.get_status()
 
     # ------------------------------------------------------------------
     # Status
