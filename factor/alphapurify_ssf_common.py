@@ -18,6 +18,9 @@ SSF_FACTOR_COUNT = "ssf_count"
 SSF_FACTOR_RATIO = "ssf_total_hold_ratio"
 SSF_FACTOR_RATIO_CHANGE = "ssf_total_hold_ratio_change"
 
+# forward return horizons aligned with monthly windows
+SSF_FORWARD_RETURNS = [20, 60, 120, 240]
+
 
 def build_ssf_factor_history(history_df: pd.DataFrame) -> pd.DataFrame:
     """
