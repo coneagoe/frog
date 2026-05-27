@@ -2263,7 +2263,9 @@ class StorageDb:
                 return None
             for key, value in updates.items():
                 setattr(record, key, value)
-            if ("ban_days" in updates or "start_at" in updates) and "expire_at" not in updates:
+            if (
+                "ban_days" in updates or "start_at" in updates
+            ) and "expire_at" not in updates:
                 current_start = record.start_at
                 current_ban_days = record.ban_days
                 if current_start is not None and current_ban_days is not None:

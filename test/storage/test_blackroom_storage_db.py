@@ -331,8 +331,12 @@ class TestListActiveBlackroomRecords:
     def test_filters_by_market(self, sqlite_storage):
         db = sqlite_storage
         future = datetime.now(timezone.utc) + timedelta(days=30)
-        db.create_blackroom_record(stock_code="000001", market="A", enabled=True, expire_at=future)
-        db.create_blackroom_record(stock_code="00700", market="HK", enabled=True, expire_at=future)
+        db.create_blackroom_record(
+            stock_code="000001", market="A", enabled=True, expire_at=future
+        )
+        db.create_blackroom_record(
+            stock_code="00700", market="HK", enabled=True, expire_at=future
+        )
 
         active_a = db.list_active_blackroom_records(market="A")
 
@@ -414,7 +418,9 @@ class TestUpdateBlackroomRecord:
     def test_recomputes_expire_at_when_ban_days_updated(self, sqlite_storage):
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
+        record = db.create_blackroom_record(
+            stock_code="000001", ban_days=10, start_at=start
+        )
 
         updated = db.update_blackroom_record(record.id, ban_days=20)
 
@@ -424,7 +430,9 @@ class TestUpdateBlackroomRecord:
     def test_recomputes_expire_at_when_start_at_updated(self, sqlite_storage):
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
+        record = db.create_blackroom_record(
+            stock_code="000001", ban_days=10, start_at=start
+        )
 
         new_start = datetime(2025, 6, 1, tzinfo=timezone.utc)
         updated = db.update_blackroom_record(record.id, start_at=new_start)
@@ -435,18 +443,26 @@ class TestUpdateBlackroomRecord:
     def test_explicit_expire_at_in_update_is_not_overridden(self, sqlite_storage):
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
+        record = db.create_blackroom_record(
+            stock_code="000001", ban_days=10, start_at=start
+        )
 
         explicit_expire = datetime(2099, 12, 31, tzinfo=timezone.utc)
-        updated = db.update_blackroom_record(record.id, ban_days=99, expire_at=explicit_expire)
+        updated = db.update_blackroom_record(
+            record.id, ban_days=99, expire_at=explicit_expire
+        )
 
-        assert updated.expire_at.replace(tzinfo=None) == explicit_expire.replace(tzinfo=None)
+        assert updated.expire_at.replace(tzinfo=None) == explicit_expire.replace(
+            tzinfo=None
+        )
 
     def test_clears_expire_at_when_ban_days_set_to_none(self, sqlite_storage):
         """Nulling ban_days must clear expire_at, not leave stale value."""
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
+        record = db.create_blackroom_record(
+            stock_code="000001", ban_days=10, start_at=start
+        )
         assert record.expire_at is not None
 
         updated = db.update_blackroom_record(record.id, ban_days=None)
@@ -458,7 +474,9 @@ class TestUpdateBlackroomRecord:
         """Nulling start_at must clear expire_at, not leave stale value."""
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
+        record = db.create_blackroom_record(
+            stock_code="000001", ban_days=10, start_at=start
+        )
         assert record.expire_at is not None
 
         updated = db.update_blackroom_record(record.id, start_at=None)
