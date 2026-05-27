@@ -2150,7 +2150,7 @@ class StorageDb:
                 stock_code=stock_code,
                 market=market,
                 ban_days=ban_days,
-                start_at=effective_start if start_at is not None else None,
+                start_at=effective_start,
                 expire_at=expire_at,
                 source=source,
                 note=note,
@@ -2209,15 +2209,13 @@ class StorageDb:
         """
         查询当前有效的黑名单记录。
 
-        有效条件：enabled=True 且 (expire_at IS NULL 或 expire_at > 当前时间)。
+        有效条件：enabled=True 且 expire_at > 当前时间。
 
         Args:
             market: 可选，按市场过滤。
         Returns:
             BlackroomRecord 对象列表。
         """
-        from sqlalchemy import or_
-
         from .model.blackroom_record import BlackroomRecord
 
         assert self.Session is not None
@@ -2227,12 +2225,7 @@ class StorageDb:
             query = (
                 session.query(BlackroomRecord)
                 .filter_by(enabled=True)
-                .filter(
-                    or_(
-                        BlackroomRecord.expire_at.is_(None),
-                        BlackroomRecord.expire_at > now,
-                    )
-                )
+                .filter(BlackroomRecord.expire_at > now)
             )
             if market is not None:
                 query = query.filter_by(market=market)
@@ -2241,7 +2234,11 @@ class StorageDb:
             session.close()
 
     def update_blackroom_record(self, record_id: int, **updates: Any) -> Optional[Any]:
-        """更新黑名单记录。记录不存在时返回 None。"""
+        """更新黑名单记录。记录不存在时返回 None。
+
+        若更新包含 ban_days 或 start_at（且未显式提供 expire_at），
+        则自动重新计算 expire_at = start_at + ban_days。
+        """
         from .model.blackroom_record import BlackroomRecord
 
         allowed_fields = {
@@ -2266,6 +2263,11 @@ class StorageDb:
                 return None
             for key, value in updates.items():
                 setattr(record, key, value)
+            if ("ban_days" in updates or "start_at" in updates) and "expire_at" not in updates:
+                current_start = record.start_at
+                current_ban_days = record.ban_days
+                if current_start is not None and current_ban_days is not None:
+                    record.expire_at = current_start + timedelta(days=current_ban_days)
             session.commit()
             session.refresh(record)
             return record
