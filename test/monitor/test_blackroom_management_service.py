@@ -670,3 +670,83 @@ def test_filter_buy_candidates_accepts_empty_list():
     assert result["success"] is True
     assert result["data"]["allowed"] == []
     assert result["data"]["banned"] == []
+
+
+# ---------------------------------------------------------------------------
+# Regression: ban_days=None must be rejected (issue 1)
+# ---------------------------------------------------------------------------
+
+
+def test_add_record_rejects_none_ban_days():
+    """ban_days must be a positive integer; None must not create records that never expire."""
+    service = BlackroomManagementService(storage=MagicMock())
+
+    result = service.add_record(stock_code="600519", market="A", ban_days=None)
+
+    assert result["success"] is False
+    assert result["code"] == "VALIDATION_ERROR"
+    assert "ban_days" in result["message"]
+
+
+def test_add_alias_rejects_none_ban_days():
+    service = BlackroomManagementService(storage=MagicMock())
+
+    result = service.add(stock_code="600519", market="A", ban_days=None)
+
+    assert result["success"] is False
+    assert result["code"] == "VALIDATION_ERROR"
+    assert "ban_days" in result["message"]
+
+
+def test_update_record_rejects_none_ban_days():
+    """Explicitly setting ban_days=None in an update must be rejected."""
+    service = BlackroomManagementService(storage=MagicMock())
+
+    result = service.update_record(1, ban_days=None)
+
+    assert result["success"] is False
+    assert result["code"] == "VALIDATION_ERROR"
+    assert "ban_days" in result["message"]
+
+
+def test_update_alias_rejects_none_ban_days():
+    service = BlackroomManagementService(storage=MagicMock())
+
+    result = service.update(1, ban_days=None)
+
+    assert result["success"] is False
+    assert result["code"] == "VALIDATION_ERROR"
+    assert "ban_days" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# Regression: get_status must return stable payload on storage error (issue 2)
+# ---------------------------------------------------------------------------
+
+
+def test_get_status_returns_error_payload_when_storage_raises():
+    """Storage exceptions must not propagate; a stable error dict must be returned."""
+    storage = MagicMock()
+    storage.list_blackroom_records.side_effect = RuntimeError("DB connection lost")
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.get_status()
+
+    assert list(result.keys()) == ["success", "code", "message", "data"]
+    assert result["success"] is False
+    assert result["code"] == "STORAGE_ERROR"
+    assert "DB connection lost" in result["message"]
+    assert result["data"] is None
+
+
+def test_get_status_error_payload_does_not_raise():
+    """get_status must never raise, regardless of the underlying exception type."""
+    for exc_cls in (Exception, ValueError, OSError, KeyError):
+        storage = MagicMock()
+        storage.list_blackroom_records.side_effect = exc_cls("boom")
+        service = BlackroomManagementService(storage=storage)
+
+        result = service.get_status()  # must not raise
+
+        assert result["success"] is False, f"Expected failure for exc_cls={exc_cls}"
+        assert result["code"] == "STORAGE_ERROR"

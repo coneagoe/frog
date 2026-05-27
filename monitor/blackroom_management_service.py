@@ -51,8 +51,7 @@ class BlackroomManagementService:
             self._validate_stock_code(stock_code)
             self._validate_market(market)
             self._validate_source(source)
-            if ban_days is not None:
-                self._validate_ban_days(ban_days)
+            self._validate_ban_days(ban_days)
             self._validate_bool(enabled, "enabled")
             if start_at is not None and not isinstance(start_at, datetime):
                 raise BlackroomValidationError("start_at 必须是 datetime 或 None")
@@ -116,7 +115,7 @@ class BlackroomManagementService:
                 self._validate_market(updates["market"])
             if "source" in updates:
                 self._validate_source(updates["source"])
-            if "ban_days" in updates and updates["ban_days"] is not None:
+            if "ban_days" in updates:
                 self._validate_ban_days(updates["ban_days"])
             if "enabled" in updates:
                 self._validate_bool(updates["enabled"], "enabled")
@@ -252,13 +251,16 @@ class BlackroomManagementService:
     # ------------------------------------------------------------------
 
     def get_status(self) -> dict[str, Any]:
-        records = self.storage.list_blackroom_records(market=None, enabled=None)
-        data = {
-            "total": len(records),
-            "enabled": sum(1 for r in records if getattr(r, "enabled", False)),
-            "disabled": sum(1 for r in records if not getattr(r, "enabled", False)),
-        }
-        return self._result(True, "OK", "status fetched", data)
+        try:
+            records = self.storage.list_blackroom_records(market=None, enabled=None)
+            data = {
+                "total": len(records),
+                "enabled": sum(1 for r in records if getattr(r, "enabled", False)),
+                "disabled": sum(1 for r in records if not getattr(r, "enabled", False)),
+            }
+            return self._result(True, "OK", "status fetched", data)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
 
     # ------------------------------------------------------------------
     # Internals
