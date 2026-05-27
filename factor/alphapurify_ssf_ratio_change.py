@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 from common.const import COL_CLOSE, COL_DATE  # noqa: E402
 from factor.alphapurify_ssf_common import (  # noqa: E402
     SSF_FACTOR_RATIO_CHANGE,
+    SSF_FORWARD_RETURNS,
     build_ssf_factor_panel_from_db,
 )
 from storage import get_storage  # noqa: E402
@@ -114,6 +115,7 @@ def run_analysis(
         symbol_col="symbol",
         price_col="close",
         factor_name=SSF_FACTOR_RATIO_CHANGE,
+        forward_returns=SSF_FORWARD_RETURNS,
     )
     analyzer.run()
 

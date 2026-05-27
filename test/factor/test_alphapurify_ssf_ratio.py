@@ -58,11 +58,13 @@ def test_main_loads_ssf_ratio_panel_and_writes_report(tmp_path, monkeypatch):
             symbol_col,
             price_col,
             factor_name,
+            forward_returns=None,
             research_cfg=None,
             analysis_cfg=None,
         ):
             captured["base_df"] = base_df.copy()
             captured["factor_name"] = factor_name
+            captured["forward_returns"] = forward_returns
 
         def run(self):
             captured["run_called"] = True
@@ -80,5 +82,6 @@ def test_main_loads_ssf_ratio_panel_and_writes_report(tmp_path, monkeypatch):
     assert code == 0
     assert captured["run_called"] is True
     assert captured["factor_name"] == "ssf_total_hold_ratio"
+    assert captured["forward_returns"] == [20, 60, 120, 240]
     assert not captured["base_df"].empty
     assert output_path.exists()
