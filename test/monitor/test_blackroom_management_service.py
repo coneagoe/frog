@@ -179,6 +179,16 @@ def test_add_record_accepts_shareholder_reduction_source():
     assert result["success"] is True
 
 
+def test_add_record_rejects_non_datetime_start_at():
+    service = BlackroomManagementService(storage=MagicMock())
+
+    for bad in ("2026-01-01", 20260101, 0):
+        result = service.add_record(stock_code="600519", market="A", ban_days=10, start_at=bad)  # type: ignore[arg-type]
+        assert result["success"] is False, f"Expected failure for start_at={bad!r}"
+        assert result["code"] == "VALIDATION_ERROR"
+        assert "start_at" in result["message"]
+
+
 # ---------------------------------------------------------------------------
 # get_record
 # ---------------------------------------------------------------------------
@@ -319,6 +329,47 @@ def test_update_record_validates_ban_days_when_present():
     assert result["success"] is False
     assert result["code"] == "VALIDATION_ERROR"
     assert "ban_days" in result["message"]
+
+
+def test_update_record_rejects_non_datetime_start_at():
+    service = BlackroomManagementService(storage=MagicMock())
+
+    for bad in ("2026-01-01", 20260101, 0):
+        result = service.update_record(1, start_at=bad)  # type: ignore[arg-type]
+        assert result["success"] is False, f"Expected failure for start_at={bad!r}"
+        assert result["code"] == "VALIDATION_ERROR"
+        assert "start_at" in result["message"]
+
+
+def test_update_record_rejects_non_datetime_expire_at():
+    service = BlackroomManagementService(storage=MagicMock())
+
+    for bad in ("2026-12-31", 99999, 0.5):
+        result = service.update_record(1, expire_at=bad)  # type: ignore[arg-type]
+        assert result["success"] is False, f"Expected failure for expire_at={bad!r}"
+        assert result["code"] == "VALIDATION_ERROR"
+        assert "expire_at" in result["message"]
+
+
+def test_update_record_accepts_none_start_at_and_expire_at():
+    storage = MagicMock()
+    storage.update_blackroom_record.return_value = _make_record(start_at=None, expire_at=None)
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.update_record(1, start_at=None, expire_at=None)
+
+    assert result["success"] is True
+
+
+def test_update_record_accepts_valid_datetime_start_at_and_expire_at():
+    fixed = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    storage = MagicMock()
+    storage.update_blackroom_record.return_value = _make_record(start_at=fixed, expire_at=fixed)
+    service = BlackroomManagementService(storage=storage)
+
+    result = service.update_record(1, start_at=fixed, expire_at=fixed)
+
+    assert result["success"] is True
 
 
 # ---------------------------------------------------------------------------

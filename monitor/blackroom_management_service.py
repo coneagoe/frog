@@ -54,6 +54,8 @@ class BlackroomManagementService:
             if ban_days is not None:
                 self._validate_ban_days(ban_days)
             self._validate_bool(enabled, "enabled")
+            if start_at is not None and not isinstance(start_at, datetime):
+                raise BlackroomValidationError("start_at 必须是 datetime 或 None")
 
             effective_start = start_at if start_at is not None else datetime.now(timezone.utc)
 
@@ -118,6 +120,18 @@ class BlackroomManagementService:
                 self._validate_ban_days(updates["ban_days"])
             if "enabled" in updates:
                 self._validate_bool(updates["enabled"], "enabled")
+            if (
+                "start_at" in updates
+                and updates["start_at"] is not None
+                and not isinstance(updates["start_at"], datetime)
+            ):
+                raise BlackroomValidationError("start_at 必须是 datetime 或 None")
+            if (
+                "expire_at" in updates
+                and updates["expire_at"] is not None
+                and not isinstance(updates["expire_at"], datetime)
+            ):
+                raise BlackroomValidationError("expire_at 必须是 datetime 或 None")
 
             record = self.storage.update_blackroom_record(record_id, **updates)
             if record is None:
