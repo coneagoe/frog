@@ -232,12 +232,11 @@ def main(
         _emit(result, json_output=json_output)
         return EXIT_VALIDATION_ERROR
 
-    service = service or TargetManagementService()
-
     try:
         if args.command == "target":
+            _svc = service or TargetManagementService()
             if args.target_command == "add":
-                result = service.add_target(
+                result = _svc.add_target(
                     stock_code=args.stock_code,
                     market=args.market,
                     condition=args.condition,
@@ -262,13 +261,13 @@ def main(
                     }.items()
                     if value is not None
                 }
-                result = service.update(args.target_id, **updates)
+                result = _svc.update(args.target_id, **updates)
             elif args.target_command == "remove":
-                result = service.remove(args.target_id)
+                result = _svc.remove(args.target_id)
             elif args.target_command == "list":
-                result = service.list(frequency=args.frequency, enabled=args.enabled)
+                result = _svc.list(frequency=args.frequency, enabled=args.enabled)
             elif args.target_command == "get":
-                result = service.get(args.target_id)
+                result = _svc.get(args.target_id)
             else:
                 result = {
                     "success": False,
@@ -277,7 +276,8 @@ def main(
                     "data": None,
                 }
         elif args.command == "status":
-            result = service.get_status()
+            _svc = service or TargetManagementService()
+            result = _svc.get_status()
         elif args.command == "blackroom":
             result = _handle_blackroom(
                 args, blackroom_service or BlackroomManagementService()

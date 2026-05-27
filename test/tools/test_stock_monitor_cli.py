@@ -558,6 +558,30 @@ def test_blackroom_update_bad_id_type_returns_validation_error(capsys):
     bsvc.update_record.assert_not_called()
 
 
+def test_blackroom_command_succeeds_when_target_service_init_fails(capsys):
+    """Regression: blackroom commands must not touch TargetManagementService at all."""
+    from unittest.mock import patch
+
+    bsvc = MagicMock()
+    bsvc.get_status.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "status fetched",
+        "data": {"total": 0},
+    }
+
+    with patch(
+        "tools.stock_monitor_cli.TargetManagementService",
+        side_effect=RuntimeError("storage unavailable"),
+    ):
+        exit_code = main(["blackroom", "status"], blackroom_service=bsvc)
+
+    assert exit_code == 0
+    bsvc.get_status.assert_called_once_with()
+    out = capsys.readouterr().out
+    assert "OK" in out
+
+
 def test_existing_target_commands_unaffected_by_blackroom_changes():
     """Regression: existing target/status commands still work when blackroom_service is absent."""
     svc = MagicMock()
