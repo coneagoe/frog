@@ -116,7 +116,7 @@ def run_analysis(
         symbol_col="symbol",
         price_col="close",
         factor_name=SSF_FACTOR_COUNT,
-        research_cfg={'return_horizons': SSF_FORWARD_RETURNS},
+        research_cfg={"return_horizons": SSF_FORWARD_RETURNS},
     )
     analyzer.run()
 

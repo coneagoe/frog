@@ -72,7 +72,9 @@ def test_main_loads_ssf_ratio_change_panel_and_writes_report(tmp_path, monkeypat
         def create_single_fac_ic_sheet(self):
             return FakeFigure()
 
-    monkeypatch.setattr(alphapurify_ssf_ratio_change, "FactorAnalyzer", FakeFactorAnalyzer)
+    monkeypatch.setattr(
+        alphapurify_ssf_ratio_change, "FactorAnalyzer", FakeFactorAnalyzer
+    )
 
     output_path = tmp_path / "ssf_ratio_change_ic.html"
     code = alphapurify_ssf_ratio_change.main(
@@ -82,6 +84,6 @@ def test_main_loads_ssf_ratio_change_panel_and_writes_report(tmp_path, monkeypat
     assert code == 0
     assert captured["run_called"] is True
     assert captured["factor_name"] == "ssf_total_hold_ratio_change"
-    assert captured["research_cfg"] == {'return_horizons': [20, 60, 120, 240]}
+    assert captured["research_cfg"] == {"return_horizons": [20, 60, 120, 240]}
     assert not captured["base_df"].empty
     assert output_path.exists()

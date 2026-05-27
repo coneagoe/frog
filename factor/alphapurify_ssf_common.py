@@ -30,7 +30,14 @@ def build_ssf_factor_history(history_df: pd.DataFrame) -> pd.DataFrame:
     Returns a dataframe with columns: COL_ANN_DATE, SSF_FACTOR_COUNT, SSF_FACTOR_RATIO, SSF_FACTOR_RATIO_CHANGE
     """
     if history_df is None or history_df.empty:
-        return pd.DataFrame(columns=[COL_ANN_DATE, SSF_FACTOR_COUNT, SSF_FACTOR_RATIO, SSF_FACTOR_RATIO_CHANGE])
+        return pd.DataFrame(
+            columns=[
+                COL_ANN_DATE,
+                SSF_FACTOR_COUNT,
+                SSF_FACTOR_RATIO,
+                SSF_FACTOR_RATIO_CHANGE,
+            ]
+        )
 
     df = history_df.copy()
     # identify SSF holders using shared detector
@@ -38,7 +45,14 @@ def build_ssf_factor_history(history_df: pd.DataFrame) -> pd.DataFrame:
     ssf = df[mask]
 
     if ssf.empty:
-        return pd.DataFrame(columns=[COL_ANN_DATE, SSF_FACTOR_COUNT, SSF_FACTOR_RATIO, SSF_FACTOR_RATIO_CHANGE])
+        return pd.DataFrame(
+            columns=[
+                COL_ANN_DATE,
+                SSF_FACTOR_COUNT,
+                SSF_FACTOR_RATIO,
+                SSF_FACTOR_RATIO_CHANGE,
+            ]
+        )
 
     grouped = (
         ssf.groupby(COL_ANN_DATE)
@@ -80,7 +94,11 @@ def build_stock_factor_panel(
         df_result[factor_name] = pd.NA
         return df_result
 
-    fh = factor_history_df[[COL_ANN_DATE, factor_name]].drop_duplicates().sort_values(COL_ANN_DATE)
+    fh = (
+        factor_history_df[[COL_ANN_DATE, factor_name]]
+        .drop_duplicates()
+        .sort_values(COL_ANN_DATE)
+    )
 
     # ensure both date columns are datetime for merge_asof
     df[COL_DATE] = pd.to_datetime(df[COL_DATE])

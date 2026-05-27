@@ -48,7 +48,9 @@ def _make_top10_history_df() -> pd.DataFrame:
 def _make_daily_history_df() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            COL_DATE: pd.to_datetime(["2024-01-05", "2024-02-05", "2024-04-10", "2024-04-11"]),
+            COL_DATE: pd.to_datetime(
+                ["2024-01-05", "2024-02-05", "2024-04-10", "2024-04-11"]
+            ),
             COL_CLOSE: [10.0, 10.5, 11.0, 11.2],
         }
     )
@@ -134,10 +136,24 @@ def test_build_stock_factor_panel_before_first_announcement_and_exact_match():
     )
 
     # date before first announcement -> NA
-    assert pd.isna(panel.loc[panel[COL_DATE] == pd.Timestamp("2024-03-30"), SSF_FACTOR_RATIO].iloc[0])
+    assert pd.isna(
+        panel.loc[panel[COL_DATE] == pd.Timestamp("2024-03-30"), SSF_FACTOR_RATIO].iloc[
+            0
+        ]
+    )
     # announcement date equal to trading date -> exact value
-    assert panel.loc[panel[COL_DATE] == pd.Timestamp("2024-03-31"), SSF_FACTOR_RATIO].iloc[0] == 2.1
-    assert panel.loc[panel[COL_DATE] == pd.Timestamp("2024-04-10"), SSF_FACTOR_RATIO].iloc[0] == 2.5
+    assert (
+        panel.loc[panel[COL_DATE] == pd.Timestamp("2024-03-31"), SSF_FACTOR_RATIO].iloc[
+            0
+        ]
+        == 2.1
+    )
+    assert (
+        panel.loc[panel[COL_DATE] == pd.Timestamp("2024-04-10"), SSF_FACTOR_RATIO].iloc[
+            0
+        ]
+        == 2.5
+    )
 
 
 def test_build_stock_factor_panel_with_empty_factor_history_returns_na():
@@ -161,12 +177,20 @@ def test_build_ssf_factor_panel_from_db_handles_no_ssf():
 
     def _non_ssf_top10(stock_id, limit_ann_dates=12):
         df = _make_top10_history_df().copy()
-        df[COL_FLOAT_HOLDER_NAME] = ["Alpha Fund", "Beta Fund", "Gamma Fund", "Delta", "Epsilon"]
+        df[COL_FLOAT_HOLDER_NAME] = [
+            "Alpha Fund",
+            "Beta Fund",
+            "Gamma Fund",
+            "Delta",
+            "Epsilon",
+        ]
         return df
 
     storage = SimpleNamespace(
         load_general_info_stock=lambda: stock_info,
-        load_top10_floatholders_history=lambda stock_id, limit_ann_dates=12: _non_ssf_top10(stock_id),
+        load_top10_floatholders_history=lambda stock_id, limit_ann_dates=12: _non_ssf_top10(
+            stock_id
+        ),
         load_history_data_stock=lambda stock_id, period, adjust, start_date=None, end_date=None: (
             _make_daily_history_df()
         ),

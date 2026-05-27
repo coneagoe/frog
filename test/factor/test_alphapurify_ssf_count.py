@@ -82,6 +82,6 @@ def test_main_loads_ssf_count_panel_and_writes_report(tmp_path, monkeypatch):
     assert code == 0
     assert captured["run_called"] is True
     assert captured["factor_name"] == "ssf_count"
-    assert captured["research_cfg"] == {'return_horizons': [20, 60, 120, 240]}
+    assert captured["research_cfg"] == {"return_horizons": [20, 60, 120, 240]}
     assert not captured["base_df"].empty
     assert output_path.exists()
