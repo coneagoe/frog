@@ -1,5 +1,6 @@
 from .config import StorageConfig
 from .model import (
+    BlackroomRecord,
     SSFChangeSignal,
     tb_name_a_stock_basic,
     tb_name_blackroom_record,
@@ -57,5 +58,6 @@ __all__ = [
     "tb_name_stk_limit_a_stock",
     "tb_name_stk_holdernumber",
     "tb_name_top10_floatholders",
+    "BlackroomRecord",
     "tb_name_blackroom_record",
 ]

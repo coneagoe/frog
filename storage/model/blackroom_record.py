@@ -18,7 +18,25 @@ class BlackroomRecord(Base):
         server_default="A",
         comment="市场: A / HK / ETF",
     )
-    reason = Column(Text, nullable=True, comment="禁止买入原因")
+    ban_days = Column(Integer, nullable=True, comment="禁买时长（天），NULL 表示永久")
+    start_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="禁买开始时间，默认为创建时间",
+    )
+    expire_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="到期时间（NULL 表示永不过期），由 start_at + ban_days 计算",
+    )
+    source = Column(
+        String(50),
+        nullable=False,
+        default="manual",
+        server_default="manual",
+        comment="来源: manual / shareholder_reduction 等",
+    )
+    note = Column(Text, nullable=True, comment="备注或禁买原因")
     enabled = Column(
         Boolean,
         nullable=False,
@@ -26,14 +44,16 @@ class BlackroomRecord(Base):
         server_default=text("true"),
         comment="是否启用",
     )
-    expire_at = Column(
-        DateTime(timezone=True),
-        nullable=True,
-        comment="到期时间（NULL 表示永不过期）",
-    )
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
         comment="创建时间",
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="最后更新时间",
     )

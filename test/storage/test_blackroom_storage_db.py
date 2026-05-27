@@ -2,7 +2,8 @@
 黑名单（blackroom）持久化存储的 TDD 测试套件。
 
 覆盖范围：
-  - create_blackroom_record
+  - storage 包导出合约（BlackroomRecord, tb_name_blackroom_record）
+  - create_blackroom_record（所有字段、默认值、ban_days 自动计算 expire_at）
   - get_blackroom_record
   - list_blackroom_records
   - list_active_blackroom_records (honors enabled=True AND expire_at > now)
@@ -16,13 +17,58 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from storage.config import StorageConfig  # noqa: E402
 from storage.storage_db import get_storage, reset_storage  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Export contract
+# ---------------------------------------------------------------------------
+
+
+class TestExportContract:
+    def test_blackroom_record_exported_from_storage(self):
+        import storage
+
+        assert hasattr(
+            storage, "BlackroomRecord"
+        ), "storage must export BlackroomRecord"
+        assert "BlackroomRecord" in storage.__all__
+
+    def test_tb_name_blackroom_record_exported_from_storage(self):
+        import storage
+
+        assert hasattr(storage, "tb_name_blackroom_record")
+        assert "tb_name_blackroom_record" in storage.__all__
+        assert storage.tb_name_blackroom_record == "blackroom_records"
+
+    def test_blackroom_record_exported_from_storage_model(self):
+        from storage.model import BlackroomRecord, tb_name_blackroom_record
+
+        assert BlackroomRecord.__tablename__ == "blackroom_records"
+        assert tb_name_blackroom_record == "blackroom_records"
+
+    def test_blackroom_record_has_approved_schema_fields(self):
+        from storage.model import BlackroomRecord
+
+        columns = {c.name for c in BlackroomRecord.__table__.columns}
+        expected = {
+            "id",
+            "stock_code",
+            "market",
+            "ban_days",
+            "start_at",
+            "expire_at",
+            "source",
+            "note",
+            "enabled",
+            "created_at",
+            "updated_at",
+        }
+        assert expected <= columns, f"Missing columns: {expected - columns}"
 
 
 # ---------------------------------------------------------------------------
@@ -68,30 +114,72 @@ class TestCreateBlackroomRecord:
     def test_returns_persisted_record_with_all_fields(self, sqlite_storage):
         db = sqlite_storage
         expire = datetime(2030, 12, 31, tzinfo=timezone.utc)
+        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
         record = db.create_blackroom_record(
             stock_code="600519",
             market="A",
-            reason="基本面恶化",
-            enabled=True,
+            ban_days=30,
+            start_at=start,
             expire_at=expire,
+            source="manual",
+            note="基本面恶化",
+            enabled=True,
         )
 
         assert record.id is not None
         assert record.stock_code == "600519"
         assert record.market == "A"
-        assert record.reason == "基本面恶化"
+        assert record.ban_days == 30
+        # SQLite strips tz info; compare naive equivalents
+        assert record.start_at.replace(tzinfo=None) == start.replace(tzinfo=None)
+        assert record.expire_at.replace(tzinfo=None) == expire.replace(tzinfo=None)
+        assert record.source == "manual"
+        assert record.note == "基本面恶化"
         assert record.enabled is True
 
-    def test_defaults_market_to_A_and_enabled_to_true(self, sqlite_storage):
+    def test_defaults_market_source_enabled(self, sqlite_storage):
         db = sqlite_storage
 
         record = db.create_blackroom_record(stock_code="000001")
 
         assert record.market == "A"
+        assert record.source == "manual"
         assert record.enabled is True
         assert record.expire_at is None
-        assert record.reason is None
+        assert record.note is None
+        assert record.ban_days is None
+
+    def test_auto_computes_expire_at_from_ban_days(self, sqlite_storage):
+        db = sqlite_storage
+        start = datetime(2025, 6, 1, tzinfo=timezone.utc)
+
+        record = db.create_blackroom_record(
+            stock_code="000001",
+            ban_days=10,
+            start_at=start,
+        )
+
+        expected_expire = (start + timedelta(days=10)).replace(tzinfo=None)
+        # SQLite strips tz info; compare naive equivalents
+        assert record.expire_at.replace(tzinfo=None) == expected_expire
+
+    def test_explicit_expire_at_overrides_ban_days(self, sqlite_storage):
+        db = sqlite_storage
+        explicit_expire = datetime(2099, 1, 1, tzinfo=timezone.utc)
+        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+
+        record = db.create_blackroom_record(
+            stock_code="000001",
+            ban_days=5,
+            start_at=start,
+            expire_at=explicit_expire,
+        )
+
+        # SQLite strips tz info; compare naive equivalents
+        assert record.expire_at.replace(tzinfo=None) == explicit_expire.replace(
+            tzinfo=None
+        )
 
     def test_multiple_records_get_distinct_ids(self, sqlite_storage):
         db = sqlite_storage
@@ -100,6 +188,15 @@ class TestCreateBlackroomRecord:
         r2 = db.create_blackroom_record(stock_code="000002")
 
         assert r1.id != r2.id
+
+    def test_hk_market_record(self, sqlite_storage):
+        db = sqlite_storage
+
+        record = db.create_blackroom_record(
+            stock_code="00700", market="HK", source="manual"
+        )
+
+        assert record.market == "HK"
 
 
 # ---------------------------------------------------------------------------
@@ -251,18 +348,31 @@ class TestListActiveBlackroomRecords:
 class TestUpdateBlackroomRecord:
     def test_updates_allowed_fields(self, sqlite_storage):
         db = sqlite_storage
-        record = db.create_blackroom_record(stock_code="000001", reason="旧理由", enabled=True)
+        record = db.create_blackroom_record(
+            stock_code="000001", note="旧备注", enabled=True
+        )
 
-        updated = db.update_blackroom_record(record.id, reason="新理由", enabled=False)
+        updated = db.update_blackroom_record(record.id, note="新备注", enabled=False)
 
         assert updated is not None
-        assert updated.reason == "新理由"
+        assert updated.note == "新备注"
         assert updated.enabled is False
+
+    def test_updates_source_and_ban_days(self, sqlite_storage):
+        db = sqlite_storage
+        record = db.create_blackroom_record(stock_code="000001")
+
+        updated = db.update_blackroom_record(
+            record.id, source="shareholder_reduction", ban_days=60
+        )
+
+        assert updated.source == "shareholder_reduction"
+        assert updated.ban_days == 60
 
     def test_returns_none_for_missing_id(self, sqlite_storage):
         db = sqlite_storage
 
-        result = db.update_blackroom_record(99999, reason="whatever")
+        result = db.update_blackroom_record(99999, note="whatever")
 
         assert result is None
 

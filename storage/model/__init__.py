@@ -1,6 +1,6 @@
 from .a_stock_basic import AStockBasic, tb_name_a_stock_basic
-from .blackroom_record import BlackroomRecord, tb_name_blackroom_record
 from .base import Base
+from .blackroom_record import BlackroomRecord, tb_name_blackroom_record
 from .daily_basic_a_stock import DailyBasicAStock, tb_name_daily_basic_a_stock
 from .etf_basic import ETFBasic, tb_name_etf_basic
 from .etf_daily import ETFDaily, tb_name_etf_daily

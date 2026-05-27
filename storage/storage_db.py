@@ -1,7 +1,7 @@
 import logging
 import os
 import textwrap
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Any, Dict, List, Literal, Optional, Set, cast
 
@@ -2125,12 +2125,23 @@ class StorageDb:
         self,
         stock_code: str,
         market: str = "A",
-        reason: Optional[str] = None,
-        enabled: bool = True,
+        ban_days: Optional[int] = None,
+        start_at: Optional[datetime] = None,
         expire_at: Optional[datetime] = None,
+        source: str = "manual",
+        note: Optional[str] = None,
+        enabled: bool = True,
     ) -> Any:
-        """创建黑名单记录。"""
+        """创建黑名单记录。
+
+        expire_at 优先使用显式传入值；若未传入且提供了 ban_days，
+        则自动计算为 (start_at 或当前时间) + ban_days 天。
+        """
         from .model.blackroom_record import BlackroomRecord
+
+        effective_start = start_at or datetime.now(timezone.utc)
+        if expire_at is None and ban_days is not None:
+            expire_at = effective_start + timedelta(days=ban_days)
 
         assert self.Session is not None
         session = self.Session()
@@ -2138,9 +2149,12 @@ class StorageDb:
             record = BlackroomRecord(
                 stock_code=stock_code,
                 market=market,
-                reason=reason,
-                enabled=enabled,
+                ban_days=ban_days,
+                start_at=effective_start if start_at is not None else None,
                 expire_at=expire_at,
+                source=source,
+                note=note,
+                enabled=enabled,
             )
             session.add(record)
             session.commit()
@@ -2230,7 +2244,16 @@ class StorageDb:
         """更新黑名单记录。记录不存在时返回 None。"""
         from .model.blackroom_record import BlackroomRecord
 
-        allowed_fields = {"stock_code", "market", "reason", "enabled", "expire_at"}
+        allowed_fields = {
+            "stock_code",
+            "market",
+            "ban_days",
+            "start_at",
+            "expire_at",
+            "source",
+            "note",
+            "enabled",
+        }
         invalid_fields = set(updates) - allowed_fields
         if invalid_fields:
             raise ValueError(f"不支持更新字段: {sorted(invalid_fields)}")
