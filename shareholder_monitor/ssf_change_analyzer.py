@@ -38,10 +38,11 @@ def analyze_ssf_change(
 ) -> dict[str, Any] | None | SSFChangeAnalysisOutcome:
     """Compare the latest two SSF disclosure periods and rank meaningful changes.
 
-    Score combines three bounded components:
+    Score combines four bounded components:
     - event_score: average event weight in [-1, 1] for entry/increase/decrease/exit
-    - count_score: normalized latest holder presence plus holder-count delta in [0, 1]
-    - concentration_score: normalized latest SSF ratio plus ratio delta in [0, 1]
+    - count_change_score: normalized holder-count delta in [-1, 1]
+    - ratio_change_score: normalized SSF total ratio delta in [-1, 1]
+    - ratio_level_score: normalized latest SSF total ratio in [0, 1] (small tie-breaker)
     """
 
     ann_date_series = pd.to_datetime(history_df[COL_ANN_DATE]).dt.date
@@ -114,13 +115,17 @@ def analyze_ssf_change(
     count_prev = int(len(prev_ssf))
 
     event_score = sum(EVENT_WEIGHTS[event] for event in event_types) / len(event_types)
-    # Favor a higher current SSF holder count, then adjust by quarter-over-quarter change.
-    count_score = min(max((count_now - count_prev) + count_now, 0), 5) / 5
-    # Favor a higher current SSF holding ratio, then adjust by quarter-over-quarter change.
-    concentration_score = (
-        min(max(latest_ratio - prev_ratio + latest_ratio, 0.0), 5.0) / 5.0
+    count_change_score = max(min((count_now - count_prev) / 2.0, 1.0), -1.0)
+    ratio_change_score = max(min((latest_ratio - prev_ratio) / 1.5, 1.0), -1.0)
+    # Keep latest ratio as a weak tie-breaker and let ratio delta dominate.
+    ratio_level_score = max(min(latest_ratio / 5.0, 1.0), 0.0)
+    score = round(
+        60 * event_score
+        + 10 * count_change_score
+        + 25 * ratio_change_score
+        + 5 * ratio_level_score,
+        2,
     )
-    score = round(50 * event_score + 20 * count_score + 30 * concentration_score, 2)
 
     return {
         "stock_id": stock_id,

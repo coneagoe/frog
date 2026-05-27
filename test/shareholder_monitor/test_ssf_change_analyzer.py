@@ -120,7 +120,7 @@ def test_analyze_ssf_change_returns_negative_score_when_all_ssf_holders_exit():
     assert signal["event_types"] == ["exit"]
     assert signal["ssf_holder_count_now"] == 0
     assert signal["ssf_holder_count_prev"] == 1
-    assert signal["score"] == -50.0
+    assert signal["score"] < -50.0
 
 
 def test_analyze_ssf_change_returns_exit_signal_when_latest_period_has_no_ssf_holder():
@@ -177,3 +177,46 @@ def test_analyze_ssf_change_aggregates_duplicate_holder_rows_per_period():
             "prev_amount": 600.0,
         },
     ]
+
+
+def test_analyze_ssf_change_prioritizes_ratio_delta_over_static_ratio_level():
+    high_delta_signal = _assert_signal_payload(
+        analyze_ssf_change(
+            "000001",
+            pd.DataFrame(
+                {
+                    "股票代码": ["000001", "000001"],
+                    "公告日期": pd.to_datetime(["2024-03-31", "2023-12-31"]),
+                    "股东名称": ["全国社保基金一一八组合", "全国社保基金一一八组合"],
+                    "持有数量（万股）": [1300.0, 1000.0],
+                    "占总流通股本持股比例": [2.0, 1.0],
+                    "持股变动": [300.0, 0.0],
+                }
+            ),
+        )
+    )
+    low_delta_signal = _assert_signal_payload(
+        analyze_ssf_change(
+            "000002",
+            pd.DataFrame(
+                {
+                    "股票代码": ["000002", "000002"],
+                    "公告日期": pd.to_datetime(["2024-03-31", "2023-12-31"]),
+                    "股东名称": ["全国社保基金四零六组合", "全国社保基金四零六组合"],
+                    "持有数量（万股）": [4100.0, 4000.0],
+                    "占总流通股本持股比例": [4.0, 3.5],
+                    "持股变动": [100.0, 0.0],
+                }
+            ),
+        )
+    )
+
+    assert (
+        high_delta_signal["ssf_total_hold_ratio_change"]
+        > low_delta_signal["ssf_total_hold_ratio_change"]
+    )
+    assert (
+        high_delta_signal["ssf_total_hold_ratio_now"]
+        < low_delta_signal["ssf_total_hold_ratio_now"]
+    )
+    assert high_delta_signal["score"] > low_delta_signal["score"]
