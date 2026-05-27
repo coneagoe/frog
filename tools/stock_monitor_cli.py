@@ -6,6 +6,7 @@ import argparse
 import json
 from typing import Any
 
+from monitor.blackroom_management_service import BlackroomManagementService
 from monitor.target_management_service import (
     TargetManagementService,
     TargetNotFoundError,
@@ -20,6 +21,7 @@ EXIT_INTERNAL_ERROR = 12
 _EXIT_CODE_MAP = {
     "VALIDATION_ERROR": EXIT_VALIDATION_ERROR,
     "NOT_FOUND": EXIT_NOT_FOUND,
+    "STORAGE_ERROR": EXIT_INTERNAL_ERROR,
 }
 
 
@@ -115,6 +117,64 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("status", help="获取监控目标状态汇总")
 
+    # ------------------------------------------------------------------
+    # blackroom subcommand
+    # ------------------------------------------------------------------
+    blackroom_parser = subparsers.add_parser("blackroom", help="黑屋（全局禁买）管理")
+    blackroom_subparsers = blackroom_parser.add_subparsers(
+        dest="blackroom_command", required=True
+    )
+
+    br_add = blackroom_subparsers.add_parser("add", help="添加黑屋记录")
+    br_add.add_argument("--stock-code", required=True, help="股票代码")
+    br_add.add_argument("--market", required=True, help="市场，例如 A/HK/ETF")
+    br_add.add_argument("--ban-days", type=int, required=True, help="禁买天数")
+    br_add.add_argument("--note", default=None, help="备注")
+
+    br_update = blackroom_subparsers.add_parser("update", help="更新黑屋记录")
+    br_update.add_argument(
+        "--id", type=int, required=True, dest="record_id", help="记录ID"
+    )
+    br_update.add_argument("--ban-days", type=int, default=None, help="禁买天数")
+    br_update.add_argument("--note", default=None, help="备注")
+    br_update.add_argument(
+        "--enabled",
+        action="store_const",
+        const=True,
+        default=None,
+        help="启用记录",
+    )
+    br_update.add_argument(
+        "--disabled",
+        action="store_const",
+        const=False,
+        dest="enabled",
+        help="禁用记录",
+    )
+    br_update.add_argument("--start-at", default=None, help="禁买开始时间 (ISO 8601)")
+    br_update.add_argument("--expire-at", default=None, help="禁买到期时间 (ISO 8601)")
+
+    br_remove = blackroom_subparsers.add_parser("remove", help="删除黑屋记录")
+    br_remove.add_argument(
+        "--id", type=int, required=True, dest="record_id", help="记录ID"
+    )
+
+    br_list = blackroom_subparsers.add_parser("list", help="列出黑屋记录")
+    br_list.add_argument(
+        "--active-only",
+        action="store_true",
+        default=False,
+        help="仅列出有效（启用）记录",
+    )
+    br_list.add_argument("--stock-code", default=None, help="按股票代码过滤")
+
+    br_get = blackroom_subparsers.add_parser("get", help="查询单条黑屋记录")
+    br_get.add_argument(
+        "--id", type=int, required=True, dest="record_id", help="记录ID"
+    )
+
+    blackroom_subparsers.add_parser("status", help="获取黑屋状态汇总")
+
     return parser
 
 
@@ -135,7 +195,9 @@ def _to_exit_code(result: dict[str, Any]) -> int:
 
 
 def main(
-    argv: list[str] | None = None, service: TargetManagementService | None = None
+    argv: list[str] | None = None,
+    service: TargetManagementService | None = None,
+    blackroom_service: BlackroomManagementService | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
     service = service or TargetManagementService()
@@ -184,6 +246,10 @@ def main(
                 }
         elif args.command == "status":
             result = service.get_status()
+        elif args.command == "blackroom":
+            result = _handle_blackroom(
+                args, blackroom_service or BlackroomManagementService()
+            )
         else:
             result = {
                 "success": False,
@@ -215,6 +281,57 @@ def main(
 
     _emit(result, json_output=args.json_output)
     return _to_exit_code(result)
+
+
+def _handle_blackroom(
+    args: argparse.Namespace, bsvc: BlackroomManagementService
+) -> dict[str, Any]:
+    cmd = args.blackroom_command
+    if cmd == "add":
+        return bsvc.add_record(
+            stock_code=args.stock_code,
+            market=args.market,
+            ban_days=args.ban_days,
+            note=args.note,
+        )
+    if cmd == "update":
+        updates: dict[str, Any] = {}
+        if args.ban_days is not None:
+            updates["ban_days"] = args.ban_days
+        if args.note is not None:
+            updates["note"] = args.note
+        if args.enabled is not None:
+            updates["enabled"] = args.enabled
+        if args.start_at is not None:
+            from datetime import datetime
+
+            updates["start_at"] = datetime.fromisoformat(args.start_at)
+        if args.expire_at is not None:
+            from datetime import datetime
+
+            updates["expire_at"] = datetime.fromisoformat(args.expire_at)
+        return bsvc.update_record(args.record_id, **updates)
+    if cmd == "remove":
+        return bsvc.remove_record(args.record_id)
+    if cmd == "list":
+        enabled_filter = True if args.active_only else None
+        result = bsvc.list_records(enabled=enabled_filter)
+        if args.stock_code and result.get("data") is not None:
+            result = dict(result)
+            result["data"] = [
+                r for r in result["data"] if r.get("stock_code") == args.stock_code
+            ]
+        return result
+    if cmd == "get":
+        return bsvc.get_record(args.record_id)
+    if cmd == "status":
+        return bsvc.get_status()
+    return {
+        "success": False,
+        "code": "VALIDATION_ERROR",
+        "message": f"unsupported blackroom command: {cmd}",
+        "data": None,
+    }
 
 
 if __name__ == "__main__":
