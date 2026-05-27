@@ -32,6 +32,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import conf  # noqa: E402
 from backtest.bt_common import run  # noqa: E402
+from backtest.buy_guard import filter_explicit_buy_codes  # noqa: E402
 from backtest.my_strategy import MyStrategy  # noqa: E402
 from common.const import SecurityType  # noqa: E402
 
@@ -56,6 +57,7 @@ class RiskParityStrategy(MyStrategy):
     """风险平价策略 - 使用波动率倒数加权"""
 
     stocks: list[str] = []
+    buy_guard_market = "ETF"
     params = (
         ("lookback_days", 60),  # 回看窗口天数
         ("rebalance_freq", 20),  # 再平衡频率（交易日）
@@ -157,6 +159,13 @@ class RiskParityStrategy(MyStrategy):
 
     def _execute_rebalance(self, current_date):
         """执行调仓操作"""
+        buy_codes = set(
+            filter_explicit_buy_codes(
+                [code for code, weight in self.weights.items() if weight > 0.001],
+                market=self.buy_guard_market,
+            )
+        )
+
         # 打印权重
         non_zero_weights = {k: v for k, v in self.weights.items() if v > 0.001}
         print(f"{current_date.isoformat()}: rebalance, weights: {non_zero_weights}")
@@ -172,7 +181,7 @@ class RiskParityStrategy(MyStrategy):
         # 买入目标ETF
         for data in self.datas:
             target = self.weights.get(data._name, 0.0)
-            if target > 0.001:  # 忽略太小的权重
+            if data._name in buy_codes and target > 0.001:  # 忽略太小的权重
                 current_pos = self.getposition(data)
                 if current_pos.size == 0:
                     self.order_target_percent(data, target=target)
