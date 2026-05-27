@@ -305,11 +305,27 @@ def _handle_blackroom(
         if args.start_at is not None:
             from datetime import datetime
 
-            updates["start_at"] = datetime.fromisoformat(args.start_at)
+            try:
+                updates["start_at"] = datetime.fromisoformat(args.start_at)
+            except ValueError:
+                return {
+                    "success": False,
+                    "code": "VALIDATION_ERROR",
+                    "message": f"invalid --start-at value: {args.start_at!r}",
+                    "data": None,
+                }
         if args.expire_at is not None:
             from datetime import datetime
 
-            updates["expire_at"] = datetime.fromisoformat(args.expire_at)
+            try:
+                updates["expire_at"] = datetime.fromisoformat(args.expire_at)
+            except ValueError:
+                return {
+                    "success": False,
+                    "code": "VALIDATION_ERROR",
+                    "message": f"invalid --expire-at value: {args.expire_at!r}",
+                    "data": None,
+                }
         return bsvc.update_record(args.record_id, **updates)
     if cmd == "remove":
         return bsvc.remove_record(args.record_id)

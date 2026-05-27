@@ -451,6 +451,38 @@ def test_blackroom_service_exception_returns_exit_code_12(capsys):
     assert payload["code"] == "INTERNAL_ERROR"
 
 
+def test_blackroom_update_bad_start_at_returns_validation_error(capsys):
+    bsvc = MagicMock()
+
+    exit_code = main(
+        ["--json", "blackroom", "update", "--id", "1", "--start-at", "not-a-date"],
+        blackroom_service=bsvc,
+    )
+
+    assert exit_code == EXIT_VALIDATION_ERROR
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is False
+    assert payload["code"] == "VALIDATION_ERROR"
+    assert "start-at" in payload["message"]
+    bsvc.update_record.assert_not_called()
+
+
+def test_blackroom_update_bad_expire_at_returns_validation_error(capsys):
+    bsvc = MagicMock()
+
+    exit_code = main(
+        ["--json", "blackroom", "update", "--id", "1", "--expire-at", "2024-99-99"],
+        blackroom_service=bsvc,
+    )
+
+    assert exit_code == EXIT_VALIDATION_ERROR
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is False
+    assert payload["code"] == "VALIDATION_ERROR"
+    assert "expire-at" in payload["message"]
+    bsvc.update_record.assert_not_called()
+
+
 def test_existing_target_commands_unaffected_by_blackroom_changes():
     """Regression: existing target/status commands still work when blackroom_service is absent."""
     svc = MagicMock()
