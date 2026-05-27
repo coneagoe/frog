@@ -64,7 +64,7 @@ def test_main_loads_ssf_ratio_change_panel_and_writes_report(tmp_path, monkeypat
         ):
             captured["base_df"] = base_df.copy()
             captured["factor_name"] = factor_name
-            captured["forward_returns"] = forward_returns
+            captured["research_cfg"] = research_cfg
 
         def run(self):
             captured["run_called"] = True
@@ -82,6 +82,6 @@ def test_main_loads_ssf_ratio_change_panel_and_writes_report(tmp_path, monkeypat
     assert code == 0
     assert captured["run_called"] is True
     assert captured["factor_name"] == "ssf_total_hold_ratio_change"
-    assert captured["forward_returns"] == [20, 60, 120, 240]
+    assert captured["research_cfg"] == {'return_horizons': [20, 60, 120, 240]}
     assert not captured["base_df"].empty
     assert output_path.exists()
