@@ -18,7 +18,7 @@ class BlackroomRecord(Base):
         server_default="A",
         comment="市场: A / HK / ETF",
     )
-    ban_days = Column(Integer, nullable=True, comment="禁买时长（天），NULL 表示永久")
+    ban_days = Column(Integer, nullable=True, comment="禁买时长（天），NULL 表示未设定时长")
     start_at = Column(
         DateTime(timezone=True),
         nullable=True,
@@ -27,7 +27,7 @@ class BlackroomRecord(Base):
     expire_at = Column(
         DateTime(timezone=True),
         nullable=True,
-        comment="到期时间（NULL 表示永不过期），由 start_at + ban_days 计算",
+        comment="到期时间，由 start_at + ban_days 计算；NULL 表示无有效到期时间（active 查询不含此类记录）",
     )
     source = Column(
         String(50),

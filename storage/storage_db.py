@@ -2268,6 +2268,9 @@ class StorageDb:
                 current_ban_days = record.ban_days
                 if current_start is not None and current_ban_days is not None:
                     record.expire_at = current_start + timedelta(days=current_ban_days)
+                else:
+                    # One or both recompute inputs are now NULL; clear stale expire_at.
+                    record.expire_at = None
             session.commit()
             session.refresh(record)
             return record

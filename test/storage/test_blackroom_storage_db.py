@@ -196,7 +196,7 @@ class TestCreateBlackroomRecord:
         # expire_at is auto-computed from default start_at + ban_days
         assert record.expire_at is not None
 
-
+    def test_each_record_gets_unique_id(self, sqlite_storage):
         db = sqlite_storage
 
         r1 = db.create_blackroom_record(stock_code="000001")
@@ -441,6 +441,30 @@ class TestUpdateBlackroomRecord:
         updated = db.update_blackroom_record(record.id, ban_days=99, expire_at=explicit_expire)
 
         assert updated.expire_at.replace(tzinfo=None) == explicit_expire.replace(tzinfo=None)
+
+    def test_clears_expire_at_when_ban_days_set_to_none(self, sqlite_storage):
+        """Nulling ban_days must clear expire_at, not leave stale value."""
+        db = sqlite_storage
+        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
+        assert record.expire_at is not None
+
+        updated = db.update_blackroom_record(record.id, ban_days=None)
+
+        assert updated.ban_days is None
+        assert updated.expire_at is None
+
+    def test_clears_expire_at_when_start_at_set_to_none(self, sqlite_storage):
+        """Nulling start_at must clear expire_at, not leave stale value."""
+        db = sqlite_storage
+        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
+        assert record.expire_at is not None
+
+        updated = db.update_blackroom_record(record.id, start_at=None)
+
+        assert updated.start_at is None
+        assert updated.expire_at is None
 
 
 # ---------------------------------------------------------------------------
