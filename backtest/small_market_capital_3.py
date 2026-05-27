@@ -9,7 +9,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import conf  # noqa: E402
 from backtest.bt_common import run  # noqa: E402
-from backtest.buy_guard import filter_explicit_buy_codes  # noqa: E402
 from backtest.my_strategy import MyStrategy  # noqa: E402
 from common.const import (  # noqa: E402
     COL_CLOSE,
@@ -125,7 +124,6 @@ def build_dual_factor_selection(
 
 class SmallMarketCapitalStrategy(MyStrategy):
     stocks: list[str] = []
-    buy_guard_market = "A"
     params = (
         ("top_n", 80),  # 候选池大小（先按小市值截断）
         ("buy_count", 20),  # 每次买入数量
@@ -230,9 +228,6 @@ class SmallMarketCapitalStrategy(MyStrategy):
             buy_count=self.p.buy_count,
             weight_mv=self.p.weight_mv,
             weight_vol=self.p.weight_vol,
-        )
-        selected_stocks = filter_explicit_buy_codes(
-            selected_stocks, market=self.buy_guard_market
         )
         if not selected_stocks:
             print(f"No stocks pass dual factor selection for {date_str}")

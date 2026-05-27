@@ -104,18 +104,6 @@ def test_rebalance_uses_dual_factor_selection(monkeypatch):
         _fake_selection,
     )
 
-    filtered_calls = []
-
-    def _fake_filter(codes, market):
-        filtered_calls.append((codes, market))
-        return ["A"]
-
-    monkeypatch.setattr(
-        "backtest.small_market_capital_3.filter_explicit_buy_codes",
-        _fake_filter,
-        raising=False,
-    )
-
     strategy = SmallMarketCapitalStrategy.__new__(SmallMarketCapitalStrategy)
     strategy.p = type(
         "P",
@@ -133,13 +121,11 @@ def test_rebalance_uses_dual_factor_selection(monkeypatch):
     strategy.datas = [type("D", (), {"_name": "A"})(), type("D", (), {"_name": "B"})()]
     strategy.broker = MagicMock()
     strategy.broker.getposition.return_value = type("Pos", (), {"size": 0})()
-    order_target_percent = MagicMock()
-    monkeypatch.setattr(strategy, "order_target_percent", order_target_percent)
+    strategy.order_target_percent = MagicMock()
 
     strategy.rebalance(now.to_pydatetime().date())
 
     assert len(selected_calls) == 1
     assert selected_calls[0]["top_n"] == 80
     assert selected_calls[0]["buy_count"] == 2
-    assert filtered_calls == [(["A", "B"], "A")]
-    order_target_percent.assert_called_once_with(strategy.datas[0], target=1.0)
+    assert strategy.order_target_percent.call_count == 2

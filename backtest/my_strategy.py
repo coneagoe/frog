@@ -10,7 +10,6 @@ import backtrader as bt
 import pandas as pd
 import plotly.graph_objs as go
 
-from backtest.buy_guard import should_block_positive_target
 from stock import get_security_name
 
 
@@ -77,7 +76,6 @@ class Context:
 
 class MyStrategy(bt.Strategy):
     stocks: list[str] = []
-    buy_guard_market: str | None = None
     params: tuple[tuple[str, Any], ...] = (
         ("target", 0.005),
     )  # default portfolio target weight per position
@@ -91,23 +89,6 @@ class MyStrategy(bt.Strategy):
         self.trades: dict[str, list[Trade]] = {stock: [] for stock in self.stocks}
         for i in range(len(self.stocks)):
             self.context[i].name = self.stocks[i]
-
-    def order_target_percent(self, data=None, target=0.0, **kwargs):
-        market = self.buy_guard_market
-        if (
-            market is not None
-            and data is not None
-            and target > 0
-            and should_block_positive_target(
-                stock_code=data._name,
-                target=target,
-                market=market,
-            )
-        ):
-            logging.info("skip buy target for banned symbol: %s", data._name)
-            return None
-
-        return super().order_target_percent(data=data, target=target, **kwargs)
 
     def next(self):
         for i in range(len(self.datas)):

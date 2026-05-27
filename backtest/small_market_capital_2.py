@@ -9,7 +9,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import conf  # noqa: E402
 from backtest.bt_common import run  # noqa: E402
-from backtest.buy_guard import filter_explicit_buy_codes  # noqa: E402
 from backtest.my_strategy import MyStrategy  # noqa: E402
 from common.const import (  # noqa: E402
     COL_DATE,
@@ -57,7 +56,6 @@ def load_all_stocks(start_date: str, end_date: str) -> list:
 
 class SmallMarketCapitalStrategy(MyStrategy):
     stocks: list[str] = []
-    buy_guard_market = "A"
     params = (
         ("top_n", 50),  # 按市值排序前N只
         ("buy_count", 20),  # 每次买入数量
@@ -150,9 +148,7 @@ class SmallMarketCapitalStrategy(MyStrategy):
         df_sorted = df.sort_values(by=COL_TOTAL_MV, ascending=True)
         df_selected = df_sorted.head(self.p.top_n)
 
-        selected_stocks = filter_explicit_buy_codes(
-            df_selected[COL_STOCK_ID].tolist(), market=self.buy_guard_market
-        )
+        selected_stocks = df_selected[COL_STOCK_ID].tolist()
 
         print(
             f"{date_str}: 调仓完成，筛选出{len(df)}只股票，"
