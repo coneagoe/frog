@@ -2117,6 +2117,166 @@ class StorageDb:
 
         StockMonitorTarget.__table__.create(self.engine, checkfirst=True)
 
+    # ------------------------------------------------------------------
+    # Blackroom record CRUD
+    # ------------------------------------------------------------------
+
+    def create_blackroom_record(
+        self,
+        stock_code: str,
+        market: str = "A",
+        reason: Optional[str] = None,
+        enabled: bool = True,
+        expire_at: Optional[datetime] = None,
+    ) -> Any:
+        """创建黑名单记录。"""
+        from .model.blackroom_record import BlackroomRecord
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            record = BlackroomRecord(
+                stock_code=stock_code,
+                market=market,
+                reason=reason,
+                enabled=enabled,
+                expire_at=expire_at,
+            )
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+            return record
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_blackroom_record(self, record_id: int) -> Optional[Any]:
+        """按 ID 查询单条黑名单记录。"""
+        from .model.blackroom_record import BlackroomRecord
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return session.query(BlackroomRecord).filter_by(id=record_id).first()
+        finally:
+            session.close()
+
+    def list_blackroom_records(
+        self,
+        market: Optional[str] = None,
+        enabled: Optional[bool] = None,
+    ) -> List[Any]:
+        """
+        查询黑名单记录列表（不过滤到期时间）。
+
+        Args:
+            market: 可选，按市场过滤 ('A' / 'HK' / 'ETF')。
+            enabled: 可选，按启用状态过滤。
+        Returns:
+            BlackroomRecord 对象列表。
+        """
+        from .model.blackroom_record import BlackroomRecord
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            query = session.query(BlackroomRecord)
+            if market is not None:
+                query = query.filter_by(market=market)
+            if enabled is not None:
+                query = query.filter_by(enabled=enabled)
+            return cast(List[Any], query.order_by(BlackroomRecord.id.asc()).all())
+        finally:
+            session.close()
+
+    def list_active_blackroom_records(self, market: Optional[str] = None) -> List[Any]:
+        """
+        查询当前有效的黑名单记录。
+
+        有效条件：enabled=True 且 (expire_at IS NULL 或 expire_at > 当前时间)。
+
+        Args:
+            market: 可选，按市场过滤。
+        Returns:
+            BlackroomRecord 对象列表。
+        """
+        from sqlalchemy import or_
+
+        from .model.blackroom_record import BlackroomRecord
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            now = datetime.now(timezone.utc)
+            query = (
+                session.query(BlackroomRecord)
+                .filter_by(enabled=True)
+                .filter(
+                    or_(
+                        BlackroomRecord.expire_at.is_(None),
+                        BlackroomRecord.expire_at > now,
+                    )
+                )
+            )
+            if market is not None:
+                query = query.filter_by(market=market)
+            return cast(List[Any], query.order_by(BlackroomRecord.id.asc()).all())
+        finally:
+            session.close()
+
+    def update_blackroom_record(self, record_id: int, **updates: Any) -> Optional[Any]:
+        """更新黑名单记录。记录不存在时返回 None。"""
+        from .model.blackroom_record import BlackroomRecord
+
+        allowed_fields = {"stock_code", "market", "reason", "enabled", "expire_at"}
+        invalid_fields = set(updates) - allowed_fields
+        if invalid_fields:
+            raise ValueError(f"不支持更新字段: {sorted(invalid_fields)}")
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            record = session.query(BlackroomRecord).filter_by(id=record_id).first()
+            if record is None:
+                return None
+            for key, value in updates.items():
+                setattr(record, key, value)
+            session.commit()
+            session.refresh(record)
+            return record
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def delete_blackroom_record(self, record_id: int) -> bool:
+        """删除黑名单记录。删除成功返回 True，记录不存在返回 False。"""
+        from .model.blackroom_record import BlackroomRecord
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            record = session.query(BlackroomRecord).filter_by(id=record_id).first()
+            if record is None:
+                return False
+            session.delete(record)
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def ensure_blackroom_records_table(self) -> None:
+        """建表（若不存在）。在 DAG 启动时调用一次。"""
+        from .model.blackroom_record import BlackroomRecord  # noqa: F401
+
+        BlackroomRecord.__table__.create(self.engine, checkfirst=True)
+
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
     """
