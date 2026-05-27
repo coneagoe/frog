@@ -56,7 +56,9 @@ class BlackroomManagementService:
             if start_at is not None and not isinstance(start_at, datetime):
                 raise BlackroomValidationError("start_at 必须是 datetime 或 None")
 
-            effective_start = start_at if start_at is not None else datetime.now(timezone.utc)
+            effective_start = (
+                start_at if start_at is not None else datetime.now(timezone.utc)
+            )
 
             record = self.storage.create_blackroom_record(
                 stock_code=stock_code,
@@ -97,7 +99,9 @@ class BlackroomManagementService:
                 self._validate_market(market)
             if enabled is not None:
                 self._validate_bool(enabled, "enabled")
-            records = self.storage.list_blackroom_records(market=market, enabled=enabled)
+            records = self.storage.list_blackroom_records(
+                market=market, enabled=enabled
+            )
             data = [self._serialize(r) for r in records]
             return self._result(True, "OK", "records listed", data)
         except BlackroomValidationError as exc:
@@ -113,7 +117,9 @@ class BlackroomManagementService:
 
             invalid_fields = set(updates) - self._ALLOWED_UPDATE_FIELDS
             if invalid_fields:
-                raise BlackroomValidationError(f"不支持更新字段: {sorted(invalid_fields)}")
+                raise BlackroomValidationError(
+                    f"不支持更新字段: {sorted(invalid_fields)}"
+                )
 
             if "stock_code" in updates:
                 self._validate_stock_code(updates["stock_code"])
@@ -155,7 +161,9 @@ class BlackroomManagementService:
             deleted = self.storage.delete_blackroom_record(record_id)
             if not deleted:
                 raise BlackroomNotFoundError(f"blackroom record not found: {record_id}")
-            return self._result(True, "OK", "record deleted", {"id": record_id, "deleted": True})
+            return self._result(
+                True, "OK", "record deleted", {"id": record_id, "deleted": True}
+            )
         except BlackroomValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
         except BlackroomNotFoundError as exc:
