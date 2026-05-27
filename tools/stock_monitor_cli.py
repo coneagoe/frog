@@ -6,6 +6,17 @@ import argparse
 import json
 from typing import Any
 
+
+class _ParserError(Exception):
+    """Raised by _StableParser instead of calling sys.exit(2)."""
+
+
+class _StableParser(argparse.ArgumentParser):
+    """ArgumentParser that raises _ParserError on bad/missing args."""
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        raise _ParserError(message)
+
 from monitor.blackroom_management_service import BlackroomManagementService
 from monitor.target_management_service import (
     TargetManagementService,
@@ -25,17 +36,22 @@ _EXIT_CODE_MAP = {
 }
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Stock monitor target management CLI")
+def build_parser() -> _StableParser:
+    parser = _StableParser(
+        description="Stock monitor target management CLI",
+        formatter_class=argparse.HelpFormatter,
+    )
     parser.add_argument(
         "--json", action="store_true", dest="json_output", help="输出JSON结果"
     )
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(
+        dest="command", required=True, parser_class=_StableParser
+    )
 
     target_parser = subparsers.add_parser("target", help="监控目标管理")
     target_subparsers = target_parser.add_subparsers(
-        dest="target_command", required=True
+        dest="target_command", required=True, parser_class=_StableParser
     )
 
     add_parser = target_subparsers.add_parser("add", help="添加监控目标")
@@ -122,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ------------------------------------------------------------------
     blackroom_parser = subparsers.add_parser("blackroom", help="黑屋（全局禁买）管理")
     blackroom_subparsers = blackroom_parser.add_subparsers(
-        dest="blackroom_command", required=True
+        dest="blackroom_command", required=True, parser_class=_StableParser
     )
 
     br_add = blackroom_subparsers.add_parser("add", help="添加黑屋记录")
@@ -199,7 +215,19 @@ def main(
     service: TargetManagementService | None = None,
     blackroom_service: BlackroomManagementService | None = None,
 ) -> int:
-    args = build_parser().parse_args(argv)
+    try:
+        args = build_parser().parse_args(argv)
+    except _ParserError as exc:
+        result: dict[str, Any] = {
+            "success": False,
+            "code": "VALIDATION_ERROR",
+            "message": str(exc),
+            "data": None,
+        }
+        json_output = argv is not None and "--json" in argv
+        _emit(result, json_output=json_output)
+        return EXIT_VALIDATION_ERROR
+
     service = service or TargetManagementService()
 
     try:

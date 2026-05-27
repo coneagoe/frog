@@ -483,6 +483,81 @@ def test_blackroom_update_bad_expire_at_returns_validation_error(capsys):
     bsvc.update_record.assert_not_called()
 
 
+def test_blackroom_add_missing_required_args_returns_validation_error(capsys):
+    """argparse missing required arg must exit 10, not raw SystemExit(2)."""
+    bsvc = MagicMock()
+
+    # omit --market and --ban-days
+    exit_code = main(
+        ["--json", "blackroom", "add", "--stock-code", "600519"],
+        blackroom_service=bsvc,
+    )
+
+    assert exit_code == EXIT_VALIDATION_ERROR
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is False
+    assert payload["code"] == "VALIDATION_ERROR"
+    bsvc.add_record.assert_not_called()
+
+
+def test_blackroom_add_bad_ban_days_type_returns_validation_error(capsys):
+    """argparse type=int failure must exit 10, not raw SystemExit(2)."""
+    bsvc = MagicMock()
+
+    exit_code = main(
+        [
+            "--json",
+            "blackroom",
+            "add",
+            "--stock-code",
+            "600519",
+            "--market",
+            "A",
+            "--ban-days",
+            "not-an-int",
+        ],
+        blackroom_service=bsvc,
+    )
+
+    assert exit_code == EXIT_VALIDATION_ERROR
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is False
+    assert payload["code"] == "VALIDATION_ERROR"
+    bsvc.add_record.assert_not_called()
+
+
+def test_blackroom_update_missing_id_returns_validation_error(capsys):
+    """blackroom update --id is required; missing it must exit 10."""
+    bsvc = MagicMock()
+
+    exit_code = main(
+        ["--json", "blackroom", "update", "--ban-days", "5"],
+        blackroom_service=bsvc,
+    )
+
+    assert exit_code == EXIT_VALIDATION_ERROR
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is False
+    assert payload["code"] == "VALIDATION_ERROR"
+    bsvc.update_record.assert_not_called()
+
+
+def test_blackroom_update_bad_id_type_returns_validation_error(capsys):
+    """blackroom update --id type=int failure must exit 10."""
+    bsvc = MagicMock()
+
+    exit_code = main(
+        ["--json", "blackroom", "update", "--id", "abc", "--ban-days", "5"],
+        blackroom_service=bsvc,
+    )
+
+    assert exit_code == EXIT_VALIDATION_ERROR
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["success"] is False
+    assert payload["code"] == "VALIDATION_ERROR"
+    bsvc.update_record.assert_not_called()
+
+
 def test_existing_target_commands_unaffected_by_blackroom_changes():
     """Regression: existing target/status commands still work when blackroom_service is absent."""
     svc = MagicMock()
