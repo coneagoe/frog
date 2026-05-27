@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from datetime import datetime
 from typing import Any
+
+from monitor.blackroom_management_service import BlackroomManagementService
+from monitor.target_management_service import (
+    TargetManagementService,
+    TargetNotFoundError,
+    TargetValidationError,
+)
 
 
 class _ParserError(Exception):
@@ -17,12 +26,6 @@ class _StableParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:  # type: ignore[override]
         raise _ParserError(message)
 
-from monitor.blackroom_management_service import BlackroomManagementService
-from monitor.target_management_service import (
-    TargetManagementService,
-    TargetNotFoundError,
-    TargetValidationError,
-)
 
 EXIT_OK = 0
 EXIT_VALIDATION_ERROR = 10
@@ -224,7 +227,8 @@ def main(
             "message": str(exc),
             "data": None,
         }
-        json_output = argv is not None and "--json" in argv
+        effective_argv = argv if argv is not None else sys.argv[1:]
+        json_output = "--json" in effective_argv
         _emit(result, json_output=json_output)
         return EXIT_VALIDATION_ERROR
 
@@ -331,8 +335,6 @@ def _handle_blackroom(
         if args.enabled is not None:
             updates["enabled"] = args.enabled
         if args.start_at is not None:
-            from datetime import datetime
-
             try:
                 updates["start_at"] = datetime.fromisoformat(args.start_at)
             except ValueError:
@@ -343,8 +345,6 @@ def _handle_blackroom(
                     "data": None,
                 }
         if args.expire_at is not None:
-            from datetime import datetime
-
             try:
                 updates["expire_at"] = datetime.fromisoformat(args.expire_at)
             except ValueError:
