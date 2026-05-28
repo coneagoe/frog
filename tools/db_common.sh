@@ -18,13 +18,19 @@ BUSINESS_TABLES=(
   history_data_daily_etf_hfq
   history_data_weekly_etf_qfq
   history_data_weekly_etf_hfq
+  history_data_daily_fund
   history_data_daily_hk_stock_hfq
   history_data_weekly_hk_stock_hfq
   history_data_monthly_hk_stock_hfq
   stk_limit_a_stock
+  stk_holdernumber
   suspend_d_a_stock
+  top10_floatholders
+  ssf_change_signals
   etf_basic
   etf_daily
+  stock_monitor_targets
+  blackroom_records
 )
 
 # Common database configuration defaults
