@@ -1,5 +1,6 @@
 from .a_stock_basic import AStockBasic, tb_name_a_stock_basic
 from .base import Base
+from .blackroom_record import BlackroomRecord, tb_name_blackroom_record
 from .daily_basic_a_stock import DailyBasicAStock, tb_name_daily_basic_a_stock
 from .etf_basic import ETFBasic, tb_name_etf_basic
 from .etf_daily import ETFDaily, tb_name_etf_daily
@@ -88,4 +89,6 @@ __all__ = [
     "tb_name_history_data_daily_fund",
     "StockMonitorTarget",
     "tb_name_stock_monitor_target",
+    "BlackroomRecord",
+    "tb_name_blackroom_record",
 ]
