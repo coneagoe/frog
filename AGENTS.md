@@ -2,63 +2,55 @@
 
 ## Command Rules
 - Critical: use `poetry run` for Python commands in this repo. Do not use bare `python` or `python3` for project tasks.
-- Prefer the AGENTS command set below over ad-hoc alternatives.
-- Repository-local agent skills live under `.agents/skills/`; `update_doc` can still be used manually, and the root commit skill now invokes it automatically before Copilot-driven commits as part of the doc sync check.
+- Repository-local agent skills live under `.agents/skills/`; the commit workflow invokes `update_doc` before committing.
 
 ## Build And Test
 ```bash
-# Setup
 poetry install --with dev
 poetry run pre-commit install
 
-# Quality
-poetry run pre-commit run
+# CI gates, in order
 poetry run pre-commit run --all-files
+poetry run pytest test
+
+# Focused checks
 poetry run black .
 poetry run isort .
 poetry run flake8 --max-line-length=120
 poetry run mypy
 
-# Tests
-poetry run pytest test
-poetry run pytest -v test
-poetry run pytest test/download/dl/test_downloader.py
-poetry run pytest test/download/dl/test_downloader.py::TestDownloader::test_dl_general_info_stock
+# Single test
+poetry run pytest test/path/to/test_file.py::TestClass::test_method
 ```
 
 ## Architecture
-- `core/`: market abstraction and registry pattern (`IMarket`, `BaseMarket`, `market_registry.py`).
-- `download/`: data source orchestration (akshare, baostock, tushare) via `DownloadManager` and downloader modules.
-- `storage/`: SQLAlchemy-based persistence for PostgreSQL/TimescaleDB.
-- `dags/`: Airflow orchestration; shared DAG helpers live in `dags/common_dags.py`.
-- End-to-end flow: data download -> storage -> analysis/backtest -> triggers/strategies.
+- `download/`: data source orchestration (akshare, baostock, tushare) via `DownloadManager` and `download/dl/downloader.py` (the provider switchboard).
+- `storage/`: SQLAlchemy-based persistence for PostgreSQL/TimescaleDB; singleton via `get_storage()`, reset with `reset_storage()`.
+- `conf/global_settings.py` is the bootstrap entrypoint: `conf.parse_config()` reads `config.ini` into env vars and is called by many scripts/tasks.
+- `dags/`: Airflow orchestration; shared helpers in `dags/common_dags.py` (import bootstrap via `FROG_PROJECT_ROOT` or `/opt/airflow/frog`, alert parsing, partition fan-out).
+- `task/`: Celery task wrappers around `tools/` and `backtest/` entrypoints; wired via `celery_app.py`.
+- End-to-end data flow: provider APIs -> download/ -> storage/ -> analysis/backtest -> triggers.
 
 ## Conventions
-- Python: 3.11+ (CI targets 3.12).
-- Formatting: Black with 120-char line length.
-- Imports: isort with Black profile; stdlib, third-party, local grouping.
-- Naming: `snake_case` for functions/variables/files, `PascalCase` for classes, `UPPER_SNAKE_CASE` for constants.
-- When adding or removing storage tables, update `tools/db_common.sh` at the same time so `tools/db_export.sh` and `tools/db_import.sh` stay in sync.
-- When generating Git commit messages, extract the core change from the diff as the title, then use the body to list the concrete modification points instead of relying on a generic summary.
-- Domain conventions: Chinese comments/messages and Chinese column names are acceptable and common.
-- Config entry point: `conf.parse_config()`.
+- Python 3.11+ (CI targets 3.12). Formatting: Black, 120-char line length. Imports: isort with Black profile.
+- Poetry `package-mode = false`; tests set `pythonpath = ["."]`, so imports rely on the repo root rather than an installed package.
+- Chinese comments/messages and Chinese column names are common and acceptable.
+- Storage tables: when adding or removing, update `tools/db_common.sh` so `db_export.sh`/`db_import.sh` stay in sync.
+- LF line endings enforced via `.gitattributes`; `pre-commit` runs on staged files only; trailing-whitespace fixer excludes `*.csv`.
+- Do not change DAG schedule, dependencies, retries, task boundaries, or SLA unless explicitly requested.
 
 ## Testing Patterns
-- Use pytest with Arrange-Act-Assert.
 - Mock external providers (`akshare`, `baostock`, `tushare`) instead of live calls.
-- Many tests rely on explicit import-path setup:
+- Many tests manipulate `sys.path` explicitly:
 ```python
-import os
-import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 ```
-- Storage layer uses singleton-style helpers; reset shared state in tests when needed (for example via `reset_storage()`).
-
-## Airflow And Environment Notes
-- Airflow container path fallback is typically `/opt/airflow/frog`; DAGs may also read `FROG_PROJECT_ROOT`.
-- Do not change DAG schedule, dependencies, retries, task boundaries, or SLA unless explicitly requested.
-- Line endings are LF-enforced via `.gitattributes`. On Windows, if needed, run `git add --renormalize .` once.
+- Storage singleton must be reset in tests via `reset_storage()` when shared state needs clearing.
 
 ## Type Checking Scope
-- Mypy is intentionally relaxed for legacy areas and excludes parts of the repo (see `pyproject.toml`).
-- Keep changes type-aware where checking is enabled, but do not force large refactors in excluded modules.
+- Mypy is intentionally relaxed for legacy areas: `app.*`, `stock.*`, `fund.*`, `tools.*`, `backtest.deprecate.*`, and third-party libs without stubs (`akshare`, `retrying`, `baostock`, `tushare`). See `pyproject.toml` for full overrides.
+- Keep changes type-aware where checking is enabled; do not force large refactors in excluded modules.
+
+## Detailed Reference
+- `CLAUDE.md` in the repo root contains comprehensive Docker setup, service topology, env vars, and Airflow config.
+- `.github/copilot-instructions.md` has additional architecture and convention notes.

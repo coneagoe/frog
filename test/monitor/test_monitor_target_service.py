@@ -218,9 +218,7 @@ def test_custom_errors_are_exposed_for_validation_and_not_found_paths():
 
 def test_service_uses_default_storage_when_not_provided():
     fake_storage = MagicMock()
-    with patch(
-        "monitor.monitor_target_service.get_storage", return_value=fake_storage
-    ):
+    with patch("monitor.monitor_target_service.get_storage", return_value=fake_storage):
         service = MonitorTargetService()
 
     assert service.storage is fake_storage

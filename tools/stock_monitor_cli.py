@@ -9,13 +9,13 @@ from datetime import datetime
 from typing import Any
 
 from monitor.blackroom_management_service import BlackroomManagementService
-from monitor.shareholder_reduction_blackroom_sync import (
-    ShareholderReductionBlackroomSyncService,
-)
 from monitor.monitor_target_service import (
     MonitorTargetService,
     TargetNotFoundError,
     TargetValidationError,
+)
+from monitor.shareholder_reduction_blackroom_sync import (
+    ShareholderReductionBlackroomSyncService,
 )
 
 
