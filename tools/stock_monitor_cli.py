@@ -292,7 +292,7 @@ def main(
             result = _handle_blackroom(
                 args,
                 blackroom_service or BlackroomManagementService(),
-                sync_service or ShareholderReductionBlackroomSyncService(),
+                sync_service,
             )
         else:
             result = {
@@ -330,7 +330,7 @@ def main(
 def _handle_blackroom(
     args: argparse.Namespace,
     bsvc: BlackroomManagementService,
-    sync_service: ShareholderReductionBlackroomSyncService,
+    sync_service: ShareholderReductionBlackroomSyncService | None = None,
 ) -> dict[str, Any]:
     cmd = args.blackroom_command
     if cmd == "add":
@@ -385,7 +385,8 @@ def _handle_blackroom(
     if cmd == "status":
         return bsvc.get_status()
     if cmd == "sync-shareholder-reduction":
-        return sync_service.sync(
+        effective_sync_service = sync_service or ShareholderReductionBlackroomSyncService()
+        return effective_sync_service.sync(
             start_date=args.start_date, end_date=args.end_date, ban_days=args.ban_days
         )
     return {

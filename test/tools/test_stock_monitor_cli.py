@@ -642,6 +642,30 @@ def test_blackroom_command_succeeds_when_target_service_init_fails(capsys):
     assert "OK" in out
 
 
+def test_blackroom_command_succeeds_when_sync_service_init_fails(capsys):
+    """Regression: non-sync blackroom commands must not instantiate sync service."""
+    from unittest.mock import patch
+
+    bsvc = MagicMock()
+    bsvc.get_status.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "status fetched",
+        "data": {"total": 0},
+    }
+
+    with patch(
+        "tools.stock_monitor_cli.ShareholderReductionBlackroomSyncService",
+        side_effect=RuntimeError("sync storage unavailable"),
+    ):
+        exit_code = main(["blackroom", "status"], blackroom_service=bsvc)
+
+    assert exit_code == 0
+    bsvc.get_status.assert_called_once_with()
+    out = capsys.readouterr().out
+    assert "OK" in out
+
+
 def test_existing_target_commands_unaffected_by_blackroom_changes():
     """Regression: existing target/status commands still work when blackroom_service is absent."""
     svc = MagicMock()
