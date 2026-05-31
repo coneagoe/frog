@@ -451,7 +451,7 @@ def test_blackroom_sync_inits_sync_service_with_injected_blackroom_service():
     }
 
     with patch(
-        "tools.stock_monitor_cli.ShareholderReductionBlackroomSyncService",
+        "tools.stock_monitor_cli.ShareholderReductionPunishmentService",
         return_value=created_sync_service,
     ) as sync_ctor:
         exit_code = main(
@@ -724,7 +724,7 @@ def test_blackroom_command_succeeds_when_sync_service_init_fails(capsys):
     }
 
     with patch(
-        "tools.stock_monitor_cli.ShareholderReductionBlackroomSyncService",
+        "tools.stock_monitor_cli.ShareholderReductionPunishmentService",
         side_effect=RuntimeError("sync storage unavailable"),
     ):
         exit_code = main(["blackroom", "status"], blackroom_service=bsvc)

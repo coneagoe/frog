@@ -14,8 +14,8 @@ from monitor.monitor_target_service import (
     TargetNotFoundError,
     TargetValidationError,
 )
-from monitor.shareholder_reduction_blackroom_sync import (
-    ShareholderReductionBlackroomSyncService,
+from monitor.shareholder_reduction_punishment import (
+    ShareholderReductionPunishmentService,
 )
 
 
@@ -226,7 +226,7 @@ def main(
     argv: list[str] | None = None,
     service: MonitorTargetService | None = None,
     blackroom_service: BlackroomManagementService | None = None,
-    sync_service: ShareholderReductionBlackroomSyncService | None = None,
+    sync_service: ShareholderReductionPunishmentService | None = None,
 ) -> int:
     try:
         args = build_parser().parse_args(argv)
@@ -330,7 +330,7 @@ def main(
 def _handle_blackroom(
     args: argparse.Namespace,
     bsvc: BlackroomManagementService | None = None,
-    sync_service: ShareholderReductionBlackroomSyncService | None = None,
+    sync_service: ShareholderReductionPunishmentService | None = None,
 ) -> dict[str, Any]:
     cmd = args.blackroom_command
 
@@ -391,7 +391,7 @@ def _handle_blackroom(
     if cmd == "sync-shareholder-reduction":
         effective_sync_service = (
             sync_service
-            or ShareholderReductionBlackroomSyncService(blackroom_service=_get_bsvc())
+            or ShareholderReductionPunishmentService(blackroom_service=_get_bsvc())
         )
         return effective_sync_service.sync(
             start_date=args.start_date, end_date=args.end_date, ban_days=args.ban_days

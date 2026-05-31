@@ -1,4 +1,4 @@
-"""Sync shareholder-reduction announcements into blackroom bans."""
+"""Apply shareholder-reduction punishment through blackroom bans."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 from monitor.blackroom_management_service import BlackroomManagementService
 
 
-class ShareholderReductionBlackroomSyncService:
+class ShareholderReductionPunishmentService:
     _DATE_PATTERN = re.compile(r"^\d{8}$")
 
     def __init__(
