@@ -91,18 +91,18 @@ poetry run python -m tools.stock_monitor_cli --json blackroom status
 ```bash
 # 使用默认禁买天数（180 天），注意 CLI 直接将参数原样传给同步服务
 poetry run python -m tools.stock_monitor_cli --json blackroom sync-shareholder-reduction \
-  --start-date 2024-01-01 \
-  --end-date 2024-01-31
+  --start-date 20240101 \
+  --end-date 20240131
 
 # 指定自定义禁买天数（例如 365 天）
 poetry run python -m tools.stock_monitor_cli --json blackroom sync-shareholder-reduction \
-  --start-date 2024-02-01 \
-  --end-date 2024-02-29 \
+  --start-date 20240201 \
+  --end-date 20240229 \
   --ban-days 365
 ```
 
 - 说明：
-  - CLI 接受的 start-date / end-date 字符串会原样传递给同步服务（测试用例也以 "2024-01-01" 形式传递）。同步服务内部会在需要时解析或校验日期格式。
+  - CLI 接受的 start-date / end-date 字符串会原样传递给同步服务（测试用例也以 "20240101" 形式传递）。同步服务内部会在需要时解析或校验日期格式。
   - 同步过程中会调用黑屋检查（blackroom check）并对未禁买的股票调用黑屋添加（source 字段为 "shareholder_reduction"）。
   - 成功时返回 JSON（使用 --json 输出）示例：
 
