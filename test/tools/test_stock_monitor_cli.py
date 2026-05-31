@@ -393,9 +393,9 @@ def test_blackroom_sync_shareholder_reduction_calls_sync_service():
             "blackroom",
             "sync-shareholder-reduction",
             "--start-date",
-            "2024-01-01",
+            "20240101",
             "--end-date",
-            "2024-01-31",
+            "20240131",
         ],
         blackroom_service=bsvc,
         sync_service=sync_service,
@@ -403,7 +403,7 @@ def test_blackroom_sync_shareholder_reduction_calls_sync_service():
 
     assert exit_code == 0
     sync_service.sync.assert_called_once_with(
-        start_date="2024-01-01", end_date="2024-01-31", ban_days=180
+        start_date="20240101", end_date="20240131", ban_days=180
     )
 
 
@@ -422,9 +422,9 @@ def test_blackroom_sync_shareholder_reduction_custom_ban_days():
             "blackroom",
             "sync-shareholder-reduction",
             "--start-date",
-            "2024-02-01",
+            "20240201",
             "--end-date",
-            "2024-02-29",
+            "20240229",
             "--ban-days",
             "365",
         ],
@@ -434,7 +434,41 @@ def test_blackroom_sync_shareholder_reduction_custom_ban_days():
 
     assert exit_code == 0
     sync_service.sync.assert_called_once_with(
-        start_date="2024-02-01", end_date="2024-02-29", ban_days=365
+        start_date="20240201", end_date="20240229", ban_days=365
+    )
+
+
+def test_blackroom_sync_with_injected_sync_service_does_not_init_blackroom_service():
+    """Regression: sync command with injected sync service should not instantiate blackroom service."""
+    from unittest.mock import patch
+
+    sync_service = MagicMock()
+    sync_service.sync.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "synced",
+        "data": {"synced_count": 2},
+    }
+
+    with patch(
+        "tools.stock_monitor_cli.BlackroomManagementService",
+        side_effect=RuntimeError("blackroom init should not happen"),
+    ):
+        exit_code = main(
+            [
+                "blackroom",
+                "sync-shareholder-reduction",
+                "--start-date",
+                "20240101",
+                "--end-date",
+                "20240131",
+            ],
+            sync_service=sync_service,
+        )
+
+    assert exit_code == 0
+    sync_service.sync.assert_called_once_with(
+        start_date="20240101", end_date="20240131", ban_days=180
     )
 
 

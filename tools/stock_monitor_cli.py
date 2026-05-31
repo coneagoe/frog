@@ -291,7 +291,7 @@ def main(
         elif args.command == "blackroom":
             result = _handle_blackroom(
                 args,
-                blackroom_service or BlackroomManagementService(),
+                blackroom_service,
                 sync_service,
             )
         else:
@@ -329,12 +329,16 @@ def main(
 
 def _handle_blackroom(
     args: argparse.Namespace,
-    bsvc: BlackroomManagementService,
+    bsvc: BlackroomManagementService | None = None,
     sync_service: ShareholderReductionBlackroomSyncService | None = None,
 ) -> dict[str, Any]:
     cmd = args.blackroom_command
+
+    def _get_bsvc() -> BlackroomManagementService:
+        return bsvc or BlackroomManagementService()
+
     if cmd == "add":
-        return bsvc.add_record(
+        return _get_bsvc().add_record(
             stock_code=args.stock_code,
             market=args.market,
             ban_days=args.ban_days,
@@ -368,12 +372,12 @@ def _handle_blackroom(
                     "message": f"invalid --expire-at value: {args.expire_at!r}",
                     "data": None,
                 }
-        return bsvc.update_record(args.record_id, **updates)
+        return _get_bsvc().update_record(args.record_id, **updates)
     if cmd == "remove":
-        return bsvc.remove_record(args.record_id)
+        return _get_bsvc().remove_record(args.record_id)
     if cmd == "list":
         enabled_filter = True if args.active_only else None
-        result = bsvc.list_records(enabled=enabled_filter)
+        result = _get_bsvc().list_records(enabled=enabled_filter)
         if args.stock_code and result.get("data") is not None:
             result = dict(result)
             result["data"] = [
@@ -381,9 +385,9 @@ def _handle_blackroom(
             ]
         return result
     if cmd == "get":
-        return bsvc.get_record(args.record_id)
+        return _get_bsvc().get_record(args.record_id)
     if cmd == "status":
-        return bsvc.get_status()
+        return _get_bsvc().get_status()
     if cmd == "sync-shareholder-reduction":
         effective_sync_service = (
             sync_service or ShareholderReductionBlackroomSyncService()
