@@ -36,7 +36,7 @@ class BlackroomRecord(Base):
         nullable=False,
         default="manual",
         server_default="manual",
-        comment="来源: manual / shareholder_reduction 等",
+        comment="来源: manual / shareholder_selling 等",
     )
     note = Column(Text, nullable=True, comment="备注或禁买原因")
     enabled = Column(

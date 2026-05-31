@@ -386,10 +386,10 @@ class TestUpdateBlackroomRecord:
         record = db.create_blackroom_record(stock_code="000001")
 
         updated = db.update_blackroom_record(
-            record.id, source="shareholder_reduction", ban_days=60
+            record.id, source="shareholder_selling", ban_days=60
         )
 
-        assert updated.source == "shareholder_reduction"
+        assert updated.source == "shareholder_selling"
         assert updated.ban_days == 60
 
     def test_returns_none_for_missing_id(self, sqlite_storage):

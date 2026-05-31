@@ -1,4 +1,4 @@
-"""Apply shareholder-reduction punishment through blackroom bans."""
+"""Apply shareholder-selling punishment through blackroom bans."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 from monitor.blackroom_management_service import BlackroomManagementService
 
 
-class ShareholderReductionPunishmentService:
+class ShareholderSellingPunishmentService:
     _DATE_PATTERN = re.compile(r"^\d{8}$")
 
     def __init__(
@@ -67,7 +67,7 @@ class ShareholderReductionPunishmentService:
                     stock_code=stock_code,
                     market=market,
                     ban_days=ban_days,
-                    source="shareholder_reduction",
+                    source="shareholder_selling",
                     note=note,
                 )
                 if not add_result.get("success"):

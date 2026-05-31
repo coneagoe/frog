@@ -14,9 +14,7 @@ from monitor.monitor_target_service import (
     TargetNotFoundError,
     TargetValidationError,
 )
-from monitor.shareholder_reduction_punishment import (
-    ShareholderReductionPunishmentService,
-)
+from monitor.shareholder_selling_punishment import ShareholderSellingPunishmentService
 
 
 class _ParserError(Exception):
@@ -197,7 +195,7 @@ def build_parser() -> _StableParser:
 
     blackroom_subparsers.add_parser("status", help="获取黑屋状态汇总")
     br_sync = blackroom_subparsers.add_parser(
-        "sync-shareholder-reduction", help="同步股东减持公告到黑屋"
+        "sync-shareholder-selling", help="同步股东减持公告到黑屋"
     )
     br_sync.add_argument("--start-date", required=True, help="开始日期 (YYYYMMDD)")
     br_sync.add_argument("--end-date", required=True, help="结束日期 (YYYYMMDD)")
@@ -226,7 +224,7 @@ def main(
     argv: list[str] | None = None,
     service: MonitorTargetService | None = None,
     blackroom_service: BlackroomManagementService | None = None,
-    sync_service: ShareholderReductionPunishmentService | None = None,
+    sync_service: ShareholderSellingPunishmentService | None = None,
 ) -> int:
     try:
         args = build_parser().parse_args(argv)
@@ -330,7 +328,7 @@ def main(
 def _handle_blackroom(
     args: argparse.Namespace,
     bsvc: BlackroomManagementService | None = None,
-    sync_service: ShareholderReductionPunishmentService | None = None,
+    sync_service: ShareholderSellingPunishmentService | None = None,
 ) -> dict[str, Any]:
     cmd = args.blackroom_command
 
@@ -388,10 +386,9 @@ def _handle_blackroom(
         return _get_bsvc().get_record(args.record_id)
     if cmd == "status":
         return _get_bsvc().get_status()
-    if cmd == "sync-shareholder-reduction":
-        effective_sync_service = (
-            sync_service
-            or ShareholderReductionPunishmentService(blackroom_service=_get_bsvc())
+    if cmd == "sync-shareholder-selling":
+        effective_sync_service = sync_service or ShareholderSellingPunishmentService(
+            blackroom_service=_get_bsvc()
         )
         return effective_sync_service.sync(
             start_date=args.start_date, end_date=args.end_date, ban_days=args.ban_days

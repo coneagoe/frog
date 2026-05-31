@@ -165,15 +165,15 @@ def test_add_record_accepts_hk_and_etf_markets():
         assert result["success"] is True, f"Expected success for market={market}"
 
 
-def test_add_record_accepts_shareholder_reduction_source():
+def test_add_record_accepts_shareholder_selling_source():
     storage = MagicMock()
     storage.create_blackroom_record.return_value = _make_record(
-        source="shareholder_reduction"
+        source="shareholder_selling"
     )
     service = BlackroomManagementService(storage=storage)
 
     result = service.add_record(
-        stock_code="600519", market="A", ban_days=90, source="shareholder_reduction"
+        stock_code="600519", market="A", ban_days=90, source="shareholder_selling"
     )
 
     assert result["success"] is True

@@ -18,7 +18,7 @@ class BlackroomNotFoundError(LookupError):
 
 class BlackroomManagementService:
     _ALLOWED_MARKETS = {"A", "HK", "ETF"}
-    _ALLOWED_SOURCES = {"manual", "shareholder_reduction"}
+    _ALLOWED_SOURCES = {"manual", "shareholder_selling"}
     _ALLOWED_UPDATE_FIELDS = {
         "stock_code",
         "market",

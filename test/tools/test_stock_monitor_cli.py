@@ -378,7 +378,7 @@ def test_blackroom_status_calls_service():
     bsvc.get_status.assert_called_once_with()
 
 
-def test_blackroom_sync_shareholder_reduction_calls_sync_service():
+def test_blackroom_sync_shareholder_selling_calls_sync_service():
     bsvc = MagicMock()
     sync_service = MagicMock()
     sync_service.sync.return_value = {
@@ -391,7 +391,7 @@ def test_blackroom_sync_shareholder_reduction_calls_sync_service():
     exit_code = main(
         [
             "blackroom",
-            "sync-shareholder-reduction",
+            "sync-shareholder-selling",
             "--start-date",
             "20240101",
             "--end-date",
@@ -407,7 +407,7 @@ def test_blackroom_sync_shareholder_reduction_calls_sync_service():
     )
 
 
-def test_blackroom_sync_shareholder_reduction_custom_ban_days():
+def test_blackroom_sync_shareholder_selling_custom_ban_days():
     bsvc = MagicMock()
     sync_service = MagicMock()
     sync_service.sync.return_value = {
@@ -420,7 +420,7 @@ def test_blackroom_sync_shareholder_reduction_custom_ban_days():
     exit_code = main(
         [
             "blackroom",
-            "sync-shareholder-reduction",
+            "sync-shareholder-selling",
             "--start-date",
             "20240201",
             "--end-date",
@@ -451,13 +451,13 @@ def test_blackroom_sync_inits_sync_service_with_injected_blackroom_service():
     }
 
     with patch(
-        "tools.stock_monitor_cli.ShareholderReductionPunishmentService",
+        "tools.stock_monitor_cli.ShareholderSellingPunishmentService",
         return_value=created_sync_service,
     ) as sync_ctor:
         exit_code = main(
             [
                 "blackroom",
-                "sync-shareholder-reduction",
+                "sync-shareholder-selling",
                 "--start-date",
                 "20240201",
                 "--end-date",
@@ -492,7 +492,7 @@ def test_blackroom_sync_with_injected_sync_service_does_not_init_blackroom_servi
         exit_code = main(
             [
                 "blackroom",
-                "sync-shareholder-reduction",
+                "sync-shareholder-selling",
                 "--start-date",
                 "20240101",
                 "--end-date",
@@ -724,7 +724,7 @@ def test_blackroom_command_succeeds_when_sync_service_init_fails(capsys):
     }
 
     with patch(
-        "tools.stock_monitor_cli.ShareholderReductionPunishmentService",
+        "tools.stock_monitor_cli.ShareholderSellingPunishmentService",
         side_effect=RuntimeError("sync storage unavailable"),
     ):
         exit_code = main(["blackroom", "status"], blackroom_service=bsvc)

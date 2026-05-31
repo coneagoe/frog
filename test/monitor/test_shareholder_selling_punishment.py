@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 
-from monitor.shareholder_reduction_punishment import (
-    ShareholderReductionPunishmentService,
+from monitor.shareholder_selling_punishment import (
+    ShareholderSellingPunishmentService,
 )
 
 
@@ -39,9 +39,7 @@ def test_sync_dedupes_per_stock_skips_existing_and_adds_new(monkeypatch):
         "data": {"id": 11},
     }
 
-    service = ShareholderReductionPunishmentService(
-        blackroom_service=blackroom_service
-    )
+    service = ShareholderSellingPunishmentService(blackroom_service=blackroom_service)
 
     result = service.sync(start_date="20250101", end_date="20250131", ban_days=30)
 
@@ -65,13 +63,13 @@ def test_sync_dedupes_per_stock_skips_existing_and_adds_new(monkeypatch):
         stock_code="000001",
         market="A",
         ban_days=30,
-        source="shareholder_reduction",
+        source="shareholder_selling",
         note="股东减持公告 20250103 / 股东C",
     )
 
 
 def test_sync_rejects_invalid_date_range():
-    service = ShareholderReductionPunishmentService(blackroom_service=MagicMock())
+    service = ShareholderSellingPunishmentService(blackroom_service=MagicMock())
 
     result = service.sync(start_date="20250131", end_date="20250101", ban_days=30)
 
@@ -81,7 +79,7 @@ def test_sync_rejects_invalid_date_range():
 
 
 def test_sync_rejects_invalid_date_format():
-    service = ShareholderReductionPunishmentService(blackroom_service=MagicMock())
+    service = ShareholderSellingPunishmentService(blackroom_service=MagicMock())
 
     result = service.sync(start_date="2025-01-01", end_date="20250131", ban_days=30)
 
@@ -98,9 +96,7 @@ def test_sync_returns_success_with_zero_counts_when_tushare_empty(monkeypatch):
     _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))
 
     blackroom_service = MagicMock()
-    service = ShareholderReductionPunishmentService(
-        blackroom_service=blackroom_service
-    )
+    service = ShareholderSellingPunishmentService(blackroom_service=blackroom_service)
 
     result = service.sync(start_date="20250101", end_date="20250131", ban_days=30)
 
@@ -124,7 +120,7 @@ def test_sync_returns_storage_error_when_tushare_client_creation_fails(monkeypat
     monkeypatch.setenv("TUSHARE_TOKEN", "token")
 
     _install_tushare_stub(monkeypatch, MagicMock(side_effect=RuntimeError("boom")))
-    service = ShareholderReductionPunishmentService(blackroom_service=MagicMock())
+    service = ShareholderSellingPunishmentService(blackroom_service=MagicMock())
 
     result = service.sync(start_date="20250101", end_date="20250131", ban_days=30)
 
@@ -149,9 +145,7 @@ def test_sync_stops_and_propagates_when_check_fails(monkeypatch):
         "message": "check failed",
         "data": None,
     }
-    service = ShareholderReductionPunishmentService(
-        blackroom_service=blackroom_service
-    )
+    service = ShareholderSellingPunishmentService(blackroom_service=blackroom_service)
 
     result = service.sync(start_date="20250101", end_date="20250131", ban_days=30)
 
@@ -187,9 +181,7 @@ def test_sync_stops_and_propagates_when_add_fails(monkeypatch):
         "message": "add failed",
         "data": None,
     }
-    service = ShareholderReductionPunishmentService(
-        blackroom_service=blackroom_service
-    )
+    service = ShareholderSellingPunishmentService(blackroom_service=blackroom_service)
 
     result = service.sync(start_date="20250101", end_date="20250131", ban_days=30)
 
@@ -204,6 +196,6 @@ def test_sync_stops_and_propagates_when_add_fails(monkeypatch):
         stock_code="000001",
         market="A",
         ban_days=30,
-        source="shareholder_reduction",
+        source="shareholder_selling",
         note="股东减持公告 20250103 / 股东C",
     )
