@@ -1,4 +1,4 @@
-"""Service layer for monitor target management with validation and stable payloads."""
+"""Service layer for monitor targets with validation and stable payloads."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class TargetNotFoundError(LookupError):
     """Raised when monitor target cannot be found."""
 
 
-class TargetManagementService:
+class MonitorTargetService:
     _ALLOWED_MARKETS = {"A", "HK", "ETF"}
     _ALLOWED_FREQUENCY = {"daily", "intraday"}
     _ALLOWED_RESET_MODE = {"auto", "manual"}
@@ -346,10 +346,10 @@ class TargetManagementService:
             "reset_mode": getattr(target, "reset_mode", None),
             "enabled": getattr(target, "enabled", None),
             "last_state": getattr(target, "last_state", None),
-            "triggered_at": TargetManagementService._to_iso(
+            "triggered_at": MonitorTargetService._to_iso(
                 getattr(target, "triggered_at", None)
             ),
-            "created_at": TargetManagementService._to_iso(
+            "created_at": MonitorTargetService._to_iso(
                 getattr(target, "created_at", None)
             ),
         }

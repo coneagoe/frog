@@ -84,7 +84,7 @@ poetry run python -m tools.stock_monitor_cli --json blackroom status
 
 ### 同步股东减持公告到黑屋（sync-shareholder-reduction）
 
-该命令从 Tushare 拉取股东减持公告，去重后将未被黑屋禁止的标的加入黑屋记录。注意：实际运行需要在环境中设置 TUSHARE_TOKEN。
+该命令从 Tushare `stk_holdertrade` 拉取股东减持公告（`in_de=DE`），去重后将未被黑屋禁止的标的加入黑屋记录。注意：实际运行需要在环境中设置 TUSHARE_TOKEN。
 
 - 命令：
 

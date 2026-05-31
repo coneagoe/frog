@@ -688,7 +688,7 @@ def test_blackroom_update_bad_id_type_returns_validation_error(capsys):
 
 
 def test_blackroom_command_succeeds_when_target_service_init_fails(capsys):
-    """Regression: blackroom commands must not touch TargetManagementService at all."""
+    """Regression: blackroom commands must not touch MonitorTargetService at all."""
     from unittest.mock import patch
 
     bsvc = MagicMock()
@@ -700,7 +700,7 @@ def test_blackroom_command_succeeds_when_target_service_init_fails(capsys):
     }
 
     with patch(
-        "tools.stock_monitor_cli.TargetManagementService",
+        "tools.stock_monitor_cli.MonitorTargetService",
         side_effect=RuntimeError("storage unavailable"),
     ):
         exit_code = main(["blackroom", "status"], blackroom_service=bsvc)

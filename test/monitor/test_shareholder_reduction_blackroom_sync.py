@@ -17,8 +17,8 @@ def _install_tushare_stub(monkeypatch, pro_api):
 def test_sync_dedupes_per_stock_skips_existing_and_adds_new(monkeypatch):
     monkeypatch.setenv("TUSHARE_TOKEN", "token")
 
-    pro_client = MagicMock()
-    pro_client.stk_holder_reduce.return_value = pd.DataFrame(
+    pro_client = MagicMock(spec_set=["stk_holdertrade"])
+    pro_client.stk_holdertrade.return_value = pd.DataFrame(
         [
             {"ts_code": "600519.SH", "ann_date": "20250101", "holder_name": "股东A"},
             {"ts_code": "600519.SH", "ann_date": "20250102", "holder_name": "股东B"},
@@ -56,8 +56,8 @@ def test_sync_dedupes_per_stock_skips_existing_and_adds_new(monkeypatch):
     assert result["data"]["records"][0]["stock_code"] == "000001"
     assert result["data"]["records"][0]["market"] == "A"
 
-    pro_client.stk_holder_reduce.assert_called_once_with(
-        start_date="20250101", end_date="20250131"
+    pro_client.stk_holdertrade.assert_called_once_with(
+        start_date="20250101", end_date="20250131", in_de="DE"
     )
     blackroom_service.check.assert_any_call("600519", "A")
     blackroom_service.check.assert_any_call("000001", "A")
@@ -94,7 +94,7 @@ def test_sync_returns_success_with_zero_counts_when_tushare_empty(monkeypatch):
     monkeypatch.setenv("TUSHARE_TOKEN", "token")
 
     pro_client = MagicMock()
-    pro_client.stk_holder_reduce.return_value = pd.DataFrame([])
+    pro_client.stk_holdertrade.return_value = pd.DataFrame([])
     _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))
 
     blackroom_service = MagicMock()
@@ -137,7 +137,7 @@ def test_sync_stops_and_propagates_when_check_fails(monkeypatch):
     monkeypatch.setenv("TUSHARE_TOKEN", "token")
 
     pro_client = MagicMock()
-    pro_client.stk_holder_reduce.return_value = pd.DataFrame(
+    pro_client.stk_holdertrade.return_value = pd.DataFrame(
         [{"ts_code": "000001.SZ", "ann_date": "20250103", "holder_name": "股东C"}]
     )
     _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))
@@ -169,7 +169,7 @@ def test_sync_stops_and_propagates_when_add_fails(monkeypatch):
     monkeypatch.setenv("TUSHARE_TOKEN", "token")
 
     pro_client = MagicMock()
-    pro_client.stk_holder_reduce.return_value = pd.DataFrame(
+    pro_client.stk_holdertrade.return_value = pd.DataFrame(
         [{"ts_code": "000001.SZ", "ann_date": "20250103", "holder_name": "股东C"}]
     )
     _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))

@@ -31,7 +31,11 @@ class ShareholderReductionBlackroomSyncService:
 
         try:
             client = self._create_tushare_client()
-            data = client.stk_holder_reduce(start_date=start_date, end_date=end_date)
+            data = client.stk_holdertrade(
+                start_date=start_date,
+                end_date=end_date,
+                in_de="DE",
+            )
 
             fetched = len(data) if data is not None else 0
             unique_rows = self._build_unique_rows(data)

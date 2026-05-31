@@ -12,8 +12,8 @@ from monitor.blackroom_management_service import BlackroomManagementService
 from monitor.shareholder_reduction_blackroom_sync import (
     ShareholderReductionBlackroomSyncService,
 )
-from monitor.target_management_service import (
-    TargetManagementService,
+from monitor.monitor_target_service import (
+    MonitorTargetService,
     TargetNotFoundError,
     TargetValidationError,
 )
@@ -224,7 +224,7 @@ def _to_exit_code(result: dict[str, Any]) -> int:
 
 def main(
     argv: list[str] | None = None,
-    service: TargetManagementService | None = None,
+    service: MonitorTargetService | None = None,
     blackroom_service: BlackroomManagementService | None = None,
     sync_service: ShareholderReductionBlackroomSyncService | None = None,
 ) -> int:
@@ -244,7 +244,7 @@ def main(
 
     try:
         if args.command == "target":
-            _svc = service or TargetManagementService()
+            _svc = service or MonitorTargetService()
             if args.target_command == "add":
                 result = _svc.add_target(
                     stock_code=args.stock_code,
@@ -286,7 +286,7 @@ def main(
                     "data": None,
                 }
         elif args.command == "status":
-            _svc = service or TargetManagementService()
+            _svc = service or MonitorTargetService()
             result = _svc.get_status()
         elif args.command == "blackroom":
             result = _handle_blackroom(

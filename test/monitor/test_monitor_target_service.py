@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from monitor.target_management_service import (
-    TargetManagementService,
+from monitor.monitor_target_service import (
+    MonitorTargetService,
     TargetNotFoundError,
     TargetValidationError,
 )
@@ -28,7 +28,7 @@ def _make_target(**overrides):
 
 
 def test_add_target_rejects_invalid_json_condition():
-    service = TargetManagementService(storage=MagicMock())
+    service = MonitorTargetService(storage=MagicMock())
 
     result = service.add_target(
         stock_code="600519",
@@ -43,7 +43,7 @@ def test_add_target_rejects_invalid_json_condition():
 
 
 def test_add_target_validates_condition_business_rules():
-    service = TargetManagementService(storage=MagicMock())
+    service = MonitorTargetService(storage=MagicMock())
 
     result = service.add_target(
         stock_code="600519",
@@ -59,7 +59,7 @@ def test_add_target_validates_condition_business_rules():
 def test_add_target_returns_stable_payload_and_serialized_data():
     storage = MagicMock()
     storage.create_monitor_target.return_value = _make_target()
-    service = TargetManagementService(storage=storage)
+    service = MonitorTargetService(storage=storage)
 
     result = service.add_target(
         stock_code="600519",
@@ -78,7 +78,7 @@ def test_add_target_returns_stable_payload_and_serialized_data():
 def test_get_target_returns_not_found_result():
     storage = MagicMock()
     storage.get_monitor_target.return_value = None
-    service = TargetManagementService(storage=storage)
+    service = MonitorTargetService(storage=storage)
 
     result = service.get_target(999)
 
@@ -96,7 +96,7 @@ def test_list_targets_returns_serialized_targets():
         _make_target(),
         _make_target(id=2, stock_code="000001"),
     ]
-    service = TargetManagementService(storage=storage)
+    service = MonitorTargetService(storage=storage)
 
     result = service.list_targets(frequency="daily", enabled=True)
 
@@ -114,7 +114,7 @@ def test_new_method_aliases_are_wired_to_existing_behaviors():
     storage.list_monitor_targets.return_value = [_make_target(id=1)]
     storage.update_monitor_target.return_value = _make_target(id=1, note="新备注")
     storage.delete_monitor_target.return_value = True
-    service = TargetManagementService(storage=storage)
+    service = MonitorTargetService(storage=storage)
 
     assert service.get(1)["success"] is True
     assert service.list()["success"] is True
@@ -129,7 +129,7 @@ def test_get_status_returns_aggregate_counts():
         _make_target(id=2, enabled=True, last_state=False, frequency="intraday"),
         _make_target(id=3, enabled=False, last_state=False, frequency="daily"),
     ]
-    service = TargetManagementService(storage=storage)
+    service = MonitorTargetService(storage=storage)
 
     result = service.get_status()
 
@@ -149,7 +149,7 @@ def test_get_status_returns_aggregate_counts():
 def test_update_target_returns_updated_data():
     storage = MagicMock()
     storage.update_monitor_target.return_value = _make_target(note="新备注")
-    service = TargetManagementService(storage=storage)
+    service = MonitorTargetService(storage=storage)
 
     result = service.update_target(1, note="新备注")
 
@@ -161,7 +161,7 @@ def test_update_target_returns_updated_data():
 def test_remove_target_handles_not_found_and_success():
     storage = MagicMock()
     storage.delete_monitor_target.side_effect = [False, True]
-    service = TargetManagementService(storage=storage)
+    service = MonitorTargetService(storage=storage)
 
     missing = service.remove_target(99)
     removed = service.remove_target(1)
@@ -175,7 +175,7 @@ def test_remove_target_handles_not_found_and_success():
 def test_set_target_status_validates_and_updates_enabled_flag():
     storage = MagicMock()
     storage.update_monitor_target.return_value = _make_target(enabled=False)
-    service = TargetManagementService(storage=storage)
+    service = MonitorTargetService(storage=storage)
 
     invalid = service.set_target_status(1, enabled="no")  # type: ignore[arg-type]
     valid = service.set_target_status(1, enabled=False)
@@ -188,7 +188,7 @@ def test_set_target_status_validates_and_updates_enabled_flag():
 
 
 def test_target_id_true_is_rejected_as_validation_error():
-    service = TargetManagementService(storage=MagicMock())
+    service = MonitorTargetService(storage=MagicMock())
 
     result = service.get_target(True)
 
@@ -198,7 +198,7 @@ def test_target_id_true_is_rejected_as_validation_error():
 
 
 def test_bool_numeric_condition_value_is_rejected():
-    service = TargetManagementService(storage=MagicMock())
+    service = MonitorTargetService(storage=MagicMock())
 
     result = service.add_target(
         stock_code="600519",
@@ -219,8 +219,8 @@ def test_custom_errors_are_exposed_for_validation_and_not_found_paths():
 def test_service_uses_default_storage_when_not_provided():
     fake_storage = MagicMock()
     with patch(
-        "monitor.target_management_service.get_storage", return_value=fake_storage
+        "monitor.monitor_target_service.get_storage", return_value=fake_storage
     ):
-        service = TargetManagementService()
+        service = MonitorTargetService()
 
     assert service.storage is fake_storage
