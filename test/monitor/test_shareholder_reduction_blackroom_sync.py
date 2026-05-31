@@ -131,3 +131,79 @@ def test_sync_returns_storage_error_when_tushare_client_creation_fails(monkeypat
     assert result["success"] is False
     assert result["code"] == "STORAGE_ERROR"
     assert "boom" in result["message"]
+
+
+def test_sync_stops_and_propagates_when_check_fails(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "token")
+
+    pro_client = MagicMock()
+    pro_client.stk_holder_reduce.return_value = pd.DataFrame(
+        [{"ts_code": "000001.SZ", "ann_date": "20250103", "holder_name": "股东C"}]
+    )
+    _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))
+
+    blackroom_service = MagicMock()
+    blackroom_service.check.return_value = {
+        "success": False,
+        "code": "BLACKROOM_CHECK_FAILED",
+        "message": "check failed",
+        "data": None,
+    }
+    service = ShareholderReductionBlackroomSyncService(
+        blackroom_service=blackroom_service
+    )
+
+    result = service.sync(start_date="20250101", end_date="20250131", ban_days=30)
+
+    assert result == {
+        "success": False,
+        "code": "BLACKROOM_CHECK_FAILED",
+        "message": "check failed",
+        "data": None,
+    }
+    blackroom_service.check.assert_called_once_with("000001", "A")
+    blackroom_service.add.assert_not_called()
+
+
+def test_sync_stops_and_propagates_when_add_fails(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "token")
+
+    pro_client = MagicMock()
+    pro_client.stk_holder_reduce.return_value = pd.DataFrame(
+        [{"ts_code": "000001.SZ", "ann_date": "20250103", "holder_name": "股东C"}]
+    )
+    _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))
+
+    blackroom_service = MagicMock()
+    blackroom_service.check.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "",
+        "data": {"banned": False},
+    }
+    blackroom_service.add.return_value = {
+        "success": False,
+        "code": "BLACKROOM_ADD_FAILED",
+        "message": "add failed",
+        "data": None,
+    }
+    service = ShareholderReductionBlackroomSyncService(
+        blackroom_service=blackroom_service
+    )
+
+    result = service.sync(start_date="20250101", end_date="20250131", ban_days=30)
+
+    assert result == {
+        "success": False,
+        "code": "BLACKROOM_ADD_FAILED",
+        "message": "add failed",
+        "data": None,
+    }
+    blackroom_service.check.assert_called_once_with("000001", "A")
+    blackroom_service.add.assert_called_once_with(
+        stock_code="000001",
+        market="A",
+        ban_days=30,
+        source="shareholder_reduction",
+        note="股东减持公告 20250103 / 股东C",
+    )

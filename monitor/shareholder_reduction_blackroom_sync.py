@@ -47,6 +47,12 @@ class ShareholderReductionBlackroomSyncService:
                 holder_name = row["holder_name"]
 
                 check_result = self.blackroom_service.check(stock_code, market)
+                if not check_result.get("success"):
+                    return self._propagate_failure(
+                        check_result,
+                        default_code="BLACKROOM_CHECK_FAILED",
+                        default_message="blackroom check failed",
+                    )
                 banned = bool((check_result.get("data") or {}).get("banned"))
                 if banned:
                     skipped += 1
@@ -60,18 +66,21 @@ class ShareholderReductionBlackroomSyncService:
                     source="shareholder_reduction",
                     note=note,
                 )
-                if add_result.get("success"):
-                    added += 1
-                    records.append(
-                        {
-                            "stock_code": stock_code,
-                            "market": market,
-                            "ann_date": ann_date,
-                            "holder_name": holder_name,
-                        }
+                if not add_result.get("success"):
+                    return self._propagate_failure(
+                        add_result,
+                        default_code="BLACKROOM_ADD_FAILED",
+                        default_message="blackroom add failed",
                     )
-                else:
-                    skipped += 1
+                added += 1
+                records.append(
+                    {
+                        "stock_code": stock_code,
+                        "market": market,
+                        "ann_date": ann_date,
+                        "holder_name": holder_name,
+                    }
+                )
 
             return self._result(
                 True,
@@ -156,3 +165,13 @@ class ShareholderReductionBlackroomSyncService:
             "message": message,
             "data": data,
         }
+
+    def _propagate_failure(
+        self, result: dict[str, Any], default_code: str, default_message: str
+    ) -> dict[str, Any]:
+        return self._result(
+            False,
+            str(result.get("code") or default_code),
+            str(result.get("message") or default_message),
+            result.get("data"),
+        )
