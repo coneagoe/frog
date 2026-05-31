@@ -9,6 +9,9 @@ from datetime import datetime
 from typing import Any
 
 from monitor.blackroom_management_service import BlackroomManagementService
+from monitor.shareholder_reduction_blackroom_sync import (
+    ShareholderReductionBlackroomSyncService,
+)
 from monitor.target_management_service import (
     TargetManagementService,
     TargetNotFoundError,
@@ -193,6 +196,12 @@ def build_parser() -> _StableParser:
     )
 
     blackroom_subparsers.add_parser("status", help="获取黑屋状态汇总")
+    br_sync = blackroom_subparsers.add_parser(
+        "sync-shareholder-reduction", help="同步股东减持公告到黑屋"
+    )
+    br_sync.add_argument("--start-date", required=True, help="开始日期 (YYYYMMDD)")
+    br_sync.add_argument("--end-date", required=True, help="结束日期 (YYYYMMDD)")
+    br_sync.add_argument("--ban-days", type=int, default=180, help="禁买天数")
 
     return parser
 
@@ -217,6 +226,7 @@ def main(
     argv: list[str] | None = None,
     service: TargetManagementService | None = None,
     blackroom_service: BlackroomManagementService | None = None,
+    sync_service: ShareholderReductionBlackroomSyncService | None = None,
 ) -> int:
     try:
         args = build_parser().parse_args(argv)
@@ -280,7 +290,9 @@ def main(
             result = _svc.get_status()
         elif args.command == "blackroom":
             result = _handle_blackroom(
-                args, blackroom_service or BlackroomManagementService()
+                args,
+                blackroom_service or BlackroomManagementService(),
+                sync_service or ShareholderReductionBlackroomSyncService(),
             )
         else:
             result = {
@@ -316,7 +328,9 @@ def main(
 
 
 def _handle_blackroom(
-    args: argparse.Namespace, bsvc: BlackroomManagementService
+    args: argparse.Namespace,
+    bsvc: BlackroomManagementService,
+    sync_service: ShareholderReductionBlackroomSyncService,
 ) -> dict[str, Any]:
     cmd = args.blackroom_command
     if cmd == "add":
@@ -370,6 +384,10 @@ def _handle_blackroom(
         return bsvc.get_record(args.record_id)
     if cmd == "status":
         return bsvc.get_status()
+    if cmd == "sync-shareholder-reduction":
+        return sync_service.sync(
+            start_date=args.start_date, end_date=args.end_date, ban_days=args.ban_days
+        )
     return {
         "success": False,
         "code": "VALIDATION_ERROR",

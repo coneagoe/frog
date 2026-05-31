@@ -378,6 +378,66 @@ def test_blackroom_status_calls_service():
     bsvc.get_status.assert_called_once_with()
 
 
+def test_blackroom_sync_shareholder_reduction_calls_sync_service():
+    bsvc = MagicMock()
+    sync_service = MagicMock()
+    sync_service.sync.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "synced",
+        "data": {"synced_count": 3},
+    }
+
+    exit_code = main(
+        [
+            "blackroom",
+            "sync-shareholder-reduction",
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-01-31",
+        ],
+        blackroom_service=bsvc,
+        sync_service=sync_service,
+    )
+
+    assert exit_code == 0
+    sync_service.sync.assert_called_once_with(
+        start_date="2024-01-01", end_date="2024-01-31", ban_days=180
+    )
+
+
+def test_blackroom_sync_shareholder_reduction_custom_ban_days():
+    bsvc = MagicMock()
+    sync_service = MagicMock()
+    sync_service.sync.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "synced",
+        "data": {"synced_count": 1},
+    }
+
+    exit_code = main(
+        [
+            "blackroom",
+            "sync-shareholder-reduction",
+            "--start-date",
+            "2024-02-01",
+            "--end-date",
+            "2024-02-29",
+            "--ban-days",
+            "365",
+        ],
+        blackroom_service=bsvc,
+        sync_service=sync_service,
+    )
+
+    assert exit_code == 0
+    sync_service.sync.assert_called_once_with(
+        start_date="2024-02-01", end_date="2024-02-29", ban_days=365
+    )
+
+
 def test_blackroom_validation_error_returns_exit_code_10(capsys):
     bsvc = MagicMock()
     bsvc.add_record.return_value = {
