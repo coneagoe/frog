@@ -385,7 +385,9 @@ def _handle_blackroom(
     if cmd == "status":
         return bsvc.get_status()
     if cmd == "sync-shareholder-reduction":
-        effective_sync_service = sync_service or ShareholderReductionBlackroomSyncService()
+        effective_sync_service = (
+            sync_service or ShareholderReductionBlackroomSyncService()
+        )
         return effective_sync_service.sync(
             start_date=args.start_date, end_date=args.end_date, ban_days=args.ban_days
         )

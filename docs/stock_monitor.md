@@ -81,3 +81,33 @@ poetry run python -m tools.stock_monitor_cli --json blackroom remove --id 1
 # 查询黑屋统计
 poetry run python -m tools.stock_monitor_cli --json blackroom status
 ```
+
+### 同步股东减持公告到黑屋（sync-shareholder-reduction）
+
+该命令从 Tushare 拉取股东减持公告，去重后将未被黑屋禁止的标的加入黑屋记录。注意：实际运行需要在环境中设置 TUSHARE_TOKEN。
+
+- 命令：
+
+```bash
+# 使用默认禁买天数（180 天），注意 CLI 直接将参数原样传给同步服务
+poetry run python -m tools.stock_monitor_cli --json blackroom sync-shareholder-reduction \
+  --start-date 2024-01-01 \
+  --end-date 2024-01-31
+
+# 指定自定义禁买天数（例如 365 天）
+poetry run python -m tools.stock_monitor_cli --json blackroom sync-shareholder-reduction \
+  --start-date 2024-02-01 \
+  --end-date 2024-02-29 \
+  --ban-days 365
+```
+
+- 说明：
+  - CLI 接受的 start-date / end-date 字符串会原样传递给同步服务（测试用例也以 "2024-01-01" 形式传递）。同步服务内部会在需要时解析或校验日期格式。
+  - 同步过程中会调用黑屋检查（blackroom check）并对未禁买的股票调用黑屋添加（source 字段为 "shareholder_reduction"）。
+  - 成功时返回 JSON（使用 --json 输出）示例：
+
+```json
+{"success": true, "code": "OK", "message": "sync completed", "data": {"fetched": 12, "unique_stocks": 8, "added": 5, "skipped": 3, "records": [{"stock_code":"000001","market":"A","ann_date":"20240115","holder_name":"股东X"}]}}
+```
+
+如果未设置 TUSHARE_TOKEN 或发生外部调用错误，命令会返回失败（例如 code 为 STORAGE_ERROR 或 INTERNAL_ERROR）。
