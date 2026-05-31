@@ -438,6 +438,41 @@ def test_blackroom_sync_shareholder_reduction_custom_ban_days():
     )
 
 
+def test_blackroom_sync_inits_sync_service_with_injected_blackroom_service():
+    from unittest.mock import patch
+
+    bsvc = MagicMock()
+    created_sync_service = MagicMock()
+    created_sync_service.sync.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "synced",
+        "data": {"synced_count": 1},
+    }
+
+    with patch(
+        "tools.stock_monitor_cli.ShareholderReductionBlackroomSyncService",
+        return_value=created_sync_service,
+    ) as sync_ctor:
+        exit_code = main(
+            [
+                "blackroom",
+                "sync-shareholder-reduction",
+                "--start-date",
+                "20240201",
+                "--end-date",
+                "20240229",
+            ],
+            blackroom_service=bsvc,
+        )
+
+    assert exit_code == 0
+    sync_ctor.assert_called_once_with(blackroom_service=bsvc)
+    created_sync_service.sync.assert_called_once_with(
+        start_date="20240201", end_date="20240229", ban_days=180
+    )
+
+
 def test_blackroom_sync_with_injected_sync_service_does_not_init_blackroom_service():
     """Regression: sync command with injected sync service should not instantiate blackroom service."""
     from unittest.mock import patch
