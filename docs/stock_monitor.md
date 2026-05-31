@@ -102,7 +102,7 @@ poetry run python -m tools.stock_monitor_cli --json blackroom sync-shareholder-r
 ```
 
 - 说明：
-  - CLI 接受的 start-date / end-date 字符串会原样传递给同步服务（测试用例也以 "20240101" 形式传递）。同步服务内部会在需要时解析或校验日期格式。
+- CLI 接受的 start-date / end-date 字符串会原样传递给同步服务（测试用例通过 mock sync service，以带短横线的日期字符串，例如 "2024-01-01"，进行调用）。同步服务内部会在需要时解析或校验日期格式。
   - 同步过程中会调用黑屋检查（blackroom check）并对未禁买的股票调用黑屋添加（source 字段为 "shareholder_reduction"）。
   - 成功时返回 JSON（使用 --json 输出）示例：
 
