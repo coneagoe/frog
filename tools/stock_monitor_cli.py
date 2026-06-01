@@ -8,13 +8,17 @@ import sys
 from datetime import datetime
 from typing import Any
 
-from monitor.blackroom_management_service import BlackroomManagementService
+from monitor.blackroom_countdown import BlackroomCountdownService
+from monitor.blackroom_service import BlackroomService
 from monitor.monitor_target_service import (
     MonitorTargetService,
     TargetNotFoundError,
     TargetValidationError,
 )
-from monitor.shareholder_selling_punishment import ShareholderSellingPunishmentService
+from monitor.shareholder_selling_punishment import ShareholderSellingBlackroomSyncService
+
+BlackroomManagementService = BlackroomService
+ShareholderSellingPunishmentService = ShareholderSellingBlackroomSyncService
 
 
 class _ParserError(Exception):
@@ -151,6 +155,12 @@ def build_parser() -> _StableParser:
     br_add.add_argument("--ban-days", type=int, required=True, help="禁买天数")
     br_add.add_argument("--note", default=None, help="备注")
 
+    br_ban = blackroom_subparsers.add_parser("ban", help="封禁股票进入黑屋")
+    br_ban.add_argument("--stock-code", required=True, help="股票代码")
+    br_ban.add_argument("--market", required=True, help="市场，例如 A/HK/ETF")
+    br_ban.add_argument("--ban-days", type=int, required=True, help="禁买天数")
+    br_ban.add_argument("--note", default=None, help="备注")
+
     br_update = blackroom_subparsers.add_parser("update", help="更新黑屋记录")
     br_update.add_argument(
         "--id", type=int, required=True, dest="record_id", help="记录ID"
@@ -179,6 +189,13 @@ def build_parser() -> _StableParser:
         "--id", type=int, required=True, dest="record_id", help="记录ID"
     )
 
+    br_unban = blackroom_subparsers.add_parser("unban", help="解除黑屋封禁")
+    br_unban.add_argument(
+        "--id", type=int, default=None, dest="record_id", help="记录ID"
+    )
+    br_unban.add_argument("--stock-code", default=None, help="股票代码")
+    br_unban.add_argument("--market", default=None, help="市场，例如 A/HK/ETF")
+
     br_list = blackroom_subparsers.add_parser("list", help="列出黑屋记录")
     br_list.add_argument(
         "--active-only",
@@ -194,6 +211,7 @@ def build_parser() -> _StableParser:
     )
 
     blackroom_subparsers.add_parser("status", help="获取黑屋状态汇总")
+    blackroom_subparsers.add_parser("countdown", help="执行黑屋剩余天数倒计时")
     br_sync = blackroom_subparsers.add_parser(
         "sync-shareholder-selling", help="同步股东减持公告到黑屋"
     )
@@ -223,8 +241,9 @@ def _to_exit_code(result: dict[str, Any]) -> int:
 def main(
     argv: list[str] | None = None,
     service: MonitorTargetService | None = None,
-    blackroom_service: BlackroomManagementService | None = None,
-    sync_service: ShareholderSellingPunishmentService | None = None,
+    blackroom_service: BlackroomService | None = None,
+    sync_service: ShareholderSellingBlackroomSyncService | None = None,
+    countdown_service: BlackroomCountdownService | None = None,
 ) -> int:
     try:
         args = build_parser().parse_args(argv)
@@ -291,6 +310,7 @@ def main(
                 args,
                 blackroom_service,
                 sync_service,
+                countdown_service,
             )
         else:
             result = {
@@ -327,16 +347,17 @@ def main(
 
 def _handle_blackroom(
     args: argparse.Namespace,
-    bsvc: BlackroomManagementService | None = None,
-    sync_service: ShareholderSellingPunishmentService | None = None,
+    bsvc: BlackroomService | None = None,
+    sync_service: ShareholderSellingBlackroomSyncService | None = None,
+    countdown_service: BlackroomCountdownService | None = None,
 ) -> dict[str, Any]:
     cmd = args.blackroom_command
 
-    def _get_bsvc() -> BlackroomManagementService:
-        return bsvc or BlackroomManagementService()
+    def _get_bsvc() -> BlackroomService:
+        return bsvc or BlackroomService()
 
-    if cmd == "add":
-        return _get_bsvc().add_record(
+    if cmd in {"add", "ban"}:
+        return _get_bsvc().ban(
             stock_code=args.stock_code,
             market=args.market,
             ban_days=args.ban_days,
@@ -372,10 +393,20 @@ def _handle_blackroom(
                 }
         return _get_bsvc().update_record(args.record_id, **updates)
     if cmd == "remove":
-        return _get_bsvc().remove_record(args.record_id)
+        return _get_bsvc().unban(args.record_id)
+    if cmd == "unban":
+        if args.record_id is not None:
+            return _get_bsvc().unban(args.record_id)
+        if args.stock_code is not None and args.market is not None:
+            return _get_bsvc().unban_stock(args.stock_code, args.market)
+        return {
+            "success": False,
+            "code": "VALIDATION_ERROR",
+            "message": "unban requires --id or both --stock-code and --market",
+            "data": None,
+        }
     if cmd == "list":
-        enabled_filter = True if args.active_only else None
-        result = _get_bsvc().list_records(enabled=enabled_filter)
+        result = _get_bsvc().list_records(active_only=args.active_only)
         if args.stock_code and result.get("data") is not None:
             result = dict(result)
             result["data"] = [
@@ -386,8 +417,11 @@ def _handle_blackroom(
         return _get_bsvc().get_record(args.record_id)
     if cmd == "status":
         return _get_bsvc().get_status()
+    if cmd == "countdown":
+        effective_countdown_service = countdown_service or BlackroomCountdownService()
+        return effective_countdown_service.run()
     if cmd == "sync-shareholder-selling":
-        effective_sync_service = sync_service or ShareholderSellingPunishmentService(
+        effective_sync_service = sync_service or ShareholderSellingBlackroomSyncService(
             blackroom_service=_get_bsvc()
         )
         return effective_sync_service.sync(

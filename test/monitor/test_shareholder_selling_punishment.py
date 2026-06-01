@@ -5,8 +5,19 @@ from unittest.mock import MagicMock
 import pandas as pd
 
 from monitor.shareholder_selling_punishment import (
+    ShareholderSellingBlackroomSyncService,
     ShareholderSellingPunishmentService,
 )
+
+
+def test_new_sync_service_name_and_old_alias_share_behavior():
+    bsvc = MagicMock()
+
+    new_service = ShareholderSellingBlackroomSyncService(blackroom_service=bsvc)
+    old_service = ShareholderSellingPunishmentService(blackroom_service=bsvc)
+
+    assert isinstance(old_service, ShareholderSellingBlackroomSyncService)
+    assert new_service.blackroom_service is bsvc
 
 
 def _install_tushare_stub(monkeypatch, pro_api):
@@ -28,11 +39,11 @@ def test_sync_dedupes_per_stock_skips_existing_and_adds_new(monkeypatch):
     _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))
 
     blackroom_service = MagicMock()
-    blackroom_service.check.side_effect = [
+    blackroom_service.is_banned.side_effect = [
         {"success": True, "code": "OK", "message": "", "data": {"banned": True}},
         {"success": True, "code": "OK", "message": "", "data": {"banned": False}},
     ]
-    blackroom_service.add.return_value = {
+    blackroom_service.ban.return_value = {
         "success": True,
         "code": "OK",
         "message": "record created",
@@ -57,9 +68,9 @@ def test_sync_dedupes_per_stock_skips_existing_and_adds_new(monkeypatch):
     pro_client.stk_holdertrade.assert_called_once_with(
         start_date="20250101", end_date="20250131", in_de="DE"
     )
-    blackroom_service.check.assert_any_call("600519", "A")
-    blackroom_service.check.assert_any_call("000001", "A")
-    blackroom_service.add.assert_called_once_with(
+    blackroom_service.is_banned.assert_any_call("600519", "A")
+    blackroom_service.is_banned.assert_any_call("000001", "A")
+    blackroom_service.ban.assert_called_once_with(
         stock_code="000001",
         market="A",
         ban_days=30,
@@ -112,8 +123,8 @@ def test_sync_returns_success_with_zero_counts_when_tushare_empty(monkeypatch):
             "records": [],
         },
     }
-    blackroom_service.check.assert_not_called()
-    blackroom_service.add.assert_not_called()
+    blackroom_service.is_banned.assert_not_called()
+    blackroom_service.ban.assert_not_called()
 
 
 def test_sync_returns_storage_error_when_tushare_client_creation_fails(monkeypatch):
@@ -139,7 +150,7 @@ def test_sync_stops_and_propagates_when_check_fails(monkeypatch):
     _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))
 
     blackroom_service = MagicMock()
-    blackroom_service.check.return_value = {
+    blackroom_service.is_banned.return_value = {
         "success": False,
         "code": "BLACKROOM_CHECK_FAILED",
         "message": "check failed",
@@ -155,8 +166,8 @@ def test_sync_stops_and_propagates_when_check_fails(monkeypatch):
         "message": "check failed",
         "data": None,
     }
-    blackroom_service.check.assert_called_once_with("000001", "A")
-    blackroom_service.add.assert_not_called()
+    blackroom_service.is_banned.assert_called_once_with("000001", "A")
+    blackroom_service.ban.assert_not_called()
 
 
 def test_sync_stops_and_propagates_when_add_fails(monkeypatch):
@@ -169,13 +180,13 @@ def test_sync_stops_and_propagates_when_add_fails(monkeypatch):
     _install_tushare_stub(monkeypatch, MagicMock(return_value=pro_client))
 
     blackroom_service = MagicMock()
-    blackroom_service.check.return_value = {
+    blackroom_service.is_banned.return_value = {
         "success": True,
         "code": "OK",
         "message": "",
         "data": {"banned": False},
     }
-    blackroom_service.add.return_value = {
+    blackroom_service.ban.return_value = {
         "success": False,
         "code": "BLACKROOM_ADD_FAILED",
         "message": "add failed",
@@ -191,8 +202,8 @@ def test_sync_stops_and_propagates_when_add_fails(monkeypatch):
         "message": "add failed",
         "data": None,
     }
-    blackroom_service.check.assert_called_once_with("000001", "A")
-    blackroom_service.add.assert_called_once_with(
+    blackroom_service.is_banned.assert_called_once_with("000001", "A")
+    blackroom_service.ban.assert_called_once_with(
         stock_code="000001",
         market="A",
         ban_days=30,

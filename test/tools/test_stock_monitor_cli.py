@@ -181,7 +181,7 @@ def test_target_remove_list_get_and_status_commands_are_wired():
 
 def test_blackroom_add_parses_args_and_calls_service(capsys):
     bsvc = MagicMock()
-    bsvc.add_record.return_value = {
+    bsvc.ban.return_value = {
         "success": True,
         "code": "OK",
         "message": "record created",
@@ -203,7 +203,7 @@ def test_blackroom_add_parses_args_and_calls_service(capsys):
     )
 
     assert exit_code == 0
-    bsvc.add_record.assert_called_once_with(
+    bsvc.ban.assert_called_once_with(
         stock_code="600519", market="A", ban_days=30, note=None
     )
     assert "OK" in capsys.readouterr().out
@@ -211,7 +211,7 @@ def test_blackroom_add_parses_args_and_calls_service(capsys):
 
 def test_blackroom_add_with_note_calls_service(capsys):
     bsvc = MagicMock()
-    bsvc.add_record.return_value = {
+    bsvc.ban.return_value = {
         "success": True,
         "code": "OK",
         "message": "record created",
@@ -236,12 +236,89 @@ def test_blackroom_add_with_note_calls_service(capsys):
     )
 
     assert exit_code == 0
-    bsvc.add_record.assert_called_once_with(
+    bsvc.ban.assert_called_once_with(
         stock_code="000001", market="A", ban_days=7, note="watch"
     )
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is True
     assert payload["data"]["id"] == 2
+
+
+def test_blackroom_ban_calls_business_service():
+    bsvc = MagicMock()
+    bsvc.ban.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "record banned",
+        "data": {"id": 1},
+    }
+
+    exit_code = main(
+        [
+            "blackroom",
+            "ban",
+            "--stock-code",
+            "600519",
+            "--market",
+            "A",
+            "--ban-days",
+            "30",
+        ],
+        blackroom_service=bsvc,
+    )
+
+    assert exit_code == 0
+    bsvc.ban.assert_called_once_with(
+        stock_code="600519", market="A", ban_days=30, note=None
+    )
+
+
+def test_blackroom_unban_by_id_calls_business_service():
+    bsvc = MagicMock()
+    bsvc.unban.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "record unbanned",
+        "data": {"id": 4},
+    }
+
+    exit_code = main(["blackroom", "unban", "--id", "4"], blackroom_service=bsvc)
+
+    assert exit_code == 0
+    bsvc.unban.assert_called_once_with(4)
+
+
+def test_blackroom_unban_by_stock_calls_business_service():
+    bsvc = MagicMock()
+    bsvc.unban_stock.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "stock unbanned",
+        "data": {"deleted": 2},
+    }
+
+    exit_code = main(
+        ["blackroom", "unban", "--stock-code", "600519", "--market", "A"],
+        blackroom_service=bsvc,
+    )
+
+    assert exit_code == 0
+    bsvc.unban_stock.assert_called_once_with("600519", "A")
+
+
+def test_blackroom_countdown_calls_countdown_service():
+    countdown_service = MagicMock()
+    countdown_service.run.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "countdown completed",
+        "data": {"deleted": 1},
+    }
+
+    exit_code = main(["blackroom", "countdown"], countdown_service=countdown_service)
+
+    assert exit_code == 0
+    countdown_service.run.assert_called_once_with()
 
 
 def test_blackroom_update_command_sends_updates():
@@ -282,7 +359,7 @@ def test_blackroom_update_enabled_flag():
 
 def test_blackroom_remove_calls_service():
     bsvc = MagicMock()
-    bsvc.remove_record.return_value = {
+    bsvc.unban.return_value = {
         "success": True,
         "code": "OK",
         "message": "record deleted",
@@ -292,7 +369,7 @@ def test_blackroom_remove_calls_service():
     exit_code = main(["blackroom", "remove", "--id", "4"], blackroom_service=bsvc)
 
     assert exit_code == 0
-    bsvc.remove_record.assert_called_once_with(4)
+    bsvc.unban.assert_called_once_with(4)
 
 
 def test_blackroom_list_calls_service():
@@ -307,7 +384,7 @@ def test_blackroom_list_calls_service():
     exit_code = main(["blackroom", "list"], blackroom_service=bsvc)
 
     assert exit_code == 0
-    bsvc.list_records.assert_called_once_with(enabled=None)
+    bsvc.list_records.assert_called_once_with(active_only=False)
 
 
 def test_blackroom_list_active_only_passes_enabled_true():
@@ -322,7 +399,7 @@ def test_blackroom_list_active_only_passes_enabled_true():
     exit_code = main(["blackroom", "list", "--active-only"], blackroom_service=bsvc)
 
     assert exit_code == 0
-    bsvc.list_records.assert_called_once_with(enabled=True)
+    bsvc.list_records.assert_called_once_with(active_only=True)
 
 
 def test_blackroom_list_stock_code_filter_applied_client_side(capsys):
@@ -451,7 +528,7 @@ def test_blackroom_sync_inits_sync_service_with_injected_blackroom_service():
     }
 
     with patch(
-        "tools.stock_monitor_cli.ShareholderSellingPunishmentService",
+        "tools.stock_monitor_cli.ShareholderSellingBlackroomSyncService",
         return_value=created_sync_service,
     ) as sync_ctor:
         exit_code = main(
@@ -486,7 +563,7 @@ def test_blackroom_sync_with_injected_sync_service_does_not_init_blackroom_servi
     }
 
     with patch(
-        "tools.stock_monitor_cli.BlackroomManagementService",
+        "tools.stock_monitor_cli.BlackroomService",
         side_effect=RuntimeError("blackroom init should not happen"),
     ):
         exit_code = main(
@@ -509,7 +586,7 @@ def test_blackroom_sync_with_injected_sync_service_does_not_init_blackroom_servi
 
 def test_blackroom_validation_error_returns_exit_code_10(capsys):
     bsvc = MagicMock()
-    bsvc.add_record.return_value = {
+    bsvc.ban.return_value = {
         "success": False,
         "code": "VALIDATION_ERROR",
         "message": "ban_days 必须是正整数",
@@ -557,7 +634,7 @@ def test_blackroom_not_found_returns_exit_code_11(capsys):
 
 def test_blackroom_service_exception_returns_exit_code_12(capsys):
     bsvc = MagicMock()
-    bsvc.add_record.side_effect = RuntimeError("db down")
+    bsvc.ban.side_effect = RuntimeError("db down")
 
     exit_code = main(
         [
@@ -626,7 +703,7 @@ def test_blackroom_add_missing_required_args_returns_validation_error(capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is False
     assert payload["code"] == "VALIDATION_ERROR"
-    bsvc.add_record.assert_not_called()
+    bsvc.ban.assert_not_called()
 
 
 def test_blackroom_add_bad_ban_days_type_returns_validation_error(capsys):
@@ -652,7 +729,7 @@ def test_blackroom_add_bad_ban_days_type_returns_validation_error(capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is False
     assert payload["code"] == "VALIDATION_ERROR"
-    bsvc.add_record.assert_not_called()
+    bsvc.ban.assert_not_called()
 
 
 def test_blackroom_update_missing_id_returns_validation_error(capsys):
@@ -724,7 +801,7 @@ def test_blackroom_command_succeeds_when_sync_service_init_fails(capsys):
     }
 
     with patch(
-        "tools.stock_monitor_cli.ShareholderSellingPunishmentService",
+        "tools.stock_monitor_cli.ShareholderSellingBlackroomSyncService",
         side_effect=RuntimeError("sync storage unavailable"),
     ):
         exit_code = main(["blackroom", "status"], blackroom_service=bsvc)

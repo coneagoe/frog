@@ -302,7 +302,6 @@ def reset_storage() -> None:
     """
     重置当前进程的 StorageDb 单例实例（主要用于测试）
     """
-    global _storage_instances, _metadata_initialized_pids
     pid = os.getpid()
     if pid in _storage_instances:
         _storage_instances[pid].disconnect()
@@ -2126,6 +2125,7 @@ class StorageDb:
         stock_code: str,
         market: str = "A",
         ban_days: Optional[int] = None,
+        remaining_days: Optional[int] = None,
         start_at: Optional[datetime] = None,
         expire_at: Optional[datetime] = None,
         source: str = "manual",
@@ -2140,6 +2140,8 @@ class StorageDb:
         from .model.blackroom_record import BlackroomRecord
 
         effective_start = start_at or datetime.now(timezone.utc)
+        if remaining_days is None:
+            remaining_days = ban_days
         if expire_at is None and ban_days is not None:
             expire_at = effective_start + timedelta(days=ban_days)
 
@@ -2150,6 +2152,7 @@ class StorageDb:
                 stock_code=stock_code,
                 market=market,
                 ban_days=ban_days,
+                remaining_days=remaining_days,
                 start_at=effective_start,
                 expire_at=expire_at,
                 source=source,
@@ -2209,7 +2212,7 @@ class StorageDb:
         """
         查询当前有效的黑名单记录。
 
-        有效条件：enabled=True 且 expire_at > 当前时间。
+        有效条件：enabled=True 且 remaining_days > 0。
 
         Args:
             market: 可选，按市场过滤。
@@ -2221,11 +2224,10 @@ class StorageDb:
         assert self.Session is not None
         session = self.Session()
         try:
-            now = datetime.now(timezone.utc)
             query = (
                 session.query(BlackroomRecord)
                 .filter_by(enabled=True)
-                .filter(BlackroomRecord.expire_at > now)
+                .filter(BlackroomRecord.remaining_days > 0)
             )
             if market is not None:
                 query = query.filter_by(market=market)
@@ -2245,6 +2247,7 @@ class StorageDb:
             "stock_code",
             "market",
             "ban_days",
+            "remaining_days",
             "start_at",
             "expire_at",
             "source",
@@ -2263,6 +2266,8 @@ class StorageDb:
                 return None
             for key, value in updates.items():
                 setattr(record, key, value)
+            if "ban_days" in updates and "remaining_days" not in updates:
+                record.remaining_days = record.ban_days
             if (
                 "ban_days" in updates or "start_at" in updates
             ) and "expire_at" not in updates:
@@ -2301,11 +2306,78 @@ class StorageDb:
         finally:
             session.close()
 
+    def delete_blackroom_records_by_stock(self, stock_code: str, market: str) -> int:
+        """按股票代码和市场删除黑屋记录，返回删除条数。"""
+        from .model.blackroom_record import BlackroomRecord
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            records = (
+                session.query(BlackroomRecord)
+                .filter_by(stock_code=stock_code, market=market)
+                .all()
+            )
+            deleted = len(records)
+            for record in records:
+                session.delete(record)
+            session.commit()
+            return deleted
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def countdown_blackroom_records(self) -> dict[str, int]:
+        """递减有效黑屋记录剩余天数，并删除归零记录。"""
+        from .model.blackroom_record import BlackroomRecord
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            records = (
+                session.query(BlackroomRecord)
+                .filter_by(enabled=True)
+                .filter(BlackroomRecord.remaining_days > 0)
+                .order_by(BlackroomRecord.id.asc())
+                .all()
+            )
+            decremented = len(records)
+            for record in records:
+                record.remaining_days = int(record.remaining_days or 0) - 1
+            expired = [
+                record for record in records if int(record.remaining_days or 0) <= 0
+            ]
+            deleted = len(expired)
+            for record in expired:
+                session.delete(record)
+            session.commit()
+            return {"decremented": decremented, "deleted": deleted}
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def ensure_blackroom_records_table(self) -> None:
         """建表（若不存在）。在 DAG 启动时调用一次。"""
         from .model.blackroom_record import BlackroomRecord  # noqa: F401
 
         BlackroomRecord.__table__.create(self.engine, checkfirst=True)
+        columns = {column["name"] for column in inspect(self.engine).get_columns("blackroom_records")}
+        if "remaining_days" not in columns:
+            with self.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE blackroom_records ADD COLUMN remaining_days INTEGER"))
+                conn.execute(
+                    text(
+                        """
+                        UPDATE blackroom_records
+                        SET remaining_days = ban_days
+                        WHERE remaining_days IS NULL AND ban_days IS NOT NULL
+                        """
+                    )
+                )
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
@@ -2320,7 +2392,6 @@ def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
         config: 可选的 StorageConfig；如果不传则使用默认配置。
                 注意：如果当前进程已有实例，此参数会被忽略。
     """
-    global _storage_instances
     pid = os.getpid()
 
     if pid not in _storage_instances:

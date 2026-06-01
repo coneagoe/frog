@@ -21,6 +21,11 @@ class BlackroomRecord(Base):
     ban_days = Column(
         Integer, nullable=True, comment="禁买时长（天），NULL 表示未设定时长"
     )
+    remaining_days = Column(
+        Integer,
+        nullable=True,
+        comment="剩余禁买天数；大于 0 表示仍处于倒计时封禁期",
+    )
     start_at = Column(
         DateTime(timezone=True),
         nullable=True,

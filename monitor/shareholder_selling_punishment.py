@@ -7,17 +7,17 @@ import re
 from datetime import datetime
 from typing import Any
 
-from monitor.blackroom_management_service import BlackroomManagementService
+from monitor.blackroom_service import BlackroomService
 
 
-class ShareholderSellingPunishmentService:
+class ShareholderSellingBlackroomSyncService:
     _DATE_PATTERN = re.compile(r"^\d{8}$")
 
     def __init__(
-        self, blackroom_service: BlackroomManagementService | None = None
+        self, blackroom_service: BlackroomService | None = None
     ) -> None:
         self.blackroom_service = (
-            BlackroomManagementService()
+            BlackroomService()
             if blackroom_service is None
             else blackroom_service
         )
@@ -50,7 +50,7 @@ class ShareholderSellingPunishmentService:
                 ann_date = row["ann_date"]
                 holder_name = row["holder_name"]
 
-                check_result = self.blackroom_service.check(stock_code, market)
+                check_result = self.blackroom_service.is_banned(stock_code, market)
                 if not check_result.get("success"):
                     return self._propagate_failure(
                         check_result,
@@ -63,7 +63,7 @@ class ShareholderSellingPunishmentService:
                     continue
 
                 note = f"股东减持公告 {ann_date} / {holder_name}"
-                add_result = self.blackroom_service.add(
+                add_result = self.blackroom_service.ban(
                     stock_code=stock_code,
                     market=market,
                     ban_days=ban_days,
@@ -115,7 +115,7 @@ class ShareholderSellingPunishmentService:
         cls._validate_date(start_date, "start_date")
         cls._validate_date(end_date, "end_date")
         if start_date > end_date:
-            raise ValueError("start_date 不echo end_date")
+            raise ValueError("start_date 不能晚于 end_date")
 
     @classmethod
     def _validate_date(cls, value: Any, field_name: str) -> None:
@@ -179,3 +179,7 @@ class ShareholderSellingPunishmentService:
             str(result.get("message") or default_message),
             result.get("data"),
         )
+
+
+class ShareholderSellingPunishmentService(ShareholderSellingBlackroomSyncService):
+    """Backward-compatible name for shareholder-selling blackroom sync."""

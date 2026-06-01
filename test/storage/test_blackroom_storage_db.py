@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
@@ -60,6 +61,7 @@ class TestExportContract:
             "stock_code",
             "market",
             "ban_days",
+            "remaining_days",
             "start_at",
             "expire_at",
             "source",
@@ -111,6 +113,12 @@ def sqlite_storage(tmp_path, monkeypatch):
 
 
 class TestCreateBlackroomRecord:
+    def test_blackroom_record_has_remaining_days_field(self):
+        from storage.model import BlackroomRecord
+
+        columns = {c.name for c in BlackroomRecord.__table__.columns}
+        assert "remaining_days" in columns
+
     def test_returns_persisted_record_with_all_fields(self, sqlite_storage):
         db = sqlite_storage
         expire = datetime(2030, 12, 31, tzinfo=timezone.utc)
@@ -120,6 +128,7 @@ class TestCreateBlackroomRecord:
             stock_code="600519",
             market="A",
             ban_days=30,
+            remaining_days=20,
             start_at=start,
             expire_at=expire,
             source="manual",
@@ -131,6 +140,7 @@ class TestCreateBlackroomRecord:
         assert record.stock_code == "600519"
         assert record.market == "A"
         assert record.ban_days == 30
+        assert record.remaining_days == 20
         # SQLite strips tz info; compare naive equivalents
         assert record.start_at.replace(tzinfo=None) == start.replace(tzinfo=None)
         assert record.expire_at.replace(tzinfo=None) == expire.replace(tzinfo=None)
@@ -149,7 +159,16 @@ class TestCreateBlackroomRecord:
         assert record.expire_at is None
         assert record.note is None
         assert record.ban_days is None
+        assert record.remaining_days is None
         assert record.start_at is not None  # defaults to current time
+
+    def test_create_initializes_remaining_days_from_ban_days(self, sqlite_storage):
+        db = sqlite_storage
+
+        record = db.create_blackroom_record(stock_code="000001", ban_days=15)
+
+        assert record.ban_days == 15
+        assert record.remaining_days == 15
 
     def test_auto_computes_expire_at_from_ban_days(self, sqlite_storage):
         db = sqlite_storage
@@ -292,9 +311,8 @@ class TestListBlackroomRecords:
 class TestListActiveBlackroomRecords:
     def test_excludes_disabled_records(self, sqlite_storage):
         db = sqlite_storage
-        future = datetime.now(timezone.utc) + timedelta(days=30)
-        db.create_blackroom_record(stock_code="000001", enabled=True, expire_at=future)
-        db.create_blackroom_record(stock_code="000002", enabled=False, expire_at=future)
+        db.create_blackroom_record(stock_code="000001", enabled=True, ban_days=30)
+        db.create_blackroom_record(stock_code="000002", enabled=False, ban_days=30)
 
         active = db.list_active_blackroom_records()
 
@@ -302,27 +320,34 @@ class TestListActiveBlackroomRecords:
         assert "000001" in codes
         assert "000002" not in codes
 
-    def test_excludes_expired_records(self, sqlite_storage):
+    def test_excludes_zero_remaining_records(self, sqlite_storage):
+        db = sqlite_storage
+        db.create_blackroom_record(
+            stock_code="000001", enabled=True, ban_days=1, remaining_days=0
+        )
+
+        active = db.list_active_blackroom_records()
+
+        assert active == []
+
+    def test_includes_records_with_null_expire_at_when_remaining_positive(
+        self, sqlite_storage
+    ):
+        db = sqlite_storage
+        db.create_blackroom_record(
+            stock_code="000001", enabled=True, ban_days=5, expire_at=None
+        )
+
+        active = db.list_active_blackroom_records()
+
+        assert [r.stock_code for r in active] == ["000001"]
+
+    def test_includes_records_with_positive_remaining_days(self, sqlite_storage):
         db = sqlite_storage
         past = datetime(2000, 1, 1, tzinfo=timezone.utc)
-        db.create_blackroom_record(stock_code="000001", enabled=True, expire_at=past)
-
-        active = db.list_active_blackroom_records()
-
-        assert active == []
-
-    def test_excludes_records_with_null_expire_at(self, sqlite_storage):
-        db = sqlite_storage
-        db.create_blackroom_record(stock_code="000001", enabled=True, expire_at=None)
-
-        active = db.list_active_blackroom_records()
-
-        assert active == []
-
-    def test_includes_records_expiring_in_future(self, sqlite_storage):
-        db = sqlite_storage
-        future = datetime.now(timezone.utc) + timedelta(days=365)
-        db.create_blackroom_record(stock_code="000001", enabled=True, expire_at=future)
+        db.create_blackroom_record(
+            stock_code="000001", enabled=True, ban_days=5, expire_at=past
+        )
 
         active = db.list_active_blackroom_records()
 
@@ -330,12 +355,11 @@ class TestListActiveBlackroomRecords:
 
     def test_filters_by_market(self, sqlite_storage):
         db = sqlite_storage
-        future = datetime.now(timezone.utc) + timedelta(days=30)
         db.create_blackroom_record(
-            stock_code="000001", market="A", enabled=True, expire_at=future
+            stock_code="000001", market="A", enabled=True, ban_days=30
         )
         db.create_blackroom_record(
-            stock_code="00700", market="HK", enabled=True, expire_at=future
+            stock_code="00700", market="HK", enabled=True, ban_days=30
         )
 
         active_a = db.list_active_blackroom_records(market="A")
@@ -343,24 +367,45 @@ class TestListActiveBlackroomRecords:
         assert len(active_a) == 1
         assert active_a[0].stock_code == "000001"
 
-    def test_combined_disabled_and_expired(self, sqlite_storage):
+    def test_combined_disabled_and_zero_remaining(self, sqlite_storage):
         db = sqlite_storage
-        past = datetime(2000, 1, 1, tzinfo=timezone.utc)
-        future = datetime.now(timezone.utc) + timedelta(days=1)
-        future2 = datetime.now(timezone.utc) + timedelta(days=2)
-        # disabled but not expired -> excluded
-        db.create_blackroom_record(stock_code="000001", enabled=False, expire_at=future)
-        # enabled but expired -> excluded
-        db.create_blackroom_record(stock_code="000002", enabled=True, expire_at=past)
-        # enabled, future expiry -> included
-        db.create_blackroom_record(stock_code="000003", enabled=True, expire_at=future2)
-        # enabled, no expiry -> excluded (NULL expire_at is not active)
-        db.create_blackroom_record(stock_code="000004", enabled=True, expire_at=None)
+        # disabled but positive remaining -> excluded
+        db.create_blackroom_record(stock_code="000001", enabled=False, ban_days=1)
+        # enabled but zero remaining -> excluded
+        db.create_blackroom_record(
+            stock_code="000002", enabled=True, ban_days=1, remaining_days=0
+        )
+        # enabled, positive remaining -> included
+        db.create_blackroom_record(stock_code="000003", enabled=True, ban_days=2)
+        # enabled, no remaining_days -> excluded
+        db.create_blackroom_record(stock_code="000004", enabled=True, ban_days=None)
 
         active = db.list_active_blackroom_records()
 
         codes = [r.stock_code for r in active]
         assert codes == ["000003"]
+
+    def test_active_records_use_remaining_days_not_expire_at(self, sqlite_storage):
+        db = sqlite_storage
+        past = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        future = datetime.now(timezone.utc) + timedelta(days=30)
+        db.create_blackroom_record(
+            stock_code="000001", enabled=True, ban_days=5, expire_at=past
+        )
+        db.create_blackroom_record(
+            stock_code="000002",
+            enabled=True,
+            ban_days=0,
+            remaining_days=0,
+            expire_at=future,
+        )
+        db.create_blackroom_record(
+            stock_code="000003", enabled=False, ban_days=5, expire_at=future
+        )
+
+        active = db.list_active_blackroom_records()
+
+        assert [r.stock_code for r in active] == ["000001"]
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +436,15 @@ class TestUpdateBlackroomRecord:
 
         assert updated.source == "shareholder_selling"
         assert updated.ban_days == 60
+        assert updated.remaining_days == 60
+
+    def test_updates_remaining_days_explicitly(self, sqlite_storage):
+        db = sqlite_storage
+        record = db.create_blackroom_record(stock_code="000001", ban_days=10)
+
+        updated = db.update_blackroom_record(record.id, remaining_days=3)
+
+        assert updated.remaining_days == 3
 
     def test_returns_none_for_missing_id(self, sqlite_storage):
         db = sqlite_storage
@@ -506,3 +560,106 @@ class TestDeleteBlackroomRecord:
         result = db.delete_blackroom_record(99999)
 
         assert result is False
+
+    def test_delete_blackroom_records_by_stock(self, sqlite_storage):
+        db = sqlite_storage
+        db.create_blackroom_record(stock_code="000001", market="A", ban_days=5)
+        db.create_blackroom_record(stock_code="000001", market="A", ban_days=10)
+        db.create_blackroom_record(stock_code="000001", market="HK", ban_days=5)
+
+        deleted = db.delete_blackroom_records_by_stock("000001", "A")
+
+        assert deleted == 2
+        assert [r.market for r in db.list_blackroom_records()] == ["HK"]
+
+
+# ---------------------------------------------------------------------------
+# countdown_blackroom_records
+# ---------------------------------------------------------------------------
+
+
+class TestCountdownBlackroomRecords:
+    def test_countdown_decrements_and_deletes_expired(self, sqlite_storage):
+        db = sqlite_storage
+        db.create_blackroom_record(stock_code="000001", ban_days=2)
+        db.create_blackroom_record(stock_code="000002", ban_days=1)
+        db.create_blackroom_record(stock_code="000003", ban_days=3, enabled=False)
+
+        result = db.countdown_blackroom_records()
+
+        records = db.list_blackroom_records()
+
+        assert result == {"decremented": 2, "deleted": 1}
+        assert [(r.stock_code, r.remaining_days) for r in records] == [
+            ("000001", 1),
+            ("000003", 3),
+        ]
+
+
+# ---------------------------------------------------------------------------
+# ensure_blackroom_records_table migration compatibility
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureBlackroomRecordsTable:
+    def test_adds_remaining_days_column_and_backfills_legacy_rows(
+        self, tmp_path, monkeypatch
+    ):
+        from sqlalchemy import create_engine as real_create_engine
+
+        sqlite_url = f"sqlite:///{tmp_path}/legacy_blackroom.db"
+        engine = real_create_engine(sqlite_url)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE blackroom_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        stock_code VARCHAR(10) NOT NULL,
+                        market VARCHAR(5) NOT NULL DEFAULT 'A',
+                        ban_days INTEGER,
+                        start_at DATETIME,
+                        expire_at DATETIME,
+                        source VARCHAR(50) NOT NULL DEFAULT 'manual',
+                        note TEXT,
+                        enabled BOOLEAN NOT NULL DEFAULT 1,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO blackroom_records (stock_code, market, ban_days) VALUES ('000001', 'A', 12)"
+                )
+            )
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+        monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
+
+        db = get_storage(mock_config)
+        db.engine = engine
+        db.Session = sessionmaker(bind=engine)
+
+        db.ensure_blackroom_records_table()
+
+        with engine.connect() as conn:
+            columns = [
+                row[1]
+                for row in conn.execute(text("PRAGMA table_info(blackroom_records)"))
+            ]
+            remaining_days = conn.execute(
+                text("SELECT remaining_days FROM blackroom_records WHERE stock_code = '000001'")
+            ).scalar_one()
+        assert "remaining_days" in columns
+        assert remaining_days == 12
+        reset_storage()
