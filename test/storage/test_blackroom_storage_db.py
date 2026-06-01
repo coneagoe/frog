@@ -602,6 +602,68 @@ class TestCountdownBlackroomRecords:
 
 
 class TestEnsureBlackroomRecordsTable:
+    def test_storage_init_auto_migrates_legacy_blackroom_table(
+        self, tmp_path, monkeypatch
+    ):
+        from sqlalchemy import create_engine as real_create_engine
+
+        sqlite_url = f"sqlite:///{tmp_path}/legacy_blackroom_init.db"
+        engine = real_create_engine(sqlite_url)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE blackroom_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        stock_code VARCHAR(10) NOT NULL,
+                        market VARCHAR(5) NOT NULL DEFAULT 'A',
+                        ban_days INTEGER,
+                        start_at DATETIME,
+                        expire_at DATETIME,
+                        source VARCHAR(50) NOT NULL DEFAULT 'manual',
+                        note TEXT,
+                        enabled BOOLEAN NOT NULL DEFAULT 1,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO blackroom_records (stock_code, market, ban_days) VALUES ('000001', 'A', 8)"
+                )
+            )
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+
+        db = get_storage(mock_config)
+        db.engine = engine
+        db.Session = sessionmaker(bind=engine)
+
+        with engine.connect() as conn:
+            columns = [
+                row[1]
+                for row in conn.execute(text("PRAGMA table_info(blackroom_records)"))
+            ]
+            remaining_days = conn.execute(
+                text(
+                    "SELECT remaining_days FROM blackroom_records WHERE stock_code = '000001'"
+                )
+            ).scalar_one()
+
+        assert "remaining_days" in columns
+        assert remaining_days == 8
+        reset_storage()
+
     def test_adds_remaining_days_column_and_backfills_legacy_rows(
         self, tmp_path, monkeypatch
     ):
@@ -658,7 +720,9 @@ class TestEnsureBlackroomRecordsTable:
                 for row in conn.execute(text("PRAGMA table_info(blackroom_records)"))
             ]
             remaining_days = conn.execute(
-                text("SELECT remaining_days FROM blackroom_records WHERE stock_code = '000001'")
+                text(
+                    "SELECT remaining_days FROM blackroom_records WHERE stock_code = '000001'"
+                )
             ).scalar_one()
         assert "remaining_days" in columns
         assert remaining_days == 12

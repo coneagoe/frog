@@ -13,13 +13,9 @@ from monitor.blackroom_service import BlackroomService
 class ShareholderSellingBlackroomSyncService:
     _DATE_PATTERN = re.compile(r"^\d{8}$")
 
-    def __init__(
-        self, blackroom_service: BlackroomService | None = None
-    ) -> None:
+    def __init__(self, blackroom_service: BlackroomService | None = None) -> None:
         self.blackroom_service = (
-            BlackroomService()
-            if blackroom_service is None
-            else blackroom_service
+            BlackroomService() if blackroom_service is None else blackroom_service
         )
 
     def sync(self, start_date: str, end_date: str, ban_days: int) -> dict[str, Any]:

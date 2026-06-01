@@ -394,6 +394,7 @@ class StorageDb:
         pid = os.getpid()
         if pid not in _metadata_initialized_pids:
             Base.metadata.create_all(self.engine)
+            self.ensure_blackroom_records_table()
             _metadata_initialized_pids.add(pid)
 
     def connect(self) -> bool:
@@ -2365,10 +2366,17 @@ class StorageDb:
         from .model.blackroom_record import BlackroomRecord  # noqa: F401
 
         BlackroomRecord.__table__.create(self.engine, checkfirst=True)
-        columns = {column["name"] for column in inspect(self.engine).get_columns("blackroom_records")}
+        columns = {
+            column["name"]
+            for column in inspect(self.engine).get_columns("blackroom_records")
+        }
         if "remaining_days" not in columns:
             with self.engine.begin() as conn:
-                conn.execute(text("ALTER TABLE blackroom_records ADD COLUMN remaining_days INTEGER"))
+                conn.execute(
+                    text(
+                        "ALTER TABLE blackroom_records ADD COLUMN remaining_days INTEGER"
+                    )
+                )
                 conn.execute(
                     text(
                         """

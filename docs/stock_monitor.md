@@ -93,7 +93,7 @@ poetry run python -m tools.stock_monitor_cli --json blackroom countdown
 poetry run python -m tools.stock_monitor_cli --json blackroom status
 ```
 
-兼容说明：`blackroom add` 仍可用，等价于 `blackroom ban`；`blackroom remove --id ...` 仍可用，等价于 `blackroom unban --id ...`。
+兼容说明：`blackroom add` 仍可用，等价于 `blackroom ban`；`blackroom remove --id ...` 仍可用，等价于 `blackroom unban --id ...`。黑屋相关命令在首次访问存储时会自动补齐 legacy `blackroom_records.remaining_days` 字段，并按已有 `ban_days` 回填旧记录。
 
 ### 同步股东减持公告到黑屋（sync-shareholder-selling）
 

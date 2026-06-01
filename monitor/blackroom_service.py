@@ -413,21 +413,13 @@ class BlackroomService:
             "market": getattr(record, "market", None),
             "ban_days": getattr(record, "ban_days", None),
             "remaining_days": getattr(record, "remaining_days", None),
-            "start_at": BlackroomService._to_iso(
-                getattr(record, "start_at", None)
-            ),
-            "expire_at": BlackroomService._to_iso(
-                getattr(record, "expire_at", None)
-            ),
+            "start_at": BlackroomService._to_iso(getattr(record, "start_at", None)),
+            "expire_at": BlackroomService._to_iso(getattr(record, "expire_at", None)),
             "source": getattr(record, "source", None),
             "note": getattr(record, "note", None),
             "enabled": getattr(record, "enabled", None),
-            "created_at": BlackroomService._to_iso(
-                getattr(record, "created_at", None)
-            ),
-            "updated_at": BlackroomService._to_iso(
-                getattr(record, "updated_at", None)
-            ),
+            "created_at": BlackroomService._to_iso(getattr(record, "created_at", None)),
+            "updated_at": BlackroomService._to_iso(getattr(record, "updated_at", None)),
         }
 
     @staticmethod

@@ -15,7 +15,9 @@ from monitor.monitor_target_service import (
     TargetNotFoundError,
     TargetValidationError,
 )
-from monitor.shareholder_selling_punishment import ShareholderSellingBlackroomSyncService
+from monitor.shareholder_selling_punishment import (
+    ShareholderSellingBlackroomSyncService,
+)
 
 BlackroomManagementService = BlackroomService
 ShareholderSellingPunishmentService = ShareholderSellingBlackroomSyncService
