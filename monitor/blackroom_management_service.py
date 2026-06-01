@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from monitor.blackroom_service import (
     BlackroomNotFoundError,
     BlackroomService,
@@ -19,5 +21,5 @@ __all__ = [
 class BlackroomManagementService(BlackroomService):
     """Backward-compatible name for BlackroomService."""
 
-    def __init__(self, storage=None) -> None:  # type: ignore[no-untyped-def]
+    def __init__(self, storage: Any = None) -> None:
         super().__init__(get_storage() if storage is None else storage)
