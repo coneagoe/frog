@@ -1,4 +1,4 @@
-"""DAG for downloading A-share top10_floatholders data weekly."""
+"""DAG for scanning A-share top10 floatholder data weekly."""
 
 import os
 import sys
@@ -26,20 +26,20 @@ from shareholder_monitor import run_ssf_change_alert  # noqa: E402
 PARTITION_COUNT = get_partition_count()
 
 
-def download_top10_floatholders_partition_task(
+def scan_top10_floatholder_partition_task(
     *, partition_id: int, partition_count: int, **context
 ):
-    """Download A-share top10_floatholders data for a specific partition.
+    """Scan A-share top10 floatholder data for a specific partition.
 
     Args:
         partition_id: The partition identifier (0-based)
 
     Returns:
-        Success message with download statistics
+        Success message with scan statistics
 
     Raises:
         AirflowSkipException: If partition is not active
-        Exception: If any stock download fails
+        Exception: If any stock scan fails
     """
     from common.const import COL_STOCK_ID  # noqa: E402
     from download import DownloadManager  # noqa: E402
@@ -68,27 +68,27 @@ def download_top10_floatholders_partition_task(
 
         if idx % 100 == 0 or idx == total:
             print(
-                f"[top10 floatholders p{partition_id:02d}] 进度: {idx}/{total} "
+                f"[top10 floatholder scan p{partition_id:02d}] 进度: {idx}/{total} "
                 f"(failed={len(failed_ids)})"
             )
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
         raise Exception(
-            f"前十大流通股东分片下载失败: partition={partition_id}/{partition_count}, "
+            f"前十大流通股东分片扫描失败: partition={partition_id}/{partition_count}, "
             f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
         )
 
     return (
-        f"前十大流通股东下载成功完成: partition={partition_id}/{partition_count}, "
+        f"前十大流通股东扫描成功完成: partition={partition_id}/{partition_count}, "
         f"count={total}"
     )
 
 
 dag = DAG(
-    "download_top10_floatholders_weekly",
+    "scan_top10_floatholder_weekly",
     default_args=get_default_args(),
-    description="Weekly A-share top10_floatholders download",
+    description="Weekly A-share top10 floatholder scan",
     schedule="0 21 * * 0",
     catchup=False,
     max_active_runs=1,
@@ -96,8 +96,8 @@ dag = DAG(
 
 partition_tasks = [
     PythonOperator(
-        task_id=f"download_top10_floatholders_p{pid:02d}",
-        python_callable=download_top10_floatholders_partition_task,
+        task_id=f"scan_top10_floatholder_p{pid:02d}",
+        python_callable=scan_top10_floatholder_partition_task,
         op_kwargs={"partition_id": pid, "partition_count": PARTITION_COUNT},
         dag=dag,
     )
