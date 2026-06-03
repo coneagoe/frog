@@ -91,6 +91,7 @@ When simplifying code (per `docs/coding_rule.md`):
 
 - **Semantics-Preserving**: Never change external behavior, outputs, I/O side effects, or timing
 - **Scope**: Only modify files explicitly provided by user or current changeset
+- **Naming**: Name by actual responsibility/behavior, not by current implementation details
 - **Airflow DAGs**: Never change schedule, dependencies, retries, SLA, or task boundaries
 - **Verification Whitelist**: Only run these commands for validation:
   - `poetry run pre-commit run --all-files`
