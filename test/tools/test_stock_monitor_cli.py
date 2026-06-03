@@ -1,12 +1,21 @@
 import json
 from unittest.mock import MagicMock
 
+import tools.stock_monitor_cli as stock_monitor_cli_module
+
 from tools.stock_monitor_cli import (
     EXIT_INTERNAL_ERROR,
     EXIT_NOT_FOUND,
     EXIT_VALIDATION_ERROR,
     main,
 )
+
+
+def test_cli_module_exports_only_new_sync_service_name():
+    old_name = "ShareholderSelling" + "BlackroomSyncService"
+
+    assert hasattr(stock_monitor_cli_module, "ShareholderSellingPunishmentService")
+    assert not hasattr(stock_monitor_cli_module, old_name)
 
 
 def test_add_command_parses_args_and_calls_service(capsys):
@@ -528,7 +537,7 @@ def test_blackroom_sync_inits_sync_service_with_injected_blackroom_service():
     }
 
     with patch(
-        "tools.stock_monitor_cli.ShareholderSellingBlackroomSyncService",
+        "tools.stock_monitor_cli.ShareholderSellingPunishmentService",
         return_value=created_sync_service,
     ) as sync_ctor:
         exit_code = main(
@@ -801,7 +810,7 @@ def test_blackroom_command_succeeds_when_sync_service_init_fails(capsys):
     }
 
     with patch(
-        "tools.stock_monitor_cli.ShareholderSellingBlackroomSyncService",
+        "tools.stock_monitor_cli.ShareholderSellingPunishmentService",
         side_effect=RuntimeError("sync storage unavailable"),
     ):
         exit_code = main(["blackroom", "status"], blackroom_service=bsvc)

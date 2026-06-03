@@ -73,7 +73,7 @@ def test_sync_shareholder_selling_blackroom_uses_logical_date(
         "data": {"added": 2, "skipped": 1},
     }
     monkeypatch.setattr(
-        "monitor.shareholder_selling_punishment.ShareholderSellingBlackroomSyncService",
+        "monitor.shareholder_selling_punishment.ShareholderSellingPunishmentService",
         service,
     )
 
@@ -99,7 +99,7 @@ def test_sync_shareholder_selling_blackroom_failure_raises(
         "data": None,
     }
     monkeypatch.setattr(
-        "monitor.shareholder_selling_punishment.ShareholderSellingBlackroomSyncService",
+        "monitor.shareholder_selling_punishment.ShareholderSellingPunishmentService",
         service,
     )
 

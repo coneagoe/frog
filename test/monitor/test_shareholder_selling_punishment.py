@@ -3,21 +3,21 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pandas as pd
+import monitor.shareholder_selling_punishment as punishment_module
 
 from monitor.shareholder_selling_punishment import (
-    ShareholderSellingBlackroomSyncService,
     ShareholderSellingPunishmentService,
 )
 
 
-def test_new_sync_service_name_and_old_alias_share_behavior():
+def test_only_new_sync_service_name_is_exported():
     bsvc = MagicMock()
+    old_name = "ShareholderSelling" + "BlackroomSyncService"
 
-    new_service = ShareholderSellingBlackroomSyncService(blackroom_service=bsvc)
-    old_service = ShareholderSellingPunishmentService(blackroom_service=bsvc)
+    service = ShareholderSellingPunishmentService(blackroom_service=bsvc)
 
-    assert isinstance(old_service, ShareholderSellingBlackroomSyncService)
-    assert new_service.blackroom_service is bsvc
+    assert service.blackroom_service is bsvc
+    assert not hasattr(punishment_module, old_name)
 
 
 def _install_tushare_stub(monkeypatch, pro_api):

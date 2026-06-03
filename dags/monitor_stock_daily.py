@@ -56,11 +56,11 @@ def _raise_if_failed(result: dict[str, Any], task_name: str) -> None:
 def sync_shareholder_selling_blackroom(**context):
     """Sync shareholder-selling announcements into blackroom bans every scheduled day."""
     from monitor.shareholder_selling_punishment import (
-        ShareholderSellingBlackroomSyncService,
+        ShareholderSellingPunishmentService,
     )
 
     run_date = _format_logical_date(context)
-    result = ShareholderSellingBlackroomSyncService().sync(
+    result = ShareholderSellingPunishmentService().sync(
         start_date=run_date,
         end_date=run_date,
         ban_days=180,

@@ -16,11 +16,10 @@ from monitor.monitor_target_service import (
     TargetValidationError,
 )
 from monitor.shareholder_selling_punishment import (
-    ShareholderSellingBlackroomSyncService,
+    ShareholderSellingPunishmentService,
 )
 
 BlackroomManagementService = BlackroomService
-ShareholderSellingPunishmentService = ShareholderSellingBlackroomSyncService
 
 
 class _ParserError(Exception):
@@ -237,14 +236,15 @@ def _emit(result: dict[str, Any], json_output: bool) -> None:
 def _to_exit_code(result: dict[str, Any]) -> int:
     if result.get("success"):
         return EXIT_OK
-    return _EXIT_CODE_MAP.get(result.get("code"), EXIT_INTERNAL_ERROR)
+    code = result.get("code")
+    return _EXIT_CODE_MAP.get(str(code) if code is not None else "", EXIT_INTERNAL_ERROR)
 
 
 def main(
     argv: list[str] | None = None,
     service: MonitorTargetService | None = None,
     blackroom_service: BlackroomService | None = None,
-    sync_service: ShareholderSellingBlackroomSyncService | None = None,
+    sync_service: ShareholderSellingPunishmentService | None = None,
     countdown_service: BlackroomCountdownService | None = None,
 ) -> int:
     try:
@@ -350,7 +350,7 @@ def main(
 def _handle_blackroom(
     args: argparse.Namespace,
     bsvc: BlackroomService | None = None,
-    sync_service: ShareholderSellingBlackroomSyncService | None = None,
+    sync_service: ShareholderSellingPunishmentService | None = None,
     countdown_service: BlackroomCountdownService | None = None,
 ) -> dict[str, Any]:
     cmd = args.blackroom_command
@@ -423,7 +423,7 @@ def _handle_blackroom(
         effective_countdown_service = countdown_service or BlackroomCountdownService()
         return effective_countdown_service.run()
     if cmd == "sync-shareholder-selling":
-        effective_sync_service = sync_service or ShareholderSellingBlackroomSyncService(
+        effective_sync_service = sync_service or ShareholderSellingPunishmentService(
             blackroom_service=_get_bsvc()
         )
         return effective_sync_service.sync(

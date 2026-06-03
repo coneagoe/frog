@@ -10,7 +10,7 @@ from typing import Any
 from monitor.blackroom_service import BlackroomService
 
 
-class ShareholderSellingBlackroomSyncService:
+class ShareholderSellingPunishmentService:
     _DATE_PATTERN = re.compile(r"^\d{8}$")
 
     def __init__(self, blackroom_service: BlackroomService | None = None) -> None:
@@ -175,7 +175,3 @@ class ShareholderSellingBlackroomSyncService:
             str(result.get("message") or default_message),
             result.get("data"),
         )
-
-
-class ShareholderSellingPunishmentService(ShareholderSellingBlackroomSyncService):
-    """Backward-compatible name for shareholder-selling blackroom sync."""
