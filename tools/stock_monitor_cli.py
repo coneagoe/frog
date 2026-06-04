@@ -15,9 +15,7 @@ from monitor.monitor_target_service import (
     TargetNotFoundError,
     TargetValidationError,
 )
-from monitor.shareholder_selling_punishment import (
-    ShareholderSellingPunishmentService,
-)
+from monitor.shareholder_selling_punishment import ShareholderSellingPunishmentService
 
 BlackroomManagementService = BlackroomService
 
@@ -237,7 +235,9 @@ def _to_exit_code(result: dict[str, Any]) -> int:
     if result.get("success"):
         return EXIT_OK
     code = result.get("code")
-    return _EXIT_CODE_MAP.get(str(code) if code is not None else "", EXIT_INTERNAL_ERROR)
+    return _EXIT_CODE_MAP.get(
+        str(code) if code is not None else "", EXIT_INTERNAL_ERROR
+    )
 
 
 def main(

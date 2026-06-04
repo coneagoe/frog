@@ -3,11 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pandas as pd
-import monitor.shareholder_selling_punishment as punishment_module
 
-from monitor.shareholder_selling_punishment import (
-    ShareholderSellingPunishmentService,
-)
+import monitor.shareholder_selling_punishment as punishment_module
+from monitor.shareholder_selling_punishment import ShareholderSellingPunishmentService
 
 
 def test_only_new_sync_service_name_is_exported():

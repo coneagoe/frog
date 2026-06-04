@@ -2,7 +2,6 @@ import json
 from unittest.mock import MagicMock
 
 import tools.stock_monitor_cli as stock_monitor_cli_module
-
 from tools.stock_monitor_cli import (
     EXIT_INTERNAL_ERROR,
     EXIT_NOT_FOUND,
