@@ -1,4 +1,4 @@
-from shareholder_monitor.ssf_detector import is_social_security_holder
+from top10_floatholder.ssf_detector import is_social_security_holder
 
 
 def test_is_social_security_holder_matches_ssf_keywords():

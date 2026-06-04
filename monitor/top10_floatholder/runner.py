@@ -6,10 +6,13 @@ from dataclasses import dataclass
 import pandas as pd
 
 from storage import get_storage
+from top10_floatholder.ssf_change_analyzer import (
+    SSFChangeAnalysisOutcome,
+    analyze_ssf_change,
+)
 from utility import send_email
 
 from .ssf_alert import build_ssf_change_alert_email
-from .ssf_change_analyzer import SSFChangeAnalysisOutcome, analyze_ssf_change
 
 logger = logging.getLogger(__name__)
 

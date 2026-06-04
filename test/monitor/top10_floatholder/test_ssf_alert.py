@@ -1,7 +1,7 @@
 from datetime import datetime
 from inspect import signature
 
-from shareholder_monitor.ssf_alert import build_ssf_change_alert_email
+from monitor.top10_floatholder.ssf_alert import build_ssf_change_alert_email
 
 
 class SignalObject:

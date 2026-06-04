@@ -2,7 +2,7 @@ from typing import Any
 
 import pandas as pd
 
-from shareholder_monitor.ssf_change_analyzer import (
+from top10_floatholder.ssf_change_analyzer import (
     SSFChangeAnalysisOutcome,
     analyze_ssf_change,
 )

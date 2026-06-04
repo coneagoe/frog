@@ -21,7 +21,7 @@ from common_dags import (  # noqa: E402
     get_partitioned_ids,
 )
 
-from shareholder_monitor import run_ssf_change_alert  # noqa: E402
+from monitor.top10_floatholder import run_ssf_change_alert  # noqa: E402
 
 PARTITION_COUNT = get_partition_count()
 

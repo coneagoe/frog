@@ -11,7 +11,7 @@ from common.const import (
     AdjustType,
     PeriodType,
 )
-from shareholder_monitor.ssf_detector import is_social_security_holder
+from top10_floatholder.ssf_detector import is_social_security_holder
 
 # exported factor names
 SSF_FACTOR_COUNT = "ssf_count"
@@ -26,7 +26,7 @@ def build_ssf_factor_history(history_df: pd.DataFrame) -> pd.DataFrame:
     """
     Given top10 floatholders history records, compute per-announcement-date SSF counts,
     total SSF holding ratio, and ratio change vs previous announcement.
-    We identify SSF holders using shareholder_monitor.ssf_detector.is_social_security_holder.
+    We identify SSF holders using top10_floatholder.ssf_detector.is_social_security_holder.
     Returns a dataframe with columns: COL_ANN_DATE, SSF_FACTOR_COUNT, SSF_FACTOR_RATIO, SSF_FACTOR_RATIO_CHANGE
     """
     if history_df is None or history_df.empty:
