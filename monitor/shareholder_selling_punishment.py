@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from monitor.blackroom_service import BlackroomService
@@ -37,6 +37,7 @@ class ShareholderSellingPunishmentService:
             unique_rows = self._build_unique_rows(data)
 
             added = 0
+            reset = 0
             skipped = 0
             records: list[dict[str, Any]] = []
 
@@ -46,39 +47,64 @@ class ShareholderSellingPunishmentService:
                 ann_date = row["ann_date"]
                 holder_name = row["holder_name"]
 
-                check_result = self.blackroom_service.is_banned(stock_code, market)
-                if not check_result.get("success"):
+                try:
+                    announcement_start = self._parse_announcement_date(ann_date)
+                except ValueError as exc:
+                    return self._result(False, "VALIDATION_ERROR", str(exc), None)
+                note = f"股东减持公告 {ann_date} / {holder_name}"
+
+                active_result = self.blackroom_service.get_active_record(stock_code, market)
+                if not active_result.get("success"):
                     return self._propagate_failure(
-                        check_result,
+                        active_result,
                         default_code="BLACKROOM_CHECK_FAILED",
                         default_message="blackroom check failed",
                     )
-                banned = bool((check_result.get("data") or {}).get("banned"))
-                if banned:
-                    skipped += 1
-                    continue
 
-                note = f"股东减持公告 {ann_date} / {holder_name}"
-                add_result = self.blackroom_service.ban(
-                    stock_code=stock_code,
-                    market=market,
-                    ban_days=ban_days,
-                    source="shareholder_selling",
-                    note=note,
-                )
-                if not add_result.get("success"):
-                    return self._propagate_failure(
-                        add_result,
-                        default_code="BLACKROOM_ADD_FAILED",
-                        default_message="blackroom add failed",
+                active_record = active_result.get("data")
+                if active_record:
+                    record_id = active_record.get("id")
+                    update_result = self.blackroom_service.update_record(
+                        record_id,
+                        start_at=announcement_start,
+                        ban_days=ban_days,
+                        remaining_days=ban_days,
+                        source="shareholder_selling",
+                        note=note,
                     )
-                added += 1
+                    if not update_result.get("success"):
+                        return self._propagate_failure(
+                            update_result,
+                            default_code="BLACKROOM_UPDATE_FAILED",
+                            default_message="blackroom update failed",
+                        )
+                    reset += 1
+                    action = "reset"
+                else:
+                    add_result = self.blackroom_service.ban(
+                        stock_code=stock_code,
+                        market=market,
+                        ban_days=ban_days,
+                        start_at=announcement_start,
+                        source="shareholder_selling",
+                        note=note,
+                    )
+                    if not add_result.get("success"):
+                        return self._propagate_failure(
+                            add_result,
+                            default_code="BLACKROOM_ADD_FAILED",
+                            default_message="blackroom add failed",
+                        )
+                    added += 1
+                    action = "added"
+
                 records.append(
                     {
                         "stock_code": stock_code,
                         "market": market,
                         "ann_date": ann_date,
                         "holder_name": holder_name,
+                        "action": action,
                     }
                 )
 
@@ -90,6 +116,7 @@ class ShareholderSellingPunishmentService:
                     "fetched": fetched,
                     "unique_stocks": len(unique_rows),
                     "added": added,
+                    "reset": reset,
                     "skipped": skipped,
                     "records": records,
                 },
@@ -119,6 +146,15 @@ class ShareholderSellingPunishmentService:
             raise ValueError(f"{field_name} 必须是 YYYYMMDD 格式")
         datetime.strptime(value, "%Y%m%d")
 
+    @classmethod
+    def _parse_announcement_date(cls, value: Any) -> datetime:
+        try:
+            cls._validate_date(value, "ann_date")
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        parsed = datetime.strptime(value, "%Y%m%d")
+        return parsed.replace(tzinfo=timezone.utc)
+
     @staticmethod
     def _validate_ban_days(ban_days: Any) -> None:
         if type(ban_days) is not int or ban_days <= 0:
@@ -139,23 +175,25 @@ class ShareholderSellingPunishmentService:
         if data is None or getattr(data, "empty", False):
             return []
 
-        rows: list[dict[str, Any]] = []
-        seen: set[tuple[str, str]] = set()
+        rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        order: list[tuple[str, str]] = []
         for row in data.to_dict("records"):
             stock_code, market = self._normalize_ts_code(row.get("ts_code"))
             key = (stock_code, market)
-            if key in seen:
+            normalized_row = {
+                "stock_code": stock_code,
+                "market": market,
+                "ann_date": str(row.get("ann_date") or ""),
+                "holder_name": str(row.get("holder_name") or ""),
+            }
+            if key not in rows_by_key:
+                rows_by_key[key] = normalized_row
+                order.append(key)
                 continue
-            seen.add(key)
-            rows.append(
-                {
-                    "stock_code": stock_code,
-                    "market": market,
-                    "ann_date": str(row.get("ann_date") or ""),
-                    "holder_name": str(row.get("holder_name") or ""),
-                }
-            )
-        return rows
+            if normalized_row["ann_date"] > rows_by_key[key]["ann_date"]:
+                rows_by_key[key] = normalized_row
+
+        return [rows_by_key[key] for key in order]
 
     @staticmethod
     def _result(success: bool, code: str, message: str, data: Any) -> dict[str, Any]:

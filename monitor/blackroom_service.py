@@ -271,6 +271,27 @@ class BlackroomService:
         except Exception as exc:  # noqa: BLE001
             return self._result(False, "STORAGE_ERROR", str(exc), None)
 
+    def get_active_record(self, stock_code: str, market: str) -> dict[str, Any]:
+        try:
+            self._validate_stock_code(stock_code)
+            self._validate_market(market)
+
+            active = self.storage.list_active_blackroom_records(market=market)
+            for record in active:
+                if getattr(record, "stock_code", None) == stock_code:
+                    return self._result(
+                        True,
+                        "OK",
+                        "active record checked",
+                        self._serialize(record),
+                    )
+
+            return self._result(True, "OK", "active record checked", None)
+        except BlackroomValidationError as exc:
+            return self._result(False, "VALIDATION_ERROR", str(exc), None)
+        except Exception as exc:  # noqa: BLE001
+            return self._result(False, "STORAGE_ERROR", str(exc), None)
+
     def is_buy_banned(self, stock_code: str, market: str) -> dict[str, Any]:
         return self.is_banned(stock_code=stock_code, market=market)
 
@@ -322,6 +343,9 @@ class BlackroomService:
 
     def check(self, stock_code: str, market: str) -> dict[str, Any]:
         return self.is_banned(stock_code=stock_code, market=market)
+
+    def active_record(self, stock_code: str, market: str) -> dict[str, Any]:
+        return self.get_active_record(stock_code=stock_code, market=market)
 
     def status(self) -> dict[str, Any]:
         return self.get_status()

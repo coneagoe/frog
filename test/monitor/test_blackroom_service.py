@@ -73,6 +73,35 @@ def test_is_banned_uses_active_records():
     assert result["data"]["banned"] is True
 
 
+def test_get_active_record_returns_matching_serialized_record():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.return_value = [
+        _record(id=3, stock_code="000001"),
+        _record(id=7, stock_code="600519"),
+    ]
+
+    result = BlackroomService(storage=storage).get_active_record("600519", "A")
+
+    assert result["success"] is True
+    assert result["data"]["id"] == 7
+    assert result["data"]["stock_code"] == "600519"
+    storage.list_active_blackroom_records.assert_called_once_with(market="A")
+
+
+def test_get_active_record_returns_none_when_stock_not_active():
+    storage = MagicMock()
+    storage.list_active_blackroom_records.return_value = [_record(stock_code="000001")]
+
+    result = BlackroomService(storage=storage).get_active_record("600519", "A")
+
+    assert result == {
+        "success": True,
+        "code": "OK",
+        "message": "active record checked",
+        "data": None,
+    }
+
+
 def test_filter_buy_candidates_splits_allowed_and_banned():
     storage = MagicMock()
     storage.list_active_blackroom_records.return_value = [_record(stock_code="600519")]
