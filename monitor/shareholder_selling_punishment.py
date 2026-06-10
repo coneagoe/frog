@@ -53,7 +53,9 @@ class ShareholderSellingPunishmentService:
                     return self._result(False, "VALIDATION_ERROR", str(exc), None)
                 note = f"股东减持公告 {ann_date} / {holder_name}"
 
-                active_result = self.blackroom_service.get_active_record(stock_code, market)
+                active_result = self.blackroom_service.get_active_record(
+                    stock_code, market
+                )
                 if not active_result.get("success"):
                     return self._propagate_failure(
                         active_result,
