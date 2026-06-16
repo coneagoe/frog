@@ -29,7 +29,10 @@ describe("api client", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await createAccount({ name: "demo", initial_cash: "100000.00" });
-    expect(fetchMock).toHaveBeenCalledWith("/api/paper/accounts", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/accounts",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "demo", initial_cash: "100000.00" }) })
+    );
   });
 });
 
