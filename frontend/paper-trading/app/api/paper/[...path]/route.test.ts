@@ -25,6 +25,7 @@ describe("paper API proxy", () => {
     );
     const headers = fetchMock.mock.calls[0][1].headers as Headers;
     expect(headers.get("authorization")).toBe("Bearer secret");
+    expect(headers.has("content-type")).toBe(false);
   });
 
   it("forwards POST JSON bodies", async () => {
@@ -35,10 +36,16 @@ describe("paper API proxy", () => {
     const body = JSON.stringify({ name: "demo", initial_cash: "100000.00" });
 
     await POST(
-      new Request("http://localhost/api/paper/accounts", { method: "POST", body }),
+      new Request("http://localhost/api/paper/accounts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body
+      }),
       { params: Promise.resolve({ path: ["accounts"] }) }
     );
 
     expect(fetchMock.mock.calls[0][1].body).toBeInstanceOf(ReadableStream);
+    const headers = fetchMock.mock.calls[0][1].headers as Headers;
+    expect(headers.get("content-type")).toBe("application/json");
   });
 });
