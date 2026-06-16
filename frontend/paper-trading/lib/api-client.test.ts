@@ -7,8 +7,11 @@ afterEach(() => {
 
 describe("api client", () => {
   it("parses successful JSON responses", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: 1 }]), { status: 200 })));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: 1 }]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
     await expect(apiGet<{ id: number }[]>("/accounts")).resolves.toEqual([{ id: 1 }]);
+    const headers = fetchMock.mock.calls[0][1].headers as Headers;
+    expect(headers.has("content-type")).toBe(false);
   });
 
   it("normalizes structured backend errors", async () => {
@@ -41,5 +44,14 @@ describe("ApiError", () => {
     const error = new ApiError(409, "ORDER_NOT_CANCELLABLE", "Cannot cancel", { id: 1 });
     expect(error.status).toBe(409);
     expect(error.details).toEqual({ id: 1 });
+  });
+
+  it("uses text from non-object JSON error payloads", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify("backend failed"), { status: 500 })));
+    await expect(apiGet("/accounts")).rejects.toMatchObject({
+      status: 500,
+      code: "HTTP_ERROR",
+      message: "backend failed"
+    });
   });
 });

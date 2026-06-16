@@ -15,12 +15,13 @@ import type {
 export { ApiError };
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.body && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
   const response = await fetch(`/api/paper${path}`, {
     ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {})
-    }
+    headers
   });
   if (!response.ok) {
     throw await parseApiError(response);

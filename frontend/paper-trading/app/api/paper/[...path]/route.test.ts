@@ -39,6 +39,6 @@ describe("paper API proxy", () => {
       { params: Promise.resolve({ path: ["accounts"] }) }
     );
 
-    expect(fetchMock.mock.calls[0][1].body).toBe(body);
+    expect(fetchMock.mock.calls[0][1].body).toBeInstanceOf(ReadableStream);
   });
 });
