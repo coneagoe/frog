@@ -4,16 +4,18 @@ import { EmptyState } from "./empty-state";
 export type Column<T> = {
   key: string;
   header: string;
-  align?: "left" | "right" | "center";
+  align?: "left" | "right";
   render: (row: T) => ReactNode;
 };
 
 export function DataTable<T>({
   columns,
+  getRowKey,
   rows,
   emptyTitle
 }: {
   columns: Column<T>[];
+  getRowKey: (row: T) => string | number;
   rows: T[];
   emptyTitle: string;
 }) {
@@ -31,8 +33,8 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={index}>
+          {rows.map((row) => (
+            <tr key={getRowKey(row)}>
               {columns.map((column) => (
                 <td className={column.align === "right" ? "numeric" : undefined} key={column.key}>
                   {column.render(row)}
