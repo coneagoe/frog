@@ -48,10 +48,16 @@ from storage.model import (  # noqa: E402
 )
 from storage.storage_db import (  # noqa: E402
     ConnectionError,
+    StorageDb,
     connect_once,
     get_storage,
     reset_storage,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_blackroom_table_migration(monkeypatch):
+    monkeypatch.setattr(StorageDb, "ensure_blackroom_records_table", Mock())
 
 
 class TestStorageDb:

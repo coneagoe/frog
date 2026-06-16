@@ -31,6 +31,14 @@ BUSINESS_TABLES=(
   etf_daily
   stock_monitor_targets
   blackroom_records
+  paper_accounts
+  paper_cash_ledger
+  paper_positions
+  paper_position_lots
+  paper_orders
+  paper_trades
+  paper_account_snapshots
+  paper_matching_runs
 )
 
 # Common database configuration defaults

@@ -1,0 +1,34 @@
+from enum import StrEnum
+
+
+class AccountStatus(StrEnum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+
+
+class OrderSide(StrEnum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+class OrderStatus(StrEnum):
+    NEW = "new"
+    ACCEPTED = "accepted"
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
+
+
+class CashEventType(StrEnum):
+    DEPOSIT = "deposit"
+    FREEZE = "freeze"
+    RELEASE = "release"
+    TRADE = "trade"
+    FEE = "fee"
+
+
+class MatchingRunStatus(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
