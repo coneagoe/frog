@@ -18,12 +18,13 @@ async function proxy(request: Request, context: RouteContext) {
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
 
   try {
+    const headers = new Headers({ authorization: `Bearer ${token}` });
+    if (body) {
+      headers.set("content-type", request.headers.get("content-type") ?? "application/json");
+    }
     const init: RequestInit & { duplex?: "half" } = {
       method: request.method,
-      headers: new Headers({
-        authorization: `Bearer ${token}`,
-        "content-type": request.headers.get("content-type") ?? "application/json"
-      }),
+      headers,
       body
     };
     if (body) {
