@@ -32,12 +32,13 @@ describe("paper API proxy", () => {
     process.env.PAPER_TRADING_API_TOKEN = "secret";
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
+    const body = JSON.stringify({ name: "demo", initial_cash: "100000.00" });
 
     await POST(
-      new Request("http://localhost/api/paper/accounts", { method: "POST", body: JSON.stringify({ name: "demo" }) }),
+      new Request("http://localhost/api/paper/accounts", { method: "POST", body }),
       { params: Promise.resolve({ path: ["accounts"] }) }
     );
 
-    expect(fetchMock.mock.calls[0][1].body).toBe(JSON.stringify({ name: "demo" }));
+    expect(fetchMock.mock.calls[0][1].body).toBe(body);
   });
 });
