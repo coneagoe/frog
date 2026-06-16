@@ -15,17 +15,21 @@ async function proxy(request: Request, context: RouteContext) {
   const { path } = await context.params;
   const incomingUrl = new URL(request.url);
   const targetUrl = new URL(`/paper/${path.join("/")}${incomingUrl.search}`, baseUrl);
-  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
+  const body = request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
 
   try {
-    const response = await fetch(targetUrl.toString(), {
+    const init: RequestInit & { duplex?: "half" } = {
       method: request.method,
       headers: new Headers({
         authorization: `Bearer ${token}`,
         "content-type": request.headers.get("content-type") ?? "application/json"
       }),
       body
-    });
+    };
+    if (body) {
+      init.duplex = "half";
+    }
+    const response = await fetch(targetUrl.toString(), init);
     const text = await response.text();
     return new Response(text, {
       status: response.status,
