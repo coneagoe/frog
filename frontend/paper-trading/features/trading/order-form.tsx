@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createOrder } from "@/lib/api-client";
 import type { Account, OrderSide } from "@/lib/types";
 
@@ -23,6 +23,10 @@ export function OrderForm({
   const [submitting, setSubmitting] = useState(false);
   const numericQuantity = Number(quantity);
   const lotWarning = Number.isFinite(numericQuantity) && numericQuantity > 0 && numericQuantity % 100 !== 0;
+
+  useEffect(() => {
+    setAccountId(selectedAccountId ?? accounts[0]?.id ?? 0);
+  }, [accounts, selectedAccountId]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
