@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { cancelOrder, listAccounts, listCashLedger, listOrders, listPositions, listTrades } from "@/lib/api-client";
@@ -10,6 +11,7 @@ import { PriceChart } from "./price-chart";
 import { CashLedgerTable, OrderTable, PositionTable, TradeTable } from "./trading-tables";
 
 export function TradePage() {
+  const searchParams = useSearchParams();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [symbol, setSymbol] = useState("");
@@ -75,7 +77,10 @@ export function TradePage() {
       try {
         const nextAccounts = await listAccounts();
         setAccounts(nextAccounts);
-        const firstAccountId = nextAccounts[0]?.id ?? null;
+        const requestedAccountId = Number(searchParams.get("accountId"));
+        const firstAccountId = nextAccounts.some((account) => account.id === requestedAccountId)
+          ? requestedAccountId
+          : nextAccounts[0]?.id ?? null;
         setSelectedAccountId(firstAccountId);
         if (firstAccountId) {
           await loadAccountData(firstAccountId, true);
@@ -87,7 +92,7 @@ export function TradePage() {
       }
     }
     void load();
-  }, []);
+  }, [searchParams]);
 
   async function onCancel(orderId: number) {
     try {

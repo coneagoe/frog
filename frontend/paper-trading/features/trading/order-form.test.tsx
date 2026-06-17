@@ -9,6 +9,10 @@ vi.mock("@/lib/api-client", () => ({
   createOrder: vi.fn()
 }));
 
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams()
+}));
+
 const createOrderMock = vi.mocked(createOrder);
 const accounts: Account[] = [{ id: 1, name: "demo", initial_cash: "100000.00", status: "active", base_currency: "CNY" }];
 
