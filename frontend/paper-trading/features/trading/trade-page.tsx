@@ -24,20 +24,30 @@ export function TradePage() {
     if (!accountId) {
       return;
     }
-    try {
-      setError(null);
-      const [nextPositions, nextOrders, nextTrades, nextCashLedger] = await Promise.all([
-        listPositions(accountId),
-        listOrders(accountId),
-        listTrades(accountId),
-        listCashLedger(accountId)
-      ]);
-      setPositions(nextPositions);
-      setOrders(nextOrders);
-      setTrades(nextTrades);
-      setCashLedger(nextCashLedger);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load trading data");
+    setError(null);
+    const [nextPositions, nextOrders, nextTrades, nextCashLedger] = await Promise.allSettled([
+      listPositions(accountId),
+      listOrders(accountId),
+      listTrades(accountId),
+      listCashLedger(accountId)
+    ]);
+
+    if (nextPositions.status === "fulfilled") {
+      setPositions(nextPositions.value);
+    }
+    if (nextOrders.status === "fulfilled") {
+      setOrders(nextOrders.value);
+    }
+    if (nextTrades.status === "fulfilled") {
+      setTrades(nextTrades.value);
+    }
+    if (nextCashLedger.status === "fulfilled") {
+      setCashLedger(nextCashLedger.value);
+    }
+
+    const failed = [nextPositions, nextOrders, nextTrades, nextCashLedger].find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") {
+      setError(failed.reason instanceof Error ? failed.reason.message : "Some trading panels failed to load");
     }
   }
 

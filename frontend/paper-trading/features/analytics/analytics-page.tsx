@@ -18,18 +18,26 @@ export function AnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function loadAccountData(accountId: number) {
-    try {
-      setError(null);
-      const [nextSnapshots, nextTrades, nextCashLedger] = await Promise.all([
-        listSnapshots(accountId),
-        listTrades(accountId),
-        listCashLedger(accountId)
-      ]);
-      setSnapshots(nextSnapshots);
-      setTrades(nextTrades);
-      setCashLedger(nextCashLedger);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load analytics data");
+    setError(null);
+    const [nextSnapshots, nextTrades, nextCashLedger] = await Promise.allSettled([
+      listSnapshots(accountId),
+      listTrades(accountId),
+      listCashLedger(accountId)
+    ]);
+
+    if (nextSnapshots.status === "fulfilled") {
+      setSnapshots(nextSnapshots.value);
+    }
+    if (nextTrades.status === "fulfilled") {
+      setTrades(nextTrades.value);
+    }
+    if (nextCashLedger.status === "fulfilled") {
+      setCashLedger(nextCashLedger.value);
+    }
+
+    const failed = [nextSnapshots, nextTrades, nextCashLedger].find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") {
+      setError(failed.reason instanceof Error ? failed.reason.message : "Some analytics panels failed to load");
     }
   }
 
