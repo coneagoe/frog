@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { cancelOrder, listAccounts, listCashLedger, listOrders, listPositions, listTrades } from "@/lib/api-client";
 import type { Account, CashLedgerEntry, Order, Position, Trade } from "@/lib/types";
@@ -19,11 +19,13 @@ export function TradePage() {
   const [cashLedger, setCashLedger] = useState<CashLedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   async function loadAccountData(accountId: number, clearExisting = false) {
     if (!accountId) {
       return;
     }
+    const requestId = ++requestIdRef.current;
     setError(null);
     if (clearExisting) {
       setPositions([]);
@@ -37,6 +39,10 @@ export function TradePage() {
       listTrades(accountId),
       listCashLedger(accountId)
     ]);
+
+    if (requestId !== requestIdRef.current) {
+      return;
+    }
 
     if (nextPositions.status === "fulfilled") {
       setPositions(nextPositions.value);

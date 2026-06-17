@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { listAccounts, listCashLedger, listSnapshots, listTrades } from "@/lib/api-client";
 import type { Account, CashLedgerEntry, Snapshot, Trade } from "@/lib/types";
@@ -16,8 +16,10 @@ export function AnalyticsPage() {
   const [cashLedger, setCashLedger] = useState<CashLedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   async function loadAccountData(accountId: number, clearExisting = false) {
+    const requestId = ++requestIdRef.current;
     setError(null);
     if (clearExisting) {
       setSnapshots([]);
@@ -29,6 +31,10 @@ export function AnalyticsPage() {
       listTrades(accountId),
       listCashLedger(accountId)
     ]);
+
+    if (requestId !== requestIdRef.current) {
+      return;
+    }
 
     if (nextSnapshots.status === "fulfilled") {
       setSnapshots(nextSnapshots.value);
