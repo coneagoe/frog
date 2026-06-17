@@ -110,6 +110,34 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.grid--trade {
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+}
+
+.summary-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-card {
+  display: grid;
+  gap: 8px;
+}
+
+.metric-card strong {
+  font-size: 22px;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.actions a {
+  color: var(--accent);
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -174,6 +202,12 @@ button {
   opacity: 0.55;
 }
 
+.button--secondary {
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
 .status-badge {
   background: var(--panel-soft);
   border: 1px solid var(--border);
@@ -232,6 +266,22 @@ button {
   }
 
   .grid--two {
+    grid-template-columns: 1fr;
+  }
+
+  .grid--trade,
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .table {
+    min-width: 640px;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 960px) {
+  .grid--trade,
+  .summary-grid {
     grid-template-columns: 1fr;
   }
 }
