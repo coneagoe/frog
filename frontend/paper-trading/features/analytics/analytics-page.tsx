@@ -53,7 +53,12 @@ export function AnalyticsPage() {
     void load();
   }, []);
 
-  const latestSnapshot = snapshots.at(-1) ?? null;
+  const latestSnapshot = snapshots.reduce<Snapshot | null>((latest, snapshot) => {
+    if (!latest || snapshot.trade_date > latest.trade_date) {
+      return snapshot;
+    }
+    return latest;
+  }, null);
 
   return (
     <section className="page">
@@ -65,6 +70,7 @@ export function AnalyticsPage() {
         <label>
           Account
           <select
+            disabled={accounts.length === 0}
             value={selectedAccountId ?? ""}
             onChange={(event) => {
               const accountId = Number(event.target.value);
@@ -77,6 +83,7 @@ export function AnalyticsPage() {
         </label>
       </div>
       {loading ? <div className="panel">Loading paper trading data...</div> : null}
+      {!loading && accounts.length === 0 ? <div className="panel">No paper accounts yet. Create an account before viewing analytics.</div> : null}
       {error ? <ErrorBanner message={error} /> : null}
       <AnalyticsSummary snapshot={latestSnapshot} />
       <section className="panel">
