@@ -98,6 +98,7 @@ export function TradePage() {
         </label>
       </div>
       {loading ? <div className="panel">Loading paper trading data...</div> : null}
+      {!loading && accounts.length === 0 ? <div className="panel">No paper accounts yet. Create an account before trading.</div> : null}
       {error ? <ErrorBanner message={error} /> : null}
       <div className="grid grid--trade">
         <div className="grid">
