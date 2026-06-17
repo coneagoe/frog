@@ -13,9 +13,13 @@ export function AccountsPage() {
   const [loading, setLoading] = useState(true);
 
   async function refreshAccounts() {
-    setError(null);
-    const nextAccounts = await listAccounts();
-    setAccounts(nextAccounts);
+    try {
+      setError(null);
+      const nextAccounts = await listAccounts();
+      setAccounts(nextAccounts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load accounts");
+    }
   }
 
   useEffect(() => {

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { createAccount } from "@/lib/api-client";
 import type { Account } from "@/lib/types";
 
-export function CreateAccountForm({ onCreated }: { onCreated: (account: Account) => void }) {
+export function CreateAccountForm({ onCreated }: { onCreated: (account: Account) => Promise<void> | void }) {
   const [name, setName] = useState("");
   const [initialCash, setInitialCash] = useState("100000.00");
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +16,7 @@ export function CreateAccountForm({ onCreated }: { onCreated: (account: Account)
     setError(null);
     try {
       const account = await createAccount({ name, initial_cash: initialCash });
-      onCreated(account);
+      await onCreated(account);
       setName("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create account");
