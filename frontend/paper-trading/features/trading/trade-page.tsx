@@ -20,11 +20,17 @@ export function TradePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadAccountData(accountId: number) {
+  async function loadAccountData(accountId: number, clearExisting = false) {
     if (!accountId) {
       return;
     }
     setError(null);
+    if (clearExisting) {
+      setPositions([]);
+      setOrders([]);
+      setTrades([]);
+      setCashLedger([]);
+    }
     const [nextPositions, nextOrders, nextTrades, nextCashLedger] = await Promise.allSettled([
       listPositions(accountId),
       listOrders(accountId),
@@ -66,7 +72,7 @@ export function TradePage() {
         const firstAccountId = nextAccounts[0]?.id ?? null;
         setSelectedAccountId(firstAccountId);
         if (firstAccountId) {
-          await loadAccountData(firstAccountId);
+          await loadAccountData(firstAccountId, true);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load trading data");
@@ -100,7 +106,7 @@ export function TradePage() {
             onChange={(event) => {
               const accountId = Number(event.target.value);
               setSelectedAccountId(accountId);
-              void loadAccountData(accountId);
+              void loadAccountData(accountId, true);
             }}
           >
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
