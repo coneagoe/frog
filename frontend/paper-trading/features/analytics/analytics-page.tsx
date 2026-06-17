@@ -17,8 +17,13 @@ export function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadAccountData(accountId: number) {
+  async function loadAccountData(accountId: number, clearExisting = false) {
     setError(null);
+    if (clearExisting) {
+      setSnapshots([]);
+      setTrades([]);
+      setCashLedger([]);
+    }
     const [nextSnapshots, nextTrades, nextCashLedger] = await Promise.allSettled([
       listSnapshots(accountId),
       listTrades(accountId),
@@ -50,7 +55,7 @@ export function AnalyticsPage() {
         const firstAccountId = nextAccounts[0]?.id ?? null;
         setSelectedAccountId(firstAccountId);
         if (firstAccountId) {
-          await loadAccountData(firstAccountId);
+          await loadAccountData(firstAccountId, true);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load analytics data");
@@ -83,7 +88,7 @@ export function AnalyticsPage() {
             onChange={(event) => {
               const accountId = Number(event.target.value);
               setSelectedAccountId(accountId);
-              void loadAccountData(accountId);
+              void loadAccountData(accountId, true);
             }}
           >
             {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
