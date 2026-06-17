@@ -28,7 +28,9 @@ export function DataTable<T>({
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column.key}>{column.header}</th>
+              <th className={column.align === "right" ? "numeric" : undefined} key={column.key}>
+                {column.header}
+              </th>
             ))}
           </tr>
         </thead>
