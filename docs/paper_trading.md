@@ -31,6 +31,22 @@ All endpoints require a bearer token:
 Authorization: Bearer change-me
 ```
 
+## Start The Frontend
+
+The paper trading frontend lives in `frontend/paper-trading` and proxies browser requests to the FastAPI backend.
+
+```bash
+cd frontend/paper-trading
+npm install
+export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
+export PAPER_TRADING_API_TOKEN="change-me"
+npm run dev
+```
+
+Open `http://localhost:3000/accounts`.
+
+The bearer token is read only by Next.js route handlers. Browser code calls local `/api/paper/*` endpoints and does not receive `PAPER_TRADING_API_TOKEN`.
+
 ## Create Account
 
 ```bash
