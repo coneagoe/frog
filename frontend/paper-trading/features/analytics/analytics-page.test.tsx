@@ -9,6 +9,10 @@ vi.mock("lightweight-charts", () => ({
   LineSeries: vi.fn()
 }));
 
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams()
+}));
+
 vi.mock("@/lib/api-client", () => ({
   listAccounts: vi.fn(),
   listCashLedger: vi.fn(),

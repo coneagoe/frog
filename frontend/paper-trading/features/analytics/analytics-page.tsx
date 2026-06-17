@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { listAccounts, listCashLedger, listSnapshots, listTrades } from "@/lib/api-client";
@@ -9,6 +10,7 @@ import { AnalyticsCashLedgerTable, AnalyticsTradeTable, SnapshotTable } from "./
 import { AssetChart } from "./asset-chart";
 
 export function AnalyticsPage() {
+  const searchParams = useSearchParams();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
@@ -58,7 +60,10 @@ export function AnalyticsPage() {
       try {
         const nextAccounts = await listAccounts();
         setAccounts(nextAccounts);
-        const firstAccountId = nextAccounts[0]?.id ?? null;
+        const requestedAccountId = Number(searchParams.get("accountId"));
+        const firstAccountId = nextAccounts.some((account) => account.id === requestedAccountId)
+          ? requestedAccountId
+          : nextAccounts[0]?.id ?? null;
         setSelectedAccountId(firstAccountId);
         if (firstAccountId) {
           await loadAccountData(firstAccountId, true);
@@ -70,7 +75,7 @@ export function AnalyticsPage() {
       }
     }
     void load();
-  }, []);
+  }, [searchParams]);
 
   const latestSnapshot = snapshots.reduce<Snapshot | null>((latest, snapshot) => {
     if (!latest || snapshot.trade_date > latest.trade_date) {
