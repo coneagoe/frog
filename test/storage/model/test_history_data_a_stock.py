@@ -4,9 +4,7 @@ import sys
 import pytest
 from sqlalchemy import create_engine, inspect
 
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
-)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../..")))
 from storage.model.history_data_a_stock import (  # noqa: E402
     Base,
     HistoryDataDailyAStockQFQ,
@@ -30,9 +28,9 @@ class TestHistoryDataDailyAStockTableCreation:
         inspector = inspect(sqlite_engine)
         tables = inspector.get_table_names()
 
-        assert (
-            tb_name_history_data_daily_a_stock_qfq in tables
-        ), f"数据表 '{tb_name_history_data_daily_a_stock_qfq}' 未成功创建"
+        assert tb_name_history_data_daily_a_stock_qfq in tables, (
+            f"数据表 '{tb_name_history_data_daily_a_stock_qfq}' 未成功创建"
+        )
 
         columns = inspector.get_columns(tb_name_history_data_daily_a_stock_qfq)
         column_names = [col["name"] for col in columns]
@@ -64,9 +62,9 @@ class TestHistoryDataDailyAStockTableCreation:
         inspector = inspect(sqlite_engine)
         tables = inspector.get_table_names()
 
-        assert (
-            tb_name_history_data_weekly_a_stock_qfq in tables
-        ), f"数据表 '{tb_name_history_data_weekly_a_stock_qfq}' 未成功创建"
+        assert tb_name_history_data_weekly_a_stock_qfq in tables, (
+            f"数据表 '{tb_name_history_data_weekly_a_stock_qfq}' 未成功创建"
+        )
 
         columns = inspector.get_columns(tb_name_history_data_weekly_a_stock_qfq)
         column_names = [col["name"] for col in columns]

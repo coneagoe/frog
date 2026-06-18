@@ -42,9 +42,7 @@ def download_suspend_d_a_stock_task(**context):
 # Create DAG
 dag = DAG(
     "download_suspend_d_a_stock_daily",
-    default_args=__import__(
-        "common_dags", fromlist=["get_default_args"]
-    ).get_default_args(),
+    default_args=__import__("common_dags", fromlist=["get_default_args"]).get_default_args(),
     description="Weekdays suspend_d A-share download",
     schedule="0 9 * * 1-5",
     catchup=False,

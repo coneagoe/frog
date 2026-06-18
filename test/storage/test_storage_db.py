@@ -120,9 +120,7 @@ class TestStorageDb:
         # Mock the to_sql method directly on the DataFrame
         with patch.object(test_df, "to_sql") as mock_to_sql:
             # Call the method
-            storage_db.save_history_data_stock(
-                test_df, PeriodType.DAILY, AdjustType.QFQ
-            )
+            storage_db.save_history_data_stock(test_df, PeriodType.DAILY, AdjustType.QFQ)
 
             # Assertions
             mock_to_sql.assert_called_once_with(
@@ -177,9 +175,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                "general_info_stock" in args[0]
-            )  # SQL query should contain table name
+            assert "general_info_stock" in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine
 
     def test_load_general_info_stock_empty_table(self, storage_db):
@@ -202,9 +198,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                "general_info_stock" in args[0]
-            )  # SQL query should contain table name
+            assert "general_info_stock" in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine
 
     def test_load_general_info_stock_table_not_exists(self, storage_db):
@@ -224,9 +218,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                "general_info_stock" in args[0]
-            )  # SQL query should contain table name
+            assert "general_info_stock" in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine
 
     def test_load_general_info_stock_database_error(self, storage_db):
@@ -246,9 +238,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                "general_info_stock" in args[0]
-            )  # SQL query should contain table name
+            assert "general_info_stock" in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine
 
     def test_save_and_load_general_info_stock_integration(self, storage_db):
@@ -285,9 +275,7 @@ class TestStorageDb:
                 mock_read_sql.assert_called_once()
                 args, kwargs = mock_read_sql.call_args
                 assert len(args) == 2
-                assert (
-                    "general_info_stock" in args[0]
-                )  # SQL query should contain table name
+                assert "general_info_stock" in args[0]  # SQL query should contain table name
                 assert args[1] == storage_db.engine
 
                 # 验证数据一致性
@@ -310,9 +298,7 @@ class TestStorageDb:
             result = storage_db.save_general_info_etf(test_df, "test_etf_table")
 
             assert result is True
-            mock_to_sql.assert_called_once_with(
-                "test_etf_table", storage_db.engine, if_exists="replace", index=False
-            )
+            mock_to_sql.assert_called_once_with("test_etf_table", storage_db.engine, if_exists="replace", index=False)
 
     def test_save_history_data_fund_normalizes_code_and_trade_date(self, storage_db):
         raw_df = pd.DataFrame(
@@ -441,9 +427,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                "custom_etf_table" in args[0]
-            )  # SQL query should contain custom table name
+            assert "custom_etf_table" in args[0]  # SQL query should contain custom table name
             assert args[1] == storage_db.engine  # engine parameter
 
     def test_load_general_info_etf_empty_table(self, storage_db):
@@ -543,9 +527,7 @@ class TestStorageDb:
                 mock_read_sql.assert_called_once()
                 args, kwargs = mock_read_sql.call_args
                 assert len(args) == 2
-                assert (
-                    "test_etf_table" in args[0]
-                )  # SQL query should contain table name
+                assert "test_etf_table" in args[0]  # SQL query should contain table name
                 assert args[1] == storage_db.engine  # engine parameter
 
                 # 验证数据一致性
@@ -590,9 +572,7 @@ class TestStorageDb:
         test_df = pd.DataFrame({col: [None] for col in expected_columns})
 
         with patch.object(test_df, "to_sql") as mock_to_sql:
-            storage_db.save_history_data_stock(
-                test_df, PeriodType.DAILY, AdjustType.QFQ
-            )
+            storage_db.save_history_data_stock(test_df, PeriodType.DAILY, AdjustType.QFQ)
             mock_to_sql.assert_called_once_with(
                 tb_name_history_data_daily_a_stock_qfq,
                 storage_db.engine,
@@ -619,9 +599,7 @@ class TestStorageDb:
         )
 
         with patch.object(test_df, "to_sql") as mock_to_sql:
-            storage_db.save_history_data_stock(
-                test_df, PeriodType.WEEKLY, AdjustType.QFQ
-            )
+            storage_db.save_history_data_stock(test_df, PeriodType.WEEKLY, AdjustType.QFQ)
             mock_to_sql.assert_called_once_with(
                 tb_name_history_data_weekly_a_stock_qfq,
                 storage_db.engine,
@@ -630,9 +608,7 @@ class TestStorageDb:
                 method="multi",
             )
 
-    def test_save_history_data_hk_stock_write_value_error_uses_generic_handler(
-        self, storage_db
-    ):
+    def test_save_history_data_hk_stock_write_value_error_uses_generic_handler(self, storage_db):
         test_df = pd.DataFrame(
             {
                 COL_DATE: [date(2023, 1, 1)],
@@ -648,16 +624,9 @@ class TestStorageDb:
             }
         )
 
-        with patch.object(
-            test_df, "to_sql", side_effect=ValueError("write failed")
-        ) as mock_to_sql:
+        with patch.object(test_df, "to_sql", side_effect=ValueError("write failed")) as mock_to_sql:
             with patch("storage.storage_db.logger") as mock_logger:
-                assert (
-                    storage_db.save_history_data_hk_stock(
-                        test_df, PeriodType.DAILY, AdjustType.HFQ
-                    )
-                    is False
-                )
+                assert storage_db.save_history_data_hk_stock(test_df, PeriodType.DAILY, AdjustType.HFQ) is False
 
         mock_to_sql.assert_called_once_with(
             tb_name_history_data_daily_hk_stock_hfq,
@@ -669,9 +638,7 @@ class TestStorageDb:
         mock_logger.error.assert_called_once()
         assert "保存港股历史数据失败" in mock_logger.error.call_args[0][0]
 
-    def test_save_history_data_hk_stock_unsupported_period_returns_false(
-        self, storage_db
-    ):
+    def test_save_history_data_hk_stock_unsupported_period_returns_false(self, storage_db):
         test_df = pd.DataFrame(
             {
                 COL_DATE: [date(2023, 1, 1)],
@@ -689,12 +656,7 @@ class TestStorageDb:
 
         with patch.object(test_df, "to_sql") as mock_to_sql:
             with patch("storage.storage_db.logger") as mock_logger:
-                assert (
-                    storage_db.save_history_data_hk_stock(
-                        test_df, "INVALID_PERIOD", AdjustType.HFQ
-                    )
-                    is False
-                )
+                assert storage_db.save_history_data_hk_stock(test_df, "INVALID_PERIOD", AdjustType.HFQ) is False
 
         mock_to_sql.assert_not_called()
         mock_logger.error.assert_called_once()
@@ -704,9 +666,7 @@ class TestStorageDb:
         with patch("storage.storage_db.pd.read_sql") as mock_read_sql:
             mock_read_sql.return_value = pd.DataFrame()
 
-            storage_db.load_history_data_fund(
-                "510300", start_date="2024-01-01", end_date="2024-03-31"
-            )
+            storage_db.load_history_data_fund("510300", start_date="2024-01-01", end_date="2024-03-31")
 
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
@@ -723,9 +683,7 @@ class TestStorageDb:
         with patch("storage.storage_db.pd.read_sql") as mock_read_sql:
             mock_read_sql.return_value = pd.DataFrame()
 
-            storage_db.load_etf_daily(
-                "510300", start_date="2024-01-01", end_date="2024-03-31"
-            )
+            storage_db.load_etf_daily("510300", start_date="2024-01-01", end_date="2024-03-31")
 
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
@@ -1221,9 +1179,7 @@ class TestStorageDb:
         mock_read_sql = Mock(return_value=test_data)
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
-        result = storage_db.load_history_data_stock(
-            "000001", PeriodType.DAILY, AdjustType.QFQ
-        )
+        result = storage_db.load_history_data_stock("000001", PeriodType.DAILY, AdjustType.QFQ)
 
         # 验证结果
         assert len(result) == 3
@@ -1264,9 +1220,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法
-        result = storage_db.load_history_data_stock(
-            "000002", PeriodType.WEEKLY, AdjustType.HFQ
-        )
+        result = storage_db.load_history_data_stock("000002", PeriodType.WEEKLY, AdjustType.HFQ)
 
         # 验证结果
         assert len(result) == 3
@@ -1348,9 +1302,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法
-        result = storage_db.load_history_data_stock(
-            "000003", PeriodType.DAILY, AdjustType.QFQ
-        )
+        result = storage_db.load_history_data_stock("000003", PeriodType.DAILY, AdjustType.QFQ)
 
         # 验证结果
         assert len(result) == 0
@@ -1379,9 +1331,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法
-        result = storage_db.load_history_data_stock(
-            "000001", PeriodType.DAILY, AdjustType.QFQ
-        )
+        result = storage_db.load_history_data_stock("000001", PeriodType.DAILY, AdjustType.QFQ)
 
         # 验证结果 - 应该返回空DataFrame
         assert len(result) == 0
@@ -1394,7 +1344,9 @@ class TestStorageDb:
         """Test load_history_data_stock with unsupported period type"""
         # 调用方法，使用不支持的周期类型
         result = storage_db.load_history_data_stock(
-            "000001", "MONTHLY", AdjustType.QFQ  # 使用字符串代替枚举，模拟不支持的情况
+            "000001",
+            "MONTHLY",
+            AdjustType.QFQ,  # 使用字符串代替枚举，模拟不支持的情况
         )
 
         # 验证结果 - 应该返回空DataFrame
@@ -1414,9 +1366,7 @@ class TestStorageDb:
         assert len(result) == 0
         assert list(result.columns) == []  # 空DataFrame
 
-    def test_load_history_data_stock_with_only_start_date(
-        self, storage_db, monkeypatch
-    ):
+    def test_load_history_data_stock_with_only_start_date(self, storage_db, monkeypatch):
         """Test load_history_data_stock with only start date filter"""
         # 创建测试数据
         test_data = pd.DataFrame(
@@ -1439,9 +1389,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法，只带开始日期
-        result = storage_db.load_history_data_stock(
-            "000001", PeriodType.DAILY, AdjustType.QFQ, start_date="2023-01-10"
-        )
+        result = storage_db.load_history_data_stock("000001", PeriodType.DAILY, AdjustType.QFQ, start_date="2023-01-10")
 
         # 验证结果
         assert len(result) == 3
@@ -1478,9 +1426,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法，只带结束日期
-        result = storage_db.load_history_data_stock(
-            "000001", PeriodType.DAILY, AdjustType.QFQ, end_date="2023-01-07"
-        )
+        result = storage_db.load_history_data_stock("000001", PeriodType.DAILY, AdjustType.QFQ, end_date="2023-01-07")
 
         # 验证结果
         assert len(result) == 3
@@ -1514,9 +1460,7 @@ class TestStorageDb:
         mock_read_sql = Mock(return_value=test_data)
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
-        result = storage_db.load_history_data_etf(
-            "510300", PeriodType.DAILY, AdjustType.QFQ
-        )
+        result = storage_db.load_history_data_etf("510300", PeriodType.DAILY, AdjustType.QFQ)
 
         # 验证结果
         assert len(result) == 3
@@ -1557,9 +1501,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法
-        result = storage_db.load_history_data_etf(
-            "510500", PeriodType.WEEKLY, AdjustType.HFQ
-        )
+        result = storage_db.load_history_data_etf("510500", PeriodType.WEEKLY, AdjustType.HFQ)
 
         # 验证结果
         assert len(result) == 3
@@ -1641,9 +1583,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法
-        result = storage_db.load_history_data_etf(
-            "510300", PeriodType.DAILY, AdjustType.QFQ
-        )
+        result = storage_db.load_history_data_etf("510300", PeriodType.DAILY, AdjustType.QFQ)
 
         # 验证结果
         assert len(result) == 0
@@ -1672,9 +1612,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法
-        result = storage_db.load_history_data_etf(
-            "510300", PeriodType.DAILY, AdjustType.QFQ
-        )
+        result = storage_db.load_history_data_etf("510300", PeriodType.DAILY, AdjustType.QFQ)
 
         # 验证结果 - 应该返回空DataFrame
         assert len(result) == 0
@@ -1687,7 +1625,9 @@ class TestStorageDb:
         """Test load_history_data_etf with unsupported period type"""
         # 调用方法，使用不支持的周期类型
         result = storage_db.load_history_data_etf(
-            "510300", "MONTHLY", AdjustType.QFQ  # 使用字符串代替枚举，模拟不支持的情况
+            "510300",
+            "MONTHLY",
+            AdjustType.QFQ,  # 使用字符串代替枚举，模拟不支持的情况
         )
 
         # 验证结果 - 应该返回空DataFrame
@@ -1730,9 +1670,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法，只带开始日期
-        result = storage_db.load_history_data_etf(
-            "510300", PeriodType.DAILY, AdjustType.QFQ, start_date="2023-01-10"
-        )
+        result = storage_db.load_history_data_etf("510300", PeriodType.DAILY, AdjustType.QFQ, start_date="2023-01-10")
 
         # 验证结果
         assert len(result) == 3
@@ -1769,9 +1707,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法，只带结束日期
-        result = storage_db.load_history_data_etf(
-            "510300", PeriodType.DAILY, AdjustType.QFQ, end_date="2023-01-07"
-        )
+        result = storage_db.load_history_data_etf("510300", PeriodType.DAILY, AdjustType.QFQ, end_date="2023-01-07")
 
         # 验证结果
         assert len(result) == 3
@@ -1980,9 +1916,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                tb_name_ingredient_300 in args[0]
-            )  # SQL query should contain table name
+            assert tb_name_ingredient_300 in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine  # engine parameter
 
     def test_load_ingredient_300_database_error(self, storage_db):
@@ -2002,9 +1936,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                tb_name_ingredient_300 in args[0]
-            )  # SQL query should contain table name
+            assert tb_name_ingredient_300 in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine  # engine parameter
 
     def test_load_ingredient_500_success(self, storage_db):
@@ -2033,9 +1965,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                tb_name_ingredient_500 in args[0]
-            )  # SQL query should contain table name
+            assert tb_name_ingredient_500 in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine  # engine parameter
 
     def test_load_ingredient_500_empty_table(self, storage_db):
@@ -2058,9 +1988,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                tb_name_ingredient_500 in args[0]
-            )  # SQL query should contain table name
+            assert tb_name_ingredient_500 in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine  # engine parameter
 
     def test_load_ingredient_500_table_not_exists(self, storage_db):
@@ -2080,9 +2008,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                tb_name_ingredient_500 in args[0]
-            )  # SQL query should contain table name
+            assert tb_name_ingredient_500 in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine  # engine parameter
 
     def test_load_ingredient_500_database_error(self, storage_db):
@@ -2102,9 +2028,7 @@ class TestStorageDb:
             mock_read_sql.assert_called_once()
             args, kwargs = mock_read_sql.call_args
             assert len(args) == 2
-            assert (
-                tb_name_ingredient_500 in args[0]
-            )  # SQL query should contain table name
+            assert tb_name_ingredient_500 in args[0]  # SQL query should contain table name
             assert args[1] == storage_db.engine  # engine parameter
 
     def test_save_and_load_ingredient_300_integration(self, storage_db):
@@ -2141,9 +2065,7 @@ class TestStorageDb:
                 mock_read_sql.assert_called_once()
                 args, kwargs = mock_read_sql.call_args
                 assert len(args) == 2
-                assert (
-                    tb_name_ingredient_300 in args[0]
-                )  # SQL query should contain table name
+                assert tb_name_ingredient_300 in args[0]  # SQL query should contain table name
                 assert args[1] == storage_db.engine  # engine parameter
 
                 # 验证数据一致性
@@ -2185,9 +2107,7 @@ class TestStorageDb:
                 mock_read_sql.assert_called_once()
                 args, kwargs = mock_read_sql.call_args
                 assert len(args) == 2
-                assert (
-                    tb_name_ingredient_500 in args[0]
-                )  # SQL query should contain table name
+                assert tb_name_ingredient_500 in args[0]  # SQL query should contain table name
                 assert args[1] == storage_db.engine  # engine parameter
 
                 # 验证数据一致性
@@ -2195,9 +2115,7 @@ class TestStorageDb:
                 assert result[COL_STOCK_ID].tolist() == ["000001", "000002"]
                 assert result[COL_STOCK_NAME].tolist() == ["平安银行", "万科A"]
 
-    def test_load_history_data_stock_hk_ggt_daily_success(
-        self, storage_db, monkeypatch
-    ):
+    def test_load_history_data_stock_hk_ggt_daily_success(self, storage_db, monkeypatch):
         """Test successful load_history_data_stock_hk_ggt for daily data"""
         test_data = pd.DataFrame(
             {
@@ -2217,9 +2135,7 @@ class TestStorageDb:
         mock_read_sql = Mock(return_value=test_data)
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
-        result = storage_db.load_history_data_stock_hk_ggt(
-            "00700", PeriodType.DAILY, AdjustType.HFQ
-        )
+        result = storage_db.load_history_data_stock_hk_ggt("00700", PeriodType.DAILY, AdjustType.HFQ)
 
         # 验证结果
         assert len(result) == 3
@@ -2237,9 +2153,7 @@ class TestStorageDb:
         assert args[1] == storage_db.engine  # engine参数
         assert kwargs["params"] == ("00700",)  # stock_id参数
 
-    def test_load_history_data_stock_hk_ggt_weekly_success(
-        self, storage_db, monkeypatch
-    ):
+    def test_load_history_data_stock_hk_ggt_weekly_success(self, storage_db, monkeypatch):
         """Test successful load_history_data_stock_hk_ggt for weekly data"""
         test_data = pd.DataFrame(
             {
@@ -2259,9 +2173,7 @@ class TestStorageDb:
         mock_read_sql = Mock(return_value=test_data)
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
-        result = storage_db.load_history_data_stock_hk_ggt(
-            "09988", PeriodType.WEEKLY, AdjustType.HFQ
-        )
+        result = storage_db.load_history_data_stock_hk_ggt("09988", PeriodType.WEEKLY, AdjustType.HFQ)
 
         # 验证结果
         assert len(result) == 3
@@ -2276,9 +2188,7 @@ class TestStorageDb:
         assert "history_data_weekly_hk_stock_hfq" in sql_query
         assert kwargs["params"] == ("09988",)
 
-    def test_load_history_data_stock_hk_ggt_monthly_success(
-        self, storage_db, monkeypatch
-    ):
+    def test_load_history_data_stock_hk_ggt_monthly_success(self, storage_db, monkeypatch):
         """Test successful load_history_data_stock_hk_ggt for monthly data"""
         test_data = pd.DataFrame(
             {
@@ -2298,9 +2208,7 @@ class TestStorageDb:
         mock_read_sql = Mock(return_value=test_data)
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
-        result = storage_db.load_history_data_stock_hk_ggt(
-            "02318", PeriodType.MONTHLY, AdjustType.HFQ
-        )
+        result = storage_db.load_history_data_stock_hk_ggt("02318", PeriodType.MONTHLY, AdjustType.HFQ)
 
         # 验证结果
         assert len(result) == 3
@@ -2315,9 +2223,7 @@ class TestStorageDb:
         assert "history_data_monthly_hk_stock_hfq" in sql_query
         assert kwargs["params"] == ("02318",)
 
-    def test_load_history_data_stock_hk_ggt_with_date_range(
-        self, storage_db, monkeypatch
-    ):
+    def test_load_history_data_stock_hk_ggt_with_date_range(self, storage_db, monkeypatch):
         """Test load_history_data_stock_hk_ggt with date range filter"""
         test_data = pd.DataFrame(
             {
@@ -2362,7 +2268,9 @@ class TestStorageDb:
         """Test load_history_data_stock_hk_ggt with unsupported adjust type (should only support HFQ)"""
         # 调用方法，使用不支持的复权类型（港股通只支持后复权）
         result = storage_db.load_history_data_stock_hk_ggt(
-            "00700", PeriodType.DAILY, AdjustType.QFQ  # QFQ 不被支持
+            "00700",
+            PeriodType.DAILY,
+            AdjustType.QFQ,  # QFQ 不被支持
         )
 
         # 验证结果 - 应该返回空DataFrame
@@ -2373,25 +2281,23 @@ class TestStorageDb:
         """Test load_history_data_stock_hk_ggt with unsupported period type"""
         # 调用方法，使用不支持的周期类型
         result = storage_db.load_history_data_stock_hk_ggt(
-            "00700", "INVALID_PERIOD", AdjustType.HFQ  # 使用无效周期
+            "00700",
+            "INVALID_PERIOD",
+            AdjustType.HFQ,  # 使用无效周期
         )
 
         # 验证结果 - 应该返回空DataFrame
         assert len(result) == 0
         assert list(result.columns) == []  # 空DataFrame
 
-    def test_load_history_data_stock_hk_ggt_database_error(
-        self, storage_db, monkeypatch
-    ):
+    def test_load_history_data_stock_hk_ggt_database_error(self, storage_db, monkeypatch):
         """Test load_history_data_stock_hk_ggt handles database errors gracefully"""
         # Mock pd.read_sql to raise database exception
         mock_read_sql = Mock(side_effect=Exception("Database connection error"))
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法
-        result = storage_db.load_history_data_stock_hk_ggt(
-            "00700", PeriodType.DAILY, AdjustType.HFQ
-        )
+        result = storage_db.load_history_data_stock_hk_ggt("00700", PeriodType.DAILY, AdjustType.HFQ)
 
         # 验证结果 - 应该返回空DataFrame
         assert len(result) == 0
@@ -2422,9 +2328,7 @@ class TestStorageDb:
         monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
 
         # 调用方法
-        result = storage_db.load_history_data_stock_hk_ggt(
-            "00700", PeriodType.DAILY, AdjustType.HFQ
-        )
+        result = storage_db.load_history_data_stock_hk_ggt("00700", PeriodType.DAILY, AdjustType.HFQ)
 
         # 验证结果
         assert len(result) == 0
@@ -2446,9 +2350,7 @@ class TestStorageDb:
         args, kwargs = mock_read_sql.call_args
         assert kwargs["params"] == ("00700",)
 
-    def test_load_history_data_stock_hk_ggt_with_only_start_date(
-        self, storage_db, monkeypatch
-    ):
+    def test_load_history_data_stock_hk_ggt_with_only_start_date(self, storage_db, monkeypatch):
         """Test load_history_data_stock_hk_ggt with only start date filter"""
         test_data = pd.DataFrame(
             {
@@ -2484,9 +2386,7 @@ class TestStorageDb:
         assert 'AND "日期" <= %s' not in sql_query  # 不应该有结束日期条件
         assert kwargs["params"] == ("00700", "2023-01-10")
 
-    def test_load_history_data_stock_hk_ggt_with_only_end_date(
-        self, storage_db, monkeypatch
-    ):
+    def test_load_history_data_stock_hk_ggt_with_only_end_date(self, storage_db, monkeypatch):
         """Test load_history_data_stock_hk_ggt with only end date filter"""
         test_data = pd.DataFrame(
             {
@@ -2758,9 +2658,7 @@ class TestSaveAndGetTop10Floatholders:
         assert row[COL_FLOAT_HOLDER_HOLD_CHANGE] == pytest.approx(150.0)
         assert row[COL_FLOAT_HOLDER_TYPE] == "机构"
 
-    def test_save_top10_floatholders_allows_missing_optional_fields(
-        self, sqlite_storage
-    ):
+    def test_save_top10_floatholders_allows_missing_optional_fields(self, sqlite_storage):
         db, engine = sqlite_storage
         df = pd.DataFrame(
             {
@@ -2785,15 +2683,11 @@ class TestSaveAndGetTop10Floatholders:
 
     def test_save_top10_floatholders_failure(self, storage_db):
         df = self._make_raw_df()
-        with patch.object(
-            storage_db.engine, "begin", side_effect=Exception("DB error")
-        ):
+        with patch.object(storage_db.engine, "begin", side_effect=Exception("DB error")):
             result = storage_db.save_top10_floatholders(df)
             assert result is False
 
-    def test_save_top10_floatholders_is_idempotent_for_same_primary_key(
-        self, sqlite_storage
-    ):
+    def test_save_top10_floatholders_is_idempotent_for_same_primary_key(self, sqlite_storage):
         db, engine = sqlite_storage
         initial_df = pd.DataFrame(
             {
@@ -2907,9 +2801,7 @@ class TestSSFChangeSignalStorage:
         db.Session = sessionmaker(bind=engine)
         return db
 
-    def test_list_ssf_change_signal_candidates_excludes_existing_signal(
-        self, sqlite_storage
-    ):
+    def test_list_ssf_change_signal_candidates_excludes_existing_signal(self, sqlite_storage):
         db = sqlite_storage
         db.ensure_ssf_change_signals_table()
         db.save_top10_floatholders(
@@ -2932,9 +2824,7 @@ class TestSSFChangeSignalStorage:
         db.save_ssf_change_signals([self._make_signal_payload()])
         assert db.list_ssf_change_signal_candidates() == []
 
-    def test_mark_ssf_change_candidates_processed_excludes_no_signal_candidates(
-        self, sqlite_storage
-    ):
+    def test_mark_ssf_change_candidates_processed_excludes_no_signal_candidates(self, sqlite_storage):
         db = sqlite_storage
         db.ensure_ssf_change_signals_table()
         db.save_top10_floatholders(
@@ -2968,13 +2858,9 @@ class TestSSFChangeSignalStorage:
         assert db.list_ssf_change_signal_candidates() == []
         assert db.list_pending_ssf_change_signals() == []
 
-    def test_list_ssf_change_signal_candidates_orders_by_selected_columns(
-        self, sqlite_storage
-    ):
+    def test_list_ssf_change_signal_candidates_orders_by_selected_columns(self, sqlite_storage):
         with patch("storage.storage_db.pd.read_sql") as mock_read_sql:
-            mock_read_sql.return_value = pd.DataFrame(
-                [{"stock_id": "000001", "ann_date": "2024-03-31"}]
-            )
+            mock_read_sql.return_value = pd.DataFrame([{"stock_id": "000001", "ann_date": "2024-03-31"}])
 
             sqlite_storage.list_ssf_change_signal_candidates()
 
@@ -2982,9 +2868,7 @@ class TestSSFChangeSignalStorage:
         assert "ORDER BY ann_date DESC, stock_id" in sql
         assert "ORDER BY latest.ann_date DESC, latest.stock_id" not in sql
 
-    def test_load_top10_floatholders_history_loads_latest_ann_dates(
-        self, sqlite_storage
-    ):
+    def test_load_top10_floatholders_history_loads_latest_ann_dates(self, sqlite_storage):
         db = sqlite_storage
         db.save_top10_floatholders(
             pd.DataFrame(
@@ -3013,9 +2897,7 @@ class TestSSFChangeSignalStorage:
             "2023-12-31",
         ]
 
-    def test_save_ssf_change_signals_is_idempotent_for_duplicate_payloads(
-        self, sqlite_storage
-    ):
+    def test_save_ssf_change_signals_is_idempotent_for_duplicate_payloads(self, sqlite_storage):
         from sqlalchemy import text
 
         db = sqlite_storage
@@ -3025,9 +2907,7 @@ class TestSSFChangeSignalStorage:
         first_ids = db.save_ssf_change_signals([payload])
         second_ids = db.save_ssf_change_signals([payload])
         with db.engine.connect() as conn:
-            row_count = conn.execute(
-                text("SELECT COUNT(*) FROM ssf_change_signals")
-            ).scalar_one()
+            row_count = conn.execute(text("SELECT COUNT(*) FROM ssf_change_signals")).scalar_one()
 
         assert len(first_ids) == 1
         assert second_ids == []
@@ -3037,15 +2917,11 @@ class TestSSFChangeSignalStorage:
         db = sqlite_storage
         db.ensure_ssf_change_signals_table()
 
-        inserted_ids = db.save_ssf_change_signals(
-            [self._make_signal_payload(unexpected_field="ignored")]
-        )
+        inserted_ids = db.save_ssf_change_signals([self._make_signal_payload(unexpected_field="ignored")])
 
         assert len(inserted_ids) == 1
 
-    def test_save_ssf_change_signals_keeps_valid_rows_when_one_payload_is_bad(
-        self, sqlite_storage
-    ):
+    def test_save_ssf_change_signals_keeps_valid_rows_when_one_payload_is_bad(self, sqlite_storage):
         from sqlalchemy import text
 
         db = sqlite_storage
@@ -3063,11 +2939,7 @@ class TestSSFChangeSignalStorage:
         )
 
         with db.engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT stock_id, ann_date FROM ssf_change_signals ORDER BY stock_id ASC"
-                )
-            ).all()
+            rows = conn.execute(text("SELECT stock_id, ann_date FROM ssf_change_signals ORDER BY stock_id ASC")).all()
 
         assert len(inserted_ids) == 1
         assert rows == [("000001", "2024-03-31")]

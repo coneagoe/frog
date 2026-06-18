@@ -70,9 +70,7 @@ def download_history_data_etf_ak(
     adjust: AdjustType = AdjustType.QFQ,
 ) -> pd.DataFrame:
     try:
-        df = ak.fund_etf_hist_em(
-            symbol=etf_id, period=period.value, adjust=adjust.value
-        )
+        df = ak.fund_etf_hist_em(symbol=etf_id, period=period.value, adjust=adjust.value)
         assert isinstance(df, pd.DataFrame), f"Expected DataFrame, got {type(df)}"
         assert not df.empty, f"download history data {etf_id} fail, please check"
     except KeyError:
@@ -105,9 +103,7 @@ def download_history_data_etf_ak(
         ]
 
     df["date"] = pd.to_datetime(df[COL_DATE])
-    mask = (df["date"] >= pd.to_datetime(start_date)) & (
-        df["date"] <= pd.to_datetime(end_date)
-    )
+    mask = (df["date"] >= pd.to_datetime(start_date)) & (df["date"] <= pd.to_datetime(end_date))
     df = df.loc[mask].copy()
     df.drop(columns=["date"], inplace=True)
 
@@ -116,9 +112,7 @@ def download_history_data_etf_ak(
 
 @_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
-def download_history_data_us_index_ak(
-    index: str, period: PeriodType = PeriodType.DAILY
-) -> pd.DataFrame:
+def download_history_data_us_index_ak(index: str, period: PeriodType = PeriodType.DAILY) -> pd.DataFrame:
     """
     :param index: str, one of [".IXIC", ".DJI", ".INX"]
         .IXIC: NASDAQ Composite
@@ -192,9 +186,7 @@ def download_history_data_stock_hk_ak(
 
 @_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)
 @change_proxy
-def download_history_data_a_index_ak(
-    index: str, start_date: str, end_date: str
-) -> pd.DataFrame:
+def download_history_data_a_index_ak(index: str, start_date: str, end_date: str) -> pd.DataFrame:
     df = ak.stock_zh_index_daily_em(symbol=index)
     assert isinstance(df, pd.DataFrame), f"Expected DataFrame, got {type(df)}"
     assert not df.empty, f"download history data {index} fail, please check"

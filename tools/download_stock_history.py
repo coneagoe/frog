@@ -10,9 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common.const import AdjustType, PeriodType  # noqa: E402
 from download import DownloadManager  # noqa: E402
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -44,9 +42,7 @@ def parse_arguments():
         help="开始日期，格式: YYYY-MM-DD，默认: 2000-01-01",
     )
 
-    parser.add_argument(
-        "--end-date", type=str, help="结束日期，格式: YYYY-MM-DD，默认: 当天"
-    )
+    parser.add_argument("--end-date", type=str, help="结束日期，格式: YYYY-MM-DD，默认: 当天")
 
     parser.add_argument(
         "--period",
@@ -137,9 +133,7 @@ def main():
         if success:
             logger.info(f"✅ 所有{type_names[args.type]}历史数据下载成功完成！")
         else:
-            logger.warning(
-                f"⚠ 部分{type_names[args.type]}历史数据下载失败，请查看日志了解详情"
-            )
+            logger.warning(f"⚠ 部分{type_names[args.type]}历史数据下载失败，请查看日志了解详情")
 
     except Exception as e:
         logger.error(f"任务执行失败: {str(e)}")

@@ -43,11 +43,7 @@ def download_stock_general_info_task(**context):
 
     print("开始下载ETF基础信息(Tushare)...")
     etf_basic_result = manager.download_etf_basic()
-    print(
-        "✅ ETF基础信息(Tushare)下载成功"
-        if etf_basic_result
-        else "❌ ETF基础信息(Tushare)下载失败"
-    )
+    print("✅ ETF基础信息(Tushare)下载成功" if etf_basic_result else "❌ ETF基础信息(Tushare)下载失败")
 
     print("开始下载港股通基础信息...")
     hk_ggt_result = manager.download_general_info_hk_ggt()
@@ -62,9 +58,7 @@ def download_stock_general_info_task(**context):
 # Create DAG
 dag = DAG(
     "download_stock_general_info_daily",
-    default_args=__import__(
-        "common_dags", fromlist=["get_default_args"]
-    ).get_default_args(),
+    default_args=__import__("common_dags", fromlist=["get_default_args"]).get_default_args(),
     description="Daily general info download for stocks, ETFs, and HK GGT stocks",
     schedule="0 16 * * 1-5",
     catchup=False,

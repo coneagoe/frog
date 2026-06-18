@@ -39,9 +39,7 @@ def download_a_stock_basic_task(**context):
 # Create DAG
 dag = DAG(
     "download_a_stock_basic_weekly",
-    default_args=__import__(
-        "common_dags", fromlist=["get_default_args"]
-    ).get_default_args(),
+    default_args=__import__("common_dags", fromlist=["get_default_args"]).get_default_args(),
     description="Weekly A-stock basic info download",
     schedule="0 20 * * 0",
     catchup=False,

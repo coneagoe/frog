@@ -27,9 +27,7 @@ class MatchingService:
         self.snapshot_service = snapshot_service
 
     def run(self, trade_date: date, account_id: int | None = None):
-        run = self.repo.create_matching_run(
-            trade_date, account_id, MatchingRunStatus.RUNNING.value
-        )
+        run = self.repo.create_matching_run(trade_date, account_id, MatchingRunStatus.RUNNING.value)
         processed = filled = skipped = rejected = failed = 0
         affected_accounts: set[int] = set()
         for order in self.repo.get_orders_for_matching(trade_date, account_id):
@@ -41,9 +39,7 @@ class MatchingService:
                     rejected += 1
                     continue
                 try:
-                    ensure_price_in_daily_range(
-                        Decimal(order.limit_price), bar.low, bar.high
-                    )
+                    ensure_price_in_daily_range(Decimal(order.limit_price), bar.low, bar.high)
                 except Exception:
                     skipped += 1
                     continue
@@ -76,9 +72,7 @@ class MatchingService:
         if int(order.frozen_quantity or 0) > 0:
             position = self.repo.get_position(order.account_id, order.symbol)
             if position is not None:
-                position.frozen_quantity = int(position.frozen_quantity or 0) - int(
-                    order.frozen_quantity or 0
-                )
+                position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
 
     def _fill_order(self, order: PaperOrder) -> None:
@@ -105,9 +99,7 @@ class MatchingService:
         order.filled_quantity = quantity
         self.repo.update_order_status(order, OrderStatus.FILLED)
 
-    def _settle_buy(
-        self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal
-    ) -> None:
+    def _settle_buy(self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal) -> None:
         actual_cost = amount + fees
         release = Decimal(order.frozen_cash or 0) - actual_cost
         if release:
@@ -120,16 +112,12 @@ class MatchingService:
             )
         position = self.repo.get_position(order.account_id, order.symbol)
         current_quantity = 0 if position is None else int(position.total_quantity or 0)
-        current_cost = (
-            Decimal("0") if position is None else Decimal(position.cost_amount or 0)
-        )
+        current_cost = Decimal("0") if position is None else Decimal(position.cost_amount or 0)
         self.repo.upsert_position(
             order.account_id,
             order.symbol,
             total_quantity=current_quantity + int(order.quantity),
-            frozen_quantity=(
-                0 if position is None else int(position.frozen_quantity or 0)
-            ),
+            frozen_quantity=(0 if position is None else int(position.frozen_quantity or 0)),
             cost_amount=(current_cost + actual_cost).quantize(Decimal("0.0001")),
         )
         self.repo.create_position_lot(
@@ -141,9 +129,7 @@ class MatchingService:
             Decimal(order.limit_price),
         )
 
-    def _settle_sell(
-        self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal
-    ) -> None:
+    def _settle_sell(self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal) -> None:
         self.repo.add_cash_event(
             order.account_id,
             CashEventType.TRADE,
@@ -162,17 +148,11 @@ class MatchingService:
                 break
             used = min(int(lot.remaining_quantity or 0), remaining)
             lot.remaining_quantity = int(lot.remaining_quantity or 0) - used
-            cost_reduction += (Decimal(used) * Decimal(lot.cost_price)).quantize(
-                Decimal("0.0001")
-            )
+            cost_reduction += (Decimal(used) * Decimal(lot.cost_price)).quantize(Decimal("0.0001"))
             remaining -= used
         position.total_quantity = int(position.total_quantity or 0) - quantity_to_sell
-        position.frozen_quantity = int(position.frozen_quantity or 0) - int(
-            order.frozen_quantity or 0
+        position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
+        position.cost_amount = (Decimal(position.cost_amount or 0) - cost_reduction).quantize(Decimal("0.0001"))
+        position.realized_pnl = (Decimal(position.realized_pnl or 0) + amount - fees - cost_reduction).quantize(
+            Decimal("0.0001")
         )
-        position.cost_amount = (
-            Decimal(position.cost_amount or 0) - cost_reduction
-        ).quantize(Decimal("0.0001"))
-        position.realized_pnl = (
-            Decimal(position.realized_pnl or 0) + amount - fees - cost_reduction
-        ).quantize(Decimal("0.0001"))

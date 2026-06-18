@@ -34,10 +34,7 @@ class ObosStrategy(MyStrategy):
     def __init__(self):
         super().__init__()
 
-        self.obos = {
-            i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
-            for i in range(len(self.datas))
-        }
+        self.obos = {i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m) for i in range(len(self.datas))}
 
         self.kdj = {
             i: bt.indicators.Stochastic(
@@ -62,17 +59,13 @@ class ObosStrategy(MyStrategy):
             if self.context[i].order_state == OrderState.ORDER_IDLE:
                 if self.is_over_sell(i):
                     self.order_target_percent(self.datas[i], target=self.p.target)
-                    self.context[i].stop_price = min(
-                        [self.datas[i].low[-j] for j in range(1, self.p.param_sp + 1)]
-                    )
+                    self.context[i].stop_price = min([self.datas[i].low[-j] for j in range(1, self.p.param_sp + 1)])
                     self.context[i].order_state = OrderState.ORDER_PRE_OPENING
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
                 # 如果OBOS超买
                 if self.obos[i] > OBOS_OVERBUY_THRESHOLD:
-                    self.context[i].stop_price = max(
-                        self.context[i].stop_price, self.datas[i].low[-1]
-                    )
+                    self.context[i].stop_price = max(self.context[i].stop_price, self.datas[i].low[-1])
 
                 if self.context[i].current_price < self.context[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
@@ -83,28 +76,20 @@ class ObosStrategy(MyStrategy):
 
         if trade.isopen:
             i = self.stocks.index(trade.getdataname())
-            self.context[i].stop_price = min(
-                [self.datas[i].low[-j] for j in range(1, self.p.param_sp + 1)]
-            )
+            self.context[i].stop_price = min([self.datas[i].low[-j] for j in range(1, self.p.param_sp + 1)])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
         "-f",
         "--filter",
         required=False,
         help="Space-separated list of stock IDs to filter out",
     )
-    parser.add_argument(
-        "-c", "--cash", required=False, type=float, help="Initial cash amount"
-    )
+    parser.add_argument("-c", "--cash", required=False, type=float, help="Initial cash amount")
     parser.add_argument("-p", "--plot", required=False, default="", help="Plot trade")
     args = parser.parse_args()
 

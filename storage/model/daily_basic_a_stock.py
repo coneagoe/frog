@@ -31,15 +31,11 @@ class DailyBasicAStock(Base):
 
     # YYYY-MM-DD
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
 
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="当日收盘价")
     换手率 = Column(COL_TURNOVER_RATE, Float, nullable=True, comment="换手率(%)")
-    自由流通换手率 = Column(
-        COL_TURNOVER_RATE_F, Float, nullable=True, comment="自由流通换手率(%)"
-    )
+    自由流通换手率 = Column(COL_TURNOVER_RATE_F, Float, nullable=True, comment="自由流通换手率(%)")
     量比 = Column(COL_VOLUME_RATIO, Float, nullable=True, comment="量比")
 
     市盈率 = Column(COL_PE, Float, nullable=True, comment="市盈率")

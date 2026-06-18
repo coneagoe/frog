@@ -32,9 +32,7 @@ def test_main_loads_db_data_and_writes_ic_report(tmp_path, monkeypatch):
 
     storage = SimpleNamespace(
         load_general_info_stock=lambda: stock_info,
-        load_history_data_stock=lambda stock_id, period, adjust, start_date=None, end_date=None: history_map[
-            stock_id
-        ],
+        load_history_data_stock=lambda stock_id, period, adjust, start_date=None, end_date=None: history_map[stock_id],
     )
 
     monkeypatch.setattr(alphapurify_momentum, "get_storage", lambda: storage)

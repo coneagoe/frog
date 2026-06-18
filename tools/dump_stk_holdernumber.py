@@ -26,9 +26,7 @@ if str(ROOT) not in sys.path:
 from download.dl.downloader_tushare import download_stk_holdernumber  # noqa: E402
 
 
-def dump(
-    ts_code: str, start_date: str = "", end_date: str = "", export_csv: bool = False
-) -> None:
+def dump(ts_code: str, start_date: str = "", end_date: str = "", export_csv: bool = False) -> None:
     print(f"[股东人数] 股票代码: {ts_code}")
     if start_date or end_date:
         print(f"           日期范围: {start_date or '(最早)'} ~ {end_date or '(最新)'}")
@@ -43,18 +41,18 @@ def dump(
     )
 
     if df is None or df.empty:
-        print(
-            "[无数据] 未获取到记录，请确认股票代码及 Tushare 积分是否充足（需 600 积分）。"
-        )
+        print("[无数据] 未获取到记录，请确认股票代码及 Tushare 积分是否充足（需 600 积分）。")
         return
 
     df = df.sort_values("end_date").reset_index(drop=True)
 
     col_widths = {"end_date": 12, "ann_date": 12, "holder_num": 12}
-    header = f"{'截止日期':<{col_widths['end_date']}}{'公告日期':<{col_widths['ann_date']}}{'股东户数':>{col_widths['holder_num']}}"
-    sep = "-" * (
-        col_widths["end_date"] + col_widths["ann_date"] + col_widths["holder_num"]
+    header = (
+        f"{'截止日期':<{col_widths['end_date']}}"
+        f"{'公告日期':<{col_widths['ann_date']}}"
+        f"{'股东户数':>{col_widths['holder_num']}}"
     )
+    sep = "-" * (col_widths["end_date"] + col_widths["ann_date"] + col_widths["holder_num"])
     print(header)
     print(sep)
 
@@ -63,9 +61,7 @@ def dump(
         ann = str(row.get("ann_date", ""))
         num = row.get("holder_num", "")
         num_str = f"{int(num):,}" if pd.notna(num) else "-"
-        print(
-            f"{end:<{col_widths['end_date']}}{ann:<{col_widths['ann_date']}}{num_str:>{col_widths['holder_num']}}"
-        )
+        print(f"{end:<{col_widths['end_date']}}{ann:<{col_widths['ann_date']}}{num_str:>{col_widths['holder_num']}}")
 
     print(sep)
     print(f"共 {len(df)} 条记录")
@@ -83,15 +79,9 @@ def dump(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="dump 上市公司历史股东人数")
-    parser.add_argument(
-        "-c", "--ts_code", required=True, help="股票代码，如 600600.SH、000001.SZ"
-    )
-    parser.add_argument(
-        "-s", "--start_date", default="", help="起始日期 YYYYMMDD（默认不限，获取全量）"
-    )
-    parser.add_argument(
-        "-e", "--end_date", default="", help="截止日期 YYYYMMDD（默认不限）"
-    )
+    parser.add_argument("-c", "--ts_code", required=True, help="股票代码，如 600600.SH、000001.SZ")
+    parser.add_argument("-s", "--start_date", default="", help="起始日期 YYYYMMDD（默认不限，获取全量）")
+    parser.add_argument("-e", "--end_date", default="", help="截止日期 YYYYMMDD（默认不限）")
     parser.add_argument("--csv", action="store_true", help="同时导出 CSV 文件")
     args = parser.parse_args()
 

@@ -34,9 +34,7 @@ class TestExportContract:
     def test_blackroom_record_exported_from_storage(self):
         import storage
 
-        assert hasattr(
-            storage, "BlackroomRecord"
-        ), "storage must export BlackroomRecord"
+        assert hasattr(storage, "BlackroomRecord"), "storage must export BlackroomRecord"
         assert "BlackroomRecord" in storage.__all__
 
     def test_tb_name_blackroom_record_exported_from_storage(self):
@@ -197,9 +195,7 @@ class TestCreateBlackroomRecord:
         )
 
         # SQLite strips tz info; compare naive equivalents
-        assert record.expire_at.replace(tzinfo=None) == explicit_expire.replace(
-            tzinfo=None
-        )
+        assert record.expire_at.replace(tzinfo=None) == explicit_expire.replace(tzinfo=None)
 
     def test_start_at_defaults_to_now_when_omitted(self, sqlite_storage):
         db = sqlite_storage
@@ -226,9 +222,7 @@ class TestCreateBlackroomRecord:
     def test_hk_market_record(self, sqlite_storage):
         db = sqlite_storage
 
-        record = db.create_blackroom_record(
-            stock_code="00700", market="HK", source="manual"
-        )
+        record = db.create_blackroom_record(stock_code="00700", market="HK", source="manual")
 
         assert record.market == "HK"
 
@@ -322,21 +316,15 @@ class TestListActiveBlackroomRecords:
 
     def test_excludes_zero_remaining_records(self, sqlite_storage):
         db = sqlite_storage
-        db.create_blackroom_record(
-            stock_code="000001", enabled=True, ban_days=1, remaining_days=0
-        )
+        db.create_blackroom_record(stock_code="000001", enabled=True, ban_days=1, remaining_days=0)
 
         active = db.list_active_blackroom_records()
 
         assert active == []
 
-    def test_includes_records_with_null_expire_at_when_remaining_positive(
-        self, sqlite_storage
-    ):
+    def test_includes_records_with_null_expire_at_when_remaining_positive(self, sqlite_storage):
         db = sqlite_storage
-        db.create_blackroom_record(
-            stock_code="000001", enabled=True, ban_days=5, expire_at=None
-        )
+        db.create_blackroom_record(stock_code="000001", enabled=True, ban_days=5, expire_at=None)
 
         active = db.list_active_blackroom_records()
 
@@ -345,9 +333,7 @@ class TestListActiveBlackroomRecords:
     def test_includes_records_with_positive_remaining_days(self, sqlite_storage):
         db = sqlite_storage
         past = datetime(2000, 1, 1, tzinfo=timezone.utc)
-        db.create_blackroom_record(
-            stock_code="000001", enabled=True, ban_days=5, expire_at=past
-        )
+        db.create_blackroom_record(stock_code="000001", enabled=True, ban_days=5, expire_at=past)
 
         active = db.list_active_blackroom_records()
 
@@ -355,12 +341,8 @@ class TestListActiveBlackroomRecords:
 
     def test_filters_by_market(self, sqlite_storage):
         db = sqlite_storage
-        db.create_blackroom_record(
-            stock_code="000001", market="A", enabled=True, ban_days=30
-        )
-        db.create_blackroom_record(
-            stock_code="00700", market="HK", enabled=True, ban_days=30
-        )
+        db.create_blackroom_record(stock_code="000001", market="A", enabled=True, ban_days=30)
+        db.create_blackroom_record(stock_code="00700", market="HK", enabled=True, ban_days=30)
 
         active_a = db.list_active_blackroom_records(market="A")
 
@@ -372,9 +354,7 @@ class TestListActiveBlackroomRecords:
         # disabled but positive remaining -> excluded
         db.create_blackroom_record(stock_code="000001", enabled=False, ban_days=1)
         # enabled but zero remaining -> excluded
-        db.create_blackroom_record(
-            stock_code="000002", enabled=True, ban_days=1, remaining_days=0
-        )
+        db.create_blackroom_record(stock_code="000002", enabled=True, ban_days=1, remaining_days=0)
         # enabled, positive remaining -> included
         db.create_blackroom_record(stock_code="000003", enabled=True, ban_days=2)
         # enabled, no remaining_days -> excluded
@@ -389,9 +369,7 @@ class TestListActiveBlackroomRecords:
         db = sqlite_storage
         past = datetime(2000, 1, 1, tzinfo=timezone.utc)
         future = datetime.now(timezone.utc) + timedelta(days=30)
-        db.create_blackroom_record(
-            stock_code="000001", enabled=True, ban_days=5, expire_at=past
-        )
+        db.create_blackroom_record(stock_code="000001", enabled=True, ban_days=5, expire_at=past)
         db.create_blackroom_record(
             stock_code="000002",
             enabled=True,
@@ -399,9 +377,7 @@ class TestListActiveBlackroomRecords:
             remaining_days=0,
             expire_at=future,
         )
-        db.create_blackroom_record(
-            stock_code="000003", enabled=False, ban_days=5, expire_at=future
-        )
+        db.create_blackroom_record(stock_code="000003", enabled=False, ban_days=5, expire_at=future)
 
         active = db.list_active_blackroom_records()
 
@@ -416,9 +392,7 @@ class TestListActiveBlackroomRecords:
 class TestUpdateBlackroomRecord:
     def test_updates_allowed_fields(self, sqlite_storage):
         db = sqlite_storage
-        record = db.create_blackroom_record(
-            stock_code="000001", note="旧备注", enabled=True
-        )
+        record = db.create_blackroom_record(stock_code="000001", note="旧备注", enabled=True)
 
         updated = db.update_blackroom_record(record.id, note="新备注", enabled=False)
 
@@ -430,9 +404,7 @@ class TestUpdateBlackroomRecord:
         db = sqlite_storage
         record = db.create_blackroom_record(stock_code="000001")
 
-        updated = db.update_blackroom_record(
-            record.id, source="shareholder_selling", ban_days=60
-        )
+        updated = db.update_blackroom_record(record.id, source="shareholder_selling", ban_days=60)
 
         assert updated.source == "shareholder_selling"
         assert updated.ban_days == 60
@@ -472,9 +444,7 @@ class TestUpdateBlackroomRecord:
     def test_recomputes_expire_at_when_ban_days_updated(self, sqlite_storage):
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(
-            stock_code="000001", ban_days=10, start_at=start
-        )
+        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
 
         updated = db.update_blackroom_record(record.id, ban_days=20)
 
@@ -484,9 +454,7 @@ class TestUpdateBlackroomRecord:
     def test_recomputes_expire_at_when_start_at_updated(self, sqlite_storage):
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(
-            stock_code="000001", ban_days=10, start_at=start
-        )
+        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
 
         new_start = datetime(2025, 6, 1, tzinfo=timezone.utc)
         updated = db.update_blackroom_record(record.id, start_at=new_start)
@@ -497,26 +465,18 @@ class TestUpdateBlackroomRecord:
     def test_explicit_expire_at_in_update_is_not_overridden(self, sqlite_storage):
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(
-            stock_code="000001", ban_days=10, start_at=start
-        )
+        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
 
         explicit_expire = datetime(2099, 12, 31, tzinfo=timezone.utc)
-        updated = db.update_blackroom_record(
-            record.id, ban_days=99, expire_at=explicit_expire
-        )
+        updated = db.update_blackroom_record(record.id, ban_days=99, expire_at=explicit_expire)
 
-        assert updated.expire_at.replace(tzinfo=None) == explicit_expire.replace(
-            tzinfo=None
-        )
+        assert updated.expire_at.replace(tzinfo=None) == explicit_expire.replace(tzinfo=None)
 
     def test_clears_expire_at_when_ban_days_set_to_none(self, sqlite_storage):
         """Nulling ban_days must clear expire_at, not leave stale value."""
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(
-            stock_code="000001", ban_days=10, start_at=start
-        )
+        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
         assert record.expire_at is not None
 
         updated = db.update_blackroom_record(record.id, ban_days=None)
@@ -528,9 +488,7 @@ class TestUpdateBlackroomRecord:
         """Nulling start_at must clear expire_at, not leave stale value."""
         db = sqlite_storage
         start = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        record = db.create_blackroom_record(
-            stock_code="000001", ban_days=10, start_at=start
-        )
+        record = db.create_blackroom_record(stock_code="000001", ban_days=10, start_at=start)
         assert record.expire_at is not None
 
         updated = db.update_blackroom_record(record.id, start_at=None)
@@ -602,9 +560,7 @@ class TestCountdownBlackroomRecords:
 
 
 class TestEnsureBlackroomRecordsTable:
-    def test_storage_init_auto_migrates_legacy_blackroom_table(
-        self, tmp_path, monkeypatch
-    ):
+    def test_storage_init_auto_migrates_legacy_blackroom_table(self, tmp_path, monkeypatch):
         from sqlalchemy import create_engine as real_create_engine
 
         sqlite_url = f"sqlite:///{tmp_path}/legacy_blackroom_init.db"
@@ -629,11 +585,7 @@ class TestEnsureBlackroomRecordsTable:
                     """
                 )
             )
-            conn.execute(
-                text(
-                    "INSERT INTO blackroom_records (stock_code, market, ban_days) VALUES ('000001', 'A', 8)"
-                )
-            )
+            conn.execute(text("INSERT INTO blackroom_records (stock_code, market, ban_days) VALUES ('000001', 'A', 8)"))
 
         reset_storage()
         mock_config = Mock(spec=StorageConfig)
@@ -650,23 +602,16 @@ class TestEnsureBlackroomRecordsTable:
         db.Session = sessionmaker(bind=engine)
 
         with engine.connect() as conn:
-            columns = [
-                row[1]
-                for row in conn.execute(text("PRAGMA table_info(blackroom_records)"))
-            ]
+            columns = [row[1] for row in conn.execute(text("PRAGMA table_info(blackroom_records)"))]
             remaining_days = conn.execute(
-                text(
-                    "SELECT remaining_days FROM blackroom_records WHERE stock_code = '000001'"
-                )
+                text("SELECT remaining_days FROM blackroom_records WHERE stock_code = '000001'")
             ).scalar_one()
 
         assert "remaining_days" in columns
         assert remaining_days == 8
         reset_storage()
 
-    def test_adds_remaining_days_column_and_backfills_legacy_rows(
-        self, tmp_path, monkeypatch
-    ):
+    def test_adds_remaining_days_column_and_backfills_legacy_rows(self, tmp_path, monkeypatch):
         from sqlalchemy import create_engine as real_create_engine
 
         sqlite_url = f"sqlite:///{tmp_path}/legacy_blackroom.db"
@@ -692,9 +637,7 @@ class TestEnsureBlackroomRecordsTable:
                 )
             )
             conn.execute(
-                text(
-                    "INSERT INTO blackroom_records (stock_code, market, ban_days) VALUES ('000001', 'A', 12)"
-                )
+                text("INSERT INTO blackroom_records (stock_code, market, ban_days) VALUES ('000001', 'A', 12)")
             )
 
         reset_storage()
@@ -715,14 +658,9 @@ class TestEnsureBlackroomRecordsTable:
         db.ensure_blackroom_records_table()
 
         with engine.connect() as conn:
-            columns = [
-                row[1]
-                for row in conn.execute(text("PRAGMA table_info(blackroom_records)"))
-            ]
+            columns = [row[1] for row in conn.execute(text("PRAGMA table_info(blackroom_records)"))]
             remaining_days = conn.execute(
-                text(
-                    "SELECT remaining_days FROM blackroom_records WHERE stock_code = '000001'"
-                )
+                text("SELECT remaining_days FROM blackroom_records WHERE stock_code = '000001'")
             ).scalar_one()
         assert "remaining_days" in columns
         assert remaining_days == 12

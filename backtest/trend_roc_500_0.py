@@ -31,39 +31,27 @@ class TrendRoc(MyStrategy):
         # self.target = round(self.p.n_portion / len(stocks), 2)
         self.target = 0.02
 
-        self.roc = {
-            i: bt.indicators.ROC(self.datas[i], period=self.p.period)
-            for i in range(len(self.datas))
-        }
+        self.roc = {i: bt.indicators.ROC(self.datas[i], period=self.p.period) for i in range(len(self.datas))}
 
     def next(self):
         for i in range(len(self.datas)):
             if self.context[i].order is False:
                 if self.roc[i][0] > 0.08:  # if fast crosses slow to the upside
-                    self.order_target_percent(
-                        self.datas[i], target=self.target
-                    )  # enter long
+                    self.order_target_percent(self.datas[i], target=self.target)  # enter long
             else:
                 if self.roc[i][0] < 0:  # in the market & cross to the downside
                     self.order_target_percent(self.datas[i], target=0.0)
 
     def stop(self):
-        print(
-            "(period %d, n_portion %d) Ending Value %.2f"
-            % (self.p.period, self.p.n_portion, self.broker.getvalue())
-        )
+        print("(period %d, n_portion %d) Ending Value %.2f" % (self.p.period, self.p.n_portion, self.broker.getvalue()))
 
         super().stop()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     cerebro = bt.Cerebro()

@@ -17,9 +17,7 @@ def test_api_requires_bearer_token(monkeypatch, tmp_path):
     client = TestClient(app)
 
     unauthorized = client.get("/paper/accounts")
-    authorized = client.get(
-        "/paper/accounts", headers={"Authorization": "Bearer secret"}
-    )
+    authorized = client.get("/paper/accounts", headers={"Authorization": "Bearer secret"})
 
     assert unauthorized.status_code == 401
     assert authorized.status_code != 401

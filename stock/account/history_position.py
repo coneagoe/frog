@@ -79,9 +79,7 @@ def load_history_positions(
     assets, profits, profit_rates = ([], [], [])
 
     market_calendar = mcal.get_calendar("XSHG")
-    date_range = mcal.date_range(
-        market_calendar.schedule(start_date, end_date), frequency="1D"
-    )
+    date_range = mcal.date_range(market_calendar.schedule(start_date, end_date), frequency="1D")
     j = 0
     for i in date_range:
         if j % 2 == 0:
@@ -99,21 +97,15 @@ def load_history_positions(
         if stock_ids:
             df = df[df[COL_STOCK_ID].isin(stock_ids)]
 
-        df0 = pd.DataFrame(
-            {COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_MARKET_VALUE]}
-        )
+        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_MARKET_VALUE]})
         df0 = df0.set_index(COL_STOCK_NAME)
         assets.append(df0)
 
-        df0 = pd.DataFrame(
-            {COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT]}
-        )
+        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT]})
         df0 = df0.set_index(COL_STOCK_NAME)
         profits.append(df0)
 
-        df0 = pd.DataFrame(
-            {COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT_RATE]}
-        )
+        df0 = pd.DataFrame({COL_STOCK_NAME: df[COL_STOCK_NAME], date_stamp: df[COL_PROFIT_RATE]})
         df0 = df0.set_index(COL_STOCK_NAME)
         profit_rates.append(df0)
 

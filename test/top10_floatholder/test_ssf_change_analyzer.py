@@ -78,10 +78,7 @@ def test_analyze_ssf_change_reports_insufficient_history_with_fewer_than_two_per
         }
     )
 
-    assert (
-        analyze_ssf_change("000001", history)
-        is SSFChangeAnalysisOutcome.INSUFFICIENT_HISTORY
-    )
+    assert analyze_ssf_change("000001", history) is SSFChangeAnalysisOutcome.INSUFFICIENT_HISTORY
 
 
 def test_analyze_ssf_change_returns_none_when_ssf_holders_are_unchanged():
@@ -211,12 +208,6 @@ def test_analyze_ssf_change_prioritizes_ratio_delta_over_static_ratio_level():
         )
     )
 
-    assert (
-        high_delta_signal["ssf_total_hold_ratio_change"]
-        > low_delta_signal["ssf_total_hold_ratio_change"]
-    )
-    assert (
-        high_delta_signal["ssf_total_hold_ratio_now"]
-        < low_delta_signal["ssf_total_hold_ratio_now"]
-    )
+    assert high_delta_signal["ssf_total_hold_ratio_change"] > low_delta_signal["ssf_total_hold_ratio_change"]
+    assert high_delta_signal["ssf_total_hold_ratio_now"] < low_delta_signal["ssf_total_hold_ratio_now"]
     assert high_delta_signal["score"] > low_delta_signal["score"]

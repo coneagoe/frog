@@ -194,7 +194,7 @@ def get_ocr(image_file_name: str, ocr_type: OcrType):
                             words.append(v.replace(" ", ""))
                 return words
             except KeyError:
-                logging.error(f'{content["error_msg"]}, {image_file_name}')
+                logging.error(f"{content['error_msg']}, {image_file_name}")
         else:
             logging.warning(f"status: {response.status_code}")
     return None

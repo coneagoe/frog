@@ -101,22 +101,14 @@ def test_download_history_data_etf_fallback_to_money_fund(downloader_module):
         module.COL_LOW,
         module.COL_VOLUME,
     ]
-    assert result[module.COL_OPEN].iloc[0] == pytest.approx(
-        result[module.COL_CLOSE].iloc[0]
-    )
-    assert result[module.COL_HIGH].iloc[0] == pytest.approx(
-        result[module.COL_CLOSE].iloc[0]
-    )
-    assert result[module.COL_LOW].iloc[0] == pytest.approx(
-        result[module.COL_CLOSE].iloc[0]
-    )
+    assert result[module.COL_OPEN].iloc[0] == pytest.approx(result[module.COL_CLOSE].iloc[0])
+    assert result[module.COL_HIGH].iloc[0] == pytest.approx(result[module.COL_CLOSE].iloc[0])
+    assert result[module.COL_LOW].iloc[0] == pytest.approx(result[module.COL_CLOSE].iloc[0])
     assert result[module.COL_VOLUME].iloc[0] == 0
     assert "extra" in result.columns
 
 
-def test_download_history_data_stock_hk_returns_correct_data(
-    tmp_path, downloader_module, monkeypatch
-):
+def test_download_history_data_stock_hk_returns_correct_data(tmp_path, downloader_module, monkeypatch):
     module, ak_stub = downloader_module
 
     stock_id = "01234"

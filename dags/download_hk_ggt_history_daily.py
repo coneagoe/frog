@@ -46,9 +46,7 @@ def get_redis_client() -> redis.Redis:
     return redis.Redis.from_url(redis_url, decode_responses=True)
 
 
-def download_hk_ggt_history_hfq_partition_task(
-    *, partition_id: int, partition_count: int, **context
-):
+def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, partition_count: int, **context):
     """Download HK GGT HFQ history data for a specific partition.
 
     Args:
@@ -66,9 +64,7 @@ def download_hk_ggt_history_hfq_partition_task(
     #         raise AirflowSkipException("港股市场今日休市，跳过下载任务")
 
     if partition_id >= partition_count:
-        raise AirflowSkipException(
-            f"partition_id={partition_id} >= partition_count={partition_count}, skip"
-        )
+        raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
     start_date = DEFAULT_START_DATE
     end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
@@ -96,10 +92,7 @@ def download_hk_ggt_history_hfq_partition_task(
             failed_ids.append(stock_id)
 
         if idx % 50 == 0 or idx == total:
-            print(
-                f"[HK HFQ p{partition_id:02d}] 进度: {idx}/{total} "
-                f"(failed={len(failed_ids)})"
-            )
+            print(f"[HK HFQ p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
@@ -145,9 +138,7 @@ def aggregate_and_save_result(*, partition_count: int, **context):
         ex=86400,
     )
 
-    return (
-        f"Results saved to Redis: {REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY}, result={result}"
-    )
+    return f"Results saved to Redis: {REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY}, result={result}"
 
 
 # Create DAG

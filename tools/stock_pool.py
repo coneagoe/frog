@@ -19,9 +19,7 @@ class Stock(Base):  # type: ignore[misc, valid-type]
         return f"code: {self.code}, name: {self.name}, target: {self.target_price}"
 
 
-stocks_general_info = pd.read_sql_table(
-    table_name="stock_pool", con=engine, index_col="code"
-)
+stocks_general_info = pd.read_sql_table(table_name="stock_pool", con=engine, index_col="code")
 print(stocks_general_info)
 
 exit(0)

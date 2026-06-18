@@ -94,11 +94,7 @@ def build_stock_factor_panel(
         df_result[factor_name] = pd.NA
         return df_result
 
-    fh = (
-        factor_history_df[[COL_ANN_DATE, factor_name]]
-        .drop_duplicates()
-        .sort_values(COL_ANN_DATE)
-    )
+    fh = factor_history_df[[COL_ANN_DATE, factor_name]].drop_duplicates().sort_values(COL_ANN_DATE)
 
     # ensure both date columns are datetime for merge_asof
     df[COL_DATE] = pd.to_datetime(df[COL_DATE])
@@ -142,14 +138,8 @@ def build_ssf_factor_panel_from_db(
             continue
 
         # normalize adjust to AdjustType enum if possible
-        adjust_enum = (
-            AdjustType[adjust.upper()]
-            if adjust.upper() in AdjustType.__members__
-            else AdjustType.QFQ
-        )
-        history = storage.load_history_data_stock(
-            stock_id, PeriodType.DAILY, adjust_enum, start_date, end_date
-        )
+        adjust_enum = AdjustType[adjust.upper()] if adjust.upper() in AdjustType.__members__ else AdjustType.QFQ
+        history = storage.load_history_data_stock(stock_id, PeriodType.DAILY, adjust_enum, start_date, end_date)
         stock_panel = build_stock_factor_panel(
             history_df=history,
             stock_id=stock_id,

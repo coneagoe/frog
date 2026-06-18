@@ -95,11 +95,9 @@ def test_celery_beat_does_not_schedule_obos_hk_directly():
 
 
 def test_hk_ggt_dag_checks_hk_market_calendar():
-    source = (
-        Path(__file__).resolve().parents[2]
-        / "dags"
-        / "download_hk_ggt_history_daily.py"
-    ).read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[2] / "dags" / "download_hk_ggt_history_daily.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "from common import is_hk_market_open_today" in source
     assert "if not is_hk_market_open_today():" in source

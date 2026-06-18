@@ -55,22 +55,16 @@ def test_change_proxy_refreshes_proxy_after_connection_error(monkeypatch):
     assert get_proxy_calls == 1
 
 
-def test_get_proxy_raises_after_bounded_malformed_provider_responses(
-    monkeypatch, caplog
-):
+def test_get_proxy_raises_after_bounded_malformed_provider_responses(monkeypatch, caplog):
     class FakeResponse:
         def json(self):
             return {"msg": "illegal"}
 
-    monkeypatch.setattr(
-        proxy_module.requests, "get", lambda *args, **kwargs: FakeResponse()
-    )
+    monkeypatch.setattr(proxy_module.requests, "get", lambda *args, **kwargs: FakeResponse())
     monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
 
     with caplog.at_level(logging.WARNING):
-        with pytest.raises(
-            ProxyError, match="Failed to get working proxy after 2 attempts"
-        ):
+        with pytest.raises(ProxyError, match="Failed to get working proxy after 2 attempts"):
             proxy_module.get_proxy(max_attempts=2)
 
     assert "Malformed proxy response" in caplog.text
@@ -84,7 +78,5 @@ def test_get_proxy_raises_after_bounded_request_failures(monkeypatch):
     )
     monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
 
-    with pytest.raises(
-        ProxyError, match="Failed to get working proxy after 2 attempts"
-    ):
+    with pytest.raises(ProxyError, match="Failed to get working proxy after 2 attempts"):
         proxy_module.get_proxy(max_attempts=2)

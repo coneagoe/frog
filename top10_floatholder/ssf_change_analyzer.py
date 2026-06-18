@@ -33,9 +33,7 @@ def _aggregate_period_ssf(period_df: pd.DataFrame) -> pd.DataFrame:
     ].sum()
 
 
-def analyze_ssf_change(
-    stock_id: str, history_df: pd.DataFrame
-) -> dict[str, Any] | None | SSFChangeAnalysisOutcome:
+def analyze_ssf_change(stock_id: str, history_df: pd.DataFrame) -> dict[str, Any] | None | SSFChangeAnalysisOutcome:
     """Compare the latest two SSF disclosure periods and rank meaningful changes.
 
     Score combines four bounded components:
@@ -54,19 +52,13 @@ def analyze_ssf_change(
     latest_df = history_df[ann_date_series == latest_ann_date]
     prev_df = history_df[ann_date_series == prev_ann_date]
 
-    latest_ssf = latest_df[
-        latest_df[COL_FLOAT_HOLDER_NAME].map(is_social_security_holder)
-    ]
+    latest_ssf = latest_df[latest_df[COL_FLOAT_HOLDER_NAME].map(is_social_security_holder)]
     prev_ssf = prev_df[prev_df[COL_FLOAT_HOLDER_NAME].map(is_social_security_holder)]
     if latest_ssf.empty and prev_ssf.empty:
         return None
 
-    latest_ssf = _aggregate_period_ssf(
-        latest_ssf[latest_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].notna()]
-    )
-    prev_ssf = _aggregate_period_ssf(
-        prev_ssf[prev_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].notna()]
-    )
+    latest_ssf = _aggregate_period_ssf(latest_ssf[latest_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].notna()])
+    prev_ssf = _aggregate_period_ssf(prev_ssf[prev_ssf[COL_FLOAT_HOLDER_HOLD_AMOUNT].notna()])
 
     latest_map = dict(
         zip(
@@ -120,10 +112,7 @@ def analyze_ssf_change(
     # Keep latest ratio as a weak tie-breaker and let ratio delta dominate.
     ratio_level_score = max(min(latest_ratio / 5.0, 1.0), 0.0)
     score = round(
-        60 * event_score
-        + 10 * count_change_score
-        + 25 * ratio_change_score
-        + 5 * ratio_level_score,
+        60 * event_score + 10 * count_change_score + 25 * ratio_change_score + 5 * ratio_level_score,
         2,
     )
 

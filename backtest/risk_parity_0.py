@@ -79,10 +79,7 @@ class RiskParityStrategy(MyStrategy):
             return
 
         # 再平衡检查
-        if (
-            self.last_rebalance_idx is None
-            or (current_idx - self.last_rebalance_idx) >= self.p.rebalance_freq
-        ):
+        if self.last_rebalance_idx is None or (current_idx - self.last_rebalance_idx) >= self.p.rebalance_freq:
             self._rebalance()
             self.last_rebalance_idx = current_idx
 
@@ -184,12 +181,8 @@ class RiskParityStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     cerebro = bt.Cerebro()

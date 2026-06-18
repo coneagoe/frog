@@ -4,9 +4,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_scan_top10_floatholder_weekly_dag_has_scan_identity_and_downstream_analysis_task():
-    source = (ROOT / "dags/scan_top10_floatholder_weekly.py").read_text(
-        encoding="utf-8"
-    )
+    source = (ROOT / "dags/scan_top10_floatholder_weekly.py").read_text(encoding="utf-8")
 
     assert '"scan_top10_floatholder_weekly"' in source
     assert 'description="Weekly A-share top10 floatholder scan"' in source

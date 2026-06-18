@@ -4,9 +4,7 @@ import types
 
 import pytest
 
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../dags"))
-)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../dags")))
 
 from common_dags import get_partition_count, get_partition_ids  # noqa: E402
 
@@ -19,9 +17,7 @@ def test_get_partition_count_uses_download_process_count(monkeypatch):
 
 
 @pytest.mark.parametrize("download_process_count", ["0", "-1"])
-def test_get_partition_count_normalizes_non_positive_values(
-    monkeypatch, download_process_count
-):
+def test_get_partition_count_normalizes_non_positive_values(monkeypatch, download_process_count):
     monkeypatch.setenv("DOWNLOAD_PROCESS_COUNT", download_process_count)
 
     assert get_partition_count() == 1

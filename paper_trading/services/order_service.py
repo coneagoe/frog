@@ -46,9 +46,7 @@ class OrderService:
                     trade_date,
                     idempotency_key,
                 )
-            return self._accept_sell_order(
-                account_id, symbol, quantity, limit_price, trade_date, idempotency_key
-            )
+            return self._accept_sell_order(account_id, symbol, quantity, limit_price, trade_date, idempotency_key)
         except PaperTradingError as exc:
             return self.repo.create_order(
                 account_id=account_id,
@@ -78,9 +76,7 @@ class OrderService:
         if int(order.frozen_quantity or 0) > 0:
             position = self.repo.get_position(order.account_id, order.symbol)
             if position is not None:
-                position.frozen_quantity = int(position.frozen_quantity or 0) - int(
-                    order.frozen_quantity or 0
-                )
+                position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         return self.repo.update_order_status(order, OrderStatus.CANCELLED)
 
     def _accept_buy_order(
@@ -93,9 +89,7 @@ class OrderService:
         idempotency_key: str | None,
     ) -> PaperOrder:
         amount = Decimal(quantity) * limit_price
-        frozen_cash = (
-            amount + calculate_a_share_fees(OrderSide.BUY, amount).total
-        ).quantize(Decimal("0.0001"))
+        frozen_cash = (amount + calculate_a_share_fees(OrderSide.BUY, amount).total).quantize(Decimal("0.0001"))
         ensure_sufficient_cash(self.repo.get_cash_available(account_id), frozen_cash)
         order = self.repo.create_order(
             account_id=account_id,
@@ -127,11 +121,7 @@ class OrderService:
         idempotency_key: str | None,
     ) -> PaperOrder:
         position = self.repo.get_position(account_id, symbol)
-        sellable = (
-            0
-            if position is None
-            else int(position.total_quantity or 0) - int(position.frozen_quantity or 0)
-        )
+        sellable = 0 if position is None else int(position.total_quantity or 0) - int(position.frozen_quantity or 0)
         ensure_sufficient_position(sellable, quantity)
         assert position is not None
         position.frozen_quantity = int(position.frozen_quantity or 0) + quantity

@@ -32,9 +32,7 @@ DEFAULT_START_DATE: Final = "2010-01-01"
 PARTITION_COUNT = 1
 
 
-def download_etf_daily_partition_task(
-    *, partition_id: int, partition_count: int, **context
-):
+def download_etf_daily_partition_task(*, partition_id: int, partition_count: int, **context):
     """Download ETF daily data for a specific partition.
 
     Args:
@@ -51,9 +49,7 @@ def download_etf_daily_partition_task(
         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
 
     if partition_id >= partition_count:
-        raise AirflowSkipException(
-            f"partition_id={partition_id} >= partition_count={partition_count}, skip"
-        )
+        raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
     start_date = DEFAULT_START_DATE
     end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
@@ -81,10 +77,7 @@ def download_etf_daily_partition_task(
             failed_ids.append(etf_id)
 
         if idx % 50 == 0 or idx == total:
-            print(
-                f"[ETF p{partition_id:02d}] 进度: {idx}/{total} "
-                f"(failed={len(failed_ids)})"
-            )
+            print(f"[ETF p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
@@ -93,10 +86,7 @@ def download_etf_daily_partition_task(
             f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
         )
 
-    return (
-        f"ETF日线数据下载成功完成: partition={partition_id}/{partition_count}, "
-        f"count={total}"
-    )
+    return f"ETF日线数据下载成功完成: partition={partition_id}/{partition_count}, count={total}"
 
 
 # Create DAG

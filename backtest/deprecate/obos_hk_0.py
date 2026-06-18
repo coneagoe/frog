@@ -39,10 +39,7 @@ class ObosStrategy(MyStrategy):
         if self.target < 0.02:
             self.target = 0.02
 
-        self.obos = {
-            i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
-            for i in range(len(self.datas))
-        }
+        self.obos = {i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m) for i in range(len(self.datas))}
 
         self.stop_manager = StopPriceManager(self.datas)
 
@@ -83,12 +80,8 @@ class ObosStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
         "-f",
         "--filter",

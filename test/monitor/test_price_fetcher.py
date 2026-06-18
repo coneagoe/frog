@@ -13,9 +13,7 @@ def _install_tushare_stub(monkeypatch, pro_client):
 
 
 def test_fetch_price_a_share_uses_rt_k(monkeypatch):
-    pro_client = SimpleNamespace(
-        rt_k=lambda ts_code: pd.DataFrame([{"ts_code": ts_code, "close": 1800.5}])
-    )
+    pro_client = SimpleNamespace(rt_k=lambda ts_code: pd.DataFrame([{"ts_code": ts_code, "close": 1800.5}]))
     monkeypatch.setenv("TUSHARE_TOKEN", "token")
     _install_tushare_stub(monkeypatch, pro_client)
 
@@ -23,9 +21,7 @@ def test_fetch_price_a_share_uses_rt_k(monkeypatch):
 
 
 def test_fetch_price_hk_uses_rt_hk_k(monkeypatch):
-    pro_client = SimpleNamespace(
-        rt_hk_k=lambda ts_code: pd.DataFrame([{"ts_code": ts_code, "close": 64.85}])
-    )
+    pro_client = SimpleNamespace(rt_hk_k=lambda ts_code: pd.DataFrame([{"ts_code": ts_code, "close": 64.85}]))
     monkeypatch.setenv("TUSHARE_TOKEN", "token")
     _install_tushare_stub(monkeypatch, pro_client)
 

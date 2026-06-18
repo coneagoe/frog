@@ -48,12 +48,8 @@ class RsrsStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
         "-c",
         "--cash",

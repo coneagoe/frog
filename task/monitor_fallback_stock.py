@@ -45,15 +45,11 @@ def monitor_fallback_stock(test=False):
     if not df0.empty:
         df0[col_period] = df0[COL_MONITOR_PRICE].str.extract(r"ma(\d+)").astype(int)
 
-        df0[COL_MONITOR_PRICE] = df0.apply(
-            lambda row: get_yesterday_ma(row[COL_STOCK_ID], row[col_period]), axis=1
-        )
+        df0[COL_MONITOR_PRICE] = df0.apply(lambda row: get_yesterday_ma(row[COL_STOCK_ID], row[col_period]), axis=1)
 
         df_tmp.loc[df0.index, COL_MONITOR_PRICE] = df0[COL_MONITOR_PRICE]
 
-    df_tmp[COL_MONITOR_PRICE] = pd.to_numeric(
-        df_tmp[COL_MONITOR_PRICE], errors="coerce"
-    )
+    df_tmp[COL_MONITOR_PRICE] = pd.to_numeric(df_tmp[COL_MONITOR_PRICE], errors="coerce")
     df_tmp.dropna(subset=[COL_MONITOR_PRICE], inplace=True)
 
     df_output = df_tmp[df_tmp[COL_MONITOR_PRICE] >= df_tmp[COL_CURRENT_PRICE]]

@@ -106,9 +106,7 @@ def test_filter_buy_candidates_splits_allowed_and_banned():
     storage = MagicMock()
     storage.list_active_blackroom_records.return_value = [_record(stock_code="600519")]
 
-    result = BlackroomService(storage=storage).filter_buy_candidates(
-        ["600519", "000001"], "A"
-    )
+    result = BlackroomService(storage=storage).filter_buy_candidates(["600519", "000001"], "A")
 
     assert result["data"] == {"allowed": ["000001"], "banned": ["600519"]}
 

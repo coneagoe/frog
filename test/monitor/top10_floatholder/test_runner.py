@@ -41,9 +41,7 @@ def make_non_ssf_history_df():
 
 def test_run_ssf_change_alert_saves_sends_and_marks():
     mock_storage = MagicMock()
-    mock_storage.list_ssf_change_signal_candidates.return_value = [
-        ("000001", "2024-03-31")
-    ]
+    mock_storage.list_ssf_change_signal_candidates.return_value = [("000001", "2024-03-31")]
     mock_storage.load_top10_floatholders_history.return_value = make_history_df()
     mock_storage.save_ssf_change_signals.return_value = [1]
     mock_storage.list_pending_ssf_change_signals.return_value = [
@@ -60,9 +58,7 @@ def test_run_ssf_change_alert_saves_sends_and_marks():
     ]
 
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch("monitor.top10_floatholder.runner.send_email") as mock_email,
     ):
         summary = run_ssf_change_alert()
@@ -81,9 +77,7 @@ def test_run_ssf_change_alert_skips_email_when_no_pending():
     mock_storage.list_pending_ssf_change_signals.return_value = []
 
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch("monitor.top10_floatholder.runner.send_email") as mock_email,
     ):
         summary = run_ssf_change_alert()
@@ -99,9 +93,7 @@ def test_run_ssf_change_alert_skips_email_when_nothing_new():
     mock_storage.list_pending_ssf_change_signals.return_value = []
 
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch("monitor.top10_floatholder.runner.send_email") as mock_email,
     ):
         summary = run_ssf_change_alert()
@@ -149,9 +141,7 @@ def test_run_ssf_change_alert_sends_one_weekly_report_and_marks_all_pending():
     ]
 
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch("monitor.top10_floatholder.runner.send_email") as mock_email,
     ):
         summary = run_ssf_change_alert()
@@ -163,9 +153,7 @@ def test_run_ssf_change_alert_sends_one_weekly_report_and_marks_all_pending():
     assert "公告日期范围: 2024-03-31 ~ 2024-06-30" in body
     assert body.index(
         "1. 000002 | ann_date=2024-06-30 | score=92.0 | events=new_entry | count_change=1 | ratio_change=1.2"
-    ) < body.index(
-        "2. 000001 | ann_date=2024-03-31 | score=88.0 | events=increase | count_change=1 | ratio_change=0.8"
-    )
+    ) < body.index("2. 000001 | ann_date=2024-03-31 | score=88.0 | events=increase | count_change=1 | ratio_change=0.8")
     assert body.index(
         "2. 000001 | ann_date=2024-03-31 | score=88.0 | events=increase | count_change=1 | ratio_change=0.8"
     ) < body.index(
@@ -192,9 +180,7 @@ def test_run_ssf_change_alert_leaves_pending_when_email_send_fails():
         )
     ]
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch(
             "monitor.top10_floatholder.runner.send_email",
             side_effect=RuntimeError("smtp failed"),
@@ -228,9 +214,7 @@ def test_run_ssf_change_alert_may_resend_when_alert_marking_retries():
     ]
 
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch("monitor.top10_floatholder.runner.send_email") as mock_email,
     ):
         with pytest.raises(RuntimeError, match="db write failed"):
@@ -248,20 +232,14 @@ def test_run_ssf_change_alert_may_resend_when_alert_marking_retries():
 
 def test_run_ssf_change_alert_marks_no_signal_candidates_processed():
     mock_storage = MagicMock()
-    mock_storage.list_ssf_change_signal_candidates.return_value = [
-        ("000001", "2024-03-31")
-    ]
-    mock_storage.load_top10_floatholders_history.return_value = (
-        make_non_ssf_history_df()
-    )
+    mock_storage.list_ssf_change_signal_candidates.return_value = [("000001", "2024-03-31")]
+    mock_storage.load_top10_floatholders_history.return_value = make_non_ssf_history_df()
     mock_storage.save_ssf_change_signals.return_value = []
     mock_storage.mark_ssf_change_candidates_processed.return_value = [7]
     mock_storage.list_pending_ssf_change_signals.return_value = []
 
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch("monitor.top10_floatholder.runner.send_email") as mock_email,
     ):
         summary = run_ssf_change_alert()
@@ -282,20 +260,14 @@ def test_run_ssf_change_alert_marks_no_signal_candidates_processed():
 
 def test_run_ssf_change_alert_leaves_insufficient_history_candidates_retryable():
     mock_storage = MagicMock()
-    mock_storage.list_ssf_change_signal_candidates.return_value = [
-        ("000001", "2024-03-31")
-    ]
-    mock_storage.load_top10_floatholders_history.return_value = pd.DataFrame(
-        columns=["公告日期"]
-    )
+    mock_storage.list_ssf_change_signal_candidates.return_value = [("000001", "2024-03-31")]
+    mock_storage.load_top10_floatholders_history.return_value = pd.DataFrame(columns=["公告日期"])
     mock_storage.save_ssf_change_signals.return_value = []
     mock_storage.mark_ssf_change_candidates_processed.return_value = [7]
     mock_storage.list_pending_ssf_change_signals.return_value = []
 
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch("monitor.top10_floatholder.runner.send_email"),
     ):
         summary = run_ssf_change_alert()
@@ -331,9 +303,7 @@ def test_run_ssf_change_alert_continues_after_candidate_failure():
     ]
 
     with (
-        patch(
-            "monitor.top10_floatholder.runner.get_storage", return_value=mock_storage
-        ),
+        patch("monitor.top10_floatholder.runner.get_storage", return_value=mock_storage),
         patch("monitor.top10_floatholder.runner.send_email") as mock_email,
         patch("monitor.top10_floatholder.runner.logger") as mock_logger,
     ):

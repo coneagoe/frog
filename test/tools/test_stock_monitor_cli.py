@@ -169,10 +169,7 @@ def test_target_remove_list_get_and_status_commands_are_wired():
     }
 
     assert main(["target", "remove", "--target-id", "1"], service=service) == 0
-    assert (
-        main(["target", "list", "--frequency", "daily", "--enabled"], service=service)
-        == 0
-    )
+    assert main(["target", "list", "--frequency", "daily", "--enabled"], service=service) == 0
     assert main(["target", "get", "--target-id", "1"], service=service) == 0
     assert main(["status"], service=service) == 0
 
@@ -211,9 +208,7 @@ def test_blackroom_add_parses_args_and_calls_service(capsys):
     )
 
     assert exit_code == 0
-    bsvc.ban.assert_called_once_with(
-        stock_code="600519", market="A", ban_days=30, note=None
-    )
+    bsvc.ban.assert_called_once_with(stock_code="600519", market="A", ban_days=30, note=None)
     assert "OK" in capsys.readouterr().out
 
 
@@ -244,9 +239,7 @@ def test_blackroom_add_with_note_calls_service(capsys):
     )
 
     assert exit_code == 0
-    bsvc.ban.assert_called_once_with(
-        stock_code="000001", market="A", ban_days=7, note="watch"
-    )
+    bsvc.ban.assert_called_once_with(stock_code="000001", market="A", ban_days=7, note="watch")
     payload = json.loads(capsys.readouterr().out)
     assert payload["success"] is True
     assert payload["data"]["id"] == 2
@@ -276,9 +269,7 @@ def test_blackroom_ban_calls_business_service():
     )
 
     assert exit_code == 0
-    bsvc.ban.assert_called_once_with(
-        stock_code="600519", market="A", ban_days=30, note=None
-    )
+    bsvc.ban.assert_called_once_with(stock_code="600519", market="A", ban_days=30, note=None)
 
 
 def test_blackroom_unban_by_id_calls_business_service():
@@ -487,9 +478,7 @@ def test_blackroom_sync_shareholder_selling_calls_sync_service():
     )
 
     assert exit_code == 0
-    sync_service.sync.assert_called_once_with(
-        start_date="20240101", end_date="20240131", ban_days=180
-    )
+    sync_service.sync.assert_called_once_with(start_date="20240101", end_date="20240131", ban_days=180)
 
 
 def test_blackroom_sync_shareholder_selling_custom_ban_days():
@@ -518,9 +507,7 @@ def test_blackroom_sync_shareholder_selling_custom_ban_days():
     )
 
     assert exit_code == 0
-    sync_service.sync.assert_called_once_with(
-        start_date="20240201", end_date="20240229", ban_days=365
-    )
+    sync_service.sync.assert_called_once_with(start_date="20240201", end_date="20240229", ban_days=365)
 
 
 def test_blackroom_sync_inits_sync_service_with_injected_blackroom_service():
@@ -553,9 +540,7 @@ def test_blackroom_sync_inits_sync_service_with_injected_blackroom_service():
 
     assert exit_code == 0
     sync_ctor.assert_called_once_with(blackroom_service=bsvc)
-    created_sync_service.sync.assert_called_once_with(
-        start_date="20240201", end_date="20240229", ban_days=180
-    )
+    created_sync_service.sync.assert_called_once_with(start_date="20240201", end_date="20240229", ban_days=180)
 
 
 def test_blackroom_sync_with_injected_sync_service_does_not_init_blackroom_service():
@@ -587,9 +572,7 @@ def test_blackroom_sync_with_injected_sync_service_does_not_init_blackroom_servi
         )
 
     assert exit_code == 0
-    sync_service.sync.assert_called_once_with(
-        start_date="20240101", end_date="20240131", ban_days=180
-    )
+    sync_service.sync.assert_called_once_with(start_date="20240101", end_date="20240131", ban_days=180)
 
 
 def test_blackroom_validation_error_returns_exit_code_10(capsys):
@@ -631,9 +614,7 @@ def test_blackroom_not_found_returns_exit_code_11(capsys):
         "data": None,
     }
 
-    exit_code = main(
-        ["--json", "blackroom", "get", "--id", "99"], blackroom_service=bsvc
-    )
+    exit_code = main(["--json", "blackroom", "get", "--id", "99"], blackroom_service=bsvc)
 
     assert exit_code == EXIT_NOT_FOUND
     payload = json.loads(capsys.readouterr().out)

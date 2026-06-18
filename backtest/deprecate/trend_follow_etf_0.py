@@ -46,8 +46,7 @@ class TrendFollowingStrategy(bt.Strategy):
         self.target = round(1 / (self.p.num_positions), 2)
 
         self.ema_low = {
-            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period)
-            for i in range(len(self.datas))
+            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period) for i in range(len(self.datas))
         }
 
         self.macd = {
@@ -62,8 +61,7 @@ class TrendFollowingStrategy(bt.Strategy):
 
         # 根据MACD macd和signal是否金叉，生成交叉信号
         self.cross_signal = {
-            i: bt.indicators.CrossOver(self.macd[i].macd, self.macd[i].signal)
-            for i in range(len(self.datas))
+            i: bt.indicators.CrossOver(self.macd[i].macd, self.macd[i].signal) for i in range(len(self.datas))
         }
 
     def next(self):
@@ -77,10 +75,7 @@ class TrendFollowingStrategy(bt.Strategy):
                         continue
                 else:
                     # 如果MACD死叉或MACD.macd曲线不光滑
-                    if (
-                        self.cross_signal[i] < 0
-                        or self.macd[i].macd[0] - self.macd[i].macd[-1] <= 0
-                    ):
+                    if self.cross_signal[i] < 0 or self.macd[i].macd[0] - self.macd[i].macd[-1] <= 0:
                         gContext[i].is_candidator = False
                         continue
                     else:
@@ -132,12 +127,8 @@ class TrendFollowingStrategy(bt.Strategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     cerebro = bt.Cerebro()

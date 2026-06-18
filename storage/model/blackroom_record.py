@@ -18,9 +18,7 @@ class BlackroomRecord(Base):
         server_default="A",
         comment="市场: A / HK / ETF",
     )
-    ban_days = Column(
-        Integer, nullable=True, comment="禁买时长（天），NULL 表示未设定时长"
-    )
+    ban_days = Column(Integer, nullable=True, comment="禁买时长（天），NULL 表示未设定时长")
     remaining_days = Column(
         Integer,
         nullable=True,

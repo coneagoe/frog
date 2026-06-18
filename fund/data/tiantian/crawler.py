@@ -103,9 +103,7 @@ class TianTianCrawler(object):
                             COL_PINYIN,
                         ],
                     )
-                    df.to_csv(
-                        get_fund_general_info_path(), encoding="utf_8_sig", index=False
-                    )
+                    df.to_csv(get_fund_general_info_path(), encoding="utf_8_sig", index=False)
                 else:
                     logging.warning(f"status: {resp.status}")
 
@@ -119,9 +117,7 @@ class TianTianCrawler(object):
         loop = asyncio.get_event_loop()
         loop.run_until_complete(foo())
 
-    async def _download_history_netvalues(
-        self, fund_id: str, start_date: str, end_date: str
-    ):
+    async def _download_history_netvalues(self, fund_id: str, start_date: str, end_date: str):
         df = None
         page_count = self._calculate_page_count(start_date, end_date)
 
@@ -140,9 +136,7 @@ class TianTianCrawler(object):
                         df = df.append(df0, ignore_index=True)
         return df
 
-    async def _fetch_history_netvalues(
-        self, session, fund_id: str, start_date: str, end_date: str, page: int
-    ):
+    async def _fetch_history_netvalues(self, session, fund_id: str, start_date: str, end_date: str, page: int):
         """
         :param start_date: YYYY-MM-DD
         :param end_date: YYYY-MM-DD
@@ -155,9 +149,7 @@ class TianTianCrawler(object):
         if end_date:
             params["edate"] = end_date
 
-        return await self.__fetch(
-            session, history_url, params, self._history_netvalue_checker
-        )
+        return await self.__fetch(session, history_url, params, self._history_netvalue_checker)
 
     @staticmethod
     async def _save_history_netvalues(output, df):
@@ -237,15 +229,7 @@ class TianTianCrawler(object):
                         managers[manager_id] = [manager_name, ref]
                 break
 
-        if (
-            fund_id
-            and fund_name
-            and fund_type
-            and launch_date
-            and asset_size
-            and fund_company
-            and managers
-        ):
+        if fund_id and fund_name and fund_type and launch_date and asset_size and fund_company and managers:
             document = {
                 "fund_id": fund_id,
                 "fund_name": fund_name,
@@ -287,9 +271,7 @@ class TianTianCrawler(object):
         await self.collection_scales.insert_one(document)
 
     async def query_launch_date(self, fund_id: str):
-        document = await self.collection_general_info.find_one(
-            filter={"fund_id": fund_id}
-        )
+        document = await self.collection_general_info.find_one(filter={"fund_id": fund_id})
         if document:
             return document["launch_date"]
         return None

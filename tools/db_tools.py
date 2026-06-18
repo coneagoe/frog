@@ -141,8 +141,7 @@ def show_sample_data(table_name, limit=5):
         # 使用SQLAlchemy引擎避免pandas警告
         config = StorageConfig()
         sqlalchemy_url = (
-            f"postgresql://{config.db_username}:{config.db_password}@"
-            f"{config.db_host}:{config.db_port}/{config.db_name}"
+            f"postgresql://{config.db_username}:{config.db_password}@{config.db_host}:{config.db_port}/{config.db_name}"
         )
         engine = create_engine(sqlalchemy_url, echo=False)
 
@@ -155,14 +154,10 @@ def show_sample_data(table_name, limit=5):
 
             # 统计信息
             print("\n📈 统计信息：")
-            total_count = pd.read_sql(
-                f'SELECT COUNT(*) as count FROM "{table_name}"', engine
-            )["count"].iloc[0]
+            total_count = pd.read_sql(f'SELECT COUNT(*) as count FROM "{table_name}"', engine)["count"].iloc[0]
             print(f"  📍 总记录数: {total_count}")
 
-            date_cols = [
-                col for col in df.columns if "日期" in col or "date" in col.lower()
-            ]
+            date_cols = [col for col in df.columns if "日期" in col or "date" in col.lower()]
             if date_cols:
                 date_col = date_cols[0]
                 date_stats = pd.read_sql(
@@ -175,9 +170,7 @@ def show_sample_data(table_name, limit=5):
                     """,
                     engine,
                 )
-                print(
-                    f"  📅 日期范围: {date_stats['最早日期'].iloc[0]} 到 {date_stats['最晚日期'].iloc[0]}"
-                )
+                print(f"  📅 日期范围: {date_stats['最早日期'].iloc[0]} 到 {date_stats['最晚日期'].iloc[0]}")
                 print(f"  📅 不重复日期数: {date_stats['日期数量'].iloc[0]}")
 
         engine.dispose()
@@ -195,8 +188,7 @@ def query_specific_stock(table_name, stock_code, limit=5):
         # 使用SQLAlchemy引擎避免pandas警告
         config = StorageConfig()
         sqlalchemy_url = (
-            f"postgresql://{config.db_username}:{config.db_password}@"
-            f"{config.db_host}:{config.db_port}/{config.db_name}"
+            f"postgresql://{config.db_username}:{config.db_password}@{config.db_host}:{config.db_port}/{config.db_name}"
         )
         engine = create_engine(sqlalchemy_url, echo=False)
 
@@ -210,9 +202,7 @@ def query_specific_stock(table_name, stock_code, limit=5):
 
         check_df = pd.read_sql(check_query, engine)
         if check_df.empty:
-            print(
-                f"❌ 表 '{table_name}' 中没有找到股票代码列（股票代码/stock_code/code）"
-            )
+            print(f"❌ 表 '{table_name}' 中没有找到股票代码列（股票代码/stock_code/code）")
             engine.dispose()
             return
 
@@ -263,9 +253,7 @@ def query_specific_stock(table_name, stock_code, limit=5):
             print(last_df.to_string())
 
         # 如果有日期列，显示日期范围
-        date_cols = [
-            col for col in first_df.columns if "日期" in col or "date" in col.lower()
-        ]
+        date_cols = [col for col in first_df.columns if "日期" in col or "date" in col.lower()]
         if date_cols:
             date_col = date_cols[0]
             date_stats_query = f"""
@@ -276,9 +264,7 @@ def query_specific_stock(table_name, stock_code, limit=5):
             WHERE "{stock_code_column}" = '{stock_code}'
             """
             date_stats = pd.read_sql(date_stats_query, engine)
-            print(
-                f"\n📅 数据日期范围: {date_stats['最早日期'].iloc[0]} 到 {date_stats['最晚日期'].iloc[0]}"
-            )
+            print(f"\n📅 数据日期范围: {date_stats['最早日期'].iloc[0]} 到 {date_stats['最晚日期'].iloc[0]}")
 
         engine.dispose()
 
@@ -292,9 +278,7 @@ def show_raw_command_examples():
     print("1. 查看所有表:")
     print('   sudo docker exec -it frog-db-1 psql -U quant -d quant -c "\\dt"')
     print("\n2. 查看表结构:")
-    print(
-        '   sudo docker exec -it frog-db-1 psql -U quant -d quant -c "\\d history_data_daily_a_stock"'
-    )
+    print('   sudo docker exec -it frog-db-1 psql -U quant -d quant -c "\\d history_data_daily_a_stock"')
     print("\n3. 查看数据数量:")
     print(
         '   sudo docker exec -it frog-db-1 psql -U quant -d quant -c "SELECT COUNT(*) FROM history_data_daily_a_stock;"'
@@ -327,25 +311,19 @@ def main_menu():
         if choice == "1":
             show_tables()
         elif choice == "2":
-            table_name = input(
-                f"请输入表名 (默认: {tb_name_general_info_stock}): "
-            ).strip()
+            table_name = input(f"请输入表名 (默认: {tb_name_general_info_stock}): ").strip()
             if not table_name:
                 table_name = tb_name_general_info_stock
             show_table_structure(table_name)
         elif choice == "3":
-            table_name = input(
-                f"请输入表名 (默认: {tb_name_history_data_daily_a_stock_qfq}): "
-            ).strip()
+            table_name = input(f"请输入表名 (默认: {tb_name_history_data_daily_a_stock_qfq}): ").strip()
             if not table_name:
                 table_name = tb_name_history_data_daily_a_stock_qfq
             limit_str = input("显示多少条记录 (默认: 5): ").strip()
             limit = int(limit_str) if limit_str.isdigit() else 5
             show_sample_data(table_name, limit)
         elif choice == "4":
-            table_name = input(
-                f"请输入表名 (默认: {tb_name_history_data_daily_a_stock_qfq}): "
-            ).strip()
+            table_name = input(f"请输入表名 (默认: {tb_name_history_data_daily_a_stock_qfq}): ").strip()
             if not table_name:
                 table_name = tb_name_history_data_daily_a_stock_qfq
             stock_code = input("请输入股票代码: ").strip()

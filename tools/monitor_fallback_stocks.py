@@ -86,16 +86,11 @@ if __name__ == "__main__":
 
         df_tmp[COL_MONITOR_PRICE] = df_tmp[COL_MONITOR_PRICE].astype(float)
 
-        df_output = df_tmp[
-            df_tmp[COL_EMAIL].isna()
-            & (df_tmp[COL_MONITOR_PRICE] >= df_tmp[COL_CURRENT_PRICE])
-        ]
+        df_output = df_tmp[df_tmp[COL_EMAIL].isna() & (df_tmp[COL_MONITOR_PRICE] >= df_tmp[COL_CURRENT_PRICE])]
 
         if not df_output.empty:
             df.loc[df_output.index, COL_EMAIL] = 1
-            fallback_stock_output = (
-                f"fallback_stock_{date.today().strftime('%Y%m%d')}.csv"
-            )
+            fallback_stock_output = f"fallback_stock_{date.today().strftime('%Y%m%d')}.csv"
             df_output = df_output.loc[
                 :,
                 [

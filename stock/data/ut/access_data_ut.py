@@ -64,26 +64,18 @@ stocks = (
 
 class TestAccessData(unittest.TestCase):
     def test_load_history_data_stock(self):
-        df = load_history_data_stock(
-            "000001", "daily", "2022-01-01", "2023-01-02", "hfq"
-        )
+        df = load_history_data_stock("000001", "daily", "2022-01-01", "2023-01-02", "hfq")
         self.assertIsInstance(df, pd.DataFrame)
-        df = load_history_data_stock(
-            "002683", "daily", "2024-11-01", "2025-04-18", "hfq"
-        )
+        df = load_history_data_stock("002683", "daily", "2024-11-01", "2025-04-18", "hfq")
         self.assertFalse((df[COL_OPEN] >= 2683).any())
         self.assertFalse((df[COL_CLOSE] >= 2683).any())
         self.assertFalse((df[COL_HIGH] >= 2683).any())
         self.assertFalse((df[COL_LOW] >= 2683).any())
 
     def test_load_history_data_stock_hk(self):
-        df = load_history_data_stock_hk(
-            "00700", "daily", "2022-01-01", "2023-01-02", "hfq"
-        )
+        df = load_history_data_stock_hk("00700", "daily", "2022-01-01", "2023-01-02", "hfq")
         self.assertIsInstance(df, pd.DataFrame)
-        df = load_history_data_stock_hk(
-            "02510", "daily", "2024-11-01", "2025-06-23", "hfq"
-        )
+        df = load_history_data_stock_hk("02510", "daily", "2024-11-01", "2025-06-23", "hfq")
         # print(df.tail())
         self.assertIsInstance(df, pd.DataFrame)
 
@@ -114,9 +106,7 @@ class TestAccessData(unittest.TestCase):
     def test_drop_st(self):
         df_stocks = pd.DataFrame(stocks, columns=[COL_STOCK_ID])
         df = drop_st(df_stocks)
-        self.assertTrue(
-            all(not ("ST" in str(name).upper()) for name in df[COL_STOCK_NAME])
-        )
+        self.assertTrue(all("ST" not in str(name).upper() for name in df[COL_STOCK_NAME]))
 
     def test_drop_low_stocks(self):
         df_stocks = pd.DataFrame(stocks, columns=[COL_STOCK_ID])
@@ -145,15 +135,11 @@ class TestAccessData(unittest.TestCase):
         # Test that the function handles different dates correctly
         stocks_july = load_500_ingredients("2023-07-01")
         stocks_august = load_500_ingredients("2023-08-15")
-        self.assertEqual(
-            stocks_july, stocks_august
-        )  # Should use the same data for July-December
+        self.assertEqual(stocks_july, stocks_august)  # Should use the same data for July-December
 
         stocks_january = load_500_ingredients("2023-01-01")
         stocks_june = load_500_ingredients("2023-06-30")
-        self.assertEqual(
-            stocks_january, stocks_june
-        )  # Should use the same data for January-June
+        self.assertEqual(stocks_january, stocks_june)  # Should use the same data for January-June
 
         # Test with an invalid date format
         with self.assertRaises(AssertionError):

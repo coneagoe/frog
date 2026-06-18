@@ -56,9 +56,7 @@ def get_turning_points(df: pd.DataFrame):
     return turning_points
 
 
-def calculate_support_resistance(
-    df: pd.DataFrame, start_date_ts: str, end_date_ts: str
-):
+def calculate_support_resistance(df: pd.DataFrame, start_date_ts: str, end_date_ts: str):
     support_point = np.nan
     resistance_point = np.nan
 

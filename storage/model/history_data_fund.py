@@ -26,9 +26,7 @@ class HistoryDataDailyFund(Base):
 
     # YYYY-MM-DD
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    基金代码 = Column(
-        COL_ETF_ID, String(10), primary_key=True, nullable=False, comment="基金代码"
-    )
+    基金代码 = Column(COL_ETF_ID, String(10), primary_key=True, nullable=False, comment="基金代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价(元)")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价(元)")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价(元)")

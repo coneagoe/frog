@@ -33,8 +33,8 @@ class RSRS_Norm(bt.Indicator):
 
     def __init__(self):
         self.rsrs = RSRS()
-        self.l.rsrs_norm = (
-            self.rsrs - bt.ind.Average(self.rsrs, period=self.p.M)
-        ) / bt.ind.StandardDeviation(self.rsrs, period=self.p.M)
+        self.l.rsrs_norm = (self.rsrs - bt.ind.Average(self.rsrs, period=self.p.M)) / bt.ind.StandardDeviation(
+            self.rsrs, period=self.p.M
+        )
         self.l.rsrs_r2 = self.l.rsrs_norm * self.rsrs.R2
         self.l.beta_right = self.rsrs * self.l.rsrs_r2

@@ -95,9 +95,7 @@ class TiantianParser:
             self.position_yield,
         ) = (0, 0, 0, 0)
 
-    def parse_position(
-        self, image_file_name: str, ocr_type: OcrType
-    ) -> pd.DataFrame | None:
+    def parse_position(self, image_file_name: str, ocr_type: OcrType) -> pd.DataFrame | None:
         # parse fund positions according to the screenshot
         words = get_ocr(image_file_name, ocr_type)
         logging.debug(f"{image_file_name}: {words}")
@@ -106,9 +104,7 @@ class TiantianParser:
             while i < len(words):
                 logging.debug(f"{i}: {words[i]}")
                 if self.fund_name is None and self.fund_id is None:
-                    self.fund_name, self.fund_id = is_fund_name_stick_with_fund_id(
-                        words[i]
-                    )
+                    self.fund_name, self.fund_id = is_fund_name_stick_with_fund_id(words[i])
                     if self.fund_name and self.fund_id:
                         self.fund_name = get_fund_name(self.fund_id)
                     elif is_valid_fund_id(words[i]):

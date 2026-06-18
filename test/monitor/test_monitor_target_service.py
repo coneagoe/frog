@@ -103,9 +103,7 @@ def test_list_targets_returns_serialized_targets():
     assert result["success"] is True
     assert result["code"] == "OK"
     assert [item["id"] for item in result["data"]] == [1, 2]
-    storage.list_monitor_targets.assert_called_once_with(
-        frequency="daily", enabled=True
-    )
+    storage.list_monitor_targets.assert_called_once_with(frequency="daily", enabled=True)
 
 
 def test_new_method_aliases_are_wired_to_existing_behaviors():

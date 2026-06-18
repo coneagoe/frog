@@ -72,14 +72,10 @@ def test_main_loads_ssf_ratio_change_panel_and_writes_report(tmp_path, monkeypat
         def create_single_fac_ic_sheet(self):
             return FakeFigure()
 
-    monkeypatch.setattr(
-        alphapurify_ssf_ratio_change, "FactorAnalyzer", FakeFactorAnalyzer
-    )
+    monkeypatch.setattr(alphapurify_ssf_ratio_change, "FactorAnalyzer", FakeFactorAnalyzer)
 
     output_path = tmp_path / "ssf_ratio_change_ic.html"
-    code = alphapurify_ssf_ratio_change.main(
-        ["--max-stocks", "1", "--report-html", str(output_path)]
-    )
+    code = alphapurify_ssf_ratio_change.main(["--max-stocks", "1", "--report-html", str(output_path)])
 
     assert code == 0
     assert captured["run_called"] is True

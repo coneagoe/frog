@@ -24,9 +24,7 @@ def test_custom_agents_use_supported_frontmatter_only():
     assert agent_files
 
     offenders = {
-        str(path): sorted(
-            UNSUPPORTED_AGENT_FIELDS.intersection(_load_frontmatter(path))
-        )
+        str(path): sorted(UNSUPPORTED_AGENT_FIELDS.intersection(_load_frontmatter(path)))
         for path in agent_files
         if UNSUPPORTED_AGENT_FIELDS.intersection(_load_frontmatter(path))
     }

@@ -23,9 +23,7 @@ def test_ensure_lot_size_rejects_non_100_share_multiple():
 
 def test_ensure_price_in_daily_range_rejects_price_outside_range():
     with pytest.raises(PaperTradingError) as exc_info:
-        ensure_price_in_daily_range(
-            Decimal("9.90"), low=Decimal("10.00"), high=Decimal("11.00")
-        )
+        ensure_price_in_daily_range(Decimal("9.90"), low=Decimal("10.00"), high=Decimal("11.00"))
 
     assert exc_info.value.code == "PRICE_OUT_OF_RANGE"
 

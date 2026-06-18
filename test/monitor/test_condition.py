@@ -135,17 +135,13 @@ def test_ma_cross_death_triggers():
 
 def test_change_pct_above_triggers():
     cond = {"type": "change_pct", "direction": "above", "value": 5.0}
-    result = evaluate_condition(
-        cond, current_price=None, history_df=None, change_pct=6.5
-    )
+    result = evaluate_condition(cond, current_price=None, history_df=None, change_pct=6.5)
     assert result == ConditionResult.TRIGGERED
 
 
 def test_change_pct_below_triggers():
     cond = {"type": "change_pct", "direction": "below", "value": -5.0}
-    result = evaluate_condition(
-        cond, current_price=None, history_df=None, change_pct=-6.0
-    )
+    result = evaluate_condition(cond, current_price=None, history_df=None, change_pct=-6.0)
     assert result == ConditionResult.TRIGGERED
 
 

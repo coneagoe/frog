@@ -20,8 +20,8 @@ from common.const import (  # noqa: E402
     COL_TOTAL_MV,
     SecurityType,
 )
-from storage import get_storage  # noqa: E402
 from storage import (  # noqa: E402
+    get_storage,  # noqa: E402
     tb_name_a_stock_basic,
     tb_name_daily_basic_a_stock,
     tb_name_history_data_daily_a_stock_hfq,
@@ -150,10 +150,7 @@ class SmallMarketCapitalStrategy(MyStrategy):
 
         selected_stocks = df_selected[COL_STOCK_ID].tolist()
 
-        print(
-            f"{date_str}: 调仓完成，筛选出{len(df)}只股票，"
-            f"选择买入{min(self.p.buy_count, len(selected_stocks))}只"
-        )
+        print(f"{date_str}: 调仓完成，筛选出{len(df)}只股票，选择买入{min(self.p.buy_count, len(selected_stocks))}只")
 
         # 先清仓
         for data in self.datas:
@@ -174,12 +171,8 @@ class SmallMarketCapitalStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     # 获取所有A股股票（排除北交所和回测期间未上市的股票）

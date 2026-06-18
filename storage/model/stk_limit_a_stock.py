@@ -18,9 +18,7 @@ class StkLimitAStock(Base):
 
     # YYYY-MM-DD
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
 
     昨日收盘价 = Column(COL_PRE_CLOSE, Float, nullable=True, comment="昨日收盘价")
     涨停价 = Column(COL_UP_LIMIT, Float, nullable=True, comment="涨停价")

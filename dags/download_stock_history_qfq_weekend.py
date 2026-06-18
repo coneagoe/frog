@@ -37,9 +37,7 @@ def reset_stock_history_qfq_table(**context):
     return f"cleared table: {table_name}"
 
 
-def download_stock_history_qfq_partition_task(
-    *, partition_id: int, partition_count: int, **context
-):
+def download_stock_history_qfq_partition_task(*, partition_id: int, partition_count: int, **context):
     """Download A-share QFQ history data for a specific partition.
 
     Args:
@@ -57,9 +55,7 @@ def download_stock_history_qfq_partition_task(
     from storage import get_storage  # noqa: E402
 
     if partition_id >= partition_count:
-        raise AirflowSkipException(
-            f"partition_id={partition_id} >= partition_count={partition_count}, skip"
-        )
+        raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
     start_date = "2010-01-01"
     end_date = (datetime.now(tz=LOCAL_TZ) - timedelta(days=1)).date().isoformat()
@@ -87,10 +83,7 @@ def download_stock_history_qfq_partition_task(
             failed_ids.append(stock_id)
 
         if idx % 50 == 0 or idx == total:
-            print(
-                f"[QFQ p{partition_id:02d}] 进度: {idx}/{total} "
-                f"(failed={len(failed_ids)})"
-            )
+            print(f"[QFQ p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
@@ -99,10 +92,7 @@ def download_stock_history_qfq_partition_task(
             f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
         )
 
-    return (
-        f"A股QFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, "
-        f"count={total}"
-    )
+    return f"A股QFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, count={total}"
 
 
 # Create DAG

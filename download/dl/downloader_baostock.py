@@ -189,9 +189,7 @@ def download_history_data_stock_bs(
 
 
 @login
-def _download_ingredient(
-    query_func: Callable[..., baostock.data.resultset.ResultData]
-) -> pd.DataFrame:
+def _download_ingredient(query_func: Callable[..., baostock.data.resultset.ResultData]) -> pd.DataFrame:
     start_date = datetime(2010, 1, 1)
     end_date = datetime.today()
 
@@ -217,9 +215,7 @@ def _download_ingredient(
             inplace=True,
         )
         df = df[[COL_STOCK_ID, COL_STOCK_NAME]]
-        df[COL_STOCK_ID] = (
-            df[COL_STOCK_ID].str.replace("sh.", "").str.replace("sz.", "")
-        )
+        df[COL_STOCK_ID] = df[COL_STOCK_ID].str.replace("sh.", "").str.replace("sz.", "")
 
         if current_date.month == 1 and current_date.day == 1:
             current_date = datetime(current_date.year, 7, 1)

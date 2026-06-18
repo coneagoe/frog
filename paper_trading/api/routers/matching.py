@@ -12,9 +12,7 @@ from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 
-router = APIRouter(
-    prefix="/paper/matching/runs", dependencies=[Depends(require_api_token)]
-)
+router = APIRouter(prefix="/paper/matching/runs", dependencies=[Depends(require_api_token)])
 
 
 @router.post("", response_model=MatchingRunResponse)

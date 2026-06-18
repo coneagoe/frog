@@ -18,9 +18,9 @@ conf.parse_config()
 
 def show_multiple_securities(security_ids, df_list):
     for i in range(len(df_list)):
-        df_list[i]["norm_close"] = (
-            df_list[i][COL_CLOSE] - min(df_list[i][COL_CLOSE])
-        ) / (max(df_list[i][COL_CLOSE]) - min(df_list[i][COL_CLOSE]))
+        df_list[i]["norm_close"] = (df_list[i][COL_CLOSE] - min(df_list[i][COL_CLOSE])) / (
+            max(df_list[i][COL_CLOSE]) - min(df_list[i][COL_CLOSE])
+        )
 
     merged_df = df_list[0]
     for i in range(1, len(df_list)):
@@ -51,9 +51,7 @@ def show_multiple_securities(security_ids, df_list):
         )
 
     # Add average trace
-    fig.add_trace(
-        go.Scatter(x=merged_df[COL_DATE], y=avg_close, mode="lines", name="Average")
-    )
+    fig.add_trace(go.Scatter(x=merged_df[COL_DATE], y=avg_close, mode="lines", name="Average"))
 
     fig.show()
 
@@ -68,9 +66,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("-s", "--start", type=str, help="start date, YYYYMMDD")
     parser.add_argument("-e", "--end", type=str, help="end date, YYYYMMDD")
-    parser.add_argument(
-        "-t", "--template", help="The template file to read securities from."
-    )
+    parser.add_argument("-t", "--template", help="The template file to read securities from.")
     parser.add_argument("securities", nargs="*", help="list of security ids to compare")
     args = parser.parse_args()
 
@@ -83,9 +79,7 @@ if __name__ == "__main__":
             # read all security IDs from one line
             security_ids = f.readline().split()
     elif not args.securities:
-        parser.error(
-            "You must specify at least two security IDs, or use the -t option."
-        )
+        parser.error("You must specify at least two security IDs, or use the -t option.")
         exit()
     else:
         security_ids = args.securities

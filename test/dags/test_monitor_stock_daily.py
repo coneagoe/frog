@@ -62,9 +62,7 @@ def monitor_stock_daily_module(monkeypatch):
     sys.modules.pop("monitor_stock_daily", None)
 
 
-def test_sync_shareholder_selling_blackroom_uses_logical_date(
-    monkeypatch, monitor_stock_daily_module
-):
+def test_sync_shareholder_selling_blackroom_uses_logical_date(monkeypatch, monitor_stock_daily_module):
     service = MagicMock()
     service.return_value.sync.return_value = {
         "success": True,
@@ -77,20 +75,14 @@ def test_sync_shareholder_selling_blackroom_uses_logical_date(
         service,
     )
 
-    result = monitor_stock_daily_module.sync_shareholder_selling_blackroom(
-        logical_date=datetime(2026, 6, 3, 15, 30)
-    )
+    result = monitor_stock_daily_module.sync_shareholder_selling_blackroom(logical_date=datetime(2026, 6, 3, 15, 30))
 
-    service.return_value.sync.assert_called_once_with(
-        start_date="20260603", end_date="20260603", ban_days=180
-    )
+    service.return_value.sync.assert_called_once_with(start_date="20260603", end_date="20260603", ban_days=180)
     assert "股东减持黑屋同步完成" in result
     assert "added=2" in result
 
 
-def test_sync_shareholder_selling_blackroom_failure_raises(
-    monkeypatch, monitor_stock_daily_module
-):
+def test_sync_shareholder_selling_blackroom_failure_raises(monkeypatch, monitor_stock_daily_module):
     service = MagicMock()
     service.return_value.sync.return_value = {
         "success": False,
@@ -104,14 +96,10 @@ def test_sync_shareholder_selling_blackroom_failure_raises(
     )
 
     with pytest.raises(Exception, match="STORAGE_ERROR: boom"):
-        monitor_stock_daily_module.sync_shareholder_selling_blackroom(
-            logical_date=datetime(2026, 6, 3, 15, 30)
-        )
+        monitor_stock_daily_module.sync_shareholder_selling_blackroom(logical_date=datetime(2026, 6, 3, 15, 30))
 
 
-def test_countdown_blackroom_records_calls_service(
-    monkeypatch, monitor_stock_daily_module
-):
+def test_countdown_blackroom_records_calls_service(monkeypatch, monitor_stock_daily_module):
     service = MagicMock()
     service.return_value.run.return_value = {
         "success": True,
@@ -119,9 +107,7 @@ def test_countdown_blackroom_records_calls_service(
         "message": "countdown completed",
         "data": {"updated": 3},
     }
-    monkeypatch.setattr(
-        "monitor.blackroom_countdown.BlackroomCountdownService", service
-    )
+    monkeypatch.setattr("monitor.blackroom_countdown.BlackroomCountdownService", service)
 
     result = monitor_stock_daily_module.countdown_blackroom_records()
 
@@ -130,9 +116,7 @@ def test_countdown_blackroom_records_calls_service(
     assert "updated" in result
 
 
-def test_countdown_blackroom_records_failure_raises(
-    monkeypatch, monitor_stock_daily_module
-):
+def test_countdown_blackroom_records_failure_raises(monkeypatch, monitor_stock_daily_module):
     service = MagicMock()
     service.return_value.run.return_value = {
         "success": False,
@@ -140,9 +124,7 @@ def test_countdown_blackroom_records_failure_raises(
         "message": "boom",
         "data": None,
     }
-    monkeypatch.setattr(
-        "monitor.blackroom_countdown.BlackroomCountdownService", service
-    )
+    monkeypatch.setattr("monitor.blackroom_countdown.BlackroomCountdownService", service)
 
     with pytest.raises(Exception, match="STORAGE_ERROR: boom"):
         monitor_stock_daily_module.countdown_blackroom_records()

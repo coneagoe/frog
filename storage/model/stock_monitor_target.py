@@ -48,9 +48,7 @@ class StockMonitorTarget(Base):
         server_default=text("false"),
         comment="上次条件是否成立（边沿触发用）",
     )
-    triggered_at = Column(
-        DateTime(timezone=True), nullable=True, comment="最近触发时间"
-    )
+    triggered_at = Column(DateTime(timezone=True), nullable=True, comment="最近触发时间")
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

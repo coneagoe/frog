@@ -31,15 +31,12 @@ class RotateStrategy(MyStrategy):
         self.target = round(3 / len(self.stocks), 2)
 
         self.pct_change = {
-            i: bt.indicators.PercentChange(
-                self.datas[i].close, period=self.p.n_day_increase
-            )
+            i: bt.indicators.PercentChange(self.datas[i].close, period=self.p.n_day_increase)
             for i in range(len(self.datas))
         }
 
         self.ema_low = {
-            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period)
-            for i in range(len(self.datas))
+            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period) for i in range(len(self.datas))
         }
 
     def next(self):  # noqa: E303
@@ -49,16 +46,10 @@ class RotateStrategy(MyStrategy):
         performance = {i: self.pct_change[i][0] for i in range(len(self.datas))}
 
         # 按照涨幅降序排列
-        ranked_performance = sorted(
-            performance.items(), key=lambda item: item[1], reverse=True
-        )
+        ranked_performance = sorted(performance.items(), key=lambda item: item[1], reverse=True)
 
         # 选择涨幅最大的前n个股票
-        selected = [
-            stock
-            for stock, change in ranked_performance[: self.p.num_positions]
-            if change > 0
-        ]
+        selected = [stock for stock, change in ranked_performance[: self.p.num_positions] if change > 0]
 
         for i in range(len(self.datas)):
             if self.context[i].order_state == OrderState.ORDER_IDLE:
@@ -66,9 +57,7 @@ class RotateStrategy(MyStrategy):
                     self.order_target_percent(self.datas[i], target=self.target)
                     self.context[i].stop_price = 0.0
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
-                if i not in selected and (
-                    self.context[i].holding_bars >= self.p.holding_bars
-                ):
+                if i not in selected and (self.context[i].holding_bars >= self.p.holding_bars):
                     self.order_target_percent(self.datas[i], target=0.0)
                     self.context[i].order_state = OrderState.ORDER_CLOSING
 
@@ -86,12 +75,8 @@ class RotateStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
         "-f",
         "--filter",
