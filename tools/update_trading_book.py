@@ -69,23 +69,17 @@ def update_current_price(df: pd.DataFrame):
     return df
 
 
-df = pd.read_excel(
-    trading_book_path, sheet_name=sheet_name_etf, dtype={COL_STOCK_ID: str}
-)
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_etf, dtype={COL_STOCK_ID: str})
 df = update_current_price(df)
 df = update_support_resistance(df)
 df.to_excel(excel_writer, sheet_name=sheet_name_etf)
 
-df = pd.read_excel(
-    trading_book_path, sheet_name=sheet_name_stock, dtype={COL_STOCK_ID: str}
-)
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_stock, dtype={COL_STOCK_ID: str})
 df = update_current_price(df)
 df = update_support_resistance(df)
 df.to_excel(excel_writer, sheet_name=sheet_name_stock)
 
-df = pd.read_excel(
-    trading_book_path, sheet_name=sheet_name_position, dtype={COL_STOCK_ID: str}
-)
+df = pd.read_excel(trading_book_path, sheet_name=sheet_name_position, dtype={COL_STOCK_ID: str})
 df = update_stoploss(df)
 df.to_excel(excel_writer, sheet_name=sheet_name_position)
 

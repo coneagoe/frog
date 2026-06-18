@@ -14,9 +14,7 @@ class ShareholderSellingPunishmentService:
     _DATE_PATTERN = re.compile(r"^\d{8}$")
 
     def __init__(self, blackroom_service: BlackroomService | None = None) -> None:
-        self.blackroom_service = (
-            BlackroomService() if blackroom_service is None else blackroom_service
-        )
+        self.blackroom_service = BlackroomService() if blackroom_service is None else blackroom_service
 
     def sync(self, start_date: str, end_date: str, ban_days: int) -> dict[str, Any]:
         try:
@@ -53,9 +51,7 @@ class ShareholderSellingPunishmentService:
                     return self._result(False, "VALIDATION_ERROR", str(exc), None)
                 note = f"股东减持公告 {ann_date} / {holder_name}"
 
-                active_result = self.blackroom_service.get_active_record(
-                    stock_code, market
-                )
+                active_result = self.blackroom_service.get_active_record(stock_code, market)
                 if not active_result.get("success"):
                     return self._propagate_failure(
                         active_result,
@@ -206,9 +202,7 @@ class ShareholderSellingPunishmentService:
             "data": data,
         }
 
-    def _propagate_failure(
-        self, result: dict[str, Any], default_code: str, default_message: str
-    ) -> dict[str, Any]:
+    def _propagate_failure(self, result: dict[str, Any], default_code: str, default_message: str) -> dict[str, Any]:
         return self._result(
             False,
             str(result.get("code") or default_code),

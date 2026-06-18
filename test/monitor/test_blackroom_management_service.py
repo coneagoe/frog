@@ -72,9 +72,7 @@ def test_add_record_rejects_invalid_market():
 def test_add_record_rejects_invalid_source():
     service = BlackroomManagementService(storage=MagicMock())
 
-    result = service.add_record(
-        stock_code="600519", market="A", ban_days=30, source="unknown_source"
-    )
+    result = service.add_record(stock_code="600519", market="A", ban_days=30, source="unknown_source")
 
     assert result["success"] is False
     assert result["code"] == "VALIDATION_ERROR"
@@ -167,14 +165,10 @@ def test_add_record_accepts_hk_and_etf_markets():
 
 def test_add_record_accepts_shareholder_selling_source():
     storage = MagicMock()
-    storage.create_blackroom_record.return_value = _make_record(
-        source="shareholder_selling"
-    )
+    storage.create_blackroom_record.return_value = _make_record(source="shareholder_selling")
     service = BlackroomManagementService(storage=storage)
 
-    result = service.add_record(
-        stock_code="600519", market="A", ban_days=90, source="shareholder_selling"
-    )
+    result = service.add_record(stock_code="600519", market="A", ban_days=90, source="shareholder_selling")
 
     assert result["success"] is True
 
@@ -184,7 +178,10 @@ def test_add_record_rejects_non_datetime_start_at():
 
     for bad in ("2026-01-01", 20260101, 0):
         result = service.add_record(
-            stock_code="600519", market="A", ban_days=10, start_at=bad  # type: ignore[arg-type]
+            stock_code="600519",
+            market="A",
+            ban_days=10,
+            start_at=bad,  # type: ignore[arg-type]
         )
         assert result["success"] is False, f"Expected failure for start_at={bad!r}"
         assert result["code"] == "VALIDATION_ERROR"
@@ -227,9 +224,7 @@ def test_get_record_returns_serialized_record():
 def test_get_record_rejects_invalid_id():
     service = BlackroomManagementService(storage=MagicMock())
 
-    result = service.get_record(
-        True
-    )  # bool is a subtype of int; runtime validator rejects it
+    result = service.get_record(True)  # bool is a subtype of int; runtime validator rejects it
 
     assert result["success"] is False
     assert result["code"] == "VALIDATION_ERROR"
@@ -357,9 +352,7 @@ def test_update_record_rejects_non_datetime_expire_at():
 
 def test_update_record_accepts_none_start_at_and_expire_at():
     storage = MagicMock()
-    storage.update_blackroom_record.return_value = _make_record(
-        start_at=None, expire_at=None
-    )
+    storage.update_blackroom_record.return_value = _make_record(start_at=None, expire_at=None)
     service = BlackroomManagementService(storage=storage)
 
     result = service.update_record(1, start_at=None, expire_at=None)
@@ -370,9 +363,7 @@ def test_update_record_accepts_none_start_at_and_expire_at():
 def test_update_record_accepts_valid_datetime_start_at_and_expire_at():
     fixed = datetime(2026, 6, 1, tzinfo=timezone.utc)
     storage = MagicMock()
-    storage.update_blackroom_record.return_value = _make_record(
-        start_at=fixed, expire_at=fixed
-    )
+    storage.update_blackroom_record.return_value = _make_record(start_at=fixed, expire_at=fixed)
     service = BlackroomManagementService(storage=storage)
 
     result = service.update_record(1, start_at=fixed, expire_at=fixed)
@@ -416,9 +407,7 @@ def test_filter_buy_candidates_removes_banned_stocks():
     now = datetime.now(timezone.utc)
     storage = MagicMock()
     storage.list_active_blackroom_records.return_value = [
-        _make_record(
-            stock_code="600519", market="A", expire_at=now + timedelta(days=5)
-        ),
+        _make_record(stock_code="600519", market="A", expire_at=now + timedelta(days=5)),
         _make_record(
             id=2,
             stock_code="000001",
@@ -428,9 +417,7 @@ def test_filter_buy_candidates_removes_banned_stocks():
     ]
     service = BlackroomManagementService(storage=storage)
 
-    result = service.filter_buy_candidates(
-        candidates=["600519", "600036", "000001"], market="A"
-    )
+    result = service.filter_buy_candidates(candidates=["600519", "600036", "000001"], market="A")
 
     assert result["success"] is True
     assert result["data"]["allowed"] == ["600036"]
@@ -531,12 +518,8 @@ def test_get_status_returns_aggregate_counts():
     storage = MagicMock()
     storage.list_blackroom_records.return_value = [
         _make_record(id=1, market="A", enabled=True, expire_at=now + timedelta(days=5)),
-        _make_record(
-            id=2, market="HK", enabled=True, expire_at=now - timedelta(days=1)
-        ),
-        _make_record(
-            id=3, market="A", enabled=False, expire_at=now + timedelta(days=2)
-        ),
+        _make_record(id=2, market="HK", enabled=True, expire_at=now - timedelta(days=1)),
+        _make_record(id=3, market="A", enabled=False, expire_at=now + timedelta(days=2)),
     ]
     service = BlackroomManagementService(storage=storage)
 
@@ -558,9 +541,7 @@ def test_get_status_returns_aggregate_counts():
 
 def test_service_uses_default_storage_when_not_provided():
     fake_storage = MagicMock()
-    with patch(
-        "monitor.blackroom_management_service.get_storage", return_value=fake_storage
-    ):
+    with patch("monitor.blackroom_management_service.get_storage", return_value=fake_storage):
         service = BlackroomManagementService()
 
     assert service.storage is fake_storage
@@ -633,9 +614,7 @@ def test_alias_remove_delegates_to_remove_record():
 
 def test_alias_filter_delegates_to_filter_buy_candidates():
     storage = MagicMock()
-    storage.list_active_blackroom_records.return_value = [
-        _make_record(stock_code="600519")
-    ]
+    storage.list_active_blackroom_records.return_value = [_make_record(stock_code="600519")]
     service = BlackroomManagementService(storage=storage)
 
     result = service.filter(candidates=["600519", "600036"], market="A")
@@ -661,9 +640,7 @@ def test_filter_buy_candidates_rejects_non_string_elements():
         [True],
     ):
         result = service.filter_buy_candidates(candidates=bad_candidates, market="A")  # type: ignore[arg-type]
-        assert (
-            result["success"] is False
-        ), f"Expected failure for candidates={bad_candidates!r}"
+        assert result["success"] is False, f"Expected failure for candidates={bad_candidates!r}"
         assert result["code"] == "VALIDATION_ERROR"
 
 
@@ -965,9 +942,9 @@ def test_add_record_ban_days_is_required_parameter():
 
     sig = inspect.signature(BlackroomManagementService.add_record)
     param = sig.parameters["ban_days"]
-    assert (
-        param.default is inspect.Parameter.empty
-    ), "ban_days must be a required parameter with no default in add_record"
+    assert param.default is inspect.Parameter.empty, (
+        "ban_days must be a required parameter with no default in add_record"
+    )
 
 
 def test_add_alias_ban_days_is_required_parameter():
@@ -975,6 +952,4 @@ def test_add_alias_ban_days_is_required_parameter():
 
     sig = inspect.signature(BlackroomManagementService.add)
     param = sig.parameters["ban_days"]
-    assert (
-        param.default is inspect.Parameter.empty
-    ), "ban_days must be a required parameter with no default in add"
+    assert param.default is inspect.Parameter.empty, "ban_days must be a required parameter with no default in add"

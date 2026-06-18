@@ -33,15 +33,11 @@ def get_stock_position_path() -> str:
 
 
 def get_stock_general_info_path() -> str:
-    return os.path.join(
-        os.environ["stock_data_path_info"], STOCK_GENERAL_INFO_FILE_NAME
-    )
+    return os.path.join(os.environ["stock_data_path_info"], STOCK_GENERAL_INFO_FILE_NAME)
 
 
 def get_stock_delisting_info_path() -> str:
-    return os.path.join(
-        os.environ["stock_data_path_info"], STOCK_DELISTING_INFO_FILE_NAME
-    )
+    return os.path.join(os.environ["stock_data_path_info"], STOCK_DELISTING_INFO_FILE_NAME)
 
 
 def get_stock_300_ingredients_path() -> str:
@@ -53,9 +49,7 @@ def get_stock_500_ingredients_path() -> str:
 
 
 def get_hk_ggt_stock_general_info_path() -> str:
-    return os.path.join(
-        os.environ["stock_data_path_info"], HK_GGT_STOCK_GENERAL_INFO_FILE_NAME
-    )
+    return os.path.join(os.environ["stock_data_path_info"], HK_GGT_STOCK_GENERAL_INFO_FILE_NAME)
 
 
 def get_etf_general_info_path() -> str:

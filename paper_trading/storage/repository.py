@@ -26,18 +26,14 @@ class PaperTradingRepository:
         account = PaperAccount(name=name, initial_cash=initial_cash)
         self.session.add(account)
         self.session.flush()
-        self.add_cash_event(
-            account.id, CashEventType.DEPOSIT, initial_cash, note="initial_cash"
-        )
+        self.add_cash_event(account.id, CashEventType.DEPOSIT, initial_cash, note="initial_cash")
         return account
 
     def get_account(self, account_id: int) -> PaperAccount | None:
         return cast(PaperAccount | None, self.session.get(PaperAccount, account_id))
 
     def list_accounts(self) -> list[PaperAccount]:
-        return list(
-            self.session.query(PaperAccount).order_by(PaperAccount.id.asc()).all()
-        )
+        return list(self.session.query(PaperAccount).order_by(PaperAccount.id.asc()).all())
 
     def add_cash_event(
         self,
@@ -150,9 +146,7 @@ class PaperTradingRepository:
             .all()
         )
 
-    def get_orders_for_matching(
-        self, trade_date: date, account_id: int | None = None
-    ) -> list[PaperOrder]:
+    def get_orders_for_matching(self, trade_date: date, account_id: int | None = None) -> list[PaperOrder]:
         query = self.session.query(PaperOrder).filter(
             PaperOrder.trade_date == trade_date,
             PaperOrder.status == OrderStatus.ACCEPTED.value,
@@ -233,18 +227,14 @@ class PaperTradingRepository:
     def count_orders(self, account_id: int, trade_date: date) -> int:
         return int(
             self.session.query(func.count(PaperOrder.id))
-            .filter(
-                PaperOrder.account_id == account_id, PaperOrder.trade_date == trade_date
-            )
+            .filter(PaperOrder.account_id == account_id, PaperOrder.trade_date == trade_date)
             .scalar()
         )
 
     def count_trades(self, account_id: int, trade_date: date) -> int:
         return int(
             self.session.query(func.count(PaperTrade.id))
-            .filter(
-                PaperTrade.account_id == account_id, PaperTrade.trade_date == trade_date
-            )
+            .filter(PaperTrade.account_id == account_id, PaperTrade.trade_date == trade_date)
             .scalar()
         )
 
@@ -268,22 +258,14 @@ class PaperTradingRepository:
         self.session.flush()
         return run
 
-    def create_matching_run(
-        self, trade_date: date, account_id: int | None, status: str
-    ) -> PaperMatchingRun:
-        run = PaperMatchingRun(
-            trade_date=trade_date, account_id=account_id, status=status
-        )
+    def create_matching_run(self, trade_date: date, account_id: int | None, status: str) -> PaperMatchingRun:
+        run = PaperMatchingRun(trade_date=trade_date, account_id=account_id, status=status)
         self.session.add(run)
         self.session.flush()
         return run
 
     def list_matching_runs(self) -> list[PaperMatchingRun]:
-        return list(
-            self.session.query(PaperMatchingRun)
-            .order_by(PaperMatchingRun.id.asc())
-            .all()
-        )
+        return list(self.session.query(PaperMatchingRun).order_by(PaperMatchingRun.id.asc()).all())
 
     def get_matching_run(self, run_id: int) -> PaperMatchingRun:
         run = cast(PaperMatchingRun | None, self.session.get(PaperMatchingRun, run_id))
@@ -322,9 +304,7 @@ class PaperTradingRepository:
         return cast(
             PaperPosition | None,
             self.session.query(PaperPosition)
-            .filter(
-                PaperPosition.account_id == account_id, PaperPosition.symbol == symbol
-            )
+            .filter(PaperPosition.account_id == account_id, PaperPosition.symbol == symbol)
             .one_or_none(),
         )
 

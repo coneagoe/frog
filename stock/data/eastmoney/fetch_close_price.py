@@ -60,9 +60,7 @@ f167,f164,f162,f163,f92,f71,f117,f292,f51,f52,f191,f192,f262""",
             close_price = close_price_int / pow(10, precision)
             return close_price
         except Exception as e:
-            logging.warning(
-                f"content of {secid} is unexpected, please check. Error: {e}"
-            )
+            logging.warning(f"content of {secid} is unexpected, please check. Error: {e}")
             logging.warning(f"url = {url}")
             logging.warning(f"resp = {resp.content}")
             return np.nan

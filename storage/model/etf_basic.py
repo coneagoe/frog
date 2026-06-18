@@ -35,12 +35,8 @@ class ETFBasic(Base):
     扩位简称 = Column(String(40), nullable=True, comment="ETF扩位简称")
     中文全称 = Column(COL_FULLNAME, String(100), nullable=True, comment="基金中文全称")
 
-    指数代码 = Column(
-        COL_INDEX_CODE, String(10), nullable=True, comment="ETF基准指数代码"
-    )
-    指数名称 = Column(
-        COL_INDEX_NAME, String(20), nullable=True, comment="ETF基准指数中文全称"
-    )
+    指数代码 = Column(COL_INDEX_CODE, String(10), nullable=True, comment="ETF基准指数代码")
+    指数名称 = Column(COL_INDEX_NAME, String(20), nullable=True, comment="ETF基准指数中文全称")
 
     设立日期 = Column(COL_SETUP_DATE, Date, nullable=True, comment="设立日期")
     上市日期 = Column(COL_IPO_DATE, Date, nullable=True, comment="上市日期")
@@ -48,14 +44,8 @@ class ETFBasic(Base):
 
     交易所 = Column(COL_EXCHANGE, String(10), nullable=True, comment="交易所")
 
-    基金管理人 = Column(
-        COL_MGR_NAME, String(40), nullable=True, comment="基金管理人简称"
-    )
-    基金托管人 = Column(
-        COL_CUSTOD_NAME, String(40), nullable=True, comment="基金托管人名称"
-    )
+    基金管理人 = Column(COL_MGR_NAME, String(40), nullable=True, comment="基金管理人简称")
+    基金托管人 = Column(COL_CUSTOD_NAME, String(40), nullable=True, comment="基金托管人名称")
 
     管理费 = Column(COL_MGT_FEE, Float, nullable=True, comment="基金管理人收取的费用")
-    ETF类型 = Column(
-        COL_ETF_TYPE, String(20), nullable=True, comment="基金投资通道类型"
-    )
+    ETF类型 = Column(COL_ETF_TYPE, String(20), nullable=True, comment="基金投资通道类型")

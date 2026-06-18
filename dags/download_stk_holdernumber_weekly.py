@@ -24,9 +24,7 @@ from common_dags import (  # noqa: E402
 PARTITION_COUNT = get_partition_count()
 
 
-def download_stk_holdernumber_partition_task(
-    *, partition_id: int, partition_count: int, **context
-):
+def download_stk_holdernumber_partition_task(*, partition_id: int, partition_count: int, **context):
     """Download A-share shareholder count data for a specific partition.
 
     Args:
@@ -44,9 +42,7 @@ def download_stk_holdernumber_partition_task(
     from storage import get_storage  # noqa: E402
 
     if partition_id >= partition_count:
-        raise AirflowSkipException(
-            f"partition_id={partition_id} >= partition_count={partition_count}, skip"
-        )
+        raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
     df_stocks = get_storage().load_general_info_stock()
     if df_stocks is None or df_stocks.empty:
@@ -65,10 +61,7 @@ def download_stk_holdernumber_partition_task(
             failed_ids.append(stock_id)
 
         if idx % 100 == 0 or idx == total:
-            print(
-                f"[holdernumber p{partition_id:02d}] 进度: {idx}/{total} "
-                f"(failed={len(failed_ids)})"
-            )
+            print(f"[holdernumber p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
@@ -77,10 +70,7 @@ def download_stk_holdernumber_partition_task(
             f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
         )
 
-    return (
-        f"股东人数下载成功完成: partition={partition_id}/{partition_count}, "
-        f"count={total}"
-    )
+    return f"股东人数下载成功完成: partition={partition_id}/{partition_count}, count={total}"
 
 
 # Create DAG

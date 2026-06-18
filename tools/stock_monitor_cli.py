@@ -48,18 +48,12 @@ def build_parser() -> _StableParser:
         description="Stock monitor target management CLI",
         formatter_class=argparse.HelpFormatter,
     )
-    parser.add_argument(
-        "--json", action="store_true", dest="json_output", help="输出JSON结果"
-    )
+    parser.add_argument("--json", action="store_true", dest="json_output", help="输出JSON结果")
 
-    subparsers = parser.add_subparsers(
-        dest="command", required=True, parser_class=_StableParser
-    )
+    subparsers = parser.add_subparsers(dest="command", required=True, parser_class=_StableParser)
 
     target_parser = subparsers.add_parser("target", help="监控目标管理")
-    target_subparsers = target_parser.add_subparsers(
-        dest="target_command", required=True, parser_class=_StableParser
-    )
+    target_subparsers = target_parser.add_subparsers(dest="target_command", required=True, parser_class=_StableParser)
 
     add_parser = target_subparsers.add_parser("add", help="添加监控目标")
     add_parser.add_argument("--stock-code", required=True, help="股票代码")
@@ -68,20 +62,12 @@ def build_parser() -> _StableParser:
     add_parser.add_argument("--note", default=None, help="备注")
     add_parser.add_argument("--frequency", default="daily", help="执行频率")
     add_parser.add_argument("--reset-mode", default="auto", help="重置模式")
-    add_parser.add_argument(
-        "--enabled", action="store_true", default=True, help="启用目标（默认）"
-    )
-    add_parser.add_argument(
-        "--disabled", action="store_false", dest="enabled", help="禁用目标"
-    )
-    add_parser.add_argument(
-        "--last-state", action="store_true", default=False, help="上次状态"
-    )
+    add_parser.add_argument("--enabled", action="store_true", default=True, help="启用目标（默认）")
+    add_parser.add_argument("--disabled", action="store_false", dest="enabled", help="禁用目标")
+    add_parser.add_argument("--last-state", action="store_true", default=False, help="上次状态")
 
     update_parser = target_subparsers.add_parser("update", help="更新监控目标")
-    update_parser.add_argument(
-        "--target-id", type=int, required=True, help="监控目标ID"
-    )
+    update_parser.add_argument("--target-id", type=int, required=True, help="监控目标ID")
     update_parser.add_argument("--stock-code", default=None, help="股票代码")
     update_parser.add_argument("--market", default=None, help="市场，例如 A/HK/ETF")
     update_parser.add_argument("--condition", default=None, help="条件JSON字符串")
@@ -95,9 +81,7 @@ def build_parser() -> _StableParser:
         default=None,
         help="将 enabled 设置为 true",
     )
-    update_parser.add_argument(
-        "--disabled", action="store_const", const=False, dest="enabled", help="禁用目标"
-    )
+    update_parser.add_argument("--disabled", action="store_const", const=False, dest="enabled", help="禁用目标")
     update_parser.add_argument(
         "--last-state",
         action="store_const",
@@ -114,9 +98,7 @@ def build_parser() -> _StableParser:
     )
 
     remove_parser = target_subparsers.add_parser("remove", help="删除监控目标")
-    remove_parser.add_argument(
-        "--target-id", type=int, required=True, help="监控目标ID"
-    )
+    remove_parser.add_argument("--target-id", type=int, required=True, help="监控目标ID")
 
     list_parser = target_subparsers.add_parser("list", help="列出监控目标")
     list_parser.add_argument("--frequency", default=None, help="执行频率")
@@ -161,9 +143,7 @@ def build_parser() -> _StableParser:
     br_ban.add_argument("--note", default=None, help="备注")
 
     br_update = blackroom_subparsers.add_parser("update", help="更新黑屋记录")
-    br_update.add_argument(
-        "--id", type=int, required=True, dest="record_id", help="记录ID"
-    )
+    br_update.add_argument("--id", type=int, required=True, dest="record_id", help="记录ID")
     br_update.add_argument("--ban-days", type=int, default=None, help="禁买天数")
     br_update.add_argument("--note", default=None, help="备注")
     br_update.add_argument(
@@ -184,14 +164,10 @@ def build_parser() -> _StableParser:
     br_update.add_argument("--expire-at", default=None, help="禁买到期时间 (ISO 8601)")
 
     br_remove = blackroom_subparsers.add_parser("remove", help="删除黑屋记录")
-    br_remove.add_argument(
-        "--id", type=int, required=True, dest="record_id", help="记录ID"
-    )
+    br_remove.add_argument("--id", type=int, required=True, dest="record_id", help="记录ID")
 
     br_unban = blackroom_subparsers.add_parser("unban", help="解除黑屋封禁")
-    br_unban.add_argument(
-        "--id", type=int, default=None, dest="record_id", help="记录ID"
-    )
+    br_unban.add_argument("--id", type=int, default=None, dest="record_id", help="记录ID")
     br_unban.add_argument("--stock-code", default=None, help="股票代码")
     br_unban.add_argument("--market", default=None, help="市场，例如 A/HK/ETF")
 
@@ -205,15 +181,11 @@ def build_parser() -> _StableParser:
     br_list.add_argument("--stock-code", default=None, help="按股票代码过滤")
 
     br_get = blackroom_subparsers.add_parser("get", help="查询单条黑屋记录")
-    br_get.add_argument(
-        "--id", type=int, required=True, dest="record_id", help="记录ID"
-    )
+    br_get.add_argument("--id", type=int, required=True, dest="record_id", help="记录ID")
 
     blackroom_subparsers.add_parser("status", help="获取黑屋状态汇总")
     blackroom_subparsers.add_parser("countdown", help="执行黑屋剩余天数倒计时")
-    br_sync = blackroom_subparsers.add_parser(
-        "sync-shareholder-selling", help="同步股东减持公告到黑屋"
-    )
+    br_sync = blackroom_subparsers.add_parser("sync-shareholder-selling", help="同步股东减持公告到黑屋")
     br_sync.add_argument("--start-date", required=True, help="开始日期 (YYYYMMDD)")
     br_sync.add_argument("--end-date", required=True, help="结束日期 (YYYYMMDD)")
     br_sync.add_argument("--ban-days", type=int, default=180, help="禁买天数")
@@ -235,9 +207,7 @@ def _to_exit_code(result: dict[str, Any]) -> int:
     if result.get("success"):
         return EXIT_OK
     code = result.get("code")
-    return _EXIT_CODE_MAP.get(
-        str(code) if code is not None else "", EXIT_INTERNAL_ERROR
-    )
+    return _EXIT_CODE_MAP.get(str(code) if code is not None else "", EXIT_INTERNAL_ERROR)
 
 
 def main(
@@ -411,9 +381,7 @@ def _handle_blackroom(
         result = _get_bsvc().list_records(active_only=args.active_only)
         if args.stock_code and result.get("data") is not None:
             result = dict(result)
-            result["data"] = [
-                r for r in result["data"] if r.get("stock_code") == args.stock_code
-            ]
+            result["data"] = [r for r in result["data"] if r.get("stock_code") == args.stock_code]
         return result
     if cmd == "get":
         return _get_bsvc().get_record(args.record_id)
@@ -423,12 +391,8 @@ def _handle_blackroom(
         effective_countdown_service = countdown_service or BlackroomCountdownService()
         return effective_countdown_service.run()
     if cmd == "sync-shareholder-selling":
-        effective_sync_service = sync_service or ShareholderSellingPunishmentService(
-            blackroom_service=_get_bsvc()
-        )
-        return effective_sync_service.sync(
-            start_date=args.start_date, end_date=args.end_date, ban_days=args.ban_days
-        )
+        effective_sync_service = sync_service or ShareholderSellingPunishmentService(blackroom_service=_get_bsvc())
+        return effective_sync_service.sync(start_date=args.start_date, end_date=args.end_date, ban_days=args.ban_days)
     return {
         "success": False,
         "code": "VALIDATION_ERROR",

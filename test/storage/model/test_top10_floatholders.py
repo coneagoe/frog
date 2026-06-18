@@ -32,9 +32,7 @@ class TestTop10FloatholdersModel:
     def test_columns_exist(self, sqlite_engine):
         Base.metadata.create_all(sqlite_engine)
         inspector = inspect(sqlite_engine)
-        columns = [
-            col["name"] for col in inspector.get_columns(tb_name_top10_floatholders)
-        ]
+        columns = [col["name"] for col in inspector.get_columns(tb_name_top10_floatholders)]
         for expected in [
             "股票代码",
             "公告日期",

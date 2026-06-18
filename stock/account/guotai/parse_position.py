@@ -116,9 +116,7 @@ class GuotaiParser:
 
     def save_data(self):
         self.data[COL_STOCK_ID].append(self.stock_id)
-        self.data[COL_STOCK_NAME].append(
-            pattern_tailing_number.sub("", self.stock_name)
-        )
+        self.data[COL_STOCK_NAME].append(pattern_tailing_number.sub("", self.stock_name))
         self.data[COL_MARKET_VALUE].append(self.position_market_value)
         self.data[COL_POSITION].append(self.position)
         self.data[COL_POSITION_AVAILABLE].append(self.position_available)

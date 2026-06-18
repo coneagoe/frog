@@ -46,19 +46,12 @@ class ObosStrategy(MyStrategy):
                     # 如果close > ema20
                     if self.context[i].current_price > self.stop_manager.ema20[i][0]:
                         self.order_target_percent(self.datas[i], target=self.p.target)
-                        self.context[i].stop_price = min(
-                            [
-                                self.datas[i].low[-j]
-                                for j in range(1, self.p.param_sp + 1)
-                            ]
-                        )
+                        self.context[i].stop_price = min([self.datas[i].low[-j] for j in range(1, self.p.param_sp + 1)])
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
                 # 如果OBOS超买
                 if self.obos[i] > OBOS_OVERBUY_THRESHOLD:
-                    self.context[i].stop_price = max(
-                        self.context[i].stop_price, self.datas[i].low[-1]
-                    )
+                    self.context[i].stop_price = max(self.context[i].stop_price, self.datas[i].low[-1])
 
                 if self.context[i].current_price < self.context[i].stop_price:  # type: ignore[operator]
                     self.order_target_percent(self.datas[i], target=0.0)
@@ -69,9 +62,7 @@ class ObosStrategy(MyStrategy):
 
         if trade.isopen:
             i = self.stocks.index(trade.getdataname())
-            self.context[i].stop_price = min(
-                [self.datas[i].low[-j] for j in range(1, self.p.param_sp + 1)]
-            )
+            self.context[i].stop_price = min([self.datas[i].low[-j] for j in range(1, self.p.param_sp + 1)])
 
     # def stop(self):
     #     print('ema_period: %d, n_positions: %d' %
@@ -81,25 +72,17 @@ class ObosStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
         "-f",
         "--filter",
         required=False,
         help="Space-separated list of stock IDs to filter out",
     )
-    parser.add_argument(
-        "-c", "--cash", required=False, type=float, help="Initial cash amount"
-    )
+    parser.add_argument("-c", "--cash", required=False, type=float, help="Initial cash amount")
     parser.add_argument("-p", "--plot", required=False, default="", help="Plot trade")
-    parser.add_argument(
-        "-l", "--list", required=True, help="Path to CSV file containing stock list"
-    )
+    parser.add_argument("-l", "--list", required=True, help="Path to CSV file containing stock list")
     args = parser.parse_args()
 
     os.environ["PLOT_TRADE"] = args.plot

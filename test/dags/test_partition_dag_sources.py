@@ -41,9 +41,7 @@ def build_task_signature_pattern(task_name: str) -> str:
 
 
 def build_partition_kwargs_pattern(source: str) -> str:
-    partition_var = (
-        "_pid" if "for _pid in get_partition_ids(PARTITION_COUNT):" in source else "pid"
-    )
+    partition_var = "_pid" if "for _pid in get_partition_ids(PARTITION_COUNT):" in source else "pid"
     return (
         rf'op_kwargs\s*=\s*\{{\s*"partition_id"\s*:\s*{partition_var}\s*,\s*"partition_count"\s*:\s*'
         rf"PARTITION_COUNT\s*\}}"
@@ -51,19 +49,13 @@ def build_partition_kwargs_pattern(source: str) -> str:
 
 
 @pytest.mark.parametrize(("path", "task_name", "ids_name"), PARTITION_DAG_SPECS)
-def test_partition_dag_sources_freeze_shared_partition_count_once(
-    path: Path, task_name: str, ids_name: str
-):
+def test_partition_dag_sources_freeze_shared_partition_count_once(path: Path, task_name: str, ids_name: str):
     source = read_source(path)
 
     assert not re.search(r"\bMAX_PARTITIONS\b", source)
     assert len(re.findall(r"\bget_partition_count\s*\(\s*\)", source)) == 1
-    assert re.search(
-        r"^PARTITION_COUNT\s*=\s*get_partition_count\s*\(\s*\)", source, re.MULTILINE
-    )
-    assert re.search(
-        r"for\s+_?pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)", source
-    )
+    assert re.search(r"^PARTITION_COUNT\s*=\s*get_partition_count\s*\(\s*\)", source, re.MULTILINE)
+    assert re.search(r"for\s+_?pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)", source)
     assert re.search(build_task_signature_pattern(task_name), source)
     assert re.search(build_partition_kwargs_pattern(source), source)
     assert f"get_partitioned_ids({ids_name}, partition_id, partition_count)" in source
@@ -111,9 +103,7 @@ def test_etf_partition_dag_uses_frozen_partition_count_everywhere():
         build_task_signature_pattern("download_etf_daily_partition_task"),
         source,
     )
-    assert re.search(
-        r"for\s+_?pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)", source
-    )
+    assert re.search(r"for\s+_?pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)", source)
     assert re.search(build_partition_kwargs_pattern(source), source)
     assert "get_partitioned_ids(etf_ids, partition_id, partition_count)" in source
     assert "partition_count = PARTITION_COUNT" not in source

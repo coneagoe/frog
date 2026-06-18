@@ -4,16 +4,17 @@ import unittest
 
 # from unittest.mock import patch
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
-import conf  # noqa: E402
-from stock.common import (  # noqa: E402
-    get_stock_300_ingredients_path,
-    get_stock_500_ingredients_path,
-)
 from stock.data.download_data import (  # noqa: E402
     download_300_ingredients,
     download_500_ingredients,
     download_history_data_a_index,
     get_stock_data_path_1d,
+)
+
+import conf  # noqa: E402
+from stock.common import (  # noqa: E402
+    get_stock_300_ingredients_path,
+    get_stock_500_ingredients_path,
 )
 
 conf.parse_config()

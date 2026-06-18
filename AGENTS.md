@@ -1,26 +1,25 @@
 # Project Guidelines
 
 ## Command Rules
-- Critical: use `poetry run` for Python commands in this repo. Do not use bare `python` or `python3` for project tasks.
+- Critical: use `uv run` for Python commands in this repo. Do not use bare `python` or `python3` for project tasks.
 - Repository-local agent skills live under `.agents/skills/`; the commit workflow invokes `update_doc` before committing.
 
 ## Build And Test
 ```bash
-poetry install --with dev
-poetry run pre-commit install
+uv sync --group dev
+uv run pre-commit install
 
 # CI gates, in order
-poetry run pre-commit run --all-files
-poetry run pytest test
+uv run pre-commit run --all-files
+uv run pytest test
 
 # Focused checks
-poetry run black .
-poetry run isort .
-poetry run flake8 --max-line-length=120
-poetry run mypy
+uv run ruff format .
+uv run ruff check .
+uv run mypy
 
 # Single test
-poetry run pytest test/path/to/test_file.py::TestClass::test_method
+uv run pytest test/path/to/test_file.py::TestClass::test_method
 ```
 
 ## Architecture
@@ -33,7 +32,7 @@ poetry run pytest test/path/to/test_file.py::TestClass::test_method
 
 ## Conventions
 - Python 3.11+ (CI targets 3.12). Formatting: Black, 120-char line length. Imports: isort with Black profile.
-- Poetry `package-mode = false`; tests set `pythonpath = ["."]`, so imports rely on the repo root rather than an installed package.
+- uv `package = false`; tests set `pythonpath = ["."]`, so imports rely on the repo root rather than an installed package.
 - Chinese comments/messages and Chinese column names are common and acceptable.
 - Storage tables: when adding or removing, update `tools/db_common.sh` so `db_export.sh`/`db_import.sh` stay in sync.
 - LF line endings enforced via `.gitattributes`; `pre-commit` runs on staged files only; trailing-whitespace fixer excludes `*.csv`.

@@ -21,9 +21,7 @@ DEFAULT_PARTITION_COUNT: Final = 4
 
 def parse_alert_emails(raw: str) -> list[str]:
     """Parse alert emails from a string, supporting both comma and semicolon separators."""
-    return [
-        email.strip() for email in raw.replace(";", ",").split(",") if email.strip()
-    ]
+    return [email.strip() for email in raw.replace(";", ",").split(",") if email.strip()]
 
 
 def get_alert_emails() -> list[str]:
@@ -80,9 +78,7 @@ def get_partition_ids(partition_count: int | None = None) -> range:
     return range(max(1, partition_count))
 
 
-def get_partitioned_ids(
-    stock_ids: list[str], partition_id: int, partition_count: int
-) -> list[str]:
+def get_partitioned_ids(stock_ids: list[str], partition_id: int, partition_count: int) -> list[str]:
     """Get a subset of stock IDs for a specific partition.
 
     Args:
@@ -93,8 +89,4 @@ def get_partitioned_ids(
     Returns:
         List of stock IDs assigned to this partition
     """
-    return [
-        sid
-        for idx, sid in enumerate(stock_ids)
-        if (idx % partition_count) == partition_id
-    ]
+    return [sid for idx, sid in enumerate(stock_ids) if (idx % partition_count) == partition_id]

@@ -49,9 +49,7 @@ def get_shareholder_number(
     if end_date is None:
         end_date = datetime.now().strftime("%Y%m%d")
     if start_date is None:
-        start_date = (datetime.now().replace(year=datetime.now().year - 3)).strftime(
-            "%Y%m%d"
-        )
+        start_date = (datetime.now().replace(year=datetime.now().year - 3)).strftime("%Y%m%d")
 
     try:
         df = pro.stk_holdernumber(
@@ -101,9 +99,7 @@ def analyze_trend(df: pd.DataFrame) -> None:
         change = holder_nums[-1] - holder_nums[-2]
         pct = change / holder_nums[-2] * 100
         direction = "↑" if change > 0 else "↓"
-        print(
-            f"上期 ({dates[-2]}): {holder_nums[-2]:,} 户 {direction} {abs(change):,} ({pct:+.1f}%)"
-        )
+        print(f"上期 ({dates[-2]}): {holder_nums[-2]:,} 户 {direction} {abs(change):,} ({pct:+.1f}%)")
 
     if len(df) >= 4:
         recent = holder_nums[-4:]
@@ -114,29 +110,19 @@ def analyze_trend(df: pd.DataFrame) -> None:
         first, last = recent[0], recent[-1]
         total_change = (last - first) / first * 100
         if total_change > 0:
-            print(
-                f"\n趋势: 筹码分散，股东数累计增长 {total_change:.1f}%（通常意味着散户入场、机构派发）"
-            )
+            print(f"\n趋势: 筹码分散，股东数累计增长 {total_change:.1f}%（通常意味着散户入场、机构派发）")
         else:
-            print(
-                f"\n趋势: 筹码集中，股东数累计减少 {abs(total_change):.1f}%（通常意味着机构吸筹）"
-            )
+            print(f"\n趋势: 筹码集中，股东数累计减少 {abs(total_change):.1f}%（通常意味着机构吸筹）")
 
     max_idx = df["holder_num"].idxmax()
     min_idx = df["holder_num"].idxmin()
-    print(
-        f"\n历史最高: {df.loc[max_idx, 'end_date']} {df.loc[max_idx, 'holder_num']:,} 户"
-    )
-    print(
-        f"历史最低: {df.loc[min_idx, 'end_date']} {df.loc[min_idx, 'holder_num']:,} 户"
-    )
+    print(f"\n历史最高: {df.loc[max_idx, 'end_date']} {df.loc[max_idx, 'holder_num']:,} 户")
+    print(f"历史最低: {df.loc[min_idx, 'end_date']} {df.loc[min_idx, 'holder_num']:,} 户")
 
 
 def main():
     parser = argparse.ArgumentParser(description="查询上市公司股东人数")
-    parser.add_argument(
-        "-c", "--ts_code", required=True, help="股票代码，如 600600.SH、000001.SZ"
-    )
+    parser.add_argument("-c", "--ts_code", required=True, help="股票代码，如 600600.SH、000001.SZ")
     parser.add_argument("-s", "--start_date", default=None, help="开始日期 YYYYMMDD")
     parser.add_argument("-e", "--end_date", default=None, help="结束日期 YYYYMMDD")
     parser.add_argument("-x", "--export", action="store_true", help="导出为 CSV 文件")

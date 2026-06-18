@@ -39,13 +39,9 @@ def _services(tmp_path):
 
 
 def test_matching_fills_buy_order_and_creates_lot(tmp_path):
-    engine, session, repo, order_service, matching_service, trade_date = _services(
-        tmp_path
-    )
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
-    order = order_service.place_order(
-        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date
-    )
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
     run = matching_service.run(trade_date)
     session.commit()
@@ -61,13 +57,9 @@ def test_matching_fills_buy_order_and_creates_lot(tmp_path):
 
 
 def test_matching_skips_limit_order_not_touched(tmp_path):
-    engine, session, repo, order_service, matching_service, trade_date = _services(
-        tmp_path
-    )
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
-    order = order_service.place_order(
-        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("8.50"), trade_date
-    )
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("8.50"), trade_date)
 
     run = matching_service.run(trade_date)
     session.commit()
@@ -78,17 +70,11 @@ def test_matching_skips_limit_order_not_touched(tmp_path):
 
 
 def test_matching_fills_sell_order_and_releases_frozen_position(tmp_path):
-    engine, session, repo, order_service, matching_service, trade_date = _services(
-        tmp_path
-    )
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
     repo.upsert_position(account.id, "000001.SZ", 200, 0, Decimal("1800.00"))
-    repo.create_position_lot(
-        account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00")
-    )
-    order = order_service.place_order(
-        account.id, "000001.SZ", OrderSide.SELL, 100, Decimal("10.00"), trade_date
-    )
+    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.SELL, 100, Decimal("10.00"), trade_date)
 
     run = matching_service.run(trade_date)
     session.commit()

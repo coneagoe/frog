@@ -98,9 +98,9 @@ def main():
     results = []
 
     for stock_name, stock_id in stocks.items():
-        print(f"\n{'='*40}")
+        print(f"\n{'=' * 40}")
         print(f"{stock_name} (代码: {stock_id})")
-        print(f"{'='*40}")
+        print(f"{'=' * 40}")
 
         df = load_history_data_stock(
             security_id=stock_id,
@@ -144,46 +144,26 @@ def main():
                 continue
 
             # 开幕统计
-            period_return_open = calculate_period_return(
-                df, str(actual_start.date()), str(actual_end_open.date())
-            )
-            max_gain_open = calculate_max_gain(
-                df, str(actual_start.date()), str(actual_end_open.date())
-            )
-            max_dropdown_open = calculate_max_dropdown(
-                df, str(actual_start.date()), str(actual_end_open.date())
-            )
-            win_rate_open = calculate_daily_win_rate(
-                df, str(actual_start.date()), str(actual_end_open.date())
-            )
+            period_return_open = calculate_period_return(df, str(actual_start.date()), str(actual_end_open.date()))
+            max_gain_open = calculate_max_gain(df, str(actual_start.date()), str(actual_end_open.date()))
+            max_dropdown_open = calculate_max_dropdown(df, str(actual_start.date()), str(actual_end_open.date()))
+            win_rate_open = calculate_daily_win_rate(df, str(actual_start.date()), str(actual_end_open.date()))
 
             # 闭幕统计
-            period_return_close = calculate_period_return(
-                df, str(actual_start.date()), str(actual_end_close.date())
-            )
-            max_gain_close = calculate_max_gain(
-                df, str(actual_start.date()), str(actual_end_close.date())
-            )
-            max_dropdown_close = calculate_max_dropdown(
-                df, str(actual_start.date()), str(actual_end_close.date())
-            )
-            win_rate_close = calculate_daily_win_rate(
-                df, str(actual_start.date()), str(actual_end_close.date())
-            )
+            period_return_close = calculate_period_return(df, str(actual_start.date()), str(actual_end_close.date()))
+            max_gain_close = calculate_max_gain(df, str(actual_start.date()), str(actual_end_close.date()))
+            max_dropdown_close = calculate_max_dropdown(df, str(actual_start.date()), str(actual_end_close.date()))
+            win_rate_close = calculate_daily_win_rate(df, str(actual_start.date()), str(actual_end_close.date()))
 
             start_str = actual_start.strftime("%Y-%m-%d")
             end_open_str = actual_end_open.strftime("%Y-%m-%d")
             end_close_str = actual_end_close.strftime("%Y-%m-%d")
 
-            period_df_open = df[
-                (df["日期"] >= actual_start) & (df["日期"] <= actual_end_open)
-            ]
+            period_df_open = df[(df["日期"] >= actual_start) & (df["日期"] <= actual_end_open)]
             trading_days_open = len(period_df_open)
             up_days_open = (period_df_open["收盘"] > period_df_open["开盘"]).sum()
 
-            period_df_close = df[
-                (df["日期"] >= actual_start) & (df["日期"] <= actual_end_close)
-            ]
+            period_df_close = df[(df["日期"] >= actual_start) & (df["日期"] <= actual_end_close)]
             trading_days_close = len(period_df_close)
             up_days_close = (period_df_close["收盘"] > period_df_close["开盘"]).sum()
 
@@ -232,9 +212,7 @@ def main():
 
             positive_years = sum(1 for r in yearly_returns if r > 0)
             year_win_rate = positive_years / len(yearly_returns) * 100
-            print(
-                f"    年份胜率: {year_win_rate:.0f}% ({positive_years}/{len(yearly_returns)}年正收益)"
-            )
+            print(f"    年份胜率: {year_win_rate:.0f}% ({positive_years}/{len(yearly_returns)}年正收益)")
 
     # 汇总对比
     print("\n" + "=" * 80)
@@ -243,31 +221,15 @@ def main():
 
     result_df = pd.DataFrame(results)
     if not result_df.empty:
-        pivot_return_open = result_df.pivot(
-            index="年份", columns="股票", values="开幕涨跌幅(%)"
-        )
-        pivot_max_gain_open = result_df.pivot(
-            index="年份", columns="股票", values="开幕最大涨幅(%)"
-        )
-        pivot_max_dd_open = result_df.pivot(
-            index="年份", columns="股票", values="开幕最大回撤(%)"
-        )
-        pivot_win_rate_open = result_df.pivot(
-            index="年份", columns="股票", values="开幕日胜率(%)"
-        )
+        pivot_return_open = result_df.pivot(index="年份", columns="股票", values="开幕涨跌幅(%)")
+        pivot_max_gain_open = result_df.pivot(index="年份", columns="股票", values="开幕最大涨幅(%)")
+        pivot_max_dd_open = result_df.pivot(index="年份", columns="股票", values="开幕最大回撤(%)")
+        pivot_win_rate_open = result_df.pivot(index="年份", columns="股票", values="开幕日胜率(%)")
 
-        pivot_return_close = result_df.pivot(
-            index="年份", columns="股票", values="闭幕涨跌幅(%)"
-        )
-        pivot_max_gain_close = result_df.pivot(
-            index="年份", columns="股票", values="闭幕最大涨幅(%)"
-        )
-        pivot_max_dd_close = result_df.pivot(
-            index="年份", columns="股票", values="闭幕最大回撤(%)"
-        )
-        pivot_win_rate_close = result_df.pivot(
-            index="年份", columns="股票", values="闭幕日胜率(%)"
-        )
+        pivot_return_close = result_df.pivot(index="年份", columns="股票", values="闭幕涨跌幅(%)")
+        pivot_max_gain_close = result_df.pivot(index="年份", columns="股票", values="闭幕最大涨幅(%)")
+        pivot_max_dd_close = result_df.pivot(index="年份", columns="股票", values="闭幕最大回撤(%)")
+        pivot_win_rate_close = result_df.pivot(index="年份", columns="股票", values="闭幕日胜率(%)")
 
         print("\n【开幕统计】")
         print("\n各年开幕涨跌幅(%):")
@@ -305,9 +267,7 @@ def main():
         print("\n闭幕平均日胜率(%):")
         print(pivot_win_rate_close.mean().to_string())
 
-        result_df.to_csv(
-            "world_cup_beer_analysis.csv", index=False, encoding="utf-8-sig"
-        )
+        result_df.to_csv("world_cup_beer_analysis.csv", index=False, encoding="utf-8-sig")
         print("\n结果已保存到 world_cup_beer_analysis.csv")
 
 

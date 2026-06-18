@@ -29,9 +29,7 @@ def run_intraday_monitor(**context):
     now_cn = dt.now(tz=ZoneInfo("Asia/Shanghai"))
     current_time = now_cn.strftime("%H:%M")
     if not ("09:30" <= current_time <= "15:00"):
-        raise AirflowSkipException(
-            f"当前时间 {current_time} 不在交易时段 09:30-15:00，跳过"
-        )
+        raise AirflowSkipException(f"当前时间 {current_time} 不在交易时段 09:30-15:00，跳过")
 
     from monitor.monitor_runner import run_monitor
 

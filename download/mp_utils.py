@@ -96,9 +96,7 @@ def _history_batch_worker(
             else:
                 actual_start_date = start_date
 
-            df = downloader_func(
-                security_id, actual_start_date, end_date, period, adjust
-            )
+            df = downloader_func(security_id, actual_start_date, end_date, period, adjust)
 
             if df is None or df.empty:
                 success += 1
@@ -186,10 +184,7 @@ def run_history_download_mp(
             failed_ids.extend(res.failed_ids)
             errors.update(res.errors)
 
-            logging.info(
-                f"{log_prefix}进度: {min(completed, total)}/{total} "
-                f"(success={success}, failed={failed})"
-            )
+            logging.info(f"{log_prefix}进度: {min(completed, total)}/{total} (success={success}, failed={failed})")
 
     elapsed = time.time() - start_time
     logging.info(

@@ -37,25 +37,13 @@ class TrendFollowingStrategy(MyStrategy):
 
         self.target = round(3 / len(stocks), 2)
 
-        self.ema30 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=30)
-            for i in range(len(self.datas))
-        }
+        self.ema30 = {i: bt.indicators.EMA(self.datas[i].close, period=30) for i in range(len(self.datas))}
 
-        self.ema20 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=20)
-            for i in range(len(self.datas))
-        }
+        self.ema20 = {i: bt.indicators.EMA(self.datas[i].close, period=20) for i in range(len(self.datas))}
 
-        self.ema10 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=10)
-            for i in range(len(self.datas))
-        }
+        self.ema10 = {i: bt.indicators.EMA(self.datas[i].close, period=10) for i in range(len(self.datas))}
 
-        self.ema5 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=5)
-            for i in range(len(self.datas))
-        }
+        self.ema5 = {i: bt.indicators.EMA(self.datas[i].close, period=5) for i in range(len(self.datas))}
 
         self.macd_1 = {
             i: bt.indicators.MACD(
@@ -68,8 +56,7 @@ class TrendFollowingStrategy(MyStrategy):
         }
 
         self.cross_signal_1 = {
-            i: bt.indicators.CrossOver(self.macd_1[i].macd, self.macd_1[i].signal)
-            for i in range(len(self.datas))
+            i: bt.indicators.CrossOver(self.macd_1[i].macd, self.macd_1[i].signal) for i in range(len(self.datas))
         }
 
     def next(self):
@@ -83,10 +70,7 @@ class TrendFollowingStrategy(MyStrategy):
                         continue
                 else:
                     # 如果MACD死叉或MACD.macd曲线不光滑
-                    if (
-                        self.cross_signal_1[i] < 0
-                        or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0
-                    ):
+                    if self.cross_signal_1[i] < 0 or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0:
                         self.context[i].is_candidator = False
                         continue
                     else:
@@ -100,9 +84,7 @@ class TrendFollowingStrategy(MyStrategy):
                 # 计算当前收益率
                 # print(f"foo: {i}, price: {self.datas[i].close[0]}, open_price: {self.context[i].open_price}")
                 open_price = self.context[i].open_price
-                profit_rate = round(
-                    (self.datas[i].close[0] - open_price) / open_price, 4
-                )
+                profit_rate = round((self.datas[i].close[0] - open_price) / open_price, 4)
                 ema = None
                 if profit_rate < 0.2:
                     ema = self.ema30
@@ -116,9 +98,7 @@ class TrendFollowingStrategy(MyStrategy):
                     if self.context[i].stop_price < self.datas[i].low[-1]:
                         self.context[i].stop_price = self.datas[i].low[-1]
 
-                if ema is not None and self.context[i].stop_price < round(
-                    ema[i][-1], 3
-                ):
+                if ema is not None and self.context[i].stop_price < round(ema[i][-1], 3):
                     self.context[i].stop_price = round(ema[i][-1], 3)
                     # print(f"{self.datas[i]._name}: 更新止损价: {self.context[i].stop_price}")
 
@@ -135,12 +115,8 @@ class TrendFollowingStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     cerebro = bt.Cerebro()

@@ -50,7 +50,4 @@ def test_ssf_change_signal_schema(sqlite_engine):
     } <= columns
 
     unique_constraints = inspector.get_unique_constraints(tb_name_ssf_change_signal)
-    assert any(
-        set(constraint["column_names"]) == {"stock_id", "ann_date"}
-        for constraint in unique_constraints
-    )
+    assert any(set(constraint["column_names"]) == {"stock_id", "ann_date"} for constraint in unique_constraints)

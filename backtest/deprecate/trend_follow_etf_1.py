@@ -46,8 +46,7 @@ class TrendFollowingStrategy(bt.Strategy):
         self.target = round(1 / (self.p.num_positions), 2)
 
         self.ema_low = {
-            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period)
-            for i in range(len(self.datas))
+            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period) for i in range(len(self.datas))
         }
 
         self.macd_1 = {
@@ -61,8 +60,7 @@ class TrendFollowingStrategy(bt.Strategy):
         }
 
         self.cross_signal_1 = {
-            i: bt.indicators.CrossOver(self.macd_1[i].macd, self.macd_1[i].signal)
-            for i in range(len(self.datas))
+            i: bt.indicators.CrossOver(self.macd_1[i].macd, self.macd_1[i].signal) for i in range(len(self.datas))
         }
 
         # self.middle = {i: (self.datas[i].high + self.datas[i].low) / 2.0
@@ -89,10 +87,7 @@ class TrendFollowingStrategy(bt.Strategy):
                         continue
                 else:
                     # 如果MACD死叉或MACD.macd曲线不光滑
-                    if (
-                        self.cross_signal_1[i] < 0
-                        or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0
-                    ):
+                    if self.cross_signal_1[i] < 0 or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0:
                         gContext[i].is_candidator = False
                         continue
                     else:
@@ -144,12 +139,8 @@ class TrendFollowingStrategy(bt.Strategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     cerebro = bt.Cerebro()

@@ -15,9 +15,7 @@ router = APIRouter(prefix="/paper/accounts", dependencies=[Depends(require_api_t
 
 
 @router.post("", response_model=AccountResponse)
-def create_account(
-    request: CreateAccountRequest, session: Session = Depends(get_session)
-):
+def create_account(request: CreateAccountRequest, session: Session = Depends(get_session)):
     repo = PaperTradingRepository(session)
     account = AccountService(repo).create_account(request.name, request.initial_cash)
     session.commit()

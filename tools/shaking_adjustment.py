@@ -45,45 +45,23 @@ def calculate_stoploss_takeprofit(df: pd.DataFrame):
 
     mask_lt_10 = df[COL_ADJUSTED_STOPLOSS] < 10
     mask_10_100 = (df[COL_ADJUSTED_STOPLOSS] >= 10) & (df[COL_ADJUSTED_STOPLOSS] < 100)
-    mask_100_1000 = (df[COL_ADJUSTED_STOPLOSS] >= 100) & (
-        df[COL_ADJUSTED_STOPLOSS] < 1000
-    )
+    mask_100_1000 = (df[COL_ADJUSTED_STOPLOSS] >= 100) & (df[COL_ADJUSTED_STOPLOSS] < 1000)
     maks_gt_1000 = df[COL_ADJUSTED_STOPLOSS] >= 1000
 
-    df.loc[mask_lt_10, COL_ADJUSTED_STOPLOSS] = round(
-        df.loc[mask_lt_10, COL_ADJUSTED_STOPLOSS], 2
-    )
-    df.loc[mask_10_100, COL_ADJUSTED_STOPLOSS] = round(
-        df.loc[mask_10_100, COL_ADJUSTED_STOPLOSS], 1
-    )
-    df.loc[mask_100_1000, COL_ADJUSTED_STOPLOSS] = round(
-        df.loc[mask_100_1000, COL_ADJUSTED_STOPLOSS], 0
-    )
-    df.loc[maks_gt_1000, COL_ADJUSTED_STOPLOSS] = round(
-        df.loc[maks_gt_1000, COL_ADJUSTED_STOPLOSS], -1
-    )
+    df.loc[mask_lt_10, COL_ADJUSTED_STOPLOSS] = round(df.loc[mask_lt_10, COL_ADJUSTED_STOPLOSS], 2)
+    df.loc[mask_10_100, COL_ADJUSTED_STOPLOSS] = round(df.loc[mask_10_100, COL_ADJUSTED_STOPLOSS], 1)
+    df.loc[mask_100_1000, COL_ADJUSTED_STOPLOSS] = round(df.loc[mask_100_1000, COL_ADJUSTED_STOPLOSS], 0)
+    df.loc[maks_gt_1000, COL_ADJUSTED_STOPLOSS] = round(df.loc[maks_gt_1000, COL_ADJUSTED_STOPLOSS], -1)
 
     mask_lt_10 = df[COL_ADJUSTED_TAKE_PROFIT] < 10
-    mask_10_100 = (df[COL_ADJUSTED_TAKE_PROFIT] >= 10) & (
-        df[COL_ADJUSTED_TAKE_PROFIT] < 100
-    )
-    mask_100_1000 = (df[COL_ADJUSTED_TAKE_PROFIT] >= 100) & (
-        df[COL_ADJUSTED_TAKE_PROFIT] < 1000
-    )
+    mask_10_100 = (df[COL_ADJUSTED_TAKE_PROFIT] >= 10) & (df[COL_ADJUSTED_TAKE_PROFIT] < 100)
+    mask_100_1000 = (df[COL_ADJUSTED_TAKE_PROFIT] >= 100) & (df[COL_ADJUSTED_TAKE_PROFIT] < 1000)
     maks_gt_1000 = df[COL_ADJUSTED_TAKE_PROFIT] >= 1000
 
-    df.loc[mask_lt_10, COL_ADJUSTED_TAKE_PROFIT] = round(
-        df.loc[mask_lt_10, COL_ADJUSTED_TAKE_PROFIT], 2
-    )
-    df.loc[mask_10_100, COL_ADJUSTED_TAKE_PROFIT] = round(
-        df.loc[mask_10_100, COL_ADJUSTED_TAKE_PROFIT], 1
-    )
-    df.loc[mask_100_1000, COL_ADJUSTED_TAKE_PROFIT] = round(
-        df.loc[mask_100_1000, COL_ADJUSTED_TAKE_PROFIT], 0
-    )
-    df.loc[maks_gt_1000, COL_ADJUSTED_TAKE_PROFIT] = round(
-        df.loc[maks_gt_1000, COL_ADJUSTED_TAKE_PROFIT], -1
-    )
+    df.loc[mask_lt_10, COL_ADJUSTED_TAKE_PROFIT] = round(df.loc[mask_lt_10, COL_ADJUSTED_TAKE_PROFIT], 2)
+    df.loc[mask_10_100, COL_ADJUSTED_TAKE_PROFIT] = round(df.loc[mask_10_100, COL_ADJUSTED_TAKE_PROFIT], 1)
+    df.loc[mask_100_1000, COL_ADJUSTED_TAKE_PROFIT] = round(df.loc[mask_100_1000, COL_ADJUSTED_TAKE_PROFIT], 0)
+    df.loc[maks_gt_1000, COL_ADJUSTED_TAKE_PROFIT] = round(df.loc[maks_gt_1000, COL_ADJUSTED_TAKE_PROFIT], -1)
 
     df[COL_STOPLOSS_PERCENT] = round(
         (df[COL_ADJUSTED_STOPLOSS] - df[COL_BUYING_PRICE]) / df[COL_BUYING_PRICE] * 100,
@@ -91,15 +69,11 @@ def calculate_stoploss_takeprofit(df: pd.DataFrame):
     )
 
     df[COL_TAKE_PROFIT_PERCENT] = round(
-        (df[COL_ADJUSTED_TAKE_PROFIT] - df[COL_BUYING_PRICE])
-        / df[COL_BUYING_PRICE]
-        * 100,
+        (df[COL_ADJUSTED_TAKE_PROFIT] - df[COL_BUYING_PRICE]) / df[COL_BUYING_PRICE] * 100,
         2,
     )
 
-    df[COL_PROFIT_STOPLOSS_RATE] = abs(
-        round(df[COL_TAKE_PROFIT_PERCENT] / df[COL_STOPLOSS_PERCENT], 2)
-    )
+    df[COL_PROFIT_STOPLOSS_RATE] = abs(round(df[COL_TAKE_PROFIT_PERCENT] / df[COL_STOPLOSS_PERCENT], 2))
 
     return df
 
@@ -137,11 +111,7 @@ if __name__ == "__main__":
 
     df = calculate_stoploss_takeprofit(df)
 
-    df = df[
-        (df[COL_PROFIT_STOPLOSS_RATE] > 5)
-        & (df[COL_TAKE_PROFIT_PERCENT] > 0)
-        & (df[COL_STOPLOSS_PERCENT] < -1)
-    ]
+    df = df[(df[COL_PROFIT_STOPLOSS_RATE] > 5) & (df[COL_TAKE_PROFIT_PERCENT] > 0) & (df[COL_STOPLOSS_PERCENT] < -1)]
 
     df.to_csv(output_file_name, encoding="utf_8_sig", index=False)
 

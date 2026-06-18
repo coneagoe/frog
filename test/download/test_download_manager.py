@@ -294,9 +294,7 @@ class TestDownloadStkHoldernumberAStock:
 
         storage.get_last_stk_holdernumber_ann_date.return_value = "2024-03-20"
 
-        result = manager.download_stk_holdernumber_a_stock(
-            "000001", end_date="2024-03-20"
-        )
+        result = manager.download_stk_holdernumber_a_stock("000001", end_date="2024-03-20")
 
         assert result is True
         downloader.dl_stk_holdernumber.assert_not_called()
@@ -309,9 +307,7 @@ class TestDownloadStkHoldernumberAStock:
         storage.get_last_stk_holdernumber_ann_date.return_value = None
         downloader.dl_stk_holdernumber.return_value = pd.DataFrame()
 
-        result = manager.download_stk_holdernumber_a_stock(
-            "000001", end_date="2024-03-20"
-        )
+        result = manager.download_stk_holdernumber_a_stock("000001", end_date="2024-03-20")
 
         assert result is True
         storage.save_stk_holdernumber.assert_not_called()
@@ -397,9 +393,7 @@ class TestDownloadTop10FloatholdersAStock:
         storage.get_last_top10_floatholders_ann_date.return_value = "2024-03-20"
         downloader.dl_top10_floatholders.return_value = pd.DataFrame()
 
-        result = manager.download_top10_floatholders_a_stock(
-            "000001", end_date="2024-03-20"
-        )
+        result = manager.download_top10_floatholders_a_stock("000001", end_date="2024-03-20")
 
         assert result is True
         downloader.dl_top10_floatholders.assert_called_once_with(
@@ -413,9 +407,7 @@ class TestDownloadTop10FloatholdersAStock:
         storage.get_last_top10_floatholders_ann_date.return_value = None
         downloader.dl_top10_floatholders.return_value = pd.DataFrame()
 
-        result = manager.download_top10_floatholders_a_stock(
-            "000001", end_date="2024-03-20"
-        )
+        result = manager.download_top10_floatholders_a_stock("000001", end_date="2024-03-20")
 
         assert result is True
         storage.save_top10_floatholders.assert_not_called()

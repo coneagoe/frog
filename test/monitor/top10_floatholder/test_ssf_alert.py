@@ -60,9 +60,7 @@ def test_build_ssf_change_alert_email_formats_unified_weekly_report():
     assert "排序规则: 按单条信号综合分降序" in body
     assert body.index(
         "1. 000003 | ann_date=2024-04-01 | score=95.0 | events=new_entry | count_change=2 | ratio_change=1.2"
-    ) < body.index(
-        "2. 000001 | ann_date=2024-03-31 | score=88.0 | events=increase | count_change=1 | ratio_change=0.8"
-    )
+    ) < body.index("2. 000001 | ann_date=2024-03-31 | score=88.0 | events=increase | count_change=1 | ratio_change=0.8")
     assert body.index(
         "2. 000001 | ann_date=2024-03-31 | score=88.0 | events=increase | count_change=1 | ratio_change=0.8"
     ) < body.index(

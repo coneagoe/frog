@@ -39,37 +39,25 @@ class RotateStrategy(bt.Strategy):
 
     def __init__(self):  # noqa: E303
         self.pct_change = {
-            i: bt.indicators.PercentChange(
-                self.datas[i].close, period=self.p.n_day_increase
-            )
+            i: bt.indicators.PercentChange(self.datas[i].close, period=self.p.n_day_increase)
             for i in range(len(self.datas))
         }
         self.target = round(1 / self.p.num_positions, 2)
         self.ema_low = {
-            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period)
-            for i in range(len(self.datas))
+            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period) for i in range(len(self.datas))
         }
 
-        self.ema_20 = {
-            i: bt.indicators.EMA(self.datas[i].close, period=20)
-            for i in range(len(self.datas))
-        }
+        self.ema_20 = {i: bt.indicators.EMA(self.datas[i].close, period=20) for i in range(len(self.datas))}
 
     def next(self):  # noqa: E303
         # 计算所有股票的涨幅
         performance = {i: self.pct_change[i][0] for i in range(len(self.datas))}
 
         # 按照涨幅降序排列
-        ranked_performance = sorted(
-            performance.items(), key=lambda item: item[1], reverse=True
-        )
+        ranked_performance = sorted(performance.items(), key=lambda item: item[1], reverse=True)
 
         # 选择涨幅最大的前n个股票
-        selected = [
-            stock
-            for stock, change in ranked_performance[: self.p.num_positions]
-            if change > 0
-        ]
+        selected = [stock for stock, change in ranked_performance[: self.p.num_positions] if change > 0]
 
         for i in range(len(self.datas)):
             if gContext[i].order:
@@ -79,8 +67,7 @@ class RotateStrategy(bt.Strategy):
                     gContext[i].stop_price = self.ema_20[i][-1]
 
                 if (i not in selected) and (
-                    gContext[i].holding_bars >= self.p.holding_bars
-                    or self.datas[i].close[0] < gContext[i].stop_price
+                    gContext[i].holding_bars >= self.p.holding_bars or self.datas[i].close[0] < gContext[i].stop_price
                 ):
                     self.order_target_percent(self.datas[i], target=0.0)
             else:
@@ -113,12 +100,8 @@ class RotateStrategy(bt.Strategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     cerebro = bt.Cerebro()

@@ -26,9 +26,7 @@ from monitor.top10_floatholder import run_ssf_change_alert  # noqa: E402
 PARTITION_COUNT = get_partition_count()
 
 
-def scan_top10_floatholder_partition_task(
-    *, partition_id: int, partition_count: int, **context
-):
+def scan_top10_floatholder_partition_task(*, partition_id: int, partition_count: int, **context):
     """Scan A-share top10 floatholder data for a specific partition.
 
     Args:
@@ -46,9 +44,7 @@ def scan_top10_floatholder_partition_task(
     from storage import get_storage  # noqa: E402
 
     if partition_id >= partition_count:
-        raise AirflowSkipException(
-            f"partition_id={partition_id} >= partition_count={partition_count}, skip"
-        )
+        raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
     df_stocks = get_storage().load_general_info_stock()
     if df_stocks is None or df_stocks.empty:
@@ -67,10 +63,7 @@ def scan_top10_floatholder_partition_task(
             failed_ids.append(stock_id)
 
         if idx % 100 == 0 or idx == total:
-            print(
-                f"[top10 floatholder scan p{partition_id:02d}] 进度: {idx}/{total} "
-                f"(failed={len(failed_ids)})"
-            )
+            print(f"[top10 floatholder scan p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
@@ -79,10 +72,7 @@ def scan_top10_floatholder_partition_task(
             f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
         )
 
-    return (
-        f"前十大流通股东扫描成功完成: partition={partition_id}/{partition_count}, "
-        f"count={total}"
-    )
+    return f"前十大流通股东扫描成功完成: partition={partition_id}/{partition_count}, count={total}"
 
 
 dag = DAG(

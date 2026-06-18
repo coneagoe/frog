@@ -63,9 +63,7 @@ class BlackroomService:
             self._validate_bool(enabled, "enabled")
             self._validate_datetime_or_none(start_at, "start_at")
 
-            effective_start = (
-                start_at if start_at is not None else datetime.now(timezone.utc)
-            )
+            effective_start = start_at if start_at is not None else datetime.now(timezone.utc)
 
             record = self.storage.create_blackroom_record(
                 stock_code=stock_code,
@@ -132,9 +130,7 @@ class BlackroomService:
             if active_only:
                 records = self.storage.list_active_blackroom_records(market=market)
             else:
-                records = self.storage.list_blackroom_records(
-                    market=market, enabled=enabled
-                )
+                records = self.storage.list_blackroom_records(market=market, enabled=enabled)
             data = [self._serialize(r) for r in records]
             return self._result(True, "OK", "records listed", data)
         except BlackroomValidationError as exc:
@@ -150,9 +146,7 @@ class BlackroomService:
 
             invalid_fields = set(updates) - self._ALLOWED_UPDATE_FIELDS
             if invalid_fields:
-                raise BlackroomValidationError(
-                    f"不支持更新字段: {sorted(invalid_fields)}"
-                )
+                raise BlackroomValidationError(f"不支持更新字段: {sorted(invalid_fields)}")
 
             if "stock_code" in updates:
                 self._validate_stock_code(updates["stock_code"])
@@ -188,9 +182,7 @@ class BlackroomService:
             deleted = self.storage.delete_blackroom_record(record_id)
             if not deleted:
                 raise BlackroomNotFoundError(f"blackroom record not found: {record_id}")
-            return self._result(
-                True, "OK", "record unbanned", {"id": record_id, "deleted": True}
-            )
+            return self._result(True, "OK", "record unbanned", {"id": record_id, "deleted": True})
         except BlackroomValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
         except BlackroomNotFoundError as exc:
@@ -221,17 +213,13 @@ class BlackroomService:
     # Buy-ban query helpers
     # ------------------------------------------------------------------
 
-    def filter_buy_candidates(
-        self, candidates: List[str], market: str
-    ) -> dict[str, Any]:
+    def filter_buy_candidates(self, candidates: List[str], market: str) -> dict[str, Any]:
         try:
             if not isinstance(candidates, list):
                 raise BlackroomValidationError("candidates 必须是列表")
             for item in candidates:
                 if not isinstance(item, str):
-                    raise BlackroomValidationError(
-                        f"candidates 中的每个元素必须是字符串, 得到: {type(item).__name__}"
-                    )
+                    raise BlackroomValidationError(f"candidates 中的每个元素必须是字符串, 得到: {type(item).__name__}")
             self._validate_market(market)
 
             active = self.storage.list_active_blackroom_records(market=market)
@@ -328,9 +316,7 @@ class BlackroomService:
         enabled: Optional[bool] = None,
         active_only: bool = False,
     ) -> dict[str, Any]:
-        return self.list_records(
-            market=market, enabled=enabled, active_only=active_only
-        )
+        return self.list_records(market=market, enabled=enabled, active_only=active_only)
 
     def get(self, record_id: int) -> dict[str, Any]:
         return self.get_record(record_id)
@@ -399,9 +385,7 @@ class BlackroomService:
 
     def _validate_source(self, source: Any) -> None:
         if not isinstance(source, str) or source not in self._ALLOWED_SOURCES:
-            raise BlackroomValidationError(
-                f"source 必须是 {sorted(self._ALLOWED_SOURCES)} 之一"
-            )
+            raise BlackroomValidationError(f"source 必须是 {sorted(self._ALLOWED_SOURCES)} 之一")
 
     @staticmethod
     def _validate_ban_days(ban_days: Any) -> None:

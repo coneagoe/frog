@@ -36,9 +36,7 @@ class HistoryDataDailyAStockQFQ(Base):
 
     # YYYY-MM-DD
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价")
@@ -58,9 +56,7 @@ class HistoryDataDailyAStockHFQ(Base):
     __tablename__ = tb_name_history_data_daily_a_stock_hfq
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价")
@@ -80,9 +76,7 @@ class HistoryDataWeeklyAStockQFQ(Base):
     __tablename__ = tb_name_history_data_weekly_a_stock_qfq
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价")
@@ -97,9 +91,7 @@ class HistoryDataWeeklyAStockHFQ(Base):
     __tablename__ = tb_name_history_data_weekly_a_stock_hfq
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价")
@@ -114,9 +106,7 @@ class HistoryDataDailyEtfQFQ(Base):
     __tablename__ = tb_name_history_data_daily_etf_qfq
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价")
@@ -128,9 +118,7 @@ class HistoryDataDailyEtfHFQ(Base):
     __tablename__ = tb_name_history_data_daily_etf_hfq
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价")
@@ -142,9 +130,7 @@ class HistoryDataWeeklyEtfQFQ(Base):
     __tablename__ = tb_name_history_data_weekly_etf_qfq
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价")
@@ -156,9 +142,7 @@ class HistoryDataWeeklyEtfHFQ(Base):
     __tablename__ = tb_name_history_data_weekly_etf_hfq
 
     日期 = Column(COL_DATE, Date, primary_key=True, nullable=False, comment="交易日期")
-    股票代码 = Column(
-        COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码"
-    )
+    股票代码 = Column(COL_STOCK_ID, String(6), primary_key=True, nullable=False, comment="股票代码")
     开盘 = Column(COL_OPEN, Float, nullable=True, comment="开盘价")
     收盘 = Column(COL_CLOSE, Float, nullable=True, comment="收盘价")
     最高 = Column(COL_HIGH, Float, nullable=True, comment="最高价")

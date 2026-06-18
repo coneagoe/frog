@@ -29,20 +29,14 @@ from common.const import (
 
 F = TypeVar("F", bound=Callable[..., Any])
 _HK_DAILY_ADJ_CACHE_BY_TRADE_DATE: dict[str, pd.DataFrame] = {}
-_HK_DAILY_ADJ_RATE_LIMIT_LOCK_PATH = os.path.join(
-    tempfile.gettempdir(), "frog_hk_daily_adj.lock"
-)
-_HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH = os.path.join(
-    tempfile.gettempdir(), "frog_hk_daily_adj.last_call"
-)
+_HK_DAILY_ADJ_RATE_LIMIT_LOCK_PATH = os.path.join(tempfile.gettempdir(), "frog_hk_daily_adj.lock")
+_HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH = os.path.join(tempfile.gettempdir(), "frog_hk_daily_adj.last_call")
 
 
 def _create_pro_client() -> Any:
     token = os.getenv("TUSHARE_TOKEN")
     if not token:
-        raise ConnectionError(
-            "Tushare token is missing. Please set env var TUSHARE_TOKEN."
-        )
+        raise ConnectionError("Tushare token is missing. Please set env var TUSHARE_TOKEN.")
     return ts.pro_api(token=token)
 
 
@@ -258,15 +252,10 @@ def _normalize_hk_history_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     ).copy()
     normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], format="%Y%m%d")
     if "ts_code" in normalized.columns:
-        normalized[COL_STOCK_ID] = (
-            normalized["ts_code"].astype(str).str.replace(".HK", "", regex=False)
-        )
+        normalized[COL_STOCK_ID] = normalized["ts_code"].astype(str).str.replace(".HK", "", regex=False)
     normalized = normalized.reindex(columns=hk_history_columns)
     normalized[hk_history_numeric_columns] = (
-        normalized[hk_history_numeric_columns]
-        .apply(pd.to_numeric, errors="coerce")
-        .fillna(0.0)
-        .astype("float64")
+        normalized[hk_history_numeric_columns].apply(pd.to_numeric, errors="coerce").fillna(0.0).astype("float64")
     )
     return normalized
 
@@ -279,9 +268,7 @@ def _call_hk_daily_adj_throttled(client: Any, **kwargs: Any) -> pd.DataFrame | A
         try:
             last_called_at = 0.0
             if os.path.exists(_HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH):
-                with open(
-                    _HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH, encoding="utf-8"
-                ) as state_file:
+                with open(_HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH, encoding="utf-8") as state_file:
                     raw_value = state_file.read().strip()
                     if raw_value:
                         last_called_at = float(raw_value)
@@ -291,18 +278,14 @@ def _call_hk_daily_adj_throttled(client: Any, **kwargs: Any) -> pd.DataFrame | A
             # Record the call time BEFORE the API call so that even a failed call
             # (e.g. rate-limit exception) counts toward the interval. This prevents
             # @retrying.retry from immediately re-entering the throttle on retry.
-            with open(
-                _HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH, "w", encoding="utf-8"
-            ) as state_file:
+            with open(_HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH, "w", encoding="utf-8") as state_file:
                 state_file.write(str(time.time()))
             return client.hk_daily_adj(**kwargs)
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-def _call_hk_daily_adj_for_trade_date(
-    client: Any, trade_date: str
-) -> pd.DataFrame | Any:
+def _call_hk_daily_adj_for_trade_date(client: Any, trade_date: str) -> pd.DataFrame | Any:
     return _call_hk_daily_adj_throttled(
         client,
         ts_code="",
@@ -313,15 +296,11 @@ def _call_hk_daily_adj_for_trade_date(
     )
 
 
-def _load_hk_history_by_trade_date(
-    trade_date: str, stock_id: str, pro: Any | None = None
-) -> pd.DataFrame:
+def _load_hk_history_by_trade_date(trade_date: str, stock_id: str, pro: Any | None = None) -> pd.DataFrame:
     cached = _HK_DAILY_ADJ_CACHE_BY_TRADE_DATE.get(trade_date)
     if cached is None:
         client = require_pro_client(pro) if pro is not None else _create_pro_client()
-        cached = _normalize_hk_history_dataframe(
-            _call_hk_daily_adj_for_trade_date(client, trade_date)
-        )
+        cached = _normalize_hk_history_dataframe(_call_hk_daily_adj_for_trade_date(client, trade_date))
         _HK_DAILY_ADJ_CACHE_BY_TRADE_DATE[trade_date] = cached
 
     filtered = cached.loc[cached[COL_STOCK_ID] == stock_id].copy()
@@ -567,12 +546,10 @@ def download_history_data_etf_ts(
             ],
         ]
     )
-    normalized[COL_STOCK_ID] = (
-        normalized[COL_STOCK_ID].astype(str).str.split(".").str[0]
+    normalized[COL_STOCK_ID] = normalized[COL_STOCK_ID].astype(str).str.split(".").str[0]
+    normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], format="%Y%m%d", errors="coerce").dt.strftime(
+        "%Y-%m-%d"
     )
-    normalized[COL_DATE] = pd.to_datetime(
-        normalized[COL_DATE], format="%Y%m%d", errors="coerce"
-    ).dt.strftime("%Y-%m-%d")
     return normalized.dropna(subset=[COL_DATE])
 
 
@@ -648,22 +625,14 @@ def download_history_data_stock_hk_ts(
     pro: Any | None = None,
 ) -> pd.DataFrame | Any:
     if period != PeriodType.DAILY:
-        raise ValueError(
-            "Only daily period is supported for HK Tushare history downloads."
-        )
+        raise ValueError("Only daily period is supported for HK Tushare history downloads.")
     if adjust != AdjustType.HFQ:
-        raise ValueError(
-            "Only HFQ adjust is supported for HK Tushare history downloads."
-        )
+        raise ValueError("Only HFQ adjust is supported for HK Tushare history downloads.")
     ts_code = _to_hk_ts_code(stock_id)
     normalized_start_date = convert_date(start_date) if start_date else ""
     normalized_end_date = convert_date(end_date) if end_date else ""
 
-    if (
-        normalized_start_date
-        and normalized_end_date
-        and normalized_start_date == normalized_end_date
-    ):
+    if normalized_start_date and normalized_end_date and normalized_start_date == normalized_end_date:
         return _load_hk_history_by_trade_date(normalized_end_date, stock_id, pro)
 
     client = require_pro_client(pro) if pro is not None else _create_pro_client()

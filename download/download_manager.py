@@ -118,9 +118,7 @@ class DownloadManager:
             else:
                 actual_start_date = start_date
 
-            df = downloader_func(
-                security_id, actual_start_date, end_date, period, adjust
-            )
+            df = downloader_func(security_id, actual_start_date, end_date, period, adjust)
 
             if df is None or df.empty:
                 logging.info(f"No new data for {security_id}")
@@ -176,7 +174,11 @@ class DownloadManager:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
         logging.info(
-            f"开始下载所有股票历史数据，周期: {period.value}, 复权: {adjust.value}, 日期范围: {start_date} 到 {end_date}"
+            "开始下载所有股票历史数据，周期: %s, 复权: %s, 日期范围: %s 到 %s",
+            period.value,
+            adjust.value,
+            start_date,
+            end_date,
         )
 
         table_name = get_table_name(SecurityType.STOCK, period, adjust)
@@ -211,9 +213,7 @@ class DownloadManager:
                 logging.info("🎉 所有股票历史数据下载成功！")
                 return True
 
-            logging.warning(
-                f"⚠ 部分股票下载失败，成功率: {result.success/total_stocks*100:.1f}%"
-            )
+            logging.warning(f"⚠ 部分股票下载失败，成功率: {result.success / total_stocks * 100:.1f}%")
             return False
 
         except Exception as e:
@@ -277,7 +277,11 @@ class DownloadManager:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
         logging.info(
-            f"开始下载所有香港股票历史数据，周期: {period.value}, 复权: {adjust.value}, 日期范围: {start_date} 到 {end_date}"
+            "开始下载所有香港股票历史数据，周期: %s, 复权: %s, 日期范围: %s 到 %s",
+            period.value,
+            adjust.value,
+            start_date,
+            end_date,
         )
 
         table_name = get_table_name(SecurityType.HK_GGT_STOCK, period, adjust)
@@ -294,9 +298,7 @@ class DownloadManager:
             stock_ids = df_hk_stocks[COL_STOCK_ID].tolist()
             total_stocks = len(stock_ids)
 
-            logging.info(
-                f"共获取到 {total_stocks} 只香港股票，开始多进程下载历史数据..."
-            )
+            logging.info(f"共获取到 {total_stocks} 只香港股票，开始多进程下载历史数据...")
 
             result = run_history_download_mp(
                 security_type=SecurityType.HK_GGT_STOCK,
@@ -313,9 +315,7 @@ class DownloadManager:
                 logging.info("🎉 所有香港股票历史数据下载成功！")
                 return True
 
-            logging.warning(
-                f"⚠ 部分香港股票下载失败，成功率: {result.success/total_stocks*100:.1f}%"
-            )
+            logging.warning(f"⚠ 部分香港股票下载失败，成功率: {result.success / total_stocks * 100:.1f}%")
             return False
 
         except Exception as e:
@@ -417,9 +417,7 @@ class DownloadManager:
                 logging.info("🎉 所有ETF历史数据下载成功！")
                 return True
 
-            logging.warning(
-                f"⚠ 部分ETF下载失败，成功率: {result.success/total_etfs*100:.1f}%"
-            )
+            logging.warning(f"⚠ 部分ETF下载失败，成功率: {result.success / total_etfs * 100:.1f}%")
             return False
 
         except Exception as e:
@@ -439,9 +437,7 @@ class DownloadManager:
             # 下载沪深300成分股数据
             df = self.downloader.dl_ingredient_300()
             if df is None or df.empty:
-                logging.warning(
-                    "Failed to download CSI 300 ingredient data or data is empty."
-                )
+                logging.warning("Failed to download CSI 300 ingredient data or data is empty.")
                 return False
 
             # 保存数据到数据库
@@ -463,9 +459,7 @@ class DownloadManager:
         try:
             df = self.downloader.dl_ingredient_500()
             if df is None or df.empty:
-                logging.warning(
-                    "Failed to download CSI 500 ingredient data or data is empty."
-                )
+                logging.warning("Failed to download CSI 500 ingredient data or data is empty.")
                 return False
 
             return get_storage().save_ingredient_500(df)
@@ -474,9 +468,7 @@ class DownloadManager:
             logging.error(f"下载中证500成分股数据时出错: {e}")
             return False
 
-    def download_daily_basic_a_stock(
-        self, start_date: str | None = None, end_date: str | None = None
-    ) -> bool:
+    def download_daily_basic_a_stock(self, start_date: str | None = None, end_date: str | None = None) -> bool:
         """
         下载A股每日基本面数据（daily_basic）
 
@@ -506,9 +498,7 @@ class DownloadManager:
             actual_start_date = start_date
 
         market_calendar = mcal.get_calendar("XSHG")
-        trade_days = market_calendar.schedule(
-            start_date=actual_start_date, end_date=end_date
-        )
+        trade_days = market_calendar.schedule(start_date=actual_start_date, end_date=end_date)
 
         try:
             total_days = len(trade_days)
@@ -525,7 +515,7 @@ class DownloadManager:
                 get_storage().save_daily_basic_a_stock(df)
 
                 if i % 50 == 0:
-                    logging.info(f"进度: {i}/{total_days} ({i/total_days*100:.1f}%)")
+                    logging.info(f"进度: {i}/{total_days} ({i / total_days * 100:.1f}%)")
 
             logging.info(f"每日基本面数据下载完成，共处理 {total_days} 个交易日")
             return True
@@ -533,9 +523,7 @@ class DownloadManager:
             logging.error(f"下载A股每日基本面数据时出错: {e}")
             return False
 
-    def download_stk_limit_a_stock(
-        self, start_date: str | None = None, end_date: str | None = None
-    ) -> bool:
+    def download_stk_limit_a_stock(self, start_date: str | None = None, end_date: str | None = None) -> bool:
         """
         下载A股涨跌停价格数据（stk_limit）
 
@@ -566,9 +554,7 @@ class DownloadManager:
             actual_start_date = start_date
 
         market_calendar = mcal.get_calendar("XSHG")
-        trade_days = market_calendar.schedule(
-            start_date=actual_start_date, end_date=end_date
-        )
+        trade_days = market_calendar.schedule(start_date=actual_start_date, end_date=end_date)
 
         try:
             total_days = len(trade_days)
@@ -585,7 +571,7 @@ class DownloadManager:
                 get_storage().save_stk_limit_a_stock(df)
 
                 if i % 50 == 0:
-                    logging.info(f"进度: {i}/{total_days} ({i/total_days*100:.1f}%)")
+                    logging.info(f"进度: {i}/{total_days} ({i / total_days * 100:.1f}%)")
 
             logging.info(f"涨跌停价格数据下载完成，共处理 {total_days} 个交易日")
             return True
@@ -593,9 +579,7 @@ class DownloadManager:
             logging.error(f"下载A股涨跌停价格数据时出错: {e}")
             return False
 
-    def download_suspend_d_a_stock(
-        self, start_date: str | None = None, end_date: str | None = None
-    ) -> bool:
+    def download_suspend_d_a_stock(self, start_date: str | None = None, end_date: str | None = None) -> bool:
         """
         下载A股停复牌数据（suspend_d）
 
@@ -626,9 +610,7 @@ class DownloadManager:
             actual_start_date = start_date
 
         market_calendar = mcal.get_calendar("XSHG")
-        trade_days = market_calendar.schedule(
-            start_date=actual_start_date, end_date=end_date
-        )
+        trade_days = market_calendar.schedule(start_date=actual_start_date, end_date=end_date)
 
         try:
             total_days = len(trade_days)
@@ -638,21 +620,17 @@ class DownloadManager:
                 trade_date = date.strftime("%Y-%m-%d")
 
                 # 下载停牌数据 (suspend_type='S')
-                df_suspend = self.downloader.dl_suspend_d_a_stock(
-                    suspend_type="S", trade_date=trade_date
-                )
+                df_suspend = self.downloader.dl_suspend_d_a_stock(suspend_type="S", trade_date=trade_date)
                 if df_suspend is not None and not df_suspend.empty:
                     get_storage().save_suspend_d_a_stock(df_suspend)
 
                 # 下载复牌数据 (suspend_type='R')
-                df_resume = self.downloader.dl_suspend_d_a_stock(
-                    suspend_type="R", trade_date=trade_date
-                )
+                df_resume = self.downloader.dl_suspend_d_a_stock(suspend_type="R", trade_date=trade_date)
                 if df_resume is not None and not df_resume.empty:
                     get_storage().save_suspend_d_a_stock(df_resume)
 
                 if i % 50 == 0:
-                    logging.info(f"进度: {i}/{total_days} ({i/total_days*100:.1f}%)")
+                    logging.info(f"进度: {i}/{total_days} ({i / total_days * 100:.1f}%)")
 
             logging.info(f"停复牌数据下载完成，共处理 {total_days} 个交易日")
             return True
@@ -676,9 +654,7 @@ class DownloadManager:
         try:
             df = self.downloader.dl_a_stock_basic(list_status=list_status)
             if df is None or df.empty:
-                logging.warning(
-                    "Failed to download A-stock basic info or data is empty."
-                )
+                logging.warning("Failed to download A-stock basic info or data is empty.")
                 return False
 
             logging.info(f"成功下载 {len(df)} 条A股基础信息数据")
@@ -730,9 +706,7 @@ class DownloadManager:
 
         last_ann_date = get_storage().get_last_stk_holdernumber_ann_date(stock_id)
         if last_ann_date is not None:
-            actual_start = (
-                pd.Timestamp(last_ann_date) + pd.Timedelta(days=1)
-            ).strftime("%Y-%m-%d")
+            actual_start = (pd.Timestamp(last_ann_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             if pd.Timestamp(actual_start) > pd.Timestamp(end_date):
                 logging.info(f"[{stock_id}] 股东人数数据已是最新，无需下载")
                 return True
@@ -741,9 +715,7 @@ class DownloadManager:
 
         ts_code = _get_a_stock_ts_code(stock_id)
         try:
-            df = self.downloader.dl_stk_holdernumber(
-                ts_code=ts_code, start_date=actual_start, end_date=end_date
-            )
+            df = self.downloader.dl_stk_holdernumber(ts_code=ts_code, start_date=actual_start, end_date=end_date)
         except Exception as e:
             logging.error(f"[{stock_id}] 下载股东人数数据时出错: {e}")
             return False
@@ -785,9 +757,7 @@ class DownloadManager:
 
         ts_code = _get_a_stock_ts_code(stock_id)
         try:
-            df = self.downloader.dl_top10_floatholders(
-                ts_code=ts_code, start_date=actual_start, end_date=end_date
-            )
+            df = self.downloader.dl_top10_floatholders(ts_code=ts_code, start_date=actual_start, end_date=end_date)
         except Exception as e:
             logging.error(f"[{stock_id}] 下载前十大流通股东数据时出错: {e}")
             return False

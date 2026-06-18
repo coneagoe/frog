@@ -85,17 +85,13 @@ def test_run_monitor_auto_resets_state_when_condition_clears():
 
     with (
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
-        patch(
-            "monitor.monitor_runner.fetch_current_price", return_value=1600.0
-        ),  # above threshold
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1600.0),  # above threshold
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
         patch("monitor.monitor_runner.send_email"),
     ):
         run_monitor(frequency="daily")
 
-    mock_storage.update_monitor_target_state.assert_called_with(
-        1, False, triggered_at=None
-    )
+    mock_storage.update_monitor_target_state.assert_called_with(1, False, triggered_at=None)
 
 
 def test_run_monitor_manual_mode_does_not_auto_reset():

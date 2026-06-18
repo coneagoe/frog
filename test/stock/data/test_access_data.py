@@ -62,9 +62,7 @@ class TestAccessData:
             }
         )
 
-    def test_load_general_info_stock_caching(
-        self, mock_storage_db, sample_stock_data, monkeypatch
-    ):
+    def test_load_general_info_stock_caching(self, mock_storage_db, sample_stock_data, monkeypatch):
         """Test that load_general_info_stock uses caching properly"""
         # Reset global variable
         access_data.g_df_stocks = None
@@ -73,9 +71,7 @@ class TestAccessData:
         mock_storage_db.load_general_info_stock.return_value = sample_stock_data
 
         # Use monkeypatch to mock get_storage - get_storage is a singleton function that takes no parameters
-        monkeypatch.setattr(
-            "stock.data.access_data.get_storage", lambda: mock_storage_db
-        )
+        monkeypatch.setattr("stock.data.access_data.get_storage", lambda: mock_storage_db)
 
         # First call - should load from database
         result1 = access_data.load_general_info_stock()
@@ -98,14 +94,10 @@ class TestAccessData:
         access_data.g_df_stocks = None
 
         # Mock database error
-        mock_storage_db.load_general_info_stock.side_effect = Exception(
-            "Database error"
-        )
+        mock_storage_db.load_general_info_stock.side_effect = Exception("Database error")
 
         # Use monkeypatch to mock get_storage - get_storage is a singleton function that takes no parameters
-        monkeypatch.setattr(
-            "stock.data.access_data.get_storage", lambda: mock_storage_db
-        )
+        monkeypatch.setattr("stock.data.access_data.get_storage", lambda: mock_storage_db)
 
         # Should handle error gracefully and return empty DataFrame
         result = access_data.load_general_info_stock()

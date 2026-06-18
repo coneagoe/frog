@@ -23,8 +23,8 @@ from common.const import (  # noqa: E402
     PeriodType,
     SecurityType,
 )
-from storage import get_storage  # noqa: E402
 from storage import (  # noqa: E402
+    get_storage,  # noqa: E402
     tb_name_a_stock_basic,
     tb_name_daily_basic_a_stock,
     tb_name_history_data_daily_a_stock_hfq,
@@ -73,11 +73,7 @@ def build_volatility_map(
             adjust=AdjustType.HFQ,
             end_date=end_date,
         )
-        if (
-            history_df is None
-            or history_df.empty
-            or COL_CLOSE not in history_df.columns
-        ):
+        if history_df is None or history_df.empty or COL_CLOSE not in history_df.columns:
             continue
 
         close_series = pd.to_numeric(history_df[COL_CLOSE], errors="coerce").dropna()
@@ -99,9 +95,7 @@ def build_dual_factor_selection(
     weight_mv: float,
     weight_vol: float,
 ) -> list[str]:
-    df_small = (
-        candidate_df.sort_values(by=COL_TOTAL_MV, ascending=True).head(top_n).copy()
-    )
+    df_small = candidate_df.sort_values(by=COL_TOTAL_MV, ascending=True).head(top_n).copy()
     df_small["volatility"] = df_small[COL_STOCK_ID].map(vol_map)
     df_small = df_small.dropna(subset=["volatility"])
     if df_small.empty:
@@ -109,16 +103,10 @@ def build_dual_factor_selection(
 
     # Smaller market cap and lower volatility are both better.
     df_small["mv_score"] = 1.0 - df_small[COL_TOTAL_MV].rank(pct=True, method="average")
-    df_small["vol_score"] = 1.0 - df_small["volatility"].rank(
-        pct=True, method="average"
-    )
-    df_small["total_score"] = (
-        weight_mv * df_small["mv_score"] + weight_vol * df_small["vol_score"]
-    )
+    df_small["vol_score"] = 1.0 - df_small["volatility"].rank(pct=True, method="average")
+    df_small["total_score"] = weight_mv * df_small["mv_score"] + weight_vol * df_small["vol_score"]
 
-    selected_df = df_small.sort_values(by="total_score", ascending=False).head(
-        buy_count
-    )
+    selected_df = df_small.sort_values(by="total_score", ascending=False).head(buy_count)
     return selected_df[COL_STOCK_ID].tolist()
 
 
@@ -233,10 +221,7 @@ class SmallMarketCapitalStrategy(MyStrategy):
             print(f"No stocks pass dual factor selection for {date_str}")
             return
 
-        print(
-            f"{date_str}: 调仓完成，筛选出{len(df)}只股票，"
-            f"选择买入{min(self.p.buy_count, len(selected_stocks))}只"
-        )
+        print(f"{date_str}: 调仓完成，筛选出{len(df)}只股票，选择买入{min(self.p.buy_count, len(selected_stocks))}只")
 
         # 先清仓
         for data in self.datas:
@@ -258,12 +243,8 @@ class SmallMarketCapitalStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     # 获取所有A股股票（排除北交所和回测期间未上市的股票）

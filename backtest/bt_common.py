@@ -96,9 +96,7 @@ def load_test_data(
         security_type=security_type,
     )
 
-    assert (
-        not df.empty
-    ), f"No data for {security_id} from {start_date} to {end_date}, df = {df.head()}"
+    assert not df.empty, f"No data for {security_id} from {start_date} to {end_date}, df = {df.head()}"
 
     df = df[[COL_DATE, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME]]
     df.columns = pd.Index(
@@ -162,9 +160,7 @@ def load_test_data(
     return df
 
 
-def drop_suspended(
-    stocks: list, start_date: str, end_date: str, num_points: int
-) -> list:
+def drop_suspended(stocks: list, start_date: str, end_date: str, num_points: int) -> list:
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
     delta = (end - start) / (num_points - 1)
@@ -176,9 +172,7 @@ def drop_suspended(
     return stocks
 
 
-def set_stocks(
-    cerebro, stocks: list, start_date: str, end_date: str, security_type: SecurityType
-):
+def set_stocks(cerebro, stocks: list, start_date: str, end_date: str, security_type: SecurityType):
     global df_data
 
     # 添加数据
@@ -290,10 +284,7 @@ def run(
 def show_position(positions):
     for data, position in positions.items():
         if position:
-            print(
-                f"current position(当前持仓): {data._name}, "
-                f'size(数量): {"%.2f" % position.size}'
-            )
+            print(f"current position(当前持仓): {data._name}, size(数量): {'%.2f' % position.size}")
 
 
 def plot(strategy: bt.Strategy):
@@ -312,9 +303,7 @@ def plot(strategy: bt.Strategy):
     df_trades = pd.DataFrame(trades_list)
     holding_time_counts = df_trades["holding_time"].value_counts().sort_index()
 
-    df_trades["open_time"] = pd.to_datetime(
-        df_trades["open_time"]
-    )  # ensure open_time is datetime
+    df_trades["open_time"] = pd.to_datetime(df_trades["open_time"])  # ensure open_time is datetime
     monthly_trades = df_trades.groupby(df_trades["open_time"].dt.to_period("M")).size()
 
     num_subplots = 4

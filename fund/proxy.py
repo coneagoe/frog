@@ -37,9 +37,7 @@ def get_http_proxy():
 
 def get_http_proxies():
     tmp = requests.get("http://127.0.0.1:5010/all").json()
-    candidate_proxies = [
-        f"http://{x['proxy']}" for x in tmp if re.match(r".*:80\b", x["proxy"])
-    ]
+    candidate_proxies = [f"http://{x['proxy']}" for x in tmp if re.match(r".*:80\b", x["proxy"])]
     print(candidate_proxies)
     proxies = []
     for proxy in candidate_proxies:

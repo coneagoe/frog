@@ -262,9 +262,7 @@ ETF_ID_TABLES: Set[str] = {
 }
 
 
-def get_table_name(
-    security_type: SecurityType, period: PeriodType, adjust: AdjustType
-) -> str:
+def get_table_name(security_type: SecurityType, period: PeriodType, adjust: AdjustType) -> str:
     if security_type == SecurityType.STOCK:
         if period == PeriodType.DAILY:
             if adjust == AdjustType.QFQ:
@@ -441,13 +439,9 @@ class StorageDb:
             raise ConnectionError("SQLAlchemy引擎未初始化")
         return self.engine
 
-    def _normalize_code_column(
-        self, df: pd.DataFrame, code_column: Optional[str]
-    ) -> pd.DataFrame:
+    def _normalize_code_column(self, df: pd.DataFrame, code_column: Optional[str]) -> pd.DataFrame:
         if code_column and code_column in df.columns:
-            df[code_column] = (
-                df[code_column].astype("string").str.split(".", n=1).str[0]
-            )
+            df[code_column] = df[code_column].astype("string").str.split(".", n=1).str[0]
         return df
 
     def _normalize_date_columns(
@@ -505,9 +499,7 @@ class StorageDb:
             method=method,
         )
 
-    def _get_history_table_name(
-        self, security_type: SecurityType, period: PeriodType, adjust: AdjustType
-    ) -> str:
+    def _get_history_table_name(self, security_type: SecurityType, period: PeriodType, adjust: AdjustType) -> str:
         return get_table_name(security_type, period, adjust)
 
     def _build_code_date_range_query(
@@ -537,9 +529,7 @@ class StorageDb:
         sql_lines.append(f'ORDER BY "{date_column}" {order}')
         return "\n".join(sql_lines), tuple(params)
 
-    def save_history_data_stock(
-        self, df: pd.DataFrame, period: PeriodType, adjust: AdjustType
-    ) -> bool:
+    def save_history_data_stock(self, df: pd.DataFrame, period: PeriodType, adjust: AdjustType) -> bool:
         table_name = self._get_history_table_name(SecurityType.STOCK, period, adjust)
         self._write_dataframe(
             df,
@@ -550,9 +540,7 @@ class StorageDb:
 
         return True
 
-    def save_history_data_hk_stock(
-        self, df: pd.DataFrame, period: PeriodType, adjust: AdjustType
-    ) -> bool:
+    def save_history_data_hk_stock(self, df: pd.DataFrame, period: PeriodType, adjust: AdjustType) -> bool:
         """
         保存港股历史数据到对应的数据库表
 
@@ -566,9 +554,7 @@ class StorageDb:
         """
         try:
             try:
-                table_name = self._get_history_table_name(
-                    SecurityType.HK_GGT_STOCK, period, AdjustType.HFQ
-                )
+                table_name = self._get_history_table_name(SecurityType.HK_GGT_STOCK, period, AdjustType.HFQ)
             except ValueError:
                 logger.error(f"不支持的港股数据周期: {period}")
                 return False
@@ -610,9 +596,7 @@ class StorageDb:
                 return False
 
             try:
-                table_name = self._get_history_table_name(
-                    SecurityType.ETF, period, adjust
-                )
+                table_name = self._get_history_table_name(SecurityType.ETF, period, adjust)
             except ValueError:
                 logger.error(f"不支持的ETF复权类型: {adjust}")
                 return False
@@ -657,9 +641,7 @@ class StorageDb:
                 method="multi",
             )
 
-            logger.info(
-                f"基金日线行情数据保存成功: {tb_name_history_data_daily_fund}, 数据条数: {len(prepared)}"
-            )
+            logger.info(f"基金日线行情数据保存成功: {tb_name_history_data_daily_fund}, 数据条数: {len(prepared)}")
             return True
 
         except Exception as e:
@@ -701,9 +683,7 @@ class StorageDb:
             return pd.DataFrame()
 
     def save_general_info_stock(self, df: pd.DataFrame) -> bool:
-        df.to_sql(
-            tb_name_general_info_stock, self.engine, if_exists="replace", index=False
-        )
+        df.to_sql(tb_name_general_info_stock, self.engine, if_exists="replace", index=False)
         return True
 
     def load_general_info_stock(self) -> pd.DataFrame:
@@ -731,9 +711,7 @@ class StorageDb:
             logger.error(f"加载股票基本信息数据失败: {str(e)}")
             return pd.DataFrame(columns=[COL_STOCK_ID, COL_STOCK_NAME])
 
-    def save_general_info_etf(
-        self, df: pd.DataFrame, table_name: str = tb_name_general_info_etf
-    ) -> bool:
+    def save_general_info_etf(self, df: pd.DataFrame, table_name: str = tb_name_general_info_etf) -> bool:
         """
         保存ETF基本信息
 
@@ -755,9 +733,7 @@ class StorageDb:
             logger.error(f"保存ETF基本信息失败: {str(e)}")
             return False
 
-    def load_general_info_etf(
-        self, table_name: str = tb_name_general_info_etf
-    ) -> pd.DataFrame:
+    def load_general_info_etf(self, table_name: str = tb_name_general_info_etf) -> pd.DataFrame:
         """
         加载ETF基本信息数据
 
@@ -777,9 +753,7 @@ class StorageDb:
             return pd.DataFrame(columns=[COL_STOCK_ID, COL_STOCK_NAME])
 
     def save_general_info_hk_ggt(self, df: pd.DataFrame) -> bool:
-        df.to_sql(
-            tb_name_general_info_ggt, self.engine, if_exists="replace", index=False
-        )
+        df.to_sql(tb_name_general_info_ggt, self.engine, if_exists="replace", index=False)
         return True
 
     def save_ingredient_300(self, df: pd.DataFrame) -> bool:
@@ -796,9 +770,7 @@ class StorageDb:
             if self.engine is None:
                 raise ConnectionError("SQLAlchemy引擎未初始化")
 
-            df.to_sql(
-                tb_name_ingredient_300, self.engine, if_exists="replace", index=False
-            )
+            df.to_sql(tb_name_ingredient_300, self.engine, if_exists="replace", index=False)
             logger.info(f"沪深300成分股数据保存成功，数据条数: {len(df)}")
             return True
 
@@ -820,9 +792,7 @@ class StorageDb:
             if self.engine is None:
                 raise ConnectionError("SQLAlchemy引擎未初始化")
 
-            df.to_sql(
-                tb_name_ingredient_500, self.engine, if_exists="replace", index=False
-            )
+            df.to_sql(tb_name_ingredient_500, self.engine, if_exists="replace", index=False)
             logger.info(f"中证500成分股数据保存成功，数据条数: {len(df)}")
             return True
 
@@ -953,15 +923,11 @@ class StorageDb:
             # Convert list to tuple for pandas read_sql compatibility
             sql_params = tuple(params) if params else None
             df = pd.read_sql(sql, self.engine, params=sql_params)
-            logger.info(
-                f"股票历史数据加载成功: {stock_id}, 周期: {period}, 复权: {adjust}, 数据条数: {len(df)}"
-            )
+            logger.info(f"股票历史数据加载成功: {stock_id}, 周期: {period}, 复权: {adjust}, 数据条数: {len(df)}")
             return df
 
         except Exception as e:
-            logger.error(
-                f"加载股票历史数据失败: {stock_id}, 周期: {period}, 复权: {adjust}, 错误: {str(e)}"
-            )
+            logger.error(f"加载股票历史数据失败: {stock_id}, 周期: {period}, 复权: {adjust}, 错误: {str(e)}")
             return pd.DataFrame()
 
     def load_history_data_stock_hk_ggt(
@@ -1029,9 +995,7 @@ class StorageDb:
             return df
 
         except Exception as e:
-            logger.error(
-                f"加载港股通成分股历史数据失败: {stock_id}, 周期: {period}, 复权: {adjust}, 错误: {str(e)}"
-            )
+            logger.error(f"加载港股通成分股历史数据失败: {stock_id}, 周期: {period}, 复权: {adjust}, 错误: {str(e)}")
             return pd.DataFrame()
 
     def load_history_data_etf(
@@ -1098,15 +1062,11 @@ class StorageDb:
             # Convert list to tuple for pandas read_sql compatibility
             sql_params = tuple(params) if params else None
             df = pd.read_sql(sql, self.engine, params=sql_params)
-            logger.info(
-                f"ETF历史数据加载成功: {etf_id}, 周期: {period}, 复权: {adjust}, 数据条数: {len(df)}"
-            )
+            logger.info(f"ETF历史数据加载成功: {etf_id}, 周期: {period}, 复权: {adjust}, 数据条数: {len(df)}")
             return df
 
         except Exception as e:
-            logger.error(
-                f"加载ETF历史数据失败: {etf_id}, 周期: {period}, 复权: {adjust}, 错误: {str(e)}"
-            )
+            logger.error(f"加载ETF历史数据失败: {etf_id}, 周期: {period}, 复权: {adjust}, 错误: {str(e)}")
             return pd.DataFrame()
 
     @connect_once
@@ -1211,9 +1171,7 @@ class StorageDb:
                 self.connection.rollback()
 
     @connect_once
-    def get_last_record(
-        self, table_name: str, stock_id: Optional[str] = None
-    ) -> Optional[dict]:
+    def get_last_record(self, table_name: str, stock_id: Optional[str] = None) -> Optional[dict]:
         """
         获取指定股票在指定表中的最新一条记录
 
@@ -1259,9 +1217,7 @@ class StorageDb:
                 return None
 
         except Exception as e:
-            logger.error(
-                f"获取最新记录失败 - 表名: {table_name}, 股票代码: {stock_id}, 错误: {str(e)}"
-            )
+            logger.error(f"获取最新记录失败 - 表名: {table_name}, 股票代码: {stock_id}, 错误: {str(e)}")
             return None
 
     def save_daily_basic_a_stock(self, df: pd.DataFrame) -> bool:
@@ -1280,9 +1236,7 @@ class StorageDb:
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_DAILY_BASIC.values())]
             # 转换日期为 YYYY-MM-DD 格式
-            df[COL_DATE] = pd.to_datetime(
-                df[COL_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.strftime("%Y-%m-%d")
+            df[COL_DATE] = pd.to_datetime(df[COL_DATE], format="%Y%m%d", errors="coerce").dt.strftime("%Y-%m-%d")
             df.to_sql(
                 tb_name_daily_basic_a_stock,
                 self.engine,
@@ -1313,9 +1267,7 @@ class StorageDb:
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_STK_LIMIT.values())]
             # 转换日期为 YYYY-MM-DD 格式
-            df[COL_DATE] = pd.to_datetime(
-                df[COL_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.strftime("%Y-%m-%d")
+            df[COL_DATE] = pd.to_datetime(df[COL_DATE], format="%Y%m%d", errors="coerce").dt.strftime("%Y-%m-%d")
             df.to_sql(
                 tb_name_stk_limit_a_stock,
                 self.engine,
@@ -1346,9 +1298,7 @@ class StorageDb:
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_SUSPEND_D.values())]
             # 转换停复牌日期为 YYYY-MM-DD 格式
-            df[COL_DATE] = pd.to_datetime(
-                df[COL_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.strftime("%Y-%m-%d")
+            df[COL_DATE] = pd.to_datetime(df[COL_DATE], format="%Y%m%d", errors="coerce").dt.strftime("%Y-%m-%d")
             df.to_sql(
                 tb_name_suspend_d_a_stock,
                 self.engine,
@@ -1416,9 +1366,7 @@ class StorageDb:
                     df[optional_col] = pd.NA
             df = df[list(COL_MAP_TOP10_FLOATHOLDERS.values())]
             for col in [COL_ANN_DATE, COL_END_DATE]:
-                df[col] = pd.to_datetime(
-                    df[col], format="%Y%m%d", errors="coerce"
-                ).dt.date
+                df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce").dt.date
 
             if self.engine is None:
                 raise ConnectionError("SQLAlchemy引擎未初始化")
@@ -1430,21 +1378,11 @@ class StorageDb:
 
             primary_keys = list(table.primary_key.columns.keys())
             if self.engine.dialect.name == "postgresql":
-                stmt = (
-                    pg_insert(table)
-                    .values(records)
-                    .on_conflict_do_nothing(index_elements=primary_keys)
-                )
+                stmt = pg_insert(table).values(records).on_conflict_do_nothing(index_elements=primary_keys)
             elif self.engine.dialect.name == "sqlite":
-                stmt = (
-                    sqlite_insert(table)
-                    .values(records)
-                    .on_conflict_do_nothing(index_elements=primary_keys)
-                )
+                stmt = sqlite_insert(table).values(records).on_conflict_do_nothing(index_elements=primary_keys)
             else:
-                raise ConnectionError(
-                    f"Unsupported database dialect: {self.engine.dialect.name}"
-                )
+                raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
 
             with self.engine.begin() as conn:
                 conn.execute(stmt)
@@ -1483,9 +1421,7 @@ class StorageDb:
             return None
 
         except Exception as e:
-            logger.error(
-                f"获取股东人数最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}"
-            )
+            logger.error(f"获取股东人数最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}")
             return None
 
     @connect_once
@@ -1516,9 +1452,7 @@ class StorageDb:
             return None
 
         except Exception as e:
-            logger.error(
-                f"获取前十大流通股东最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}"
-            )
+            logger.error(f"获取前十大流通股东最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}")
             return None
 
     def save_a_stock_basic(self, df: pd.DataFrame) -> bool:
@@ -1537,12 +1471,8 @@ class StorageDb:
             df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
             df = df[list(COL_MAP_STOCK_BASIC.values())]
             # 转换上市日期和退市日期为 date 类型
-            df[COL_IPO_DATE] = pd.to_datetime(
-                df[COL_IPO_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.date
-            df[COL_DELISTING_DATE] = pd.to_datetime(
-                df[COL_DELISTING_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.date
+            df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d", errors="coerce").dt.date
+            df[COL_DELISTING_DATE] = pd.to_datetime(df[COL_DELISTING_DATE], format="%Y%m%d", errors="coerce").dt.date
             df.to_sql(
                 tb_name_a_stock_basic,
                 self.engine,
@@ -1610,12 +1540,8 @@ class StorageDb:
             df[COL_ETF_ID] = df[COL_ETF_ID].str.split(".").str[0]
             df = df[list(COL_MAP_ETF_BASIC.values())]
             # 转换日期为 date 类型
-            df[COL_SETUP_DATE] = pd.to_datetime(
-                df[COL_SETUP_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.date
-            df[COL_IPO_DATE] = pd.to_datetime(
-                df[COL_IPO_DATE], format="%Y%m%d", errors="coerce"
-            ).dt.date
+            df[COL_SETUP_DATE] = pd.to_datetime(df[COL_SETUP_DATE], format="%Y%m%d", errors="coerce").dt.date
+            df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d", errors="coerce").dt.date
             df.to_sql(
                 tb_name_etf_basic,
                 self.engine,
@@ -1685,9 +1611,7 @@ class StorageDb:
                 index=False,
                 method="multi",
             )
-            logger.info(
-                f"ETF日线数据保存成功: {tb_name_etf_daily}, 数据条数: {len(df)}"
-            )
+            logger.info(f"ETF日线数据保存成功: {tb_name_etf_daily}, 数据条数: {len(df)}")
             return True
 
         except Exception as e:
@@ -1736,10 +1660,7 @@ class StorageDb:
 
     def _ensure_ssf_change_signals_status_column(self) -> None:
         assert self.engine is not None
-        columns = {
-            column["name"]
-            for column in inspect(self.engine).get_columns(tb_name_ssf_change_signal)
-        }
+        columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_ssf_change_signal)}
         if "status" in columns:
             return
 
@@ -1775,14 +1696,9 @@ class StorageDb:
         )
         assert self.engine is not None
         df = pd.read_sql(sql, self.engine)
-        return [
-            (row["stock_id"], pd.Timestamp(row["ann_date"]).strftime("%Y-%m-%d"))
-            for _, row in df.iterrows()
-        ]
+        return [(row["stock_id"], pd.Timestamp(row["ann_date"]).strftime("%Y-%m-%d")) for _, row in df.iterrows()]
 
-    def load_top10_floatholders_history(
-        self, stock_id: str, limit_ann_dates: int = 2
-    ) -> pd.DataFrame:
+    def load_top10_floatholders_history(self, stock_id: str, limit_ann_dates: int = 2) -> pd.DataFrame:
         sql = textwrap.dedent(
             f"""\
             SELECT *
@@ -1821,17 +1737,14 @@ class StorageDb:
             normalized_records.append(normalized_payload)
         return self._save_ssf_change_signal_records(normalized_records)
 
-    def mark_ssf_change_candidates_processed(
-        self, records: List[Dict[str, Any]]
-    ) -> List[int]:
+    def mark_ssf_change_candidates_processed(self, records: List[Dict[str, Any]]) -> List[int]:
         normalized_records = []
         for payload in records:
             normalized_records.append(
                 {
                     "stock_id": payload["stock_id"],
                     "ann_date": payload["ann_date"],
-                    "prev_ann_date": payload.get("prev_ann_date")
-                    or payload["ann_date"],
+                    "prev_ann_date": payload.get("prev_ann_date") or payload["ann_date"],
                     "status": SSF_CHANGE_SIGNAL_STATUS_NO_SIGNAL,
                     "event_types": [],
                     "score": 0.0,
@@ -1841,9 +1754,7 @@ class StorageDb:
             )
         return self._save_ssf_change_signal_records(normalized_records)
 
-    def _save_ssf_change_signal_records(
-        self, records: List[Dict[str, Any]]
-    ) -> List[int]:
+    def _save_ssf_change_signal_records(self, records: List[Dict[str, Any]]) -> List[int]:
         from .model.ssf_change_signal import SSFChangeSignal
 
         assert self.engine is not None
@@ -1853,9 +1764,7 @@ class StorageDb:
         elif self.engine.dialect.name == "sqlite":
             insert_fn = sqlite_insert
         else:
-            raise ConnectionError(
-                f"Unsupported database dialect: {self.engine.dialect.name}"
-            )
+            raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
 
         inserted: List[int] = []
         optional_fields = [
@@ -1939,9 +1848,7 @@ class StorageDb:
         finally:
             session.close()
 
-    def list_monitor_targets(
-        self, frequency: Optional[str] = None, enabled: Optional[bool] = None
-    ) -> List[Any]:
+    def list_monitor_targets(self, frequency: Optional[str] = None, enabled: Optional[bool] = None) -> List[Any]:
         """
         查询监控目标列表。
 
@@ -2225,11 +2132,7 @@ class StorageDb:
         assert self.Session is not None
         session = self.Session()
         try:
-            query = (
-                session.query(BlackroomRecord)
-                .filter_by(enabled=True)
-                .filter(BlackroomRecord.remaining_days > 0)
-            )
+            query = session.query(BlackroomRecord).filter_by(enabled=True).filter(BlackroomRecord.remaining_days > 0)
             if market is not None:
                 query = query.filter_by(market=market)
             return cast(List[Any], query.order_by(BlackroomRecord.id.asc()).all())
@@ -2269,9 +2172,7 @@ class StorageDb:
                 setattr(record, key, value)
             if "ban_days" in updates and "remaining_days" not in updates:
                 record.remaining_days = record.ban_days
-            if (
-                "ban_days" in updates or "start_at" in updates
-            ) and "expire_at" not in updates:
+            if ("ban_days" in updates or "start_at" in updates) and "expire_at" not in updates:
                 current_start = record.start_at
                 current_ban_days = record.ban_days
                 if current_start is not None and current_ban_days is not None:
@@ -2314,11 +2215,7 @@ class StorageDb:
         assert self.Session is not None
         session = self.Session()
         try:
-            records = (
-                session.query(BlackroomRecord)
-                .filter_by(stock_code=stock_code, market=market)
-                .all()
-            )
+            records = session.query(BlackroomRecord).filter_by(stock_code=stock_code, market=market).all()
             deleted = len(records)
             for record in records:
                 session.delete(record)
@@ -2347,9 +2244,7 @@ class StorageDb:
             decremented = len(records)
             for record in records:
                 record.remaining_days = int(record.remaining_days or 0) - 1
-            expired = [
-                record for record in records if int(record.remaining_days or 0) <= 0
-            ]
+            expired = [record for record in records if int(record.remaining_days or 0) <= 0]
             deleted = len(expired)
             for record in expired:
                 session.delete(record)
@@ -2366,17 +2261,10 @@ class StorageDb:
         from .model.blackroom_record import BlackroomRecord  # noqa: F401
 
         BlackroomRecord.__table__.create(self.engine, checkfirst=True)
-        columns = {
-            column["name"]
-            for column in inspect(self.engine).get_columns("blackroom_records")
-        }
+        columns = {column["name"] for column in inspect(self.engine).get_columns("blackroom_records")}
         if "remaining_days" not in columns:
             with self.engine.begin() as conn:
-                conn.execute(
-                    text(
-                        "ALTER TABLE blackroom_records ADD COLUMN remaining_days INTEGER"
-                    )
-                )
+                conn.execute(text("ALTER TABLE blackroom_records ADD COLUMN remaining_days INTEGER"))
                 conn.execute(
                     text(
                         """

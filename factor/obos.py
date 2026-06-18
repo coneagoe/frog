@@ -25,9 +25,7 @@ class OBOSState(Enum):
     OVERSELL = 2
 
 
-def compute_overbuy_oversell(
-    prices: pd.DataFrame, n=OBOS_PARAM_N, m=OBOS_PARAM_M
-) -> pd.DataFrame:
+def compute_overbuy_oversell(prices: pd.DataFrame, n=OBOS_PARAM_N, m=OBOS_PARAM_M) -> pd.DataFrame:
     prices[COL_LOWEST] = prices[COL_LOW].rolling(n).min()
     prices[COL_HIGHEST] = prices[COL_HIGH].rolling(m).max()
 

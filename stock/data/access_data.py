@@ -265,9 +265,7 @@ def get_stock_name(stock_id: str):
         g_df_stocks = load_general_info_stock()
 
     try:
-        return g_df_stocks.loc[g_df_stocks[COL_STOCK_ID] == stock_id][
-            COL_STOCK_NAME
-        ].iloc[0]
+        return g_df_stocks.loc[g_df_stocks[COL_STOCK_ID] == stock_id][COL_STOCK_NAME].iloc[0]
     except IndexError:
         return None
 
@@ -348,9 +346,7 @@ def get_hk_ggt_stock_name(stock_id: str):
         g_df_hk_ggt_stocks = load_general_info_hk_ggt()
 
     try:
-        return g_df_hk_ggt_stocks.loc[g_df_hk_ggt_stocks[COL_STOCK_ID] == stock_id][
-            COL_STOCK_NAME
-        ].iloc[0]
+        return g_df_hk_ggt_stocks.loc[g_df_hk_ggt_stocks[COL_STOCK_ID] == stock_id][COL_STOCK_NAME].iloc[0]
     except IndexError:
         return None
 
@@ -364,25 +360,18 @@ def is_st(stock_id: str):
     # print(df[df[COL_STOCK_ID] == stock_id])
     return (
         (df[COL_STOCK_ID] == stock_id)
-        & (
-            df[COL_STOCK_NAME].str.startswith("ST")
-            | df[COL_STOCK_NAME].str.startswith("*ST")
-        )
+        & (df[COL_STOCK_NAME].str.startswith("ST") | df[COL_STOCK_NAME].str.startswith("*ST"))
     ).any()
 
 
 def drop_st(df: pd.DataFrame) -> pd.DataFrame:
     df_gen_info = load_general_info_stock()
-    df_tmp = pd.merge(
-        df, df_gen_info[[COL_STOCK_ID, COL_STOCK_NAME]], on=COL_STOCK_ID, how="inner"
-    )
+    df_tmp = pd.merge(df, df_gen_info[[COL_STOCK_ID, COL_STOCK_NAME]], on=COL_STOCK_ID, how="inner")
     df_tmp = df_tmp[~df_tmp[COL_STOCK_NAME].str.startswith(("ST", "*ST"))]
     return df_tmp
 
 
-def drop_low_price_stocks(
-    df: pd.DataFrame, start_date: str, end_date: str
-) -> pd.DataFrame:
+def drop_low_price_stocks(df: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
     def _get_first_price(stock_id: str, start_date: str, end_date: str) -> float:
         df_stock = load_history_data_stock(
             security_id=stock_id,
@@ -393,9 +382,7 @@ def drop_low_price_stocks(
         )
         return df_stock[COL_CLOSE].iloc[0]  # type: ignore
 
-    df[COL_OPEN] = df[COL_STOCK_ID].apply(
-        lambda stock_id: _get_first_price(stock_id, start_date, end_date)
-    )
+    df[COL_OPEN] = df[COL_STOCK_ID].apply(lambda stock_id: _get_first_price(stock_id, start_date, end_date))
     df = df[df[COL_OPEN] > 3]
     return df
 

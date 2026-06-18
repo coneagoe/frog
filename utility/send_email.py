@@ -28,9 +28,7 @@ def send_email(subject: str, body: str, attachment_file_name: str | None = None)
     if attachment_file_name is not None:
         with open(attachment_file_name, "rb") as attachment:
             part = MIMEApplication(attachment.read(), Name=attachment_file_name)
-            part["Content-Disposition"] = (
-                f'attachment; filename="{attachment_file_name}"'
-            )
+            part["Content-Disposition"] = f'attachment; filename="{attachment_file_name}"'
             message.attach(part)
 
     with smtplib.SMTP_SSL(mail_server, int(mail_port)) as smtp:

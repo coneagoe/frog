@@ -37,14 +37,10 @@ def normalize_etf_code(etf_code: str) -> str:
 
 
 ETF_CATEGORIES = {
-    normalize_etf_code(code): category
-    for category, codes in ETF_CATEGORIES_RAW.items()
-    for code in codes
+    normalize_etf_code(code): category for category, codes in ETF_CATEGORIES_RAW.items() for code in codes
 }
 
-stocks = [
-    normalize_etf_code(code) for codes in ETF_CATEGORIES_RAW.values() for code in codes
-]
+stocks = [normalize_etf_code(code) for codes in ETF_CATEGORIES_RAW.values() for code in codes]
 
 
 def get_etf_category(etf_code: str) -> str:
@@ -69,10 +65,7 @@ class RotateETF6Strategy(bt.Strategy):
         self.last_date = None
 
         self.trend_indicators = {
-            data._name: bt.indicators.SimpleMovingAverage(
-                data.close, period=self.p.trend_ma
-            )
-            for data in self.datas
+            data._name: bt.indicators.SimpleMovingAverage(data.close, period=self.p.trend_ma) for data in self.datas
         }
 
     def next(self):
@@ -136,9 +129,7 @@ class RotateETF6Strategy(bt.Strategy):
     def _select_candidates(self) -> list[dict]:
         candidates: list[dict] = []
         max_momentum = max(self.p.momentum_bars)
-        required_bars = (
-            max(max_momentum, self.p.trend_ma, self.p.volatility_lookback) + 1
-        )
+        required_bars = max(max_momentum, self.p.trend_ma, self.p.volatility_lookback) + 1
 
         for data in self.datas:
             if len(data) < required_bars:
@@ -211,10 +202,7 @@ class RotateETF6Strategy(bt.Strategy):
         for item in ranked_candidates:
             if len(selected) >= self.p.top_n:
                 break
-            if (
-                item["category"] not in selected_categories
-                or item["category"] == "其他"
-            ):
+            if item["category"] not in selected_categories or item["category"] == "其他":
                 selected.append(item)
                 selected_categories.add(item["category"])
 
@@ -228,18 +216,14 @@ class RotateETF6Strategy(bt.Strategy):
         return selected[: self.p.top_n]
 
     def _risk_parity_weights(self, selected: list[dict]) -> dict[str, float]:
-        inv_vol: dict[str, float] = {
-            item["code"]: 1.0 / item["volatility"] for item in selected
-        }
+        inv_vol: dict[str, float] = {item["code"]: 1.0 / item["volatility"] for item in selected}
         total_inv_vol = sum(inv_vol.values())
         if total_inv_vol <= 0:
             equal_weight = 1.0 / len(selected)
             return {item["code"]: equal_weight for item in selected}
 
         weights = {code: v / total_inv_vol for code, v in inv_vol.items()}
-        weights = {
-            code: min(w, self.p.max_position_weight) for code, w in weights.items()
-        }
+        weights = {code: min(w, self.p.max_position_weight) for code, w in weights.items()}
 
         total_weight = sum(weights.values())
         if total_weight <= 0:
@@ -259,12 +243,8 @@ class RotateETF6Strategy(bt.Strategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     cerebro = bt.Cerebro()

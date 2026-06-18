@@ -115,17 +115,13 @@ def test_download_daily_basic_a_stock_ts_success(downloader_ts_module, monkeypat
         "limit": "",
         "offset": "",
     }
-    pro_stub.daily_basic.assert_called_once_with(
-        **expected_params, fields=module.daily_basic_fields
-    )
+    pro_stub.daily_basic.assert_called_once_with(**expected_params, fields=module.daily_basic_fields)
 
     # Verify return value
     pd.testing.assert_frame_equal(result, mock_data)
 
 
-def test_download_daily_basic_a_stock_ts_different_date_formats(
-    downloader_ts_module, monkeypatch
-):
+def test_download_daily_basic_a_stock_ts_different_date_formats(downloader_ts_module, monkeypatch):
     """Test date format conversion in download_daily_basic_a_stock_ts."""
     module, ts_stub, pro_stub = downloader_ts_module
 
@@ -157,14 +153,10 @@ def test_download_daily_basic_a_stock_ts_different_date_formats(
             "limit": "",
             "offset": "",
         }
-        pro_stub.daily_basic.assert_called_once_with(
-            **expected_params, fields=module.daily_basic_fields
-        )
+        pro_stub.daily_basic.assert_called_once_with(**expected_params, fields=module.daily_basic_fields)
 
 
-def test_download_daily_basic_a_stock_ts_invalid_date_format(
-    downloader_ts_module, monkeypatch
-):
+def test_download_daily_basic_a_stock_ts_invalid_date_format(downloader_ts_module, monkeypatch):
     """Test invalid date format raises ValueError."""
     module, ts_stub, pro_stub = downloader_ts_module
 
@@ -177,9 +169,7 @@ def test_download_daily_basic_a_stock_ts_invalid_date_format(
     pro_stub.daily_basic.assert_not_called()
 
 
-def test_download_daily_basic_a_stock_ts_empty_result(
-    downloader_ts_module, monkeypatch
-):
+def test_download_daily_basic_a_stock_ts_empty_result(downloader_ts_module, monkeypatch):
     """Test handling of empty result from API."""
     module, ts_stub, pro_stub = downloader_ts_module
 
@@ -196,23 +186,17 @@ def test_download_daily_basic_a_stock_ts_empty_result(
     assert len(result) == 0
 
 
-def test_download_history_data_etf_ts_missing_token_raises(
-    downloader_ts_module, monkeypatch
-):
+def test_download_history_data_etf_ts_missing_token_raises(downloader_ts_module, monkeypatch):
     module, ts_stub, _ = downloader_ts_module
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
 
     with pytest.raises(ConnectionError, match="Tushare token is missing"):
-        module.download_history_data_etf_ts(
-            etf_id="510300", start_date="2024-01-01", end_date="2024-01-05"
-        )
+        module.download_history_data_etf_ts(etf_id="510300", start_date="2024-01-01", end_date="2024-01-05")
 
     ts_stub.pro_api.assert_not_called()
 
 
-def test_download_history_data_etf_ts_success_ignores_period_adjust(
-    downloader_ts_module, monkeypatch
-):
+def test_download_history_data_etf_ts_success_ignores_period_adjust(downloader_ts_module, monkeypatch):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
 
@@ -263,9 +247,7 @@ def test_download_history_data_etf_ts_success_ignores_period_adjust(
     assert result[module.COL_DATE].tolist() == ["2024-01-01", "2024-01-02"]
 
 
-def test_download_stk_holdernumber_missing_token_raises(
-    downloader_ts_module, monkeypatch
-):
+def test_download_stk_holdernumber_missing_token_raises(downloader_ts_module, monkeypatch):
     """无 token 时应抛出 ConnectionError。"""
     module, ts_stub, _ = downloader_ts_module
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
@@ -324,9 +306,7 @@ def test_download_stk_holdernumber_all_data(downloader_ts_module, monkeypatch):
     )
 
 
-def test_download_top10_floatholders_missing_token_raises(
-    downloader_ts_module, monkeypatch
-):
+def test_download_top10_floatholders_missing_token_raises(downloader_ts_module, monkeypatch):
     module, ts_stub, _ = downloader_ts_module
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
 
@@ -400,9 +380,7 @@ def test_download_top10_floatholders_all_data(downloader_ts_module, monkeypatch)
     )
 
 
-def test_download_history_data_stock_hk_ts_missing_token_raises(
-    downloader_ts_module, monkeypatch
-):
+def test_download_history_data_stock_hk_ts_missing_token_raises(downloader_ts_module, monkeypatch):
     module, ts_stub, _ = downloader_ts_module
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
 
@@ -458,9 +436,7 @@ def test_download_history_data_stock_hk_ts_success(downloader_ts_module, monkeyp
     assert result[module.COL_VOLUME].tolist() == [1020300.0, 980000.0]
 
 
-def test_download_history_data_stock_hk_ts_unsupported_period_raises(
-    downloader_ts_module, monkeypatch
-):
+def test_download_history_data_stock_hk_ts_unsupported_period_raises(downloader_ts_module, monkeypatch):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
 
@@ -477,9 +453,7 @@ def test_download_history_data_stock_hk_ts_unsupported_period_raises(
 
 
 @pytest.mark.parametrize("adjust", [pytest.param(""), pytest.param("qfq")])
-def test_download_history_data_stock_hk_ts_unsupported_adjust_raises(
-    downloader_ts_module, monkeypatch, adjust
-):
+def test_download_history_data_stock_hk_ts_unsupported_adjust_raises(downloader_ts_module, monkeypatch, adjust):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
 
@@ -496,9 +470,7 @@ def test_download_history_data_stock_hk_ts_unsupported_adjust_raises(
 
 
 @pytest.mark.parametrize("stock_id", ["700", "0700", "00700.HK"])
-def test_download_history_data_stock_hk_ts_invalid_stock_id_raises(
-    downloader_ts_module, monkeypatch, stock_id
-):
+def test_download_history_data_stock_hk_ts_invalid_stock_id_raises(downloader_ts_module, monkeypatch, stock_id):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
 
@@ -513,15 +485,11 @@ def test_download_history_data_stock_hk_ts_invalid_stock_id_raises(
     pro_stub.hk_daily_adj.assert_not_called()
 
 
-def test_download_history_data_stock_hk_ts_empty_result(
-    downloader_ts_module, monkeypatch
-):
+def test_download_history_data_stock_hk_ts_empty_result(downloader_ts_module, monkeypatch):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
 
-    pro_stub.hk_daily_adj.return_value = pd.DataFrame(
-        columns=module.hk_daily_adj_fields
-    )
+    pro_stub.hk_daily_adj.return_value = pd.DataFrame(columns=module.hk_daily_adj_fields)
 
     result = module.download_history_data_stock_hk_ts(
         stock_id="00700",
@@ -542,9 +510,7 @@ def test_download_history_data_stock_hk_ts_empty_result(
     assert result.dtypes.apply(str).to_dict() == _expected_hk_history_dtypes(module)
 
 
-def test_download_history_data_stock_hk_ts_single_day_uses_trade_date(
-    downloader_ts_module, monkeypatch
-):
+def test_download_history_data_stock_hk_ts_single_day_uses_trade_date(downloader_ts_module, monkeypatch):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
     monkeypatch.setenv("TUSHARE_HK_DAILY_ADJ_MIN_INTERVAL_SECONDS", "0")
@@ -584,9 +550,7 @@ def test_download_history_data_stock_hk_ts_single_day_uses_trade_date(
     assert result[module.COL_STOCK_ID].tolist() == ["00700"]
 
 
-def test_download_history_data_stock_hk_ts_single_day_reuses_trade_date_cache(
-    downloader_ts_module, monkeypatch
-):
+def test_download_history_data_stock_hk_ts_single_day_reuses_trade_date_cache(downloader_ts_module, monkeypatch):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
     monkeypatch.setenv("TUSHARE_HK_DAILY_ADJ_MIN_INTERVAL_SECONDS", "0")
@@ -630,9 +594,7 @@ def test_download_history_data_stock_hk_ts_single_day_reuses_trade_date_cache(
     assert second[module.COL_STOCK_ID].tolist() == ["00005"]
 
 
-def test_download_history_data_stock_hk_ts_multi_day_uses_throttle(
-    downloader_ts_module, monkeypatch
-):
+def test_download_history_data_stock_hk_ts_multi_day_uses_throttle(downloader_ts_module, monkeypatch):
     """Multi-day path must go through the rate-limit throttle."""
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
@@ -672,9 +634,7 @@ def test_download_history_data_stock_hk_ts_multi_day_uses_throttle(
     assert result[module.COL_STOCK_ID].tolist() == ["00700", "00700"]
 
 
-def test_throttle_records_timestamp_even_on_failed_api_call(
-    downloader_ts_module, monkeypatch, tmp_path
-):
+def test_throttle_records_timestamp_even_on_failed_api_call(downloader_ts_module, monkeypatch, tmp_path):
     """A failed API call must still update the state file so @retrying.retry respects the throttle."""
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
@@ -698,9 +658,7 @@ def test_throttle_records_timestamp_even_on_failed_api_call(
         )
 
     # State file must be written even though the API call raised — so retries wait properly
-    assert (
-        tmp_path / "last_call"
-    ).exists(), "State file must be written on failed call"
+    assert (tmp_path / "last_call").exists(), "State file must be written on failed call"
     recorded = float((tmp_path / "last_call").read_text())
     assert recorded > 0
 

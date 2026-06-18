@@ -17,9 +17,7 @@ def _repo_and_service(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
-    market_data = InMemoryMarketDataProvider(
-        bars={}, trade_dates=[date(2026, 6, 16), date(2026, 6, 17)]
-    )
+    market_data = InMemoryMarketDataProvider(bars={}, trade_dates=[date(2026, 6, 16), date(2026, 6, 17)])
     return engine, session, repo, OrderService(repo, market_data)
 
 
@@ -93,9 +91,7 @@ def test_place_sell_order_freezes_sellable_position(tmp_path):
         frozen_quantity=0,
         cost_amount=Decimal("1800.00"),
     )
-    repo.create_position_lot(
-        account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00")
-    )
+    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
 
     order = service.place_order(
         account_id=account.id,
@@ -116,9 +112,7 @@ def test_place_sell_order_freezes_sellable_position(tmp_path):
 def test_cancel_accepted_buy_order_releases_cash(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
-    order = service.place_order(
-        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), date(2026, 6, 16)
-    )
+    order = service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), date(2026, 6, 16))
 
     cancelled = service.cancel_order(order.id)
     session.commit()
@@ -131,9 +125,7 @@ def test_cancel_accepted_buy_order_releases_cash(tmp_path):
 def test_cancel_rejected_order_raises(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
-    order = service.place_order(
-        account.id, "000001.SZ", OrderSide.BUY, 250, Decimal("10.00"), date(2026, 6, 16)
-    )
+    order = service.place_order(account.id, "000001.SZ", OrderSide.BUY, 250, Decimal("10.00"), date(2026, 6, 16))
 
     with pytest.raises(ValueError):
         service.cancel_order(order.id)

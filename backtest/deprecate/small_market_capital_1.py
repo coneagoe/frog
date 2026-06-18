@@ -17,8 +17,10 @@ from common.const import (  # noqa: E402
     COL_STOCK_ID,
     SecurityType,
 )
-from storage import get_storage  # noqa: E402
-from storage import tb_name_a_stock_basic  # noqa: E402
+from storage import (
+    get_storage,  # noqa: E402
+    tb_name_a_stock_basic,  # noqa: E402
+)
 
 conf.parse_config()
 
@@ -89,9 +91,7 @@ class SmallMarketCapitalStrategy(bt.Strategy):
         df_basic = storage.load_stock_basic(self.stock_ids)
 
         # 筛选条件
-        df_filtered = df_daily_basic[
-            (df_daily_basic[COL_PB] > 0) & (df_daily_basic[COL_PE] > 0)
-        ]
+        df_filtered = df_daily_basic[(df_daily_basic[COL_PB] > 0) & (df_daily_basic[COL_PE] > 0)]
 
         if df_filtered.empty:
             print(f"No stocks pass PB/PE filter for {date_str}")
@@ -109,9 +109,7 @@ class SmallMarketCapitalStrategy(bt.Strategy):
         df_filtered[COL_IPO_DATE] = pd.to_datetime(df_filtered[COL_IPO_DATE])
 
         # 计算上市天数并筛选
-        df_filtered["上市天数"] = (
-            pd.to_datetime(current_date) - df_filtered[COL_IPO_DATE]
-        ).dt.days
+        df_filtered["上市天数"] = (pd.to_datetime(current_date) - df_filtered[COL_IPO_DATE]).dt.days
 
         df_filtered = df_filtered[df_filtered["上市天数"] > self.p.min_list_days]
 
@@ -152,12 +150,8 @@ class SmallMarketCapitalStrategy(bt.Strategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     args = parser.parse_args()
 
     # 获取所有A股股票（排除北交所）

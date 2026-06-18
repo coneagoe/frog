@@ -81,9 +81,7 @@ def test_rebalance_uses_dual_factor_selection(monkeypatch):
 
     fake_storage = MagicMock()
     fake_storage.engine = MagicMock()
-    monkeypatch.setattr(
-        "backtest.small_market_capital_3.get_storage", lambda: fake_storage
-    )
+    monkeypatch.setattr("backtest.small_market_capital_3.get_storage", lambda: fake_storage)
     monkeypatch.setattr(
         "backtest.small_market_capital_3.pd.read_sql",
         lambda *args, **kwargs: candidate,

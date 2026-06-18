@@ -14,8 +14,8 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
     Base.metadata.create_all(session.get_bind())
     app = create_app()
     app.dependency_overrides[get_session] = lambda: session
-    app.dependency_overrides[get_market_data_provider] = (
-        lambda: InMemoryMarketDataProvider(bars={}, trade_dates=[date(2026, 6, 16)])
+    app.dependency_overrides[get_market_data_provider] = lambda: InMemoryMarketDataProvider(
+        bars={}, trade_dates=[date(2026, 6, 16)]
     )
     client = TestClient(app)
     headers = {"Authorization": "Bearer secret"}

@@ -35,10 +35,7 @@ class RsrsNormStrategy(MyStrategy):
         super().next()
         if not self.position:  # not in the market
             # if (self.rsrs_norm[0] > 0.7
-            if (
-                self.rsrs_norm.beta_right[0] > 0.7
-                and self.context[0].current_price > self.ma20[0]
-            ):
+            if self.rsrs_norm.beta_right[0] > 0.7 and self.context[0].current_price > self.ma20[0]:
                 self.order_target_percent(self.data, 0.99)  # enter long
                 # self.buy()
 
@@ -53,12 +50,8 @@ class RsrsNormStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
         "-c",
         "--cash",

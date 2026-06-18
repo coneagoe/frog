@@ -89,9 +89,7 @@ def test_sync_dedupes_per_stock_resets_existing_and_adds_new(monkeypatch):
         },
     ]
 
-    pro_client.stk_holdertrade.assert_called_once_with(
-        start_date="20250101", end_date="20250131", in_de="DE"
-    )
+    pro_client.stk_holdertrade.assert_called_once_with(start_date="20250101", end_date="20250131", in_de="DE")
     blackroom_service.get_active_record.assert_any_call("600519", "A")
     blackroom_service.get_active_record.assert_any_call("000001", "A")
     blackroom_service.update_record.assert_called_once_with(

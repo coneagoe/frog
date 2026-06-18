@@ -42,9 +42,7 @@ def get_redis_client() -> redis.Redis:
 PARTITION_COUNT = get_partition_count()
 
 
-def download_stock_history_hfq_partition_task(
-    *, partition_id: int, partition_count: int, **context
-):
+def download_stock_history_hfq_partition_task(*, partition_id: int, partition_count: int, **context):
     """Download A-share HFQ history data for a specific partition.
 
     Args:
@@ -66,9 +64,7 @@ def download_stock_history_hfq_partition_task(
         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
 
     if partition_id >= partition_count:
-        raise AirflowSkipException(
-            f"partition_id={partition_id} >= partition_count={partition_count}, skip"
-        )
+        raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
     start_date = "2010-01-01"
     end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
@@ -96,10 +92,7 @@ def download_stock_history_hfq_partition_task(
             failed_ids.append(stock_id)
 
         if idx % 50 == 0 or idx == total:
-            print(
-                f"[HFQ p{partition_id:02d}] 进度: {idx}/{total} "
-                f"(failed={len(failed_ids)})"
-            )
+            print(f"[HFQ p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
@@ -108,10 +101,7 @@ def download_stock_history_hfq_partition_task(
             f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
         )
 
-    return (
-        f"A股HFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, "
-        f"count={total}"
-    )
+    return f"A股HFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, count={total}"
 
 
 def save_download_result_to_redis(*, partition_count: int, **context):

@@ -28,14 +28,10 @@ conf.parse_config()
 
 class TestDownloader:
     def test_dl_general_info_stock(self, monkeypatch):
-        mock_data = pd.DataFrame(
-            {"code": ["000001", "600000"], "name": ["平安银行", "浦发银行"]}
-        )
+        mock_data = pd.DataFrame({"code": ["000001", "600000"], "name": ["平安银行", "浦发银行"]})
         mock_ak_stock_info_a_code_name = Mock(return_value=mock_data)
         ak_client = import_module("download.dl.downloader_akshare").ak
-        monkeypatch.setattr(
-            ak_client, "stock_info_a_code_name", mock_ak_stock_info_a_code_name
-        )
+        monkeypatch.setattr(ak_client, "stock_info_a_code_name", mock_ak_stock_info_a_code_name)
 
         result = Downloader.dl_general_info_stock()
 
@@ -130,14 +126,10 @@ class TestDownloader:
         ]
 
         mock_query_history_k_data_plus = Mock(return_value=mock_rs)
-        monkeypatch.setattr(
-            "baostock.query_history_k_data_plus", mock_query_history_k_data_plus
-        )
+        monkeypatch.setattr("baostock.query_history_k_data_plus", mock_query_history_k_data_plus)
 
         dl = Downloader()
-        result = dl.dl_history_data_stock(
-            stock_id="000001", start_date="20240101", end_date="20240102"
-        )
+        result = dl.dl_history_data_stock(stock_id="000001", start_date="20240101", end_date="20240102")
 
         # 断言 baostock 函数被调用
         mock_bs_login.assert_called_once()
@@ -185,9 +177,7 @@ class TestDownloader:
         )
 
         # 调用被测试的方法
-        result = Downloader.dl_history_data_etf(
-            etf_id="510300", start_date="2024-01-01", end_date="2024-01-02"
-        )
+        result = Downloader.dl_history_data_etf(etf_id="510300", start_date="2024-01-01", end_date="2024-01-02")
 
         mock_tushare_client.fund_daily.assert_called_once()
         call_kwargs = mock_tushare_client.fund_daily.call_args.kwargs
@@ -225,14 +215,10 @@ class TestDownloader:
         )
         mock_ak_index_us_stock_sina = Mock(return_value=mock_data)
         ak_client = import_module("download.dl.downloader_akshare").ak
-        monkeypatch.setattr(
-            ak_client, "index_us_stock_sina", mock_ak_index_us_stock_sina
-        )
+        monkeypatch.setattr(ak_client, "index_us_stock_sina", mock_ak_index_us_stock_sina)
 
         # 调用被测试的方法
-        result = Downloader.dl_history_data_us_index(
-            index=".DJI", period=PeriodType.DAILY
-        )
+        result = Downloader.dl_history_data_us_index(index=".DJI", period=PeriodType.DAILY)
 
         # 断言 akshare 函数被调用
         mock_ak_index_us_stock_sina.assert_called_once_with(symbol=".DJI")
@@ -254,28 +240,13 @@ class TestDownloader:
         测试 Downloader 类方法正确映射到对应的实现函数
         """
         # 验证方法映射关系
-        assert (
-            Downloader.dl_general_info_stock.__name__
-            == "download_general_info_stock_ak"
-        )
+        assert Downloader.dl_general_info_stock.__name__ == "download_general_info_stock_ak"
         assert Downloader.dl_general_info_etf.__name__ == "download_general_info_etf_ak"
-        assert (
-            Downloader.dl_general_info_hk_ggt_stock.__name__
-            == "download_general_info_hk_ggt_stock_ak"
-        )
+        assert Downloader.dl_general_info_hk_ggt_stock.__name__ == "download_general_info_hk_ggt_stock_ak"
         assert Downloader.dl_history_data_etf.__name__ == "download_history_data_etf_ts"
-        assert (
-            Downloader.dl_history_data_stock.__name__
-            == "download_history_data_stock_bs"
-        )
-        assert (
-            Downloader.dl_history_data_stock_hk.__name__
-            == "download_history_data_stock_hk_ts"
-        )
-        assert (
-            Downloader.dl_history_data_us_index.__name__
-            == "download_history_data_us_index_ak"
-        )
+        assert Downloader.dl_history_data_stock.__name__ == "download_history_data_stock_bs"
+        assert Downloader.dl_history_data_stock_hk.__name__ == "download_history_data_stock_hk_ts"
+        assert Downloader.dl_history_data_us_index.__name__ == "download_history_data_us_index_ak"
 
 
 if __name__ == "__main__":

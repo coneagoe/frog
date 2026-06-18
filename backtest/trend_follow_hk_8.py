@@ -41,8 +41,7 @@ class TrendFollowingStrategy(MyStrategy):
         }
 
         self.cross_signal_1 = {
-            i: bt.indicators.CrossOver(self.macd_1[i].macd, self.macd_1[i].signal)
-            for i in range(len(self.datas))
+            i: bt.indicators.CrossOver(self.macd_1[i].macd, self.macd_1[i].signal) for i in range(len(self.datas))
         }
 
         self.stop_manager = StopPriceManager(self.datas)
@@ -59,24 +58,18 @@ class TrendFollowingStrategy(MyStrategy):
                         continue
                 else:
                     # 如果MACD死叉或MACD.macd曲线不光滑
-                    if (
-                        self.cross_signal_1[i] < 0
-                        or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0
-                    ):
+                    if self.cross_signal_1[i] < 0 or self.macd_1[i].macd[0] - self.macd_1[i].macd[-1] <= 0:
                         self.context[i].is_candidator = False
                         continue
                     else:
                         if (
                             self.context[i].current_price is not None
-                            and self.context[i].current_price
-                            > self.stop_manager.ema20[i][0]
+                            and self.context[i].current_price > self.stop_manager.ema20[i][0]
                             and self.macd_1[i].signal[0] > 0
                             and self.macd_1[i].macd[0] > 0
                         ):
                             self.order_target_percent(self.datas[i], target=self.target)
-                            self.context[i].stop_price = round(
-                                self.stop_manager.ema20[i][-1], 3
-                            )
+                            self.context[i].stop_price = round(self.stop_manager.ema20[i][-1], 3)
             elif self.context[i].order_state == OrderState.ORDER_HOLDING:
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
 
@@ -104,21 +97,15 @@ class TrendFollowingStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
         "-f",
         "--filter",
         required=False,
         help="Space-separated list of stock IDs to filter out",
     )
-    parser.add_argument(
-        "-c", "--cash", required=False, type=float, help="Initial cash amount"
-    )
+    parser.add_argument("-c", "--cash", required=False, type=float, help="Initial cash amount")
     parser.add_argument("-p", "--plot", required=False, default="", help="Plot trade")
     args = parser.parse_args()
 

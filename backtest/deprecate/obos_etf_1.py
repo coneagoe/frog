@@ -41,10 +41,7 @@ class ObosStrategy(MyStrategy):
         if self.target < 0.02:
             self.target = 0.02
 
-        self.obos = {
-            i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m)
-            for i in range(len(self.datas))
-        }
+        self.obos = {i: OBOS(self.datas[i], n=self.p.param_n, m=self.p.param_m) for i in range(len(self.datas))}
 
         self.stop_manager = StopPriceManager(self.datas)
 
@@ -68,9 +65,7 @@ class ObosStrategy(MyStrategy):
                 self.stop_manager.update_stop_price(self.context, self.datas, i)
                 # 如果OBOS超买
                 if self.obos[i] > OBOS_OVERBUY_THRESHOLD:
-                    self.context[i].stop_price = max(
-                        self.context[i].stop_price, self.datas[i].low[-1]
-                    )
+                    self.context[i].stop_price = max(self.context[i].stop_price, self.datas[i].low[-1])
 
                 if self.context[i].current_price < self.context[i].stop_price:
                     self.order_target_percent(self.datas[i], target=0.0)
@@ -91,12 +86,8 @@ class ObosStrategy(MyStrategy):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-s", "--start", required=True, help="Start date in YYYY-MM-DD format"
-    )
-    parser.add_argument(
-        "-e", "--end", required=True, help="End date in YYYY-MM-DD format"
-    )
+    parser.add_argument("-s", "--start", required=True, help="Start date in YYYY-MM-DD format")
+    parser.add_argument("-e", "--end", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
         "-f",
         "--filter",

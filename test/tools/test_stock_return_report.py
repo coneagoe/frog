@@ -23,18 +23,12 @@ def install_storage_stub(
             return pd.DataFrame()
         return stock_info
 
-    def load_history_data_stock(
-        stock_id, period, adjust, start_date=None, end_date=None
-    ) -> pd.DataFrame:
+    def load_history_data_stock(stock_id, period, adjust, start_date=None, end_date=None) -> pd.DataFrame:
         history_calls.append(stock_id)
         return history_by_stock_id.get(stock_id, pd.DataFrame())
 
-    monkeypatch.setattr(
-        storage, "load_general_info_stock", load_general_info_stock, raising=False
-    )
-    monkeypatch.setattr(
-        storage, "load_history_data_stock", load_history_data_stock, raising=False
-    )
+    monkeypatch.setattr(storage, "load_general_info_stock", load_general_info_stock, raising=False)
+    monkeypatch.setattr(storage, "load_history_data_stock", load_history_data_stock, raising=False)
     monkeypatch.setattr(stock_return_report, "get_storage", lambda: storage)
     return history_calls
 
@@ -43,10 +37,7 @@ def make_history_df(closes: list[float]) -> pd.DataFrame:
     base_date = pd.Timestamp("2026-03-01")
     return pd.DataFrame(
         {
-            COL_DATE: [
-                (base_date + pd.Timedelta(days=offset)).strftime("%Y-%m-%d")
-                for offset in range(len(closes))
-            ],
+            COL_DATE: [(base_date + pd.Timedelta(days=offset)).strftime("%Y-%m-%d") for offset in range(len(closes))],
             COL_CLOSE: closes,
         }
     )
@@ -54,9 +45,7 @@ def make_history_df(closes: list[float]) -> pd.DataFrame:
 
 def test_main_reads_stock_id_from_csv_and_prints_returns(tmp_path, capsys, monkeypatch):
     csv_path = tmp_path / "stocks.csv"
-    pd.DataFrame({"stock_id": ["600547"]}).to_csv(
-        csv_path, index=False, encoding="utf-8-sig"
-    )
+    pd.DataFrame({"stock_id": ["600547"]}).to_csv(csv_path, index=False, encoding="utf-8-sig")
     install_storage_stub(monkeypatch, {"600547": make_history_df(list(range(1, 26)))})
 
     exit_code = stock_return_report.main(["--input-csv", str(csv_path)])
@@ -70,9 +59,7 @@ def test_main_reads_stock_id_from_csv_and_prints_returns(tmp_path, capsys, monke
 
 def test_main_resolves_name_column_via_general_info_stock(tmp_path, monkeypatch):
     csv_path = tmp_path / "stocks.csv"
-    pd.DataFrame({"name": ["山东黄金"]}).to_csv(
-        csv_path, index=False, encoding="utf-8-sig"
-    )
+    pd.DataFrame({"name": ["山东黄金"]}).to_csv(csv_path, index=False, encoding="utf-8-sig")
     stock_info = pd.DataFrame(
         {
             COL_STOCK_ID: ["600547"],
@@ -94,9 +81,7 @@ def test_main_resolves_name_column_via_general_info_stock(tmp_path, monkeypatch)
 def test_main_exports_csv_when_output_path_given(tmp_path, monkeypatch):
     csv_path = tmp_path / "stocks.csv"
     output_path = tmp_path / "result.csv"
-    pd.DataFrame({"stock_id": ["600547"]}).to_csv(
-        csv_path, index=False, encoding="utf-8-sig"
-    )
+    pd.DataFrame({"stock_id": ["600547"]}).to_csv(csv_path, index=False, encoding="utf-8-sig")
     install_storage_stub(monkeypatch, {"600547": make_history_df(list(range(1, 26)))})
 
     exit_code = stock_return_report.main(
@@ -111,13 +96,9 @@ def test_main_exports_csv_when_output_path_given(tmp_path, monkeypatch):
     assert exported.loc[0, "monthly_return_pct"] == 400.0
 
 
-def test_main_marks_missing_returns_when_history_is_insufficient(
-    tmp_path, capsys, monkeypatch
-):
+def test_main_marks_missing_returns_when_history_is_insufficient(tmp_path, capsys, monkeypatch):
     csv_path = tmp_path / "stocks.csv"
-    pd.DataFrame({"stock_id": ["600547"]}).to_csv(
-        csv_path, index=False, encoding="utf-8-sig"
-    )
+    pd.DataFrame({"stock_id": ["600547"]}).to_csv(csv_path, index=False, encoding="utf-8-sig")
     install_storage_stub(monkeypatch, {"600547": make_history_df([10, 11, 12, 13, 14])})
 
     exit_code = stock_return_report.main(["--input-csv", str(csv_path)])
@@ -130,18 +111,14 @@ def test_main_marks_missing_returns_when_history_is_insufficient(
 
 def test_build_report_sorts_by_weekly_return_ascending_by_default(tmp_path):
     csv_path = tmp_path / "stocks.csv"
-    pd.DataFrame({"stock_id": ["600002", "600003", "600001"]}).to_csv(
-        csv_path, index=False, encoding="utf-8-sig"
-    )
+    pd.DataFrame({"stock_id": ["600002", "600003", "600001"]}).to_csv(csv_path, index=False, encoding="utf-8-sig")
     storage = SimpleNamespace(
         load_general_info_stock=lambda: pd.DataFrame(),
         load_history_data_stock=lambda stock_id, period, adjust, start_date=None, end_date=None: {
             "600001": make_history_df([10, 10, 10, 10, 10, 11]),
             "600002": make_history_df([10, 10, 10, 10, 10, 12]),
             "600003": make_history_df([10, 11, 12, 13, 14]),
-        }.get(
-            stock_id, pd.DataFrame()
-        ),
+        }.get(stock_id, pd.DataFrame()),
     )
 
     report_df = stock_return_report.build_report(str(csv_path), storage=storage)
@@ -152,9 +129,7 @@ def test_build_report_sorts_by_weekly_return_ascending_by_default(tmp_path):
 def test_main_honors_monthly_desc_sort_order_for_exported_csv(tmp_path, monkeypatch):
     csv_path = tmp_path / "stocks.csv"
     output_path = tmp_path / "result.csv"
-    pd.DataFrame({"stock_id": ["600002", "600003", "600001"]}).to_csv(
-        csv_path, index=False, encoding="utf-8-sig"
-    )
+    pd.DataFrame({"stock_id": ["600002", "600003", "600001"]}).to_csv(csv_path, index=False, encoding="utf-8-sig")
     install_storage_stub(
         monkeypatch,
         {

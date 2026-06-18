@@ -11,6 +11,4 @@ class StopPriceManagerKama:
         if profit_rate < 0.05:
             return
         else:
-            context[i].stop_price = max(
-                context[i].stop_price, round(self.kama[i].kama[-1], 3)
-            )
+            context[i].stop_price = max(context[i].stop_price, round(self.kama[i].kama[-1], 3))

@@ -98,9 +98,7 @@ def test_download_history_data_stock_bs_valid_input(downloader_bs_module):
         "pcfNcfTTM",
         "isST",
     ]
-    query_mock.next = Mock(
-        side_effect=[True, True, False]
-    )  # Return True twice, then False
+    query_mock.next = Mock(side_effect=[True, True, False])  # Return True twice, then False
     query_mock.get_row_data = Mock(
         side_effect=[
             [
@@ -386,9 +384,7 @@ def test_download_history_data_stock_bs_login_failure(downloader_bs_module):
     bs_stub.login = Mock(return_value=login_mock)
 
     with pytest.raises(ConnectionError, match="Baostock login failed: Login failed"):
-        module.download_history_data_stock_bs(
-            stock_id="000001", start_date="2024-01-01", end_date="2024-01-02"
-        )
+        module.download_history_data_stock_bs(stock_id="000001", start_date="2024-01-01", end_date="2024-01-02")
 
     bs_stub.login.assert_called_once()
 
@@ -421,9 +417,7 @@ def test_download_history_data_stock_bs_query_error(downloader_bs_module):
     bs_stub.query_history_k_data_plus = Mock(return_value=query_mock)
     bs_stub.logout = Mock()
 
-    result = module.download_history_data_stock_bs(
-        stock_id="000001", start_date="2024-01-01", end_date="2024-01-02"
-    )
+    result = module.download_history_data_stock_bs(stock_id="000001", start_date="2024-01-01", end_date="2024-01-02")
 
     # Should return empty DataFrame when query has error
     assert isinstance(result, pd.DataFrame)
@@ -478,9 +472,7 @@ def test_download_history_data_stock_bs_empty_values_replaced_with_zero(
         "pcfNcfTTM",
         "isST",
     ]
-    query_mock.next = Mock(
-        side_effect=[True, True, False]
-    )  # Return True twice, then False
+    query_mock.next = Mock(side_effect=[True, True, False])  # Return True twice, then False
     query_mock.get_row_data = Mock(
         side_effect=[
             [

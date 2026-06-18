@@ -545,16 +545,13 @@ class MyStrategy(bt.Strategy):
 
     def __init__(self):  # noqa: E303
         self.pct_change = {
-            i: bt.indicators.PercentChange(
-                self.datas[i].close, period=self.p.n_day_increase
-            )
+            i: bt.indicators.PercentChange(self.datas[i].close, period=self.p.n_day_increase)
             for i in range(len(self.datas))
         }
         # self.target = round(1 / len(stocks), 2)
         self.target = round(1 / self.p.num_positions, 2)
         self.ema_low = {
-            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period)
-            for i in range(len(self.datas))
+            i: bt.indicators.EMA(self.datas[i].low, period=self.p.ema_period) for i in range(len(self.datas))
         }
 
     def next(self):  # noqa: E303
@@ -562,32 +559,22 @@ class MyStrategy(bt.Strategy):
         performance = {i: self.pct_change[i][0] for i in range(len(self.datas))}
 
         # 按照涨幅降序排列
-        ranked_performance = sorted(
-            performance.items(), key=lambda item: item[1], reverse=True
-        )
+        ranked_performance = sorted(performance.items(), key=lambda item: item[1], reverse=True)
 
         # 选择涨幅最大的前n个股票
-        selected = [
-            stock
-            for stock, change in ranked_performance[: self.p.num_positions]
-            if change > 0
-        ]
+        selected = [stock for stock, change in ranked_performance[: self.p.num_positions] if change > 0]
 
         for i in range(len(self.datas)):
             is_order = gContext[i].order is not None
             if is_order:
                 gContext[i].holding_bars += 1
 
-                if (i not in selected) and (
-                    gContext[i].holding_bars >= self.p.holding_bars
-                ):
+                if (i not in selected) and (gContext[i].holding_bars >= self.p.holding_bars):
                     self.order_target_percent(self.datas[i], target=0.0)
                     gContext[i].order = None
             else:
                 if i in selected and self.ema_low[i][0] < self.datas[i].close[0]:
-                    gContext[i].order = self.order_target_percent(
-                        self.datas[i], target=self.target
-                    )
+                    gContext[i].order = self.order_target_percent(self.datas[i], target=self.target)
                     gContext[i].holding_bars = 0
 
     def stop(self):  # noqa: E303

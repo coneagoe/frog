@@ -53,6 +53,4 @@ class AStockBasic(Base):
 
     是否沪深港通 = Column(COL_IS_HS, String(2), nullable=True, comment="是否沪深港通")
     实控人姓名 = Column(COL_ACT_NAME, String(40), nullable=True, comment="实控人姓名")
-    实控人企业性质 = Column(
-        COL_ACT_ENT_TYPE, String(20), nullable=True, comment="实控人企业性质"
-    )
+    实控人企业性质 = Column(COL_ACT_ENT_TYPE, String(20), nullable=True, comment="实控人企业性质")

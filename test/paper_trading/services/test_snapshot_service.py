@@ -31,9 +31,7 @@ def test_generate_snapshot_values_positions_at_close(tmp_path):
         trade_dates=[date(2026, 6, 16)],
     )
 
-    snapshot = SnapshotService(repo, market_data).generate_snapshot(
-        account.id, date(2026, 6, 16)
-    )
+    snapshot = SnapshotService(repo, market_data).generate_snapshot(account.id, date(2026, 6, 16))
     session.commit()
 
     assert snapshot.cash_available == Decimal("100000.0000")

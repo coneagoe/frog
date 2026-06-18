@@ -17,9 +17,7 @@ def test_paper_trading_tables_are_registered(tmp_path):
     assert tb_name_paper_orders in inspector.get_table_names()
     assert tb_name_paper_trades in inspector.get_table_names()
 
-    order_columns = {
-        column["name"] for column in inspector.get_columns(tb_name_paper_orders)
-    }
+    order_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_orders)}
     assert {
         "id",
         "account_id",

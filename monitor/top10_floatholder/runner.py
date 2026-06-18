@@ -26,9 +26,7 @@ class SSFAlertSummary:
     failed: int = 0
 
 
-def _build_no_signal_marker(
-    stock_id: str, ann_date: str, history_df: pd.DataFrame
-) -> dict[str, str]:
+def _build_no_signal_marker(stock_id: str, ann_date: str, history_df: pd.DataFrame) -> dict[str, str]:
     ann_dates = sorted(
         pd.to_datetime(history_df["公告日期"]).dt.date.unique(),
         reverse=True,
@@ -63,9 +61,7 @@ def run_ssf_change_alert() -> SSFAlertSummary:
                 signal_payloads.append(signal)
                 continue
 
-            no_signal_markers.append(
-                _build_no_signal_marker(stock_id, ann_date, history_df)
-            )
+            no_signal_markers.append(_build_no_signal_marker(stock_id, ann_date, history_df))
         except Exception:
             summary.failed += 1
             logger.exception("Failed to process SSF change candidate %s", stock_id)

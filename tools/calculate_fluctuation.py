@@ -86,33 +86,17 @@ def calculate_fluctuation(df: pd.DataFrame):
     df[col_positive_fluctuation_percent] = df[col_positive_fluctuation] * 100
     df[col_negative_fluctuation_percent] = df[col_negative_fluctuation] * 100
 
-    df[col_buy_price] = round(
-        df[COL_CURRENT_PRICE] * (1 + df[col_negative_fluctuation]), 3
-    )
-    df[col_sell_price] = round(
-        df[COL_CURRENT_PRICE] * (1 + df[col_positive_fluctuation]), 3
-    )
+    df[col_buy_price] = round(df[COL_CURRENT_PRICE] * (1 + df[col_negative_fluctuation]), 3)
+    df[col_sell_price] = round(df[COL_CURRENT_PRICE] * (1 + df[col_positive_fluctuation]), 3)
 
-    df[COL_BUY_COUNT] = (
-        np.floor(df[COL_BUY_AMOUNT] * 0.1 / df[col_buy_price] / 100) * 100
-    )
-    df[col_sell_count] = (
-        np.floor(df[COL_BUY_AMOUNT] * 0.1 / df[col_sell_price] / 100) * 100
-    )
+    df[COL_BUY_COUNT] = np.floor(df[COL_BUY_AMOUNT] * 0.1 / df[col_buy_price] / 100) * 100
+    df[col_sell_count] = np.floor(df[COL_BUY_AMOUNT] * 0.1 / df[col_sell_price] / 100) * 100
 
-    df[col_buy_price_reverse] = round(
-        df[COL_CURRENT_PRICE] * (1 - df[col_positive_fluctuation]), 3
-    )
-    df[col_sell_price_reverse] = round(
-        df[COL_CURRENT_PRICE] * (1 - df[col_negative_fluctuation]), 3
-    )
+    df[col_buy_price_reverse] = round(df[COL_CURRENT_PRICE] * (1 - df[col_positive_fluctuation]), 3)
+    df[col_sell_price_reverse] = round(df[COL_CURRENT_PRICE] * (1 - df[col_negative_fluctuation]), 3)
 
-    df[col_buy_count_reverse] = (
-        np.floor(df[COL_BUY_AMOUNT] * 0.1 / df[col_buy_price_reverse] / 100) * 100
-    )
-    df[col_sell_count_reverse] = (
-        np.floor(df[COL_BUY_AMOUNT] * 0.1 / df[col_sell_price_reverse] / 100) * 100
-    )
+    df[col_buy_count_reverse] = np.floor(df[COL_BUY_AMOUNT] * 0.1 / df[col_buy_price_reverse] / 100) * 100
+    df[col_sell_count_reverse] = np.floor(df[COL_BUY_AMOUNT] * 0.1 / df[col_sell_price_reverse] / 100) * 100
 
     df = pd.DataFrame(
         df,
@@ -135,8 +119,6 @@ def calculate_fluctuation(df: pd.DataFrame):
 
 
 for sheet_name in sheet_names:
-    df = pd.read_excel(
-        trading_book_path, sheet_name=sheet_name, dtype={COL_STOCK_ID: str}
-    )
+    df = pd.read_excel(trading_book_path, sheet_name=sheet_name, dtype={COL_STOCK_ID: str})
     df = calculate_fluctuation(df)
     df.to_csv(f"fluctuation_{sheet_name}.csv", encoding="utf_8_sig", index=False)
