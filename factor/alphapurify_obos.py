@@ -36,25 +36,17 @@ EXIT_ERROR = 1
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="从 DB 读取 A 股日线数据，计算 OBOS 因子并用 Alphapurify 做分析"
-    )
-    parser.add_argument(
-        "--start-date", default="2024-01-01", help="开始日期 YYYY-MM-DD"
-    )
+    parser = argparse.ArgumentParser(description="从 DB 读取 A 股日线数据，计算 OBOS 因子并用 Alphapurify 做分析")
+    parser.add_argument("--start-date", default="2024-01-01", help="开始日期 YYYY-MM-DD")
     parser.add_argument("--end-date", default=None, help="结束日期 YYYY-MM-DD")
-    parser.add_argument(
-        "--max-stocks", type=int, default=100, help="最多读取多少只股票"
-    )
+    parser.add_argument("--max-stocks", type=int, default=100, help="最多读取多少只股票")
     parser.add_argument(
         "--adjust",
         choices=["qfq", "hfq"],
         default="qfq",
         help="读取 DB 时使用的复权类型",
     )
-    parser.add_argument(
-        "--report-html", default=None, help="可选：IC 报告 HTML 输出路径"
-    )
+    parser.add_argument("--report-html", default=None, help="可选：IC 报告 HTML 输出路径")
     return parser
 
 
@@ -68,11 +60,7 @@ def _normalize_history_df(history_df: pd.DataFrame, stock_id: str) -> pd.DataFra
 
     normalized = history_df[required_cols].copy()
     normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], errors="coerce")
-    normalized = (
-        normalized.dropna(subset=[COL_DATE])
-        .sort_values(COL_DATE)
-        .reset_index(drop=True)
-    )
+    normalized = normalized.dropna(subset=[COL_DATE]).sort_values(COL_DATE).reset_index(drop=True)
     if normalized.empty:
         return pd.DataFrame()
 
@@ -127,11 +115,7 @@ def load_obos_panel_from_db(
     if not frames:
         return pd.DataFrame(columns=["datetime", "symbol", "close", COL_OBOS])
 
-    return (
-        pd.concat(frames, ignore_index=True)
-        .sort_values(["datetime", "symbol"])
-        .reset_index(drop=True)
-    )
+    return pd.concat(frames, ignore_index=True).sort_values(["datetime", "symbol"]).reset_index(drop=True)
 
 
 def run_analysis(
@@ -139,9 +123,7 @@ def run_analysis(
     report_html: str | None = None,
 ) -> Any:
     if FactorAnalyzer is None:
-        raise ImportError(
-            "alphapurify 未安装，请先执行: poetry run pip install alphapurify"
-        )
+        raise ImportError("alphapurify 未安装，请先执行: uv add alphapurify")
 
     analyzer = FactorAnalyzer(
         base_df=panel_df,
@@ -183,7 +165,10 @@ def main(argv: list[str] | None = None, storage: Any | None = None) -> int:
         return EXIT_ERROR
 
     print(
-        f"面板数据: rows={len(panel_df)}, symbols={panel_df['symbol'].nunique()}, dates={panel_df['datetime'].nunique()}"
+        "面板数据: "
+        f"rows={len(panel_df)}, "
+        f"symbols={panel_df['symbol'].nunique()}, "
+        f"dates={panel_df['datetime'].nunique()}"
     )
     if getattr(analyzer, "mean_ics_dict", None) is not None:
         print(f"mean_ics_dict={analyzer.mean_ics_dict}")

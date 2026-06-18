@@ -33,28 +33,24 @@ dependencies = [
     "sqlalchemy (>=2.0.44,<3.0.0)",
     "psycopg2-binary (>=2.9.11,<3.0.0)",
     "toml (>=0.10.2,<0.11.0)",
-    "alphapurify (>=0.1.8,<0.2.0)",
-    "httpx (>=0.28.0,<1.0.0)"
+    "httpx (>=0.28.0,<1.0.0)",
+    "tqsdk (>=3.10.1,<4.0.0)"
 ]
 
-[build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry]
-name = "frog"
-version = "0.1.0"
-package-mode = false
-
-[tool.poetry.group.dev.dependencies]
-pre-commit = "^4.2.0"
-flake8 = "^7.3.0"
-types-requests = "^2.32.4.20250913"
-mypy = "^1.18.2"
-pandas-stubs = "^2.3.2.250926"
-types-tqdm = "^4.67.0.20250809"
-types-psycopg2 = "^2.9.21.20251012"
-scipy-stubs = "^1.16.3.0"
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2.0,<5.0.0",
+    "ruff>=0.12.0,<1.0.0",
+    "types-requests>=2.32.4.20250913,<3.0.0.0",
+    "mypy>=1.18.2,<2.0.0",
+    "pandas-stubs>=2.3.2.250926,<3.0.0.0",
+    "types-tqdm>=4.67.0.20250809,<5.0.0.0",
+    "types-psycopg2>=2.9.21.20251012,<3.0.0.0",
+    "scipy-stubs>=1.16.3.0,<2.0.0.0",
+]
+research = [
+    "alphapurify>=0.1.8,<0.2.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -62,8 +58,19 @@ pythonpath = ["."]
 [tool.block]
 target-version = ["py311"]
 
-[tool.isort]
-profile = "black"
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.uv]
+package = false
 
 [tool.mypy]
 python_version = "3.11"
@@ -131,20 +138,22 @@ ignore_missing_imports = true
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = ["tqsdk.*"]
+ignore_missing_imports = true
+ignore_errors = true
+
+[[tool.mypy.overrides]]
 module = ["airflow", "airflow.*"]
 ignore_missing_imports = true
 
-[[tool.poetry.source]]
+[[tool.uv.index]]
 name = "ali"
 url = "https://mirrors.aliyun.com/pypi/simple/"
-priority = "primary"
 
-[[tool.poetry.source]]
+[[tool.uv.index]]
 name = "tencent"
 url = "https://mirrors.cloud.tencent.com/pypi/simple/"
-priority = "supplemental"
 
-[[tool.poetry.source]]
+[[tool.uv.index]]
 name = "tsinghua"
 url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/"
-priority = "supplemental"
