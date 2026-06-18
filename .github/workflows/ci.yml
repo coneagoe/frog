@@ -19,65 +19,27 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: 2.0.0
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-
-    - name: Cache Poetry dependencies
-      uses: actions/cache@v3
+    - name: Cache uv dependencies
+      uses: actions/cache@v4
       with:
         path: |
-          ~/.cache/pypoetry
+          ~/.cache/uv
           .venv
-        key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-poetry-
+        key: ${{ runner.os }}-uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
 
     - name: Install dependencies
-      run: |
-        poetry install --with dev
+      run: uv sync --group dev
 
     - name: Run pre-commit hooks
-      run: |
-        poetry run pre-commit run --all-files
+      run: uv run pre-commit run --all-files
 
     - name: Run tests
-      run: |
-        poetry run pytest test
-
-#  build:
-#    needs: [test]
-#    runs-on: ubuntu-latest
-#    if: github.ref == 'refs/heads/main'
-#
-#    steps:
-#    - uses: actions/checkout@v4
-#
-#    - name: Set up Python
-#      uses: actions/setup-python@v4
-#      with:
-#        python-version: "3.12"
-#
-#    - name: Install Poetry
-#      uses: snok/install-poetry@v1
-#      with:
-#        version: 2.0.0
-#
-#    - name: Build package
-#      run: |
-#        poetry build
-#
-#    - name: Upload build artifacts
-#      uses: actions/upload-artifact@v3
-#      with:
-#        name: dist
-#        path: dist/
-#
+      run: uv run pytest test

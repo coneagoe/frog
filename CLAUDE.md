@@ -8,7 +8,7 @@ Frog is a quantitative trading system for Chinese stock markets (A-shares, Hong 
 
 ## Development Commands
 
-> **Important**: Always use `poetry run` to execute Python commands (e.g., `poetry run python`, `poetry run pytest`), never use bare `python` or `python3`.
+> **Important**: Always use `uv run` to execute Python commands (e.g., `uv run python`, `uv run pytest`), never use bare `python` or `python3`.
 
 ```bash
 # Docker operations
@@ -21,18 +21,17 @@ docker compose build --no-cache               # Rebuild images
 docker compose ps                             # List running services
 
 # Environment setup
-poetry install --with dev
-poetry run pre-commit install
+uv sync --group dev
+uv run pre-commit install
 
 # Code quality
-poetry run pre-commit run --all-files        # Run all checks on tracked files
-poetry run black .                           # Format code
-poetry run isort .                           # Sort imports
-poetry run flake8 --max-line-length=120      # Linting
-poetry run mypy                              # Type checking
+uv run pre-commit run --all-files           # Run all checks on tracked files
+uv run ruff format .                        # Format code
+uv run ruff check .                         # Linting
+uv run mypy                                 # Type checking
 
 # Testing
-poetry run pytest test                       # Run all tests
+uv run pytest test                          # Run all tests
 ```
 
 ## Naming Conventions
@@ -94,8 +93,8 @@ When simplifying code (per `docs/coding_rule.md`):
 - **Naming**: Name by actual responsibility/behavior, not by current implementation details
 - **Airflow DAGs**: Never change schedule, dependencies, retries, SLA, or task boundaries
 - **Verification Whitelist**: Only run these commands for validation:
-  - `poetry run pre-commit run --all-files`
-  - `poetry run pytest test`
+  - `uv run pre-commit run --all-files`
+  - `uv run pytest test`
   - `docker compose config`
 
 ### Type Checking

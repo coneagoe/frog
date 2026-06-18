@@ -32,25 +32,17 @@ EXIT_ERROR = 1
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="从 DB 读取社保基金持股比例因子面板并用 Alphapurify 做分析"
-    )
-    parser.add_argument(
-        "--start-date", default="2024-01-01", help="开始日期 YYYY-MM-DD"
-    )
+    parser = argparse.ArgumentParser(description="从 DB 读取社保基金持股比例因子面板并用 Alphapurify 做分析")
+    parser.add_argument("--start-date", default="2024-01-01", help="开始日期 YYYY-MM-DD")
     parser.add_argument("--end-date", default=None, help="结束日期 YYYY-MM-DD")
-    parser.add_argument(
-        "--max-stocks", type=int, default=100, help="最多读取多少只股票"
-    )
+    parser.add_argument("--max-stocks", type=int, default=100, help="最多读取多少只股票")
     parser.add_argument(
         "--adjust",
         choices=["qfq", "hfq"],
         default="qfq",
         help="读取 DB 时使用的复权类型",
     )
-    parser.add_argument(
-        "--report-html", default=None, help="可选：IC 报告 HTML 输出路径"
-    )
+    parser.add_argument("--report-html", default=None, help="可选：IC 报告 HTML 输出路径")
     return parser
 
 
@@ -84,9 +76,7 @@ def load_ssf_ratio_panel_from_db(
     # SSF_FACTOR_RATIO now matches the downstream expected name, so no renaming needed
     # but keep the logic to ensure the factor column exists
     if SSF_FACTOR_RATIO not in df.columns:
-        raise ValueError(
-            f"Expected factor column '{SSF_FACTOR_RATIO}' not found in panel"
-        )
+        raise ValueError(f"Expected factor column '{SSF_FACTOR_RATIO}' not found in panel")
 
     # validate required panel columns before selecting
     required_cols = ["datetime", "symbol", "close", SSF_FACTOR_RATIO]
@@ -106,9 +96,7 @@ def run_analysis(
     report_html: str | None = None,
 ) -> Any:
     if FactorAnalyzer is None:
-        raise ImportError(
-            "alphapurify 未安装，请先执行: poetry run pip install alphapurify"
-        )
+        raise ImportError("alphapurify 未安装，请先执行: uv add alphapurify")
 
     analyzer = FactorAnalyzer(
         base_df=panel_df,
@@ -151,7 +139,10 @@ def main(argv: list[str] | None = None, storage: Any | None = None) -> int:
         return EXIT_ERROR
 
     print(
-        f"面板数据: rows={len(panel_df)}, symbols={panel_df['symbol'].nunique()}, dates={panel_df['datetime'].nunique()}"
+        "面板数据: "
+        f"rows={len(panel_df)}, "
+        f"symbols={panel_df['symbol'].nunique()}, "
+        f"dates={panel_df['datetime'].nunique()}"
     )
     if getattr(analyzer, "mean_ics_dict", None) is not None:
         print(f"mean_ics_dict={analyzer.mean_ics_dict}")

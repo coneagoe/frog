@@ -173,7 +173,20 @@ services:
     depends_on: [db, redis]
     environment:
       <<: [*app-common-env, *airflow-email-env]
-    volumes: [".:/app"]
+
+  paper-trading:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *db-common-env
+      DATABASE_URL: postgresql://quant:quant@db:5432/quant
+      PAPER_TRADING_API_TOKEN: ${PAPER_TRADING_API_TOKEN:?PAPER_TRADING_API_TOKEN is required in .env}
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["uvicorn", "paper_trading.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
 
   celery-worker:
     build:
@@ -182,7 +195,6 @@ services:
     depends_on: [db, redis]
     environment:
       <<: *app-common-env
-    volumes: [".:/app"]
     profiles: ["worker"]
 
   airflow-init-permissions:

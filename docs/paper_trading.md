@@ -2,27 +2,33 @@
 
 The paper trading backend provides a FastAPI API for A-share simulated trading. The MVP supports multiple paper accounts, limit orders, daily matching runs, basic A-share fees, position lots, and account snapshots.
 
-## Environment
+## Docker (Recommended)
 
-Set a deployment-level API token before starting the service:
+The paper trading backend is containerized. Add `PAPER_TRADING_API_TOKEN` to your `.env` file:
+
+```bash
+echo 'PAPER_TRADING_API_TOKEN="change-me"' >> .env
+```
+
+Then start the service:
+
+```bash
+docker compose up -d paper-trading
+```
+
+The API listens on `http://localhost:8000`. All other environment variables (DB connection, etc.) are wired via the common Docker Compose config.
+
+## Manual Start
+
+If running outside Docker, set environment variables and start the API directly:
 
 ```bash
 export PAPER_TRADING_API_TOKEN="change-me"
-```
-
-The API uses the existing storage configuration variables from `storage.config.StorageConfig`:
-
-```bash
 export db_host=localhost
 export db_port=5432
 export db_username=quant
 export db_password=quant
-```
-
-## Start The API
-
-```bash
-poetry run uvicorn paper_trading.api.app:create_app --factory --host 0.0.0.0 --port 8000
+uv run uvicorn paper_trading.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
 All endpoints require a bearer token:
