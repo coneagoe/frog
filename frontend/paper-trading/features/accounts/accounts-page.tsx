@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { listAccounts } from "@/lib/api-client";
+import { deleteAccount, listAccounts } from "@/lib/api-client";
 import type { Account } from "@/lib/types";
 import { AccountList } from "./account-list";
 import { CreateAccountForm } from "./create-account-form";
@@ -54,6 +54,22 @@ export function AccountsPage() {
     await refreshAccounts();
   }
 
+  async function onDelete(account: Account) {
+    const confirmed = window.confirm(
+      `Delete paper account ${account.name}? This permanently removes all related trading data.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      setError(null);
+      await deleteAccount(account.id);
+      await refreshAccounts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete account");
+    }
+  }
+
   return (
     <section className="page">
       <div className="page__header">
@@ -72,7 +88,7 @@ export function AccountsPage() {
             </button>
           </div>
           {loading ? <p className="muted">Loading paper trading data...</p> : null}
-          {error ? <ErrorBanner message={error} /> : <AccountList accounts={accounts} />}
+          {error ? <ErrorBanner message={error} /> : <AccountList accounts={accounts} onDelete={onDelete} />}
         </section>
       </div>
     </section>

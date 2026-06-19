@@ -32,7 +32,7 @@ async function proxy(request: Request, context: RouteContext) {
     }
     const response = await fetch(targetUrl.toString(), init);
     const text = await response.text();
-    return new Response(text, {
+    return new Response(response.status === 204 ? null : text, {
       status: response.status,
       headers: { "content-type": response.headers.get("content-type") ?? "application/json" }
     });
@@ -46,5 +46,9 @@ export function GET(request: Request, context: RouteContext) {
 }
 
 export function POST(request: Request, context: RouteContext) {
+  return proxy(request, context);
+}
+
+export function DELETE(request: Request, context: RouteContext) {
   return proxy(request, context);
 }

@@ -16,3 +16,6 @@ class AccountService:
 
     def list_accounts(self) -> list[PaperAccount]:
         return self.repo.list_accounts()
+
+    def delete_account(self, account_id: int) -> bool:
+        return self.repo.delete_account(account_id)
