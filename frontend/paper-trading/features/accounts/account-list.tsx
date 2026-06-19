@@ -21,6 +21,28 @@ const accountColumns: Column<Account>[] = [
   }
 ];
 
-export function AccountList({ accounts }: { accounts: Account[] }) {
-  return <DataTable columns={accountColumns} emptyTitle="No paper accounts yet" getRowKey={(account) => account.id} rows={accounts} />;
+function getAccountColumns(onDelete?: (account: Account) => void): Column<Account>[] {
+  return accountColumns.map((column) => {
+    if (column.key !== "actions") {
+      return column;
+    }
+    return {
+      ...column,
+      render: (account) => (
+        <div className="actions">
+          <Link href={`/trade?accountId=${account.id}`}>Trade</Link>
+          <Link href={`/analytics?accountId=${account.id}`}>Analytics</Link>
+          {onDelete ? (
+            <button className="button button--secondary" onClick={() => onDelete(account)} type="button">
+              Delete {account.name}
+            </button>
+          ) : null}
+        </div>
+      )
+    };
+  });
+}
+
+export function AccountList({ accounts, onDelete }: { accounts: Account[]; onDelete?: (account: Account) => void }) {
+  return <DataTable columns={getAccountColumns(onDelete)} emptyTitle="No paper accounts yet" getRowKey={(account) => account.id} rows={accounts} />;
 }

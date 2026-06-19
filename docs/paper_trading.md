@@ -39,6 +39,16 @@ Authorization: Bearer change-me
 
 ## Start The Frontend
 
+The Docker Compose stack includes the backend and Next.js frontend:
+
+```bash
+docker compose up -d paper-trading paper-trading-frontend
+```
+
+Open `http://localhost:3000/accounts`. The frontend container talks to the backend container at `http://paper-trading:8000`.
+
+## Manual Frontend Start
+
 The paper trading frontend lives in `frontend/paper-trading` and proxies browser requests to the FastAPI backend.
 
 ```bash
@@ -60,6 +70,15 @@ curl -X POST http://localhost:8000/paper/accounts \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
   -d '{"name":"demo","initial_cash":"100000.00"}'
+```
+
+## Delete Account
+
+Deleting an account permanently removes the paper account and its associated orders, trades, positions, position lots, snapshots, matching runs, and cash ledger entries.
+
+```bash
+curl -X DELETE http://localhost:8000/paper/accounts/1 \
+  -H "Authorization: Bearer change-me"
 ```
 
 ## Create Limit Order

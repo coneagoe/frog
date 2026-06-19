@@ -35,6 +35,32 @@ class PaperTradingRepository:
     def list_accounts(self) -> list[PaperAccount]:
         return list(self.session.query(PaperAccount).order_by(PaperAccount.id.asc()).all())
 
+    def delete_account(self, account_id: int) -> bool:
+        account = self.get_account(account_id)
+        if account is None:
+            return False
+
+        self.session.query(PaperCashLedger).filter(PaperCashLedger.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.query(PaperTrade).filter(PaperTrade.account_id == account_id).delete(synchronize_session=False)
+        self.session.query(PaperOrder).filter(PaperOrder.account_id == account_id).delete(synchronize_session=False)
+        self.session.query(PaperPositionLot).filter(PaperPositionLot.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.query(PaperPosition).filter(PaperPosition.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.query(PaperAccountSnapshot).filter(PaperAccountSnapshot.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.delete(account)
+        self.session.flush()
+        return True
+
     def add_cash_event(
         self,
         account_id: int,

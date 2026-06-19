@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import get_session, require_api_token
@@ -30,6 +30,16 @@ def list_accounts(session: Session = Depends(get_session)):
 @router.get("/{account_id}", response_model=AccountResponse | None)
 def get_account(account_id: int, session: Session = Depends(get_session)):
     return AccountService(PaperTradingRepository(session)).get_account(account_id)
+
+
+@router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_account(account_id: int, session: Session = Depends(get_session)):
+    repo = PaperTradingRepository(session)
+    deleted = AccountService(repo).delete_account(account_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{account_id}/positions", response_model=list[PositionResponse])

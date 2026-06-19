@@ -26,6 +26,9 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     throw await parseApiError(response);
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
 }
 
@@ -39,6 +42,10 @@ export function createAccount(input: CreateAccountInput): Promise<Account> {
 
 export function listAccounts(): Promise<Account[]> {
   return apiGet<Account[]>("/accounts");
+}
+
+export function deleteAccount(accountId: number): Promise<void> {
+  return apiRequest<void>(`/accounts/${accountId}`, { method: "DELETE" });
 }
 
 export function listPositions(accountId: number): Promise<Position[]> {
