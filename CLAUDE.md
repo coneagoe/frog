@@ -38,6 +38,7 @@ uv run pytest test                          # Run all tests
 
 - Command names should use `_` instead of `-`.
 - When adding or removing storage tables, update `tools/db_common.sh` at the same time so `tools/db_export.sh` and `tools/db_import.sh` stay in sync.
+- Commit messages must be written in English.
 - When generating Git commit messages, extract the core change from the diff as the title, then use the body to list the concrete modification points instead of relying on a generic summary.
 
 
