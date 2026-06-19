@@ -10,6 +10,7 @@ BUSINESS_TABLES=(
   general_info_hk_ggt
   ingredient_300
   ingredient_500
+  history_data_daily_a_stock_bfq
   history_data_daily_a_stock_qfq
   history_data_daily_a_stock_hfq
   history_data_weekly_a_stock_qfq

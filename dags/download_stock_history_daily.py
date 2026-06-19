@@ -104,17 +104,80 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
     return f"A股HFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, count={total}"
 
 
+def download_stock_history_bfq_partition_task(*, partition_id: int, partition_count: int, **context):
+    """Download A-share BFQ history data for a specific partition.
+
+    Args:
+        partition_id: The partition identifier (0-based)
+
+    Returns:
+        Success message with download statistics
+
+    Raises:
+        AirflowSkipException: If market is closed or partition is not active
+        Exception: If download fails
+    """
+    from common import is_a_market_open_today  # noqa: E402
+    from common.const import COL_STOCK_ID  # noqa: E402
+    from download import DownloadManager  # noqa: E402
+    from storage import get_storage  # noqa: E402
+
+    if not is_a_market_open_today():
+        raise AirflowSkipException("A股市场今日休市，跳过下载任务")
+
+    if partition_id >= partition_count:
+        raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
+
+    start_date = "2010-01-01"
+    end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
+
+    df_stocks = get_storage().load_general_info_stock()
+    if df_stocks is None or df_stocks.empty:
+        raise Exception("无法获取股票基本信息数据")
+
+    stock_ids = df_stocks[COL_STOCK_ID].tolist()
+    my_ids = get_partitioned_ids(stock_ids, partition_id, partition_count)
+
+    manager = DownloadManager()
+
+    failed_ids: list[str] = []
+    total = len(my_ids)
+    for idx, stock_id in enumerate(my_ids, start=1):
+        ok = manager.download_stock_history(
+            stock_id=stock_id,
+            period=PeriodType.DAILY,
+            start_date=start_date,
+            end_date=end_date,
+            adjust=AdjustType.BFQ,
+        )
+        if not ok:
+            failed_ids.append(stock_id)
+
+        if idx % 50 == 0 or idx == total:
+            print(f"[BFQ p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
+
+    if failed_ids:
+        preview = ",".join(failed_ids[:10])
+        raise Exception(
+            f"BFQ 分片下载失败: partition={partition_id}/{partition_count}, "
+            f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
+        )
+
+    return f"A股BFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, count={total}"
+
+
 def save_download_result_to_redis(*, partition_count: int, **context):
-    """Aggregate partition results and write success/fail to Redis."""
+    """Aggregate partition results (HFQ + BFQ) and write success/fail to Redis."""
     ti = context["ti"]
     total_count = 0
 
-    for pid in range(partition_count):
-        task_id = f"download_stock_history_hfq_p{pid:02d}"
-        result = ti.xcom_pull(task_ids=task_id)
-        if result and "count=" in result:
-            count = int(result.split("count=")[1].split(",")[0])
-            total_count += count
+    for adjust_prefix in ("hfq", "bfq"):
+        for pid in range(partition_count):
+            task_id = f"download_stock_history_{adjust_prefix}_p{pid:02d}"
+            result = ti.xcom_pull(task_ids=task_id)
+            if result and "count=" in result:
+                count = int(result.split("count=")[1].split(",")[0])
+                total_count += count
 
     r = get_redis_client()
     execution_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
@@ -140,8 +203,8 @@ dag = DAG(
     max_active_runs=1,
 )
 
-# Create partition tasks
-partition_tasks = [
+# Create HFQ partition tasks
+hfq_partition_tasks = [
     PythonOperator(
         task_id=f"download_stock_history_hfq_p{pid:02d}",
         python_callable=download_stock_history_hfq_partition_task,
@@ -151,7 +214,18 @@ partition_tasks = [
     for pid in get_partition_ids(PARTITION_COUNT)
 ]
 
-# Aggregate task runs after all partitions complete
+# Create BFQ partition tasks
+bfq_partition_tasks = [
+    PythonOperator(
+        task_id=f"download_stock_history_bfq_p{pid:02d}",
+        python_callable=download_stock_history_bfq_partition_task,
+        op_kwargs={"partition_id": pid, "partition_count": PARTITION_COUNT},
+        dag=dag,
+    )
+    for pid in get_partition_ids(PARTITION_COUNT)
+]
+
+# Aggregate task runs after all HFQ and BFQ partitions complete
 aggregate_task = PythonOperator(
     task_id="save_download_result_to_redis",
     python_callable=save_download_result_to_redis,
@@ -159,5 +233,6 @@ aggregate_task = PythonOperator(
     dag=dag,
 )
 
-for _task in partition_tasks:
+all_partition_tasks = hfq_partition_tasks + bfq_partition_tasks
+for _task in all_partition_tasks:
     _task >> aggregate_task

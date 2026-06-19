@@ -95,6 +95,7 @@ from .model import (
     tb_name_general_info_etf,
     tb_name_general_info_ggt,
     tb_name_general_info_stock,
+    tb_name_history_data_daily_a_stock_bfq,
     tb_name_history_data_daily_a_stock_hfq,
     tb_name_history_data_daily_a_stock_qfq,
     tb_name_history_data_daily_etf_hfq,
@@ -265,7 +266,9 @@ ETF_ID_TABLES: Set[str] = {
 def get_table_name(security_type: SecurityType, period: PeriodType, adjust: AdjustType) -> str:
     if security_type == SecurityType.STOCK:
         if period == PeriodType.DAILY:
-            if adjust == AdjustType.QFQ:
+            if adjust == AdjustType.BFQ:
+                return tb_name_history_data_daily_a_stock_bfq
+            elif adjust == AdjustType.QFQ:
                 return tb_name_history_data_daily_a_stock_qfq
             elif adjust == AdjustType.HFQ:
                 return tb_name_history_data_daily_a_stock_hfq
@@ -883,7 +886,9 @@ class StorageDb:
         try:
             # 根据周期和复权类型选择对应的表名
             if period == PeriodType.DAILY:
-                if adjust == AdjustType.QFQ:
+                if adjust == AdjustType.BFQ:
+                    table_name = tb_name_history_data_daily_a_stock_bfq
+                elif adjust == AdjustType.QFQ:
                     table_name = tb_name_history_data_daily_a_stock_qfq
                 elif adjust == AdjustType.HFQ:
                     table_name = tb_name_history_data_daily_a_stock_hfq

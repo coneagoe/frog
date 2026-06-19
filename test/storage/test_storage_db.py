@@ -33,10 +33,12 @@ from common.const import (  # noqa: E402
     COL_VOLUME,
     AdjustType,
     PeriodType,
+    SecurityType,
 )
 from storage.config import StorageConfig  # noqa: E402
 from storage.model import (  # noqa: E402
     tb_name_etf_daily,
+    tb_name_history_data_daily_a_stock_bfq,
     tb_name_history_data_daily_a_stock_qfq,
     tb_name_history_data_daily_fund,
     tb_name_history_data_daily_hk_stock_hfq,
@@ -51,6 +53,7 @@ from storage.storage_db import (  # noqa: E402
     StorageDb,
     connect_once,
     get_storage,
+    get_table_name,
     reset_storage,
 )
 
@@ -100,6 +103,75 @@ class TestStorageDb:
         assert storage.connection is None
         assert storage.cursor is None
         mock_create_engine.assert_called_once()
+
+    def test_get_table_name_bfq_daily(self):
+        """get_table_name returns BFQ table for STOCK + DAILY + BFQ."""
+        assert get_table_name(SecurityType.STOCK, PeriodType.DAILY, AdjustType.BFQ) == \
+            tb_name_history_data_daily_a_stock_bfq
+
+    def test_get_table_name_bfq_weekly_raises(self):
+        """get_table_name raises ValueError for STOCK + WEEKLY + BFQ."""
+        with pytest.raises(ValueError, match="Unsupported combination"):
+            get_table_name(SecurityType.STOCK, PeriodType.WEEKLY, AdjustType.BFQ)
+
+    def test_save_history_data_stock_bfq_daily(self, storage_db):
+        """save_history_data_stock with BFQ writes to BFQ table."""
+        test_df = pd.DataFrame(
+            {
+                COL_DATE: [date(2023, 1, 1)],
+                COL_STOCK_ID: ["000001"],
+                COL_OPEN: [10.5],
+                COL_CLOSE: [11.2],
+                COL_HIGH: [11.8],
+                COL_LOW: [10.1],
+                COL_VOLUME: [1000000],
+                COL_AMOUNT: [10500000],
+                COL_CHANGE_RATE: [6.67],
+                COL_TURNOVER_RATE: [1.5],
+            }
+        )
+
+        with patch.object(test_df, "to_sql") as mock_to_sql:
+            storage_db.save_history_data_stock(test_df, PeriodType.DAILY, AdjustType.BFQ)
+
+            mock_to_sql.assert_called_once_with(
+                tb_name_history_data_daily_a_stock_bfq,
+                storage_db.engine,
+                if_exists="append",
+                index=False,
+                method="multi",
+            )
+
+    def test_load_history_data_stock_bfq_daily_success(self, storage_db, monkeypatch):
+        """Test successful load_history_data_stock for daily BFQ data."""
+        test_data = pd.DataFrame(
+            {
+                COL_DATE: ["2023-01-01", "2023-01-02"],
+                COL_STOCK_ID: ["000001", "000001"],
+                COL_OPEN: [10.5, 10.8],
+                COL_CLOSE: [11.2, 11.5],
+                COL_HIGH: [11.8, 12.1],
+                COL_LOW: [10.1, 10.4],
+                COL_VOLUME: [1000000, 1200000],
+                COL_AMOUNT: [10500000, 12600000],
+                COL_CHANGE_RATE: [6.67, 2.68],
+                COL_TURNOVER_RATE: [1.5, 1.8],
+            }
+        )
+
+        mock_read_sql = Mock(return_value=test_data)
+        monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
+
+        result = storage_db.load_history_data_stock("000001", PeriodType.DAILY, AdjustType.BFQ)
+
+        assert len(result) == 2
+        assert result[COL_STOCK_ID].tolist() == ["000001", "000001"]
+        mock_read_sql.assert_called_once()
+        args = mock_read_sql.call_args
+        sql_query = args[0][0]
+        assert tb_name_history_data_daily_a_stock_bfq in sql_query
+        assert args[0][1] == storage_db.engine
+        assert args[1]["params"] == ("000001",)
 
     def test_save_history_data_stock_1d_success(self, storage_db):
         test_df = pd.DataFrame(
