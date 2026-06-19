@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { DataTable, type Column } from "@/components/data-table";
 import { MoneyText } from "@/components/money-text";
 import { StatusBadge } from "@/components/status-badge";
@@ -12,12 +11,7 @@ const accountColumns: Column<Account>[] = [
   {
     key: "actions",
     header: "Actions",
-    render: (account) => (
-      <div className="actions">
-        <Link href={`/trade?accountId=${account.id}`}>Trade</Link>
-        <Link href={`/analytics?accountId=${account.id}`}>Analytics</Link>
-      </div>
-    )
+    render: () => null
   }
 ];
 
@@ -30,11 +24,14 @@ function getAccountColumns(onDelete?: (account: Account) => void): Column<Accoun
       ...column,
       render: (account) => (
         <div className="actions">
-          <Link href={`/trade?accountId=${account.id}`}>Trade</Link>
-          <Link href={`/analytics?accountId=${account.id}`}>Analytics</Link>
           {onDelete ? (
-            <button className="button button--secondary" onClick={() => onDelete(account)} type="button">
-              Delete {account.name}
+            <button
+              aria-label={`Delete ${account.name}`}
+              className="button button--secondary"
+              onClick={() => onDelete(account)}
+              type="button"
+            >
+              Delete
             </button>
           ) : null}
         </div>

@@ -28,8 +28,18 @@ describe("AccountsPage", () => {
 
     expect(await screen.findByText("demo")).toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Trade" })).toHaveAttribute("href", "/trade?accountId=1");
-    expect(screen.getByRole("link", { name: "Analytics" })).toHaveAttribute("href", "/analytics?accountId=1");
+    expect(screen.queryByRole("link", { name: "Trade" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Analytics" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete demo" })).toBeInTheDocument();
+  });
+
+  it("uses the accounts-specific two-column layout", async () => {
+    listAccountsMock.mockResolvedValue([]);
+
+    const { container } = render(<AccountsPage />);
+
+    expect(await screen.findByText("No paper accounts yet")).toBeInTheDocument();
+    expect(container.querySelector(".accounts-grid")).toHaveClass("grid", "grid--two", "accounts-grid");
   });
 
   it("creates an account and refreshes the list", async () => {

@@ -111,17 +111,19 @@ export function TradePage() {
           <p className="muted">Submit limit orders, run daily matching, and inspect account state.</p>
         </div>
         <label>
-          Account
-          <select
-            value={selectedAccountId ?? ""}
-            onChange={(event) => {
-              const accountId = Number(event.target.value);
-              setSelectedAccountId(accountId);
-              void loadAccountData(accountId, true);
-            }}
-          >
-            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-          </select>
+          <span className="account-selector">
+            Account
+            <select
+              value={selectedAccountId ?? ""}
+              onChange={(event) => {
+                const accountId = Number(event.target.value);
+                setSelectedAccountId(accountId);
+                void loadAccountData(accountId, true);
+              }}
+            >
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select>
+          </span>
         </label>
       </div>
       {loading ? <div className="panel">Loading paper trading data...</div> : null}

@@ -78,7 +78,7 @@ export function AccountsPage() {
           <p className="muted">Create accounts and open a trading or analytics workspace.</p>
         </div>
       </div>
-      <div className="grid grid--two">
+      <div className="grid grid--two accounts-grid">
         <CreateAccountForm onCreated={onCreated} />
         <section className="panel">
           <div className="panel__header">

@@ -76,10 +76,29 @@ button {
 }
 
 .page__header {
+  align-items: end;
+  display: grid;
+  gap: 12px 24px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.page__header > div {
+  min-width: 0;
+}
+
+.page__header > label {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.account-selector {
+  align-items: center;
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  justify-content: space-between;
+  gap: 8px;
+}
+
+.page__header select {
+  min-width: 180px;
 }
 
 .page__header h1,
@@ -108,6 +127,10 @@ button {
 
 .grid--two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.accounts-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
 }
 
 .grid--trade {
@@ -263,6 +286,15 @@ button {
 
   .app-shell__main {
     padding: 16px;
+  }
+
+  .page__header {
+    grid-template-columns: 1fr;
+  }
+
+  .page__header > label {
+    justify-self: start;
+    white-space: normal;
   }
 
   .grid--two {

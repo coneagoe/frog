@@ -84,7 +84,14 @@ export function OrderForm({
       </label>
       <label>
         Trade date
-        <input aria-label="Trade date" type="date" value={tradeDate} onChange={(event) => setTradeDate(event.target.value)} required />
+        <input
+          aria-label="Trade date"
+          lang="en-ZA"
+          type="date"
+          value={tradeDate}
+          onChange={(event) => setTradeDate(event.target.value)}
+          required
+        />
       </label>
       {error ? <div className="error-banner" role="alert">{error}</div> : null}
       <button className="button" disabled={submitting || accountId === 0} type="submit">

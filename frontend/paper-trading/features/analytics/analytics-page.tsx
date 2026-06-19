@@ -92,18 +92,20 @@ export function AnalyticsPage() {
           <p className="muted">Review account snapshots, trades, and cash movements.</p>
         </div>
         <label>
-          Account
-          <select
-            disabled={accounts.length === 0}
-            value={selectedAccountId ?? ""}
-            onChange={(event) => {
-              const accountId = Number(event.target.value);
-              setSelectedAccountId(accountId);
-              void loadAccountData(accountId, true);
-            }}
-          >
-            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-          </select>
+          <span className="account-selector">
+            Account
+            <select
+              disabled={accounts.length === 0}
+              value={selectedAccountId ?? ""}
+              onChange={(event) => {
+                const accountId = Number(event.target.value);
+                setSelectedAccountId(accountId);
+                void loadAccountData(accountId, true);
+              }}
+            >
+              {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select>
+          </span>
         </label>
       </div>
       {loading ? <div className="panel">Loading paper trading data...</div> : null}
