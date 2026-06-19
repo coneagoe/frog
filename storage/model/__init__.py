@@ -8,10 +8,12 @@ from .general_info_etf import GeneralInfoETF, tb_name_general_info_etf
 from .general_info_ggt import GeneralInfoGGT, tb_name_general_info_ggt
 from .general_info_stock import GeneralInfoStock, tb_name_general_info_stock
 from .history_data_a_stock import (
+    HistoryDataDailyAStockBFQ,
     HistoryDataDailyAStockHFQ,
     HistoryDataDailyAStockQFQ,
     HistoryDataWeeklyAStockHFQ,
     HistoryDataWeeklyAStockQFQ,
+    tb_name_history_data_daily_a_stock_bfq,
     tb_name_history_data_daily_a_stock_hfq,
     tb_name_history_data_daily_a_stock_qfq,
     tb_name_history_data_daily_etf_hfq,
@@ -63,6 +65,7 @@ __all__ = [
     "AStockBasic",
     "ETFBasic",
     "ETFDaily",
+    "HistoryDataDailyAStockBFQ",
     "HistoryDataDailyAStockQFQ",
     "HistoryDataDailyAStockHFQ",
     "HistoryDataWeeklyAStockQFQ",
@@ -83,6 +86,7 @@ __all__ = [
     "tb_name_general_info_ggt",
     "tb_name_ingredient_300",
     "tb_name_ingredient_500",
+    "tb_name_history_data_daily_a_stock_bfq",
     "tb_name_history_data_daily_a_stock_qfq",
     "tb_name_history_data_daily_a_stock_hfq",
     "tb_name_daily_basic_a_stock",

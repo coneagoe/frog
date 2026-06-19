@@ -109,6 +109,24 @@ def test_etf_partition_dag_uses_frozen_partition_count_everywhere():
     assert "partition_count = PARTITION_COUNT" not in source
 
 
+def test_daily_dag_has_both_hfq_and_bfq_partition_tasks():
+    """The daily stock history DAG must contain both HFQ and BFQ partition tasks."""
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+
+    # HFQ partition task must be defined
+    assert re.search(r"def download_stock_history_hfq_partition_task\s*\(", source)
+    # BFQ partition task must be defined
+    assert re.search(r"def download_stock_history_bfq_partition_task\s*\(", source)
+    # BFQ task must use AdjustType.BFQ
+    assert "AdjustType.BFQ" in source
+    # HFQ task must still use AdjustType.HFQ
+    assert "AdjustType.HFQ" in source
+    # Both task lists must be wired to the aggregate
+    assert "hfq_partition_tasks + bfq_partition_tasks" in source
+    # Redis key must remain unchanged
+    assert "REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY" in source
+
+
 def test_etf_and_hk_docstrings_use_neutral_partition_language():
     for path in [
         ROOT / "dags/download_etf_daily.py",
