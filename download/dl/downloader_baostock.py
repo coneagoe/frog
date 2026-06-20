@@ -54,7 +54,11 @@ def login(func: F) -> F:
         # Login to baostock
         lg = bs.login()
         if lg.error_code != "0":
-            raise ConnectionError(f"Baostock login failed: {lg.error_msg}")
+            print("login respond error_code:" + lg.error_code)
+            print("login respond  error_msg:" + lg.error_msg)
+            if lg.error_code == "10001011":
+                print("IP已经加入黑名单, 需要去QQ群里求助")
+            return lg
 
         try:
             # Execute the wrapped function
