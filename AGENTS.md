@@ -31,13 +31,14 @@ uv run pytest test/path/to/test_file.py::TestClass::test_method
 - End-to-end data flow: provider APIs -> download/ -> storage/ -> analysis/backtest -> triggers.
 
 ## Conventions
-- Python 3.11+ (CI targets 3.12). Formatting: Black, 120-char line length. Imports: isort with Black profile.
+- Python 3.11+ (CI targets 3.12). Formatting/import sorting/linting: Ruff; type checking: mypy.
 - uv `package = false`; tests set `pythonpath = ["."]`, so imports rely on the repo root rather than an installed package.
 - Chinese comments/messages and Chinese column names are common and acceptable.
 - Commit messages must be written in English.
 - Storage tables: when adding or removing, update `tools/db_common.sh` so `db_export.sh`/`db_import.sh` stay in sync.
 - LF line endings enforced via `.gitattributes`; `pre-commit` runs on staged files only; trailing-whitespace fixer excludes `*.csv`.
 - Do not change DAG schedule, dependencies, retries, task boundaries, or SLA unless explicitly requested.
+- Code simplification/refactoring tasks must follow `docs/coding_rule.md`; keep that file as the source of truth instead of duplicating its full contents here.
 
 ## Testing Patterns
 - Mock external providers (`akshare`, `baostock`, `tushare`) instead of live calls.

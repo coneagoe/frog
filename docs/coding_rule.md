@@ -21,7 +21,7 @@
 
 - 以仓库现状工具链为硬约束：
   - Python 版本约束见 `pyproject.toml`（CI 使用 3.12）。
-  - 风格与检查由 `.pre-commit-config.yaml` 驱动（black/isort/flake8/mypy 等）。
+  - 风格与检查由 `.pre-commit-config.yaml` 驱动（ruff/mypy 等）。
 - 推荐做：
   - 减少嵌套与重复，提取清晰的辅助函数（但避免过度拆分导致跳转困难）。
   - 清晰命名（变量/函数/异常信息），让控制流更容易读。
@@ -58,11 +58,11 @@
 
 只允许执行以下三条命令（不启用 autoApprove，每次运行需人工审批）：
 
-- `poetry run pre-commit run --all-files`
-- `poetry run pytest test`
+- `uv run pre-commit run --all-files`
+- `uv run pytest test`
 - `docker compose config`
 
-说明：本仓库的 mypy/flake8 已集成到 pre-commit 中，无需单独执行 `poetry run mypy` 或 `poetry run flake8`。
+说明：本仓库除 mypy 外，格式化、import 排序、lint 已统一由 ruff 处理；ruff/mypy 均集成到 pre-commit 中，无需单独执行 `uv run ruff` 或 `uv run mypy`。
 
 ## VS Code Usage / 在 VS Code 中使用
 

@@ -89,6 +89,8 @@ Workflow Orchestration (dags/ - Airflow DAGs)
 
 When simplifying code (per `docs/coding_rule.md`):
 
+Keep `docs/coding_rule.md` as the source of truth for simplification/refactoring rules; this section is only a summary.
+
 - **Semantics-Preserving**: Never change external behavior, outputs, I/O side effects, or timing
 - **Scope**: Only modify files explicitly provided by user or current changeset
 - **Naming**: Name by actual responsibility/behavior, not by current implementation details
