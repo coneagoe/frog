@@ -54,11 +54,10 @@ def login(func: F) -> F:
         # Login to baostock
         lg = bs.login()
         if lg.error_code != "0":
-            print("login respond error_code:" + lg.error_code)
-            print("login respond  error_msg:" + lg.error_msg)
+            logging.error(f"baostock error ({lg.error_code}): {lg.error_code}")
             if lg.error_code == "10001011":
                 print("IP已经加入黑名单, 需要去QQ群里求助")
-            return lg
+            exit(1)
 
         try:
             # Execute the wrapped function
@@ -206,6 +205,8 @@ def _download_ingredient(query_func: Callable[..., baostock.data.resultset.Resul
         while rs.next():
             if rs.error_code != "0":
                 logging.error(f"query fail({rs.error_code}): {rs.error_msg}")
+                if rs.error_code == "10001011":
+                    logging.error("IP已经加入黑名单, 需要去QQ群里求助")
                 exit(1)
 
             rows.append(rs.get_row_data())

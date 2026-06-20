@@ -106,8 +106,10 @@ class TestStorageDb:
 
     def test_get_table_name_bfq_daily(self):
         """get_table_name returns BFQ table for STOCK + DAILY + BFQ."""
-        assert get_table_name(SecurityType.STOCK, PeriodType.DAILY, AdjustType.BFQ) == \
-            tb_name_history_data_daily_a_stock_bfq
+        assert (
+            get_table_name(SecurityType.STOCK, PeriodType.DAILY, AdjustType.BFQ)
+            == tb_name_history_data_daily_a_stock_bfq
+        )
 
     def test_get_table_name_bfq_weekly_raises(self):
         """get_table_name raises ValueError for STOCK + WEEKLY + BFQ."""
