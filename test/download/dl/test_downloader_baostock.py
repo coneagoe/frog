@@ -373,8 +373,8 @@ def test_download_history_data_stock_bs_invalid_stock_id(downloader_bs_module):
     assert bs_stub.logout.call_count == 3
 
 
-def test_download_history_data_stock_bs_login_blacklisted_returns_error(downloader_bs_module, capsys):
-    """Test login blacklist failure prints details and returns the error response."""
+def test_download_history_data_stock_bs_login_blacklisted_exits(downloader_bs_module, capsys):
+    """Test login blacklist failure prints details and exits before querying."""
     module, bs_stub = downloader_bs_module
 
     # Mock failed login
@@ -385,16 +385,15 @@ def test_download_history_data_stock_bs_login_blacklisted_returns_error(download
     bs_stub.query_history_k_data_plus = Mock()
     bs_stub.logout = Mock()
 
-    result = module.download_history_data_stock_bs(stock_id="000001", start_date="2024-01-01", end_date="2024-01-02")
+    with pytest.raises(SystemExit) as exc_info:
+        module.download_history_data_stock_bs(stock_id="000001", start_date="2024-01-01", end_date="2024-01-02")
 
-    assert result is login_mock
+    assert exc_info.value.code == 1
     bs_stub.login.assert_called_once()
     bs_stub.query_history_k_data_plus.assert_not_called()
     bs_stub.logout.assert_not_called()
 
     captured = capsys.readouterr()
-    assert "login respond error_code:10001011" in captured.out
-    assert "login respond  error_msg:IP blacklisted" in captured.out
     assert "IP已经加入黑名单, 需要去QQ群里求助" in captured.out
 
 
