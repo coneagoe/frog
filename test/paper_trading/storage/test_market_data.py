@@ -19,16 +19,20 @@ from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
 
 
 def test_storage_market_data_provider_loads_daily_bfq_bar_by_unadjusted_db_code():
-    storage = FakeHistoryStorage({
-        "000001": pd.DataFrame({
-            COL_STOCK_ID: ["000001"],
-            COL_DATE: ["2026-06-16"],
-            COL_OPEN: [9.5],
-            COL_HIGH: [10.5],
-            COL_LOW: [9.0],
-            COL_CLOSE: [10.0],
-        }),
-    })
+    storage = FakeHistoryStorage(
+        {
+            "000001": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["000001"],
+                    COL_DATE: ["2026-06-16"],
+                    COL_OPEN: [9.5],
+                    COL_HIGH: [10.5],
+                    COL_LOW: [9.0],
+                    COL_CLOSE: [10.0],
+                }
+            ),
+        }
+    )
     provider = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16)]))
 
     bar = provider.get_daily_bar("000001.SZ", date(2026, 6, 16))
@@ -43,16 +47,20 @@ def test_storage_market_data_provider_loads_daily_bfq_bar_by_unadjusted_db_code(
 
 
 def test_storage_market_data_provider_raises_for_missing_ohlc_value():
-    storage = FakeHistoryStorage({
-        "000001": pd.DataFrame({
-            COL_STOCK_ID: ["000001"],
-            COL_DATE: ["2026-06-16"],
-            COL_OPEN: [9.5],
-            COL_HIGH: [10.5],
-            COL_LOW: [pd.NA],
-            COL_CLOSE: [10.0],
-        }),
-    })
+    storage = FakeHistoryStorage(
+        {
+            "000001": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["000001"],
+                    COL_DATE: ["2026-06-16"],
+                    COL_OPEN: [9.5],
+                    COL_HIGH: [10.5],
+                    COL_LOW: [pd.NA],
+                    COL_CLOSE: [10.0],
+                }
+            ),
+        }
+    )
     provider = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16)]))
 
     with pytest.raises(ValueError, match="Missing market data field"):

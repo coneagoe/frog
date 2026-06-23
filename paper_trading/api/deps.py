@@ -1,6 +1,7 @@
 import os
 from collections.abc import Generator
 from datetime import date, datetime, timedelta
+from typing import Protocol, runtime_checkable
 
 import pandas_market_calendars as mcal
 from fastapi import Depends, Header, HTTPException
@@ -13,6 +14,11 @@ from paper_trading.storage.market_data import (
 )
 from storage.config import StorageConfig
 from storage.storage_db import get_storage
+
+
+@runtime_checkable
+class _DateLike(Protocol):
+    def date(self) -> date: ...
 
 
 def require_api_token(authorization: str | None = Header(default=None)) -> None:
@@ -48,12 +54,14 @@ class _DataAvailableCalendar:
         self._calendar = mcal.get_calendar(calendar_name)
 
     @staticmethod
-    def _to_date(value) -> date:
+    def _to_date(value: object) -> date:
         if isinstance(value, datetime):
             return value.date()
         if isinstance(value, date):
             return value
-        return value.date()
+        if isinstance(value, _DateLike):
+            return value.date()
+        raise TypeError(f"Unsupported trading day value: {value!r}")
 
     def is_trade_date(self, trade_date: date) -> bool:
         return not self._calendar.schedule(

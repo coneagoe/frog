@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Any
 
 import pandas as pd
 
@@ -8,7 +9,7 @@ from common.const import COL_DATE
 class FakeHistoryStorage:
     def __init__(self, data: dict[str, pd.DataFrame]):
         self._data = data
-        self.calls = []
+        self.calls: list[tuple[Any, ...]] = []
 
     def load_history_data_stock(self, stock_id, period, adjust, start_date=None, end_date=None):
         self.calls.append((stock_id, period, adjust, start_date, end_date))

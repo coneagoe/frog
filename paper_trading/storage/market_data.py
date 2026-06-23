@@ -57,9 +57,12 @@ class StorageMarketDataProvider:
             start_date=trade_date.isoformat(),
             end_date=trade_date.isoformat(),
         )
+
         if df.empty:
             raise KeyError(f"No daily bar for {symbol} on {trade_date.isoformat()}")
+
         row = df.iloc[-1]
+
         return DailyBar(
             symbol=symbol,
             trade_date=trade_date,

@@ -143,6 +143,10 @@ ignore_missing_imports = true
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = ["pandas_market_calendars", "pandas_market_calendars.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["airflow", "airflow.*"]
 ignore_missing_imports = true
 
