@@ -15,7 +15,7 @@ else:
 
 from common_dags import get_default_args  # noqa: E402
 
-from common import is_a_market_open_today  # noqa: E402
+from stock.market import is_a_market_open_today  # noqa: E402
 
 
 def run_intraday_monitor(**context):

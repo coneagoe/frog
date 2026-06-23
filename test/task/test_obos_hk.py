@@ -99,5 +99,5 @@ def test_hk_ggt_dag_checks_hk_market_calendar():
         encoding="utf-8"
     )
 
-    assert "from common import is_hk_market_open_today" in source
+    assert "from stock.market import is_hk_market_open_today" in source
     assert "if not is_hk_market_open_today():" in source
