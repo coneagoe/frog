@@ -4,8 +4,9 @@ from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_session
-from paper_trading.storage.market_data import InMemoryMarketDataProvider
+from paper_trading.storage.market_data import StorageMarketDataProvider
 from storage.model.base import Base
+from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
 
 
 def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
@@ -14,8 +15,10 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
     Base.metadata.create_all(session.get_bind())
     app = create_app()
     app.dependency_overrides[get_session] = lambda: session
-    app.dependency_overrides[get_market_data_provider] = lambda: InMemoryMarketDataProvider(
-        bars={}, trade_dates=[date(2026, 6, 16)]
+    storage = FakeHistoryStorage({})
+    app.dependency_overrides[get_market_data_provider] = lambda: StorageMarketDataProvider(
+        storage,
+        FakeTradeCalendar([date(2026, 6, 16)]),
     )
     client = TestClient(app)
     headers = {"Authorization": "Bearer secret"}
