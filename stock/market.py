@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
-from datetime import date, datetime
+from datetime import datetime
 from typing import List
 
 import pandas as pd
@@ -13,27 +13,6 @@ def is_testing():
         "development",
         "testing",
     ]:
-        return True
-
-    return False
-
-
-def is_market_open():
-    if is_testing():
-        return True
-
-    if date.today().weekday() >= 5:
-        return False
-
-    now = datetime.now()
-    if (
-        (now.hour == 9 and now.minute >= 30)
-        or (now.hour == 10)
-        or (now.hour == 11 and now.minute <= 30)
-        or (now.hour == 13)
-        or (now.hour == 14)
-        or (now.hour == 15 and now.minute <= 30)
-    ):
         return True
 
     return False
@@ -70,10 +49,10 @@ def get_last_trading_day() -> str:
 
 def is_a_market_open(date_str: str) -> bool:
     """
-    Check if the given date is a trading day.
+    Check if the given date is an A-share trading day.
 
     Args:
-        date_str (str): Date in format 'YYYY-MM-DD'
+        date_str (str): Date in format 'YYYY-MM-DD'.
 
     Returns:
         bool: True if the date is a trading day, False otherwise.
@@ -92,6 +71,21 @@ def is_a_market_open_today() -> bool:
     """
     today_str = datetime.now().strftime("%Y-%m-%d")
     return is_a_market_open(today_str)
+
+
+def is_market_open_now() -> bool:
+    """
+    Check if the A-share market is open now.
+
+    Returns:
+        bool: True if now is during an A-share trading session, False otherwise.
+    """
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    if not is_a_market_open(today_str):
+        return False
+
+    return (now.hour == 9 and now.minute >= 30) or (now.hour in [10, 13, 14]) or (now.hour == 11 and now.minute <= 30)
 
 
 def is_hk_market_open(date_str: str) -> bool:
