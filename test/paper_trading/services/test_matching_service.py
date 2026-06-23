@@ -1,16 +1,26 @@
 from datetime import date
 from decimal import Decimal
 
+import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from common.const import (
+    COL_CLOSE,
+    COL_DATE,
+    COL_HIGH,
+    COL_LOW,
+    COL_OPEN,
+    COL_STOCK_ID,
+)
 from paper_trading.domain.enums import OrderSide, OrderStatus
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
-from paper_trading.storage.market_data import DailyBar, InMemoryMarketDataProvider
+from paper_trading.storage.market_data import StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
 
 
 def _services(tmp_path):
@@ -19,18 +29,19 @@ def _services(tmp_path):
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
     trade_date = date(2026, 6, 16)
-    market_data = InMemoryMarketDataProvider(
-        bars={
-            ("000001.SZ", trade_date): DailyBar(
-                "000001.SZ",
-                trade_date,
-                Decimal("9.50"),
-                Decimal("10.50"),
-                Decimal("9.00"),
-                Decimal("10.00"),
-            )
-        },
-        trade_dates=[date(2026, 6, 15), trade_date, date(2026, 6, 17)],
+    storage = FakeHistoryStorage({
+        "000001": pd.DataFrame({
+            COL_STOCK_ID: ["000001"],
+            COL_DATE: ["2026-06-16"],
+            COL_OPEN: [9.5],
+            COL_HIGH: [10.5],
+            COL_LOW: [9.0],
+            COL_CLOSE: [10.0],
+        }),
+    })
+    market_data = StorageMarketDataProvider(
+        storage,
+        FakeTradeCalendar([date(2026, 6, 15), trade_date, date(2026, 6, 17)]),
     )
     snapshot_service = SnapshotService(repo, market_data)
     matching_service = MatchingService(repo, market_data, snapshot_service)

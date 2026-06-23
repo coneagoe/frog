@@ -7,9 +7,10 @@ from sqlalchemy.orm import sessionmaker
 
 from paper_trading.domain.enums import OrderSide, OrderStatus
 from paper_trading.services.order_service import OrderService
-from paper_trading.storage.market_data import InMemoryMarketDataProvider
+from paper_trading.storage.market_data import StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
 
 
 def _repo_and_service(tmp_path):
@@ -17,7 +18,8 @@ def _repo_and_service(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
-    market_data = InMemoryMarketDataProvider(bars={}, trade_dates=[date(2026, 6, 16), date(2026, 6, 17)])
+    storage = FakeHistoryStorage({})
+    market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16), date(2026, 6, 17)]))
     return engine, session, repo, OrderService(repo, market_data)
 
 
