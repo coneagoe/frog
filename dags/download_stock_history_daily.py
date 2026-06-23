@@ -128,7 +128,7 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
     if partition_id >= partition_count:
         raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
-    start_date = "2010-01-01"
+    start_date = "2020-01-01"
     end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
 
     df_stocks = get_storage().load_general_info_stock()
