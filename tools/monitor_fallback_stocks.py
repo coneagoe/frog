@@ -20,7 +20,7 @@ from common.const import (
     DATABASE_NAME,
 )
 from stock import fetch_close_price, get_yesterday_ma
-from stock.market import is_market_open
+from stock.market import is_a_market_open
 from utility import send_email
 
 monitor_stock_table_name = "monitor_stock"
@@ -50,7 +50,7 @@ signal.signal(signal.SIGTERM, exit_handler)
 if __name__ == "__main__":
     while True:
         if not test:
-            if not is_market_open():
+            if not is_a_market_open():
                 time.sleep(sleep_interval)
                 continue
 
