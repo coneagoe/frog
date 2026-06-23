@@ -4,7 +4,6 @@ from datetime import date, datetime
 import pandas as pd
 
 from celery_app import app
-from common import is_a_market_open_today
 from common.const import (
     COL_COMMENT,
     COL_CURRENT_PRICE,
@@ -13,6 +12,7 @@ from common.const import (
     COL_STOCK_NAME,
 )
 from stock import fetch_close_price, get_yesterday_ma
+from stock.market import is_a_market_open_today
 from utility import send_email
 
 col_period = "period"

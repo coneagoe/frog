@@ -9,11 +9,11 @@ import redis
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import conf  # noqa: E402
 from celery_app import app  # noqa: E402
-from common import is_hk_market_open_today  # noqa: E402
 from common.const import (  # noqa: E402
     DEFAULT_REDIS_URL,
     REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY,
 )
+from stock.market import is_hk_market_open_today  # noqa: E402
 from utility import send_email  # noqa: E402
 
 

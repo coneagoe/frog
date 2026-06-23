@@ -24,7 +24,6 @@ from common_dags import (  # noqa: E402
     get_partitioned_ids,
 )
 
-from common import is_hk_market_open_today  # noqa: E402,F401
 from common.const import (  # noqa: E402
     COL_STOCK_ID,
     DEFAULT_REDIS_URL,
@@ -33,6 +32,7 @@ from common.const import (  # noqa: E402
     PeriodType,
 )
 from download import DownloadManager  # noqa: E402
+from stock.market import is_hk_market_open_today  # noqa: E402,F401
 from storage import get_storage  # noqa: E402
 
 DEFAULT_START_DATE: Final = "2010-01-01"

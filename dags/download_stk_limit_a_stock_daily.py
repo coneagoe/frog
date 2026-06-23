@@ -14,8 +14,8 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common import is_a_market_open_today  # noqa: E402
 from download import DownloadManager  # noqa: E402
+from stock.market import is_a_market_open_today  # noqa: E402
 
 
 def download_stk_limit_a_stock_task(**context):

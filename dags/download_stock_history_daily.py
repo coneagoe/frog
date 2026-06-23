@@ -55,9 +55,9 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
         AirflowSkipException: If market is closed or partition is not active
         Exception: If download fails
     """
-    from common import is_a_market_open_today  # noqa: E402
     from common.const import COL_STOCK_ID  # noqa: E402
     from download import DownloadManager  # noqa: E402
+    from stock.market import is_a_market_open_today  # noqa: E402
     from storage import get_storage  # noqa: E402
 
     if not is_a_market_open_today():
@@ -117,9 +117,9 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
         AirflowSkipException: If market is closed or partition is not active
         Exception: If download fails
     """
-    from common import is_a_market_open_today  # noqa: E402
     from common.const import COL_STOCK_ID  # noqa: E402
     from download import DownloadManager  # noqa: E402
+    from stock.market import is_a_market_open_today  # noqa: E402
     from storage import get_storage  # noqa: E402
 
     if not is_a_market_open_today():
