@@ -29,16 +29,20 @@ def _services(tmp_path):
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
     trade_date = date(2026, 6, 16)
-    storage = FakeHistoryStorage({
-        "000001": pd.DataFrame({
-            COL_STOCK_ID: ["000001"],
-            COL_DATE: ["2026-06-16"],
-            COL_OPEN: [9.5],
-            COL_HIGH: [10.5],
-            COL_LOW: [9.0],
-            COL_CLOSE: [10.0],
-        }),
-    })
+    storage = FakeHistoryStorage(
+        {
+            "000001": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["000001"],
+                    COL_DATE: ["2026-06-16"],
+                    COL_OPEN: [9.5],
+                    COL_HIGH: [10.5],
+                    COL_LOW: [9.0],
+                    COL_CLOSE: [10.0],
+                }
+            ),
+        }
+    )
     market_data = StorageMarketDataProvider(
         storage,
         FakeTradeCalendar([date(2026, 6, 15), trade_date, date(2026, 6, 17)]),

@@ -29,16 +29,20 @@ def test_generate_snapshot_values_positions_at_close(tmp_path):
     repo = PaperTradingRepository(session)
     account = repo.create_account("demo", Decimal("100000.00"))
     repo.upsert_position(account.id, "000001.SZ", 100, 0, Decimal("900.00"))
-    storage = FakeHistoryStorage({
-        "000001": pd.DataFrame({
-            COL_STOCK_ID: ["000001"],
-            COL_DATE: ["2026-06-16"],
-            COL_OPEN: [9.0],
-            COL_HIGH: [11.0],
-            COL_LOW: [8.0],
-            COL_CLOSE: [10.0],
-        }),
-    })
+    storage = FakeHistoryStorage(
+        {
+            "000001": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["000001"],
+                    COL_DATE: ["2026-06-16"],
+                    COL_OPEN: [9.0],
+                    COL_HIGH: [11.0],
+                    COL_LOW: [8.0],
+                    COL_CLOSE: [10.0],
+                }
+            ),
+        }
+    )
     market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16)]))
 
     snapshot = SnapshotService(repo, market_data).generate_snapshot(account.id, date(2026, 6, 16))
