@@ -14,6 +14,8 @@ from monitor.monitor_target_service import (
     MonitorTargetService,
     TargetNotFoundError,
     TargetValidationError,
+    format_monitor_target_label,
+    resolve_stock_name,
 )
 from monitor.shareholder_selling_punishment import ShareholderSellingPunishmentService
 
@@ -193,9 +195,42 @@ def build_parser() -> _StableParser:
     return parser
 
 
-def _emit(result: dict[str, Any], json_output: bool) -> None:
+def _render_target_line(item: dict[str, Any]) -> str:
+    stock_code = item.get("stock_code")
+    stock_name = resolve_stock_name(
+        stock_code=stock_code,
+        stock_name=item.get("stock_name"),
+    )
+    return format_monitor_target_label(
+        stock_code=stock_code,
+        stock_name=stock_name,
+        condition=item.get("condition"),
+        note=item.get("note"),
+    )
+
+
+def _emit_target_text(result: dict[str, Any], target_command: str | None) -> bool:
+    if not result.get("success"):
+        return False
+
+    data = result.get("data")
+    if target_command == "get" and isinstance(data, dict):
+        print(_render_target_line(data))
+        return True
+    if target_command == "list" and isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                print(_render_target_line(item))
+        return True
+    return False
+
+
+def _emit(result: dict[str, Any], json_output: bool, target_command: str | None = None) -> None:
     if json_output:
         print(json.dumps(result, ensure_ascii=False))
+        return
+
+    if target_command in {"list", "get"} and _emit_target_text(result, target_command):
         return
 
     print(f"{result.get('code', 'UNKNOWN')}: {result.get('message', '')}")
@@ -313,7 +348,8 @@ def main(
             "data": None,
         }
 
-    _emit(result, json_output=args.json_output)
+    target_command = args.target_command if args.command == "target" else None
+    _emit(result, json_output=args.json_output, target_command=target_command)
     return _to_exit_code(result)
 
 

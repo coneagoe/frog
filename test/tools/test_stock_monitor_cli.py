@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import tools.stock_monitor_cli as stock_monitor_cli_module
 from tools.stock_monitor_cli import (
@@ -177,6 +177,132 @@ def test_target_remove_list_get_and_status_commands_are_wired():
     service.list.assert_called_once_with(frequency="daily", enabled=True)
     service.get.assert_called_once_with(1)
     service.get_status.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# Target text output format tests
+# ---------------------------------------------------------------------------
+
+
+def test_target_list_text_output_uses_note_label(capsys):
+    service = MagicMock()
+    service.list.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "targets listed",
+        "data": [
+            {
+                "id": 1,
+                "stock_code": "600519",
+                "stock_name": "贵州茅台",
+                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                "note": "抄底提醒",
+            }
+        ],
+    }
+
+    exit_code = main(["target", "list"], service=service)
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "600519 贵州茅台 抄底提醒" in out
+
+
+def test_target_get_text_output_falls_back_to_condition_when_note_blank(capsys):
+    service = MagicMock()
+    service.get.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "target fetched",
+        "data": {
+            "id": 1,
+            "stock_code": "600519",
+            "stock_name": "贵州茅台",
+            "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+            "note": "   ",
+        },
+    }
+
+    exit_code = main(["target", "get", "--target-id", "1"], service=service)
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "600519 贵州茅台 价格低于1500" in out
+
+
+def test_target_list_text_resolves_missing_stock_name(capsys):
+    """When stock_name is absent from data, resolve via shared helper."""
+    service = MagicMock()
+    service.list.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "targets listed",
+        "data": [
+            {
+                "id": 1,
+                "stock_code": "600519",
+                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                "note": "抄底提醒",
+            }
+        ],
+    }
+
+    with patch("tools.stock_monitor_cli.resolve_stock_name", return_value="贵州茅台") as mock_resolve:
+        exit_code = main(["target", "list"], service=service)
+
+    assert exit_code == 0
+    mock_resolve.assert_called_once_with(stock_code="600519", stock_name=None)
+    out = capsys.readouterr().out
+    assert "600519 贵州茅台 抄底提醒" in out
+
+
+def test_target_list_text_graceful_fallback_on_resolver_failure(capsys):
+    """When resolve_stock_name fails/returns None, fall back to code-only label."""
+    service = MagicMock()
+    service.list.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "targets listed",
+        "data": [
+            {
+                "id": 1,
+                "stock_code": "600519",
+                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                "note": "抄底提醒",
+            }
+        ],
+    }
+
+    with patch("tools.stock_monitor_cli.resolve_stock_name", return_value=None):
+        exit_code = main(["target", "list"], service=service)
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "600519 抄底提醒" in out
+
+
+def test_target_list_json_output_is_unchanged(capsys):
+    service = MagicMock()
+    service.list.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "targets listed",
+        "data": [
+            {
+                "id": 1,
+                "stock_code": "600519",
+                "stock_name": "贵州茅台",
+                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                "note": "抄底提醒",
+            }
+        ],
+    }
+
+    exit_code = main(["--json", "target", "list"], service=service)
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == service.list.return_value
 
 
 # ---------------------------------------------------------------------------

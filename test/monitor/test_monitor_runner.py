@@ -13,6 +13,7 @@ def _make_target(
     frequency="daily",
     reset_mode="auto",
     last_state=False,
+    stock_name=None,
 ):
     t = MagicMock()
     t.id = id
@@ -27,6 +28,7 @@ def _make_target(
     t.frequency = frequency
     t.reset_mode = reset_mode
     t.last_state = last_state
+    t.stock_name = stock_name
     return t
 
 
@@ -111,3 +113,86 @@ def test_run_monitor_manual_mode_does_not_auto_reset():
 
     # Should NOT reset state in manual mode
     mock_storage.update_monitor_target_state.assert_not_called()
+
+
+def test_run_monitor_alert_subject_prefers_note_text():
+    """Alert subject includes note text when note is provided."""
+    target = _make_target(note="抄底提醒")
+    target.stock_name = "贵州茅台"
+
+    mock_storage = MagicMock()
+    mock_storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as mock_email,
+    ):
+        run_monitor(frequency="daily")
+
+    subject, _body = mock_email.call_args[0][:2]
+    assert subject == "[股票监控告警] 600519 贵州茅台 抄底提醒"
+
+
+def test_run_monitor_alert_subject_falls_back_when_note_blank():
+    """Alert subject falls back to condition summary when note is blank."""
+    target = _make_target(note="   ")
+    target.stock_name = "贵州茅台"
+
+    mock_storage = MagicMock()
+    mock_storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as mock_email,
+    ):
+        run_monitor(frequency="daily")
+
+    subject, _body = mock_email.call_args[0][:2]
+    assert subject == "[股票监控告警] 600519 贵州茅台 价格低于1500.0"
+
+
+def test_run_monitor_alert_subject_resolves_missing_stock_name():
+    """When target has no stock_name, resolve from stock_code via shared helper."""
+    target = _make_target(note=None, stock_name=None)
+    # stock_name is None by default; condition will be used as suffix
+
+    mock_storage = MagicMock()
+    mock_storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as mock_email,
+        patch("monitor.monitor_runner.resolve_stock_name", return_value="贵州茅台") as mock_resolve,
+    ):
+        run_monitor(frequency="daily")
+
+    mock_resolve.assert_called_once_with("600519", None)
+    subject, _body = mock_email.call_args[0][:2]
+    assert subject == "[股票监控告警] 600519 贵州茅台 价格低于1500.0"
+
+
+def test_run_monitor_alert_subject_graceful_fallback_on_resolver_failure():
+    """When resolve_stock_name fails/returns None, subject still shows code + condition."""
+    target = _make_target(note=None, stock_name=None)
+
+    mock_storage = MagicMock()
+    mock_storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as mock_email,
+        patch("monitor.monitor_runner.resolve_stock_name", return_value=None),
+    ):
+        run_monitor(frequency="daily")
+
+    subject, _body = mock_email.call_args[0][:2]
+    # No stock name, condition fallback
+    assert subject == "[股票监控告警] 600519 价格低于1500.0"
