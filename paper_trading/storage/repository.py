@@ -15,6 +15,7 @@ from paper_trading.storage.models import (
     PaperPosition,
     PaperPositionLot,
     PaperTrade,
+    PaperTradeValidityCheck,
 )
 
 
@@ -40,6 +41,9 @@ class PaperTradingRepository:
         if account is None:
             return False
 
+        self.session.query(PaperTradeValidityCheck).filter(PaperTradeValidityCheck.account_id == account_id).delete(
+            synchronize_session=False
+        )
         self.session.query(PaperCashLedger).filter(PaperCashLedger.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -194,6 +198,28 @@ class PaperTradingRepository:
         order.updated_at = datetime.now(timezone.utc)
         self.session.flush()
         return order
+
+    def update_order_validity(self, order: PaperOrder, status: str, reason: str) -> PaperOrder:
+        order.validity_status = status
+        order.validity_reason = reason
+        order.validity_checked_at = datetime.now(timezone.utc)
+        order.updated_at = datetime.now(timezone.utc)
+        self.session.flush()
+        return order
+
+    def create_trade_validity_check(self, **values: Any) -> PaperTradeValidityCheck:
+        check = PaperTradeValidityCheck(**values)
+        self.session.add(check)
+        self.session.flush()
+        return check
+
+    def list_trade_validity_checks(self, order_id: int) -> list[PaperTradeValidityCheck]:
+        return list(
+            self.session.query(PaperTradeValidityCheck)
+            .filter(PaperTradeValidityCheck.order_id == order_id)
+            .order_by(PaperTradeValidityCheck.id.asc())
+            .all()
+        )
 
     def get_positions(self, account_id: int) -> list[PaperPosition]:
         return list(

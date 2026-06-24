@@ -92,6 +92,19 @@ curl -X POST http://localhost:8000/paper/accounts/1/orders \
 
 Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, and insufficient position are stored as rejected orders.
 
+## Trade Validity Analysis
+
+Paper trading records the original trading intent and analyzes whether the operation was valid for the specified `trade_date`. The order lifecycle status (`accepted`, `rejected`, `filled`, `cancelled`) remains separate from validity status.
+
+Validity statuses:
+
+- `valid`: available data supports the operation.
+- `suspicious`: daily data indicates risk or uncertainty, such as a same-day limit touch.
+- `invalid`: the operation is not valid for the specified trading day, such as a price outside the daily low/high range.
+- `unchecked`: required market data was unavailable, so the original order is preserved without a completed analysis.
+
+The first version uses daily bars for limit-up and limit-down detection. `trade_date` is the operation date, so default analysis and matching are same-day. A-share T+1 remains a sellable-position rule and does not shift matching to the next day.
+
 ## Run Matching
 
 ```bash

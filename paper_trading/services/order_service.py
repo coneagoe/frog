@@ -9,15 +9,22 @@ from paper_trading.domain.rules import (
     ensure_sufficient_cash,
     ensure_sufficient_position,
 )
+from paper_trading.services.trade_validity_service import TradeValidityService
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperOrder
 from paper_trading.storage.repository import PaperTradingRepository
 
 
 class OrderService:
-    def __init__(self, repo: PaperTradingRepository, market_data: MarketDataProvider):
+    def __init__(
+        self,
+        repo: PaperTradingRepository,
+        market_data: MarketDataProvider,
+        validity_service: TradeValidityService | None = None,
+    ):
         self.repo = repo
         self.market_data = market_data
+        self.validity_service = validity_service or TradeValidityService(repo, market_data)
 
     def place_order(
         self,
@@ -48,7 +55,7 @@ class OrderService:
                 )
             return self._accept_sell_order(account_id, symbol, quantity, limit_price, trade_date, idempotency_key)
         except PaperTradingError as exc:
-            return self.repo.create_order(
+            order = self.repo.create_order(
                 account_id=account_id,
                 symbol=symbol,
                 side=side,
@@ -60,6 +67,8 @@ class OrderService:
                 rejection_reason=exc.message,
                 idempotency_key=idempotency_key,
             )
+            self.validity_service.analyze_order(order)
+            return order
 
     def cancel_order(self, order_id: int) -> PaperOrder:
         order = self.repo.get_order(order_id)
@@ -109,6 +118,7 @@ class OrderService:
             order_id=order.id,
             note="buy_order_freeze",
         )
+        self.validity_service.analyze_order(order)
         return order
 
     def _accept_sell_order(
@@ -125,7 +135,7 @@ class OrderService:
         ensure_sufficient_position(sellable, quantity)
         assert position is not None
         position.frozen_quantity = int(position.frozen_quantity or 0) + quantity
-        return self.repo.create_order(
+        order = self.repo.create_order(
             account_id=account_id,
             symbol=symbol,
             side=OrderSide.SELL,
@@ -136,3 +146,5 @@ class OrderService:
             frozen_quantity=quantity,
             idempotency_key=idempotency_key,
         )
+        self.validity_service.analyze_order(order)
+        return order

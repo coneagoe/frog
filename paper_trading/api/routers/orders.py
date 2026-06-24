@@ -10,6 +10,7 @@ from paper_trading.schemas.orders import (
     CreateOrderRequest,
     OrderResponse,
     TradeResponse,
+    TradeValidityCheckResponse,
 )
 from paper_trading.services.order_service import OrderService
 from paper_trading.storage.market_data import MarketDataProvider
@@ -55,6 +56,18 @@ def cancel_order(order_id: int, session: Session = Depends(get_session)):
     order = OrderService(repo, get_market_data_provider()).cancel_order(order_id)
     session.commit()
     return order
+
+
+@router.get(
+    "/accounts/{account_id}/orders/{order_id}/validity-checks",
+    response_model=list[TradeValidityCheckResponse],
+)
+def list_order_validity_checks(account_id: int, order_id: int, session: Session = Depends(get_session)):
+    repo = PaperTradingRepository(session)
+    order = repo.get_order(order_id)
+    if order.account_id != account_id:
+        return []
+    return repo.list_trade_validity_checks(order_id)
 
 
 @router.get("/accounts/{account_id}/trades", response_model=list[TradeResponse])
