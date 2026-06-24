@@ -2,9 +2,10 @@ from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.storage.models import PaperTradeValidityCheck
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -45,4 +46,96 @@ def test_create_order_persists_accepted_order(tmp_path):
     session.commit()
 
     assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
+    engine.dispose()
+
+
+def test_order_validity_summary_and_detail_are_persisted(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'repo.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    account = repo.create_account(name="demo", initial_cash=Decimal("100000.00"))
+    order = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        OrderStatus.ACCEPTED,
+    )
+
+    repo.update_order_validity(order, "valid", "VALID")
+    check = repo.create_trade_validity_check(
+        order_id=order.id,
+        account_id=account.id,
+        symbol="000001.SZ",
+        trade_date=date(2026, 6, 16),
+        side="buy",
+        input_price=Decimal("10.00"),
+        daily_low=Decimal("9.00"),
+        daily_high=Decimal("10.50"),
+        limit_up_price=Decimal("11.00"),
+        limit_down_price=Decimal("9.00"),
+        touched_limit_up=False,
+        touched_limit_down=True,
+        price_in_range=True,
+        status="valid",
+        reason_code="VALID",
+        reason_detail="Price is inside daily range",
+        data_granularity="daily",
+    )
+    session.commit()
+
+    saved = repo.get_order(order.id)
+    assert saved.validity_status == "valid"
+    assert saved.validity_reason == "VALID"
+    assert saved.validity_checked_at is not None
+    assert repo.list_trade_validity_checks(order.id)[0].id == check.id
+    engine.dispose()
+
+
+def test_delete_account_deletes_trade_validity_checks_before_orders(tmp_path):
+    """delete_account removes PaperTradeValidityCheck rows so FK to orders does not fail."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'del_account.db'}")
+    Base.metadata.create_all(engine)
+    session: Session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    account = repo.create_account(name="demo", initial_cash=Decimal("100000.00"))
+    order = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        OrderStatus.ACCEPTED,
+    )
+    repo.create_trade_validity_check(
+        order_id=order.id,
+        account_id=account.id,
+        symbol="000001.SZ",
+        trade_date=date(2026, 6, 16),
+        side="buy",
+        input_price=Decimal("10.00"),
+        daily_low=None,
+        daily_high=None,
+        status="unchecked",
+        reason_code="MARKET_DATA_UNAVAILABLE",
+        reason_detail="test",
+        data_granularity="daily",
+    )
+    session.commit()
+
+    # Verify the check exists before deletion
+    assert session.query(PaperTradeValidityCheck).filter_by(account_id=account.id).count() == 1
+
+    # Delete the account
+    deleted = repo.delete_account(account.id)
+    session.commit()
+
+    assert deleted is True
+    # Verify the account and its related rows are gone
+    assert repo.get_account(account.id) is None
+    assert session.query(PaperTradeValidityCheck).filter_by(account_id=account.id).count() == 0
     engine.dispose()

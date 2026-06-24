@@ -44,6 +44,7 @@ from .paper_trading import (
     PaperPosition,
     PaperPositionLot,
     PaperTrade,
+    PaperTradeValidityCheck,
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
@@ -51,6 +52,7 @@ from .paper_trading import (
     tb_name_paper_orders,
     tb_name_paper_position_lots,
     tb_name_paper_positions,
+    tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
 )
 from .ssf_change_signal import SSFChangeSignal, tb_name_ssf_change_signal
@@ -121,6 +123,8 @@ __all__ = [
     "PaperTrade",
     "PaperAccountSnapshot",
     "PaperMatchingRun",
+    "PaperTradeValidityCheck",
+    "tb_name_paper_trade_validity_checks",
     "tb_name_paper_accounts",
     "tb_name_paper_cash_ledger",
     "tb_name_paper_positions",

@@ -23,6 +23,8 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from storage.config import StorageConfig  # noqa: E402
+from storage.model.base import Base  # noqa: E402
+from storage.model.paper_trading import PaperOrder  # noqa: E402
 from storage.storage_db import get_storage, reset_storage  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -664,4 +666,159 @@ class TestEnsureBlackroomRecordsTable:
             ).scalar_one()
         assert "remaining_days" in columns
         assert remaining_days == 12
+        reset_storage()
+
+
+# ---------------------------------------------------------------------------
+# ensure_paper_trading_schema migration compatibility
+# ---------------------------------------------------------------------------
+
+
+class TestEnsurePaperTradingSchema:
+    def test_migrates_legacy_paper_orders_columns(self, tmp_path, monkeypatch):
+        """ensure_paper_trading_schema adds validity columns to an existing paper_orders table."""
+        from sqlalchemy import create_engine as real_create_engine
+        from sqlalchemy import inspect
+
+        sqlite_url = f"sqlite:///{tmp_path}/legacy_pt_schema.db"
+        engine = real_create_engine(sqlite_url)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_orders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id INTEGER NOT NULL,
+                        symbol VARCHAR(20) NOT NULL,
+                        side VARCHAR(10) NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        limit_price NUMERIC(20,4) NOT NULL,
+                        trade_date DATE NOT NULL,
+                        status VARCHAR(30) NOT NULL,
+                        filled_quantity INTEGER NOT NULL DEFAULT 0,
+                        frozen_cash NUMERIC(20,4) NOT NULL DEFAULT 0,
+                        frozen_quantity INTEGER NOT NULL DEFAULT 0,
+                        idempotency_key VARCHAR(100),
+                        rejection_code VARCHAR(50),
+                        rejection_reason TEXT,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+
+        db = get_storage(mock_config)
+        db.engine = engine
+
+        db.ensure_paper_trading_schema()
+
+        columns = {row["name"] for row in inspect(engine).get_columns("paper_orders")}
+        assert "validity_status" in columns
+        assert "validity_reason" in columns
+        assert "validity_checked_at" in columns
+        reset_storage()
+
+    def test_creates_paper_trade_validity_checks_table(self, tmp_path, monkeypatch):
+        """ensure_paper_trading_schema creates the paper_trade_validity_checks table."""
+        from sqlalchemy import create_engine as real_create_engine
+        from sqlalchemy import inspect
+
+        sqlite_url = f"sqlite:///{tmp_path}/pt_checks_create.db"
+        engine = real_create_engine(sqlite_url)
+        # Create paper_orders first (FK dependency)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_orders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id INTEGER NOT NULL,
+                        symbol VARCHAR(20) NOT NULL,
+                        side VARCHAR(10) NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        limit_price NUMERIC(20,4) NOT NULL,
+                        trade_date DATE NOT NULL,
+                        status VARCHAR(30) NOT NULL,
+                        filled_quantity INTEGER NOT NULL DEFAULT 0,
+                        frozen_cash NUMERIC(20,4) NOT NULL DEFAULT 0,
+                        frozen_quantity INTEGER NOT NULL DEFAULT 0,
+                        idempotency_key VARCHAR(100),
+                        rejection_code VARCHAR(50),
+                        rejection_reason TEXT,
+                        validity_status VARCHAR(20),
+                        validity_reason VARCHAR(50),
+                        validity_checked_at DATETIME,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+
+        db = get_storage(mock_config)
+        db.engine = engine
+
+        db.ensure_paper_trading_schema()
+
+        inspector = inspect(engine)
+        table_names = inspector.get_table_names()
+        assert "paper_trade_validity_checks" in table_names
+        columns = {col["name"] for col in inspector.get_columns("paper_trade_validity_checks")}
+        assert "order_id" in columns
+        assert "status" in columns
+        assert "reason_code" in columns
+        reset_storage()
+
+    def test_idempotent_when_columns_already_exist(self, tmp_path, monkeypatch):
+        """ensure_paper_trading_schema is idempotent when columns already exist."""
+        from sqlalchemy import create_engine as real_create_engine
+        from sqlalchemy import inspect
+
+        sqlite_url = f"sqlite:///{tmp_path}/pt_idempotent.db"
+        engine = real_create_engine(sqlite_url)
+        Base.metadata.create_all(engine, tables=[PaperOrder.__table__])
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+
+        db = get_storage(mock_config)
+        db.engine = engine
+
+        # First call - should succeed
+        db.ensure_paper_trading_schema()
+        # Second call - should be idempotent (no errors)
+        db.ensure_paper_trading_schema()
+
+        columns = {col["name"] for col in inspect(engine).get_columns("paper_orders")}
+        assert "validity_status" in columns
+        assert "validity_reason" in columns
+        assert "validity_checked_at" in columns
         reset_storage()

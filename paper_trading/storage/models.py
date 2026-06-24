@@ -7,6 +7,7 @@ from storage.model.paper_trading import (
     PaperPosition,
     PaperPositionLot,
     PaperTrade,
+    PaperTradeValidityCheck,
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
@@ -14,6 +15,7 @@ from storage.model.paper_trading import (
     tb_name_paper_orders,
     tb_name_paper_position_lots,
     tb_name_paper_positions,
+    tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
 )
 
@@ -24,6 +26,7 @@ __all__ = [
     "PaperPositionLot",
     "PaperOrder",
     "PaperTrade",
+    "PaperTradeValidityCheck",
     "PaperAccountSnapshot",
     "PaperMatchingRun",
     "tb_name_paper_accounts",
@@ -32,6 +35,7 @@ __all__ = [
     "tb_name_paper_position_lots",
     "tb_name_paper_orders",
     "tb_name_paper_trades",
+    "tb_name_paper_trade_validity_checks",
     "tb_name_paper_account_snapshots",
     "tb_name_paper_matching_runs",
 ]

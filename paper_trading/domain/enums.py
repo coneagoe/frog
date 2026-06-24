@@ -32,3 +32,10 @@ class MatchingRunStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class TradeValidityStatus(StrEnum):
+    VALID = "valid"
+    SUSPICIOUS = "suspicious"
+    INVALID = "invalid"
+    UNCHECKED = "unchecked"

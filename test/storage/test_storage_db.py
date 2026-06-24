@@ -61,6 +61,7 @@ from storage.storage_db import (  # noqa: E402
 @pytest.fixture(autouse=True)
 def mock_blackroom_table_migration(monkeypatch):
     monkeypatch.setattr(StorageDb, "ensure_blackroom_records_table", Mock())
+    monkeypatch.setattr(StorageDb, "ensure_paper_trading_schema", Mock())
 
 
 class TestStorageDb:

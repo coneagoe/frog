@@ -4,8 +4,21 @@ from decimal import Decimal
 from typing import Protocol
 
 import pandas as pd
+from sqlalchemy import text
 
-from common.const import COL_CLOSE, COL_HIGH, COL_LOW, COL_OPEN, AdjustType, PeriodType
+from common.const import (
+    COL_CLOSE,
+    COL_DATE,
+    COL_DOWN_LIMIT,
+    COL_HIGH,
+    COL_LOW,
+    COL_OPEN,
+    COL_STOCK_ID,
+    COL_UP_LIMIT,
+    AdjustType,
+    PeriodType,
+)
+from storage.model import tb_name_stk_limit_a_stock
 
 
 @dataclass(frozen=True)
@@ -63,6 +76,8 @@ class StorageMarketDataProvider:
 
         row = df.iloc[-1]
 
+        up_limit, down_limit = self._load_limit_prices(symbol, trade_date)
+
         return DailyBar(
             symbol=symbol,
             trade_date=trade_date,
@@ -70,7 +85,38 @@ class StorageMarketDataProvider:
             high=self._decimal_field(row, COL_HIGH, symbol, trade_date),
             low=self._decimal_field(row, COL_LOW, symbol, trade_date),
             close=self._decimal_field(row, COL_CLOSE, symbol, trade_date),
+            up_limit=up_limit,
+            down_limit=down_limit,
         )
+
+    def _load_limit_prices(self, symbol: str, trade_date: date) -> tuple[Decimal | None, Decimal | None]:
+        """Attempt to load limit prices from the stk_limit_a_stock table.
+
+        Returns (up_limit, down_limit) when data is available,
+        or (None, None) when the table or row does not exist.
+        """
+        stock_id = self._to_storage_stock_id(symbol)
+        engine = getattr(self._storage, "engine", None)
+        if engine is None:
+            return None, None
+
+        try:
+            sql = (
+                f'SELECT "{COL_UP_LIMIT}", "{COL_DOWN_LIMIT}" '
+                f"FROM {tb_name_stk_limit_a_stock} "
+                f'WHERE "{COL_STOCK_ID}" = :stock_id AND "{COL_DATE}" = :trade_date'
+            )
+            df = pd.read_sql(text(sql), engine, params={"stock_id": stock_id, "trade_date": trade_date.isoformat()})
+            if df.empty:
+                return None, None
+            row = df.iloc[-1]
+            up_raw = row.get(COL_UP_LIMIT)
+            down_raw = row.get(COL_DOWN_LIMIT)
+            up_limit = Decimal(str(up_raw)) if pd.notna(up_raw) else None
+            down_limit = Decimal(str(down_raw)) if pd.notna(down_raw) else None
+            return up_limit, down_limit
+        except Exception:
+            return None, None
 
     @staticmethod
     def _to_storage_stock_id(symbol: str) -> str:

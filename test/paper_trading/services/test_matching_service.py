@@ -71,6 +71,20 @@ def test_matching_fills_buy_order_and_creates_lot(tmp_path):
     engine.dispose()
 
 
+def test_default_matching_does_not_skip_invalid_validity_order(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    repo.update_order_validity(order, "invalid", "BUY_AT_LIMIT_UP_TOUCH")
+
+    run = matching_service.run(trade_date)
+    session.commit()
+
+    assert run.filled_count == 1
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    engine.dispose()
+
+
 def test_matching_skips_limit_order_not_touched(tmp_path):
     engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))

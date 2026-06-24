@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
@@ -31,6 +31,33 @@ class OrderResponse(BaseModel):
     frozen_quantity: int
     rejection_code: str | None = None
     rejection_reason: str | None = None
+    validity_status: str | None = None
+    validity_reason: str | None = None
+    validity_checked_at: datetime | None = None
+
+
+class TradeValidityCheckResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    order_id: int
+    account_id: int
+    symbol: str
+    trade_date: date
+    side: str
+    input_price: Decimal
+    daily_low: Decimal | None = None
+    daily_high: Decimal | None = None
+    limit_up_price: Decimal | None = None
+    limit_down_price: Decimal | None = None
+    touched_limit_up: bool | None = None
+    touched_limit_down: bool | None = None
+    price_in_range: bool | None = None
+    status: str
+    reason_code: str
+    reason_detail: str | None = None
+    data_granularity: str
+    created_at: datetime
 
 
 class TradeResponse(BaseModel):

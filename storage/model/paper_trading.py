@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -22,6 +23,7 @@ tb_name_paper_orders = "paper_orders"
 tb_name_paper_trades = "paper_trades"
 tb_name_paper_account_snapshots = "paper_account_snapshots"
 tb_name_paper_matching_runs = "paper_matching_runs"
+tb_name_paper_trade_validity_checks = "paper_trade_validity_checks"
 
 
 class PaperAccount(Base):
@@ -92,6 +94,33 @@ class PaperOrder(Base):
     rejection_reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    validity_status = Column(String(20), nullable=True, index=True)
+    validity_reason = Column(String(50), nullable=True)
+    validity_checked_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class PaperTradeValidityCheck(Base):
+    __tablename__ = tb_name_paper_trade_validity_checks
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_id = Column(Integer, ForeignKey(f"{tb_name_paper_orders}.id"), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    side = Column(String(10), nullable=False)
+    input_price = Column(Numeric(20, 4), nullable=False)
+    daily_low = Column(Numeric(20, 4), nullable=True)
+    daily_high = Column(Numeric(20, 4), nullable=True)
+    limit_up_price = Column(Numeric(20, 4), nullable=True)
+    limit_down_price = Column(Numeric(20, 4), nullable=True)
+    touched_limit_up = Column(Boolean, nullable=True)
+    touched_limit_down = Column(Boolean, nullable=True)
+    price_in_range = Column(Boolean, nullable=True)
+    status = Column(String(20), nullable=False, index=True)
+    reason_code = Column(String(50), nullable=False)
+    reason_detail = Column(Text, nullable=True)
+    data_granularity = Column(String(20), nullable=False, server_default="daily")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class PaperTrade(Base):

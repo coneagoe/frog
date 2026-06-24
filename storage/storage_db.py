@@ -110,6 +110,7 @@ from .model import (
     tb_name_history_data_weekly_hk_stock_hfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
+    tb_name_paper_orders,
     tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
     tb_name_stk_limit_a_stock,
@@ -396,6 +397,7 @@ class StorageDb:
         if pid not in _metadata_initialized_pids:
             Base.metadata.create_all(self.engine)
             self.ensure_blackroom_records_table()
+            self.ensure_paper_trading_schema()
             _metadata_initialized_pids.add(pid)
 
     def connect(self) -> bool:
@@ -2278,6 +2280,45 @@ class StorageDb:
                         WHERE remaining_days IS NULL AND ban_days IS NOT NULL
                         """
                     )
+                )
+
+    # ------------------------------------------------------------------
+    # Paper trading schema bootstrap / upgrade
+    # ------------------------------------------------------------------
+
+    def ensure_paper_trading_schema(self) -> None:
+        """Create or upgrade paper trading tables/columns.
+
+        - Creates ``paper_trade_validity_checks`` if it does not exist.
+        - Adds validity columns to an existing ``paper_orders`` table that
+          predates the validity-analysis feature.
+
+        Safe to call even when the ``paper_orders`` table does not exist yet
+        (e.g. on a fresh install where ``Base.metadata.create_all`` will
+        create it with the correct columns).
+
+        Called once per process from ``__init__``.
+        """
+        from .model.paper_trading import PaperTradeValidityCheck  # noqa: F401
+
+        PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
+
+        # Bail out if the paper_orders table does not exist yet --- fresh
+        # installs rely on Base.metadata.create_all in __init__.
+        if not inspect(self.engine).has_table(tb_name_paper_orders):
+            return
+
+        columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_orders)}
+        if "validity_status" not in columns:
+            with self.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN validity_status VARCHAR(20)"))
+        if "validity_reason" not in columns:
+            with self.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN validity_reason VARCHAR(50)"))
+        if "validity_checked_at" not in columns:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN validity_checked_at TIMESTAMP WITH TIME ZONE")
                 )
 
 
