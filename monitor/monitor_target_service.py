@@ -9,6 +9,65 @@ from typing import Any, Optional
 from storage import get_storage
 
 
+def resolve_stock_name(stock_code: str, stock_name: str | None) -> str | None:
+    """Resolve a human-readable stock name from *stock_code* when *stock_name* is absent.
+
+    Uses the shared ``get_security_name`` lookup so CLI and runner use the same path.
+    Returns *stock_name* if it is truthy, otherwise attempts resolution.
+    Returns ``None`` gracefully if resolution fails or returns a falsey value.
+    """
+    if stock_name:
+        return stock_name
+
+    try:
+        from stock.data.access_data import get_security_name
+
+        resolved = get_security_name(stock_code)
+    except Exception:
+        return None
+
+    return resolved if resolved else None
+
+
+def _format_condition_summary(condition: dict[str, Any] | None) -> str:
+    if not isinstance(condition, dict):
+        return "未知条件"
+
+    ctype = condition.get("type", "unknown")
+    direction = condition.get("direction")
+
+    if ctype == "price_threshold":
+        prefix = "价格低于" if direction == "below" else "价格高于"
+        return f"{prefix}{condition.get('value')}"
+    if ctype == "change_pct":
+        prefix = "跌幅超过" if direction == "below" else "涨幅超过"
+        return f"{prefix}{condition.get('value')}%"
+    if ctype == "price_cross_ma":
+        prefix = "价格下穿" if direction == "below" else "价格上穿"
+        return f"{prefix}{condition.get('period')}日均线"
+    if ctype == "ma_cross":
+        prefix = "下穿" if direction == "death" else "上穿"
+        return f"{condition.get('fast')}日均线{prefix}{condition.get('slow')}日均线"
+    if ctype == "rsi":
+        prefix = "低于" if direction == "below" else "高于"
+        return f"RSI{prefix}{condition.get('value')}"
+    return str(ctype)
+
+
+def format_monitor_target_label(
+    stock_code: str | None,
+    stock_name: str | None,
+    condition: dict[str, Any] | None,
+    note: str | None,
+) -> str:
+    code = (stock_code or "").strip()
+    name = (stock_name or "").strip()
+    normalized_note = note.strip() if isinstance(note, str) else ""
+    suffix = normalized_note or _format_condition_summary(condition)
+
+    return " ".join(part for part in [code, name, suffix] if part)
+
+
 class TargetValidationError(ValueError):
     """Raised when monitor target input is invalid."""
 

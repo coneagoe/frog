@@ -34,6 +34,7 @@
 
 - 默认：人类可读输出，首行 `CODE: message`，如存在 `data` 则第二行输出 JSON。
 - `--json`：输出稳定 JSON 结构：`{"success": bool, "code": str, "message": str, "data": ...}`。
+- `target list/get` 默认文本输出使用统一标题：有备注时显示 `股票代码 股票名称 备注`，未指定备注时显示 `股票代码 股票名称 监控条件`。
 
 ## 退出码约定
 

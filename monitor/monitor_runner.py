@@ -7,6 +7,7 @@ from typing import Optional
 
 from common.const import COL_CLOSE
 from monitor.condition import ConditionResult, evaluate_condition
+from monitor.monitor_target_service import format_monitor_target_label, resolve_stock_name
 from monitor.price_fetcher import fetch_current_price, fetch_history_df
 from storage import get_storage
 from utility import send_email
@@ -113,9 +114,13 @@ def run_monitor(frequency: str = "daily") -> MonitorSummary:
 
 def _send_alert(target, current_price: Optional[float], change_pct: Optional[float]):
     """Compose and send an email alert for a triggered condition."""
-    ctype = target.condition.get("type", "unknown")
-
-    subject = f"[股票监控告警] {target.stock_code} 触发条件: {target.note or ctype}"
+    label = format_monitor_target_label(
+        target.stock_code,
+        resolve_stock_name(target.stock_code, getattr(target, "stock_name", None)),
+        target.condition,
+        target.note,
+    )
+    subject = f"[股票监控告警] {label}"
 
     lines = [
         f"股票代码: {target.stock_code}  市场: {target.market}",
