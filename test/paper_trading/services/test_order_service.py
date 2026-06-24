@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -23,6 +24,15 @@ from paper_trading.storage.market_data import StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
+
+
+class FakeHistoryStorageWithEngine:
+    def __init__(self, engine: Any, data: dict[str, pd.DataFrame]):
+        self.engine = engine
+        self._inner = FakeHistoryStorage(data)
+
+    def load_history_data_stock(self, stock_id, period, adjust, start_date=None, end_date=None):
+        return self._inner.load_history_data_stock(stock_id, period, adjust, start_date, end_date)
 
 
 def _repo_and_service(tmp_path):
@@ -200,8 +210,7 @@ def test_place_buy_order_sets_validity_valid_with_daily_bar(tmp_path):
             },
         )
 
-    storage = FakeHistoryStorage({"000001": bar})
-    storage.engine = engine
+    storage = FakeHistoryStorageWithEngine(engine, {"000001": bar})
     market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16)]))
     service = OrderService(repo, market_data)
     account = repo.create_account("demo", Decimal("100000.00"))
