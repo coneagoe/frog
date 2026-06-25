@@ -131,9 +131,28 @@ class OrderService:
         idempotency_key: str | None,
     ) -> PaperOrder:
         position = self.repo.get_position(account_id, symbol)
-        sellable = 0 if position is None else int(position.total_quantity or 0) - int(position.frozen_quantity or 0)
-        ensure_sufficient_position(sellable, quantity)
+        total_sellable = (
+            0 if position is None else int(position.total_quantity or 0) - int(position.frozen_quantity or 0)
+        )
+        ensure_sufficient_position(total_sellable, quantity)
         assert position is not None
+
+        lots = self.repo.get_lots(account_id, symbol)
+        matured_qty = sum(int(lot.remaining_quantity or 0) for lot in lots if lot.buy_trade_date < trade_date)
+        sellable_matured = matured_qty - int(position.frozen_quantity or 0)
+        if quantity > sellable_matured:
+            raise PaperTradingError(
+                "A_SHARE_T1_VIOLATION",
+                "可卖出数量不足：A股 T+1 规则下当日买入部分不可当日卖出",
+                {
+                    "total_quantity": position.total_quantity,
+                    "frozen_quantity": position.frozen_quantity,
+                    "requested": quantity,
+                    "matured_quantity": matured_qty,
+                    "trade_date": str(trade_date),
+                },
+            )
+
         position.frozen_quantity = int(position.frozen_quantity or 0) + quantity
         order = self.repo.create_order(
             account_id=account_id,

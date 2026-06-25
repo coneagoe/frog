@@ -129,7 +129,9 @@ def test_place_sell_order_freezes_sellable_position(tmp_path):
 
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.frozen_quantity == 100
-    assert repo.get_position(account.id, "000001.SZ").frozen_quantity == 100
+    position = repo.get_position(account.id, "000001.SZ")
+    assert position is not None
+    assert position.frozen_quantity == 100
     engine.dispose()
 
 
@@ -282,6 +284,132 @@ def test_rejected_buy_order_has_validity_check(tmp_path):
     assert len(checks) == 1
     assert checks[0].status is not None
     assert checks[0].reason_code is not None
+    engine.dispose()
+
+
+def test_place_sell_order_rejects_t1_violation(tmp_path):
+    """Selling on the same trade date as the only position lot's buy_trade_date is rejected (A-share T+1)."""
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    repo.upsert_position(
+        account.id,
+        "000001.SZ",
+        total_quantity=100,
+        frozen_quantity=0,
+        cost_amount=Decimal("900.00"),
+    )
+    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.SELL,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "A_SHARE_T1_VIOLATION"
+    assert "A股 T+1" in order.rejection_reason
+    assert "不可当日卖出" in order.rejection_reason
+    position = repo.get_position(account.id, "000001.SZ")
+    assert position is not None
+    assert position.frozen_quantity == 0
+    engine.dispose()
+
+
+def test_place_sell_order_rejects_partial_t1_violation_with_mixed_lots(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    repo.upsert_position(
+        account.id,
+        "000001.SZ",
+        total_quantity=200,
+        frozen_quantity=0,
+        cost_amount=Decimal("1800.00"),
+    )
+    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 100, 100, Decimal("9.00"))
+    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.SELL,
+        quantity=200,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "A_SHARE_T1_VIOLATION"
+    assert "A股 T+1" in order.rejection_reason
+    assert "不可当日卖出" in order.rejection_reason
+    position = repo.get_position(account.id, "000001.SZ")
+    assert position is not None
+    assert position.frozen_quantity == 0
+    engine.dispose()
+
+
+def test_place_sell_order_keeps_existing_frozen_quantity_after_t1_rejection(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    repo.upsert_position(
+        account.id,
+        "000001.SZ",
+        total_quantity=200,
+        frozen_quantity=100,
+        cost_amount=Decimal("1800.00"),
+    )
+    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.SELL,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "A_SHARE_T1_VIOLATION"
+    position = repo.get_position(account.id, "000001.SZ")
+    assert position is not None
+    assert position.frozen_quantity == 100
+    engine.dispose()
+
+
+def test_place_sell_order_keeps_insufficient_position_precedence_when_position_is_frozen(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    repo.upsert_position(
+        account.id,
+        "000001.SZ",
+        total_quantity=100,
+        frozen_quantity=100,
+        cost_amount=Decimal("900.00"),
+    )
+    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.SELL,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INSUFFICIENT_POSITION"
+    position = repo.get_position(account.id, "000001.SZ")
+    assert position is not None
+    assert position.frozen_quantity == 100
     engine.dispose()
 
 
