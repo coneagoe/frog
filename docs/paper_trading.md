@@ -90,7 +90,7 @@ curl -X POST http://localhost:8000/paper/accounts/1/orders \
   -d '{"symbol":"000001.SZ","side":"buy","quantity":100,"limit_price":"10.00","trade_date":"2026-06-16"}'
 ```
 
-Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, and insufficient position are stored as rejected orders.
+Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, insufficient position, and A-share T+1 violation (same-day sell) are stored as rejected orders.
 
 ## Trade Validity Analysis
 
