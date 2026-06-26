@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { cancelOrder, listAccounts, listCashLedger, listOrders, listPositions, listTrades } from "@/lib/api-client";
 import type { Account, CashLedgerEntry, Order, Position, Trade } from "@/lib/types";
-import { MatchingRunForm } from "./matching-run-form";
 import { OrderForm } from "./order-form";
 import { PriceChart } from "./price-chart";
 import { CashLedgerTable, OrderTable, PositionTable, TradeTable } from "./trading-tables";
@@ -108,7 +107,7 @@ export function TradePage() {
       <div className="page__header">
         <div>
           <h1>Trade</h1>
-          <p className="muted">Submit limit orders, run daily matching, and inspect account state.</p>
+          <p className="muted">Submit limit orders and inspect account state.</p>
         </div>
         <label>
           <span className="account-selector">
@@ -139,7 +138,6 @@ export function TradePage() {
         </div>
         <div className="grid">
           <OrderForm accounts={accounts} selectedAccountId={selectedAccountId} onSubmitted={() => refreshAccountData()} />
-          <MatchingRunForm accountId={selectedAccountId} onCompleted={() => refreshAccountData()} />
         </div>
       </div>
       <section className="panel"><h2>Positions</h2><PositionTable positions={positions} /></section>

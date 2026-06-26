@@ -6,13 +6,16 @@ from paper_trading.api.deps import (
     get_session,
     require_api_token,
 )
+from paper_trading.domain.enums import OrderStatus
 from paper_trading.schemas.orders import (
     CreateOrderRequest,
     OrderResponse,
     TradeResponse,
     TradeValidityCheckResponse,
 )
+from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_service import OrderService
+from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 
@@ -27,7 +30,8 @@ def create_order(
     market_data: MarketDataProvider = Depends(get_market_data_provider),
 ):
     repo = PaperTradingRepository(session)
-    order = OrderService(repo, market_data).place_order(
+    order_service = OrderService(repo, market_data)
+    order = order_service.place_order(
         account_id,
         request.symbol,
         request.side,
@@ -36,6 +40,10 @@ def create_order(
         request.trade_date,
         request.idempotency_key,
     )
+    if order.status == OrderStatus.ACCEPTED.value:
+        snapshot_service = SnapshotService(repo, market_data)
+        MatchingService(repo, market_data, snapshot_service).run(request.trade_date, account_id)
+        session.refresh(order)
     session.commit()
     return order
 
