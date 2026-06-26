@@ -63,6 +63,28 @@ Open `http://localhost:3000/accounts`.
 
 The bearer token is read only by Next.js route handlers. Browser code calls local `/api/paper/*` endpoints and does not receive `PAPER_TRADING_API_TOKEN`.
 
+## CLI Wrapper
+
+For day-to-day account, order, trade, matching, and snapshot management, prefer the repo-local CLI wrapper instead of hand-written `curl`:
+
+```bash
+export PAPER_TRADING_API_TOKEN="change-me"
+export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
+
+uv run tools/paper_trading_cli.py account list
+uv run tools/paper_trading_cli.py account create --name demo --initial-cash 100000
+uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001.SZ --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-06-16
+uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account-id 1
+```
+
+Use `--json` when machine-readable output is needed:
+
+```bash
+uv run tools/paper_trading_cli.py --json order list --account-id 1
+```
+
+Use the raw API examples below when debugging auth, routing, or response-shape issues.
+
 ## Create Account
 
 ```bash
