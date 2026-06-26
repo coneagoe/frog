@@ -271,6 +271,20 @@ class PaperTradingRepository:
         return lot
 
     def save_snapshot(self, **values: Any) -> PaperAccountSnapshot:
+        existing: PaperAccountSnapshot | None = (
+            self.session.query(PaperAccountSnapshot)
+            .filter(
+                PaperAccountSnapshot.account_id == values["account_id"],
+                PaperAccountSnapshot.trade_date == values["trade_date"],
+            )
+            .one_or_none()
+        )
+        if existing is not None:
+            for key, value in values.items():
+                setattr(existing, key, value)
+            self.session.flush()
+            return existing
+
         snapshot = PaperAccountSnapshot(**values)
         self.session.add(snapshot)
         self.session.flush()
