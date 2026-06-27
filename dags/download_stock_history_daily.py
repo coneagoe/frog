@@ -60,8 +60,8 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
     from stock.market import is_a_market_open_today  # noqa: E402
     from storage import get_storage  # noqa: E402
 
-#     if not is_a_market_open_today():
-#         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
+    if not is_a_market_open_today():
+        raise AirflowSkipException("A股市场今日休市，跳过下载任务")
 
     if partition_id >= partition_count:
         raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
@@ -122,8 +122,8 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
     from stock.market import is_a_market_open_today  # noqa: E402
     from storage import get_storage  # noqa: E402
 
-#     if not is_a_market_open_today():
-#         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
+    if not is_a_market_open_today():
+        raise AirflowSkipException("A股市场今日休市，跳过下载任务")
 
     if partition_id >= partition_count:
         raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
