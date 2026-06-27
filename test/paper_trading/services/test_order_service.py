@@ -85,6 +85,27 @@ def test_place_order_rejects_invalid_lot_size(tmp_path):
     engine.dispose()
 
 
+def test_place_order_rejects_closed_trade_date(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("demo", Decimal("100000.00"))
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 14),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INVALID_TRADE_DATE"
+    assert order.rejection_reason == "Trade date is not open"
+    assert repo.get_cash_available(account.id) == Decimal("100000.0000")
+    engine.dispose()
+
+
 def test_place_buy_order_rejects_insufficient_cash(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("demo", Decimal("1000.00"))
