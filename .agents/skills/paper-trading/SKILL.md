@@ -21,13 +21,19 @@ triggers:
 
 Use the repo-local CLI first for paper trading account and order operations. The CLI wraps the FastAPI backend and avoids hand-written curl unless debugging raw HTTP behavior.
 
+For A-share order symbols, use the 6-digit stock code only. Do not add exchange suffixes like `.SH` or `.SZ`.
+
+When the user gives an order instruction, submit the order as requested. Do not treat repeated or identical order instructions as duplicates, and do not replace execution with status checks unless the user explicitly asks to query, verify, or avoid duplicate orders. If the user repeats the same buy/sell instruction, each repetition is a new intended order.
+
 ## Quick Start
 
-Set auth and base URL, then run commands through `uv run`:
+Load the repo-local `.env` first; it contains `PAPER_TRADING_API_TOKEN`. Set the backend URL explicitly if `.env` does not contain `PAPER_TRADING_API_BASE_URL`, then run commands through `uv run`:
 
 ```bash
-export PAPER_TRADING_API_TOKEN="change-me"
-export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
+set -a
+source .env
+set +a
+export PAPER_TRADING_API_BASE_URL="${PAPER_TRADING_API_BASE_URL:-http://localhost:8000}"
 uv run tools/paper_trading_cli.py account list
 ```
 
@@ -49,7 +55,7 @@ Manual backend startup is documented in `docs/paper_trading.md`.
 | Delete account | `uv run tools/paper_trading_cli.py account delete --account-id 1` |
 | List positions | `uv run tools/paper_trading_cli.py account positions --account-id 1` |
 | List cash ledger | `uv run tools/paper_trading_cli.py account cash-ledger --account-id 1` |
-| Create order | `uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001.SZ --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-06-16` |
+| Create order | `uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-06-16` |
 | List orders | `uv run tools/paper_trading_cli.py order list --account-id 1` |
 | Get order | `uv run tools/paper_trading_cli.py order get --order-id 1` |
 | Cancel order | `uv run tools/paper_trading_cli.py order cancel --order-id 1` |
@@ -77,10 +83,12 @@ Use `docs/paper_trading.md` for curl examples when investigating HTTP auth, back
 | Mistake | Fix |
 | --- | --- |
 | Running bare `python tools/paper_trading_cli.py` | Use `uv run tools/paper_trading_cli.py ...` in this repo. |
-| Missing token errors | Set `PAPER_TRADING_API_TOKEN` or pass `--token`. |
+| Missing token errors | Load repo `.env` with `set -a; source .env; set +a`, or pass `--token`. |
 | Connection refused | Start `paper-trading` or pass the correct `--base-url`. |
 | Browser/frontend token confusion | Browser calls frontend `/api/paper/*`; CLI calls backend `/paper/*` with bearer auth. |
 | Expecting matching on order creation | Run `matching run` for the relevant `trade_date` and account, then inspect trades/snapshots. |
+| Using suffixed A-share symbols like `601668.SH` or `000001.SZ` | Use suffixless 6-digit codes like `601668` or `000001`. |
+| Intercepting repeated order instructions as duplicates | Submit each repeated buy/sell instruction as a new order unless the user explicitly asks for status-only verification or duplicate prevention. |
 
 ## Implementation Pointers
 
