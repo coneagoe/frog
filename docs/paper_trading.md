@@ -154,3 +154,16 @@ curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1
 ```
 
 Snapshots are generated after matching and use close prices for valuation.
+
+### Analytics
+
+`GET /paper/accounts/{account_id}/analytics` returns account-level analytics for the paper trading dashboard.
+
+The response includes:
+
+- Activity: daily, weekly, and monthly order/trade frequency.
+- Execution: fill rate, rejection rate, and reject reason distribution.
+- Trade quality: full-position round-trip win rate, payoff ratio, profit factor, average win/loss, consecutive wins/losses, and holding days.
+- Risk: total return, max drawdown, current drawdown, and optional Sharpe, Sortino, and Calmar metrics.
+
+Round-trip metrics use full-position cycles. A cycle opens when an account's symbol quantity moves from zero to positive and closes when that symbol returns to zero. Partial exits update the open cycle but do not count as closed round trips.
