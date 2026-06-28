@@ -146,17 +146,63 @@ def test_round_trip_repository_creates_and_lists_closed_cycle(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("analytics-demo", Decimal("100000.00"))
 
+    # Create real order and trade for the round-trip open
+    open_order = repo.create_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+        status=OrderStatus.FILLED,
+        frozen_cash=Decimal("1000.0000"),
+    )
+    open_trade = repo.create_trade(
+        order_id=open_order.id,
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        price=Decimal("10.00"),
+        amount=Decimal("1000.0000"),
+        fees=Decimal("5.0000"),
+        trade_date=date(2026, 6, 16),
+    )
+
     cycle = repo.create_round_trip(
         account_id=account.id,
         symbol="000001.SZ",
-        open_trade_id=1,
+        open_trade_id=open_trade.id,
         open_trade_date=date(2026, 6, 16),
         entry_amount=Decimal("1000.0000"),
         fees=Decimal("5.0000"),
     )
+
+    # Create real order and trade for the round-trip close
+    close_order = repo.create_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.SELL,
+        quantity=100,
+        limit_price=Decimal("11.00"),
+        trade_date=date(2026, 6, 20),
+        status=OrderStatus.FILLED,
+    )
+    close_trade = repo.create_trade(
+        order_id=close_order.id,
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.SELL,
+        quantity=100,
+        price=Decimal("11.00"),
+        amount=Decimal("1100.0000"),
+        fees=Decimal("10.0000"),
+        trade_date=date(2026, 6, 20),
+    )
+
     repo.update_round_trip(
         cycle,
-        close_trade_id=2,
+        close_trade_id=close_trade.id,
         close_trade_date=date(2026, 6, 20),
         exit_amount=Decimal("1100.0000"),
         fees=Decimal("10.0000"),
@@ -178,10 +224,33 @@ def test_delete_account_removes_round_trips(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("delete-round-trips", Decimal("100000.00"))
+
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+        status=OrderStatus.FILLED,
+        frozen_cash=Decimal("1000.0000"),
+    )
+    trade = repo.create_trade(
+        order_id=order.id,
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        price=Decimal("10.00"),
+        amount=Decimal("1000.0000"),
+        fees=Decimal("5.0000"),
+        trade_date=date(2026, 6, 16),
+    )
+
     repo.create_round_trip(
         account_id=account.id,
         symbol="000001.SZ",
-        open_trade_id=1,
+        open_trade_id=trade.id,
         open_trade_date=date(2026, 6, 16),
         entry_amount=Decimal("1000.0000"),
         fees=Decimal("5.0000"),
