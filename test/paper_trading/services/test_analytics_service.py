@@ -271,11 +271,11 @@ def test_analytics_recent_round_trips_limit_and_ordering(tmp_path):
 
 
 def test_analytics_recent_round_trips_limit_open_only(tmp_path):
-    """Early return with zero closed trips still applies the 20-row recent limit."""
+    """Early return with zero closed trips: 20 most recent open rows by open date."""
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("open-only-demo", Decimal("100000.00"))
 
-    # 30 open-only round trips (no close date)
+    # 30 open-only round trips, oldest-first (id=1 → 2026-06-01, id=30 → 2026-06-30)
     for i in range(30):
         repo.create_round_trip(
             account.id,
@@ -292,6 +292,9 @@ def test_analytics_recent_round_trips_limit_open_only(tmp_path):
     assert len(analytics.trade_quality.round_trips) == 20
     for r in analytics.trade_quality.round_trips:
         assert r.status == "open"
+    # Newest 20 by open date: dates 2026-06-30 (id=30) down to 2026-06-11 (id=11)
+    assert analytics.trade_quality.round_trips[0].id == 30
+    assert analytics.trade_quality.round_trips[19].id == 11
     engine.dispose()
 
 
