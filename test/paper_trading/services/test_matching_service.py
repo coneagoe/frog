@@ -33,12 +33,12 @@ def _services(tmp_path):
         {
             "000001": pd.DataFrame(
                 {
-                    COL_STOCK_ID: ["000001"],
-                    COL_DATE: ["2026-06-16"],
-                    COL_OPEN: [9.5],
-                    COL_HIGH: [10.5],
-                    COL_LOW: [9.0],
-                    COL_CLOSE: [10.0],
+                    COL_STOCK_ID: ["000001", "000001"],
+                    COL_DATE: ["2026-06-16", "2026-06-17"],
+                    COL_OPEN: [9.5, 10.2],
+                    COL_HIGH: [10.5, 10.8],
+                    COL_LOW: [9.0, 10.0],
+                    COL_CLOSE: [10.0, 10.5],
                 }
             ),
         }
@@ -114,4 +114,21 @@ def test_matching_fills_sell_order_and_releases_frozen_position(tmp_path):
     assert position.total_quantity == 100
     assert position.frozen_quantity == 0
     assert repo.get_cash_available(account.id) == Decimal("100994.4900")
+    engine.dispose()
+
+
+def test_matching_closes_round_trip_when_position_returns_to_zero(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("round-trip-demo", Decimal("100000.00"))
+    order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    matching_service.run(trade_date)
+    next_date = date(2026, 6, 17)
+    order_service.place_order(account.id, "000001.SZ", OrderSide.SELL, 100, Decimal("10.50"), next_date)
+    matching_service.run(next_date)
+    session.commit()
+
+    cycles = repo.list_round_trips(account.id)
+    assert len(cycles) == 1
+    assert cycles[0].status == "closed"
+    assert cycles[0].close_trade_date == next_date
     engine.dispose()
