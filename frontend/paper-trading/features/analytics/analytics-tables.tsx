@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { DataTable, type Column } from "@/components/data-table";
 import { MoneyText } from "@/components/money-text";
-import { formatDate, formatPercent, formatQuantity, labelStatus } from "@/lib/format";
+import { formatBackendLabel, formatDate, formatPercent, formatQuantity, labelStatus } from "@/lib/format";
 import type { ActivityBucket, AnalyticsResponse, RoundTrip, Snapshot } from "@/lib/types";
 import { MetricValueText } from "./analytics-summary";
 import { AssetChart } from "./asset-chart";
@@ -25,6 +25,10 @@ function ActivityTable({ title, rows }: { title: string; rows: ActivityBucket[] 
   ];
 
   return <DataTable columns={columns} emptyTitle={`No ${title.toLowerCase()} activity yet`} getRowKey={(row) => row.period} rows={rows} />;
+}
+
+function UnavailableValue() {
+  return <span className="muted">-</span>;
 }
 
 function RoundTripTable({ rows }: { rows: RoundTrip[] }) {
@@ -58,20 +62,21 @@ export function AnalyticsActivitySection({ analytics }: { analytics: AnalyticsRe
 
 export function AnalyticsExecutionSection({ analytics }: { analytics: AnalyticsResponse | null }) {
   const execution = analytics?.execution;
+  const hasExecution = execution !== undefined && execution !== null;
 
   return (
     <>
       <div className="summary-grid">
-        <MetricCard label="Submitted Orders" value={execution?.order_count ?? 0} />
-        <MetricCard label="Filled Orders" value={execution?.filled_count ?? 0} />
-        <MetricCard label="Rejected Orders" value={execution?.rejected_count ?? 0} />
+        <MetricCard label="Submitted Orders" value={hasExecution ? execution.order_count : <UnavailableValue />} />
+        <MetricCard label="Filled Orders" value={hasExecution ? execution.filled_count : <UnavailableValue />} />
+        <MetricCard label="Rejected Orders" value={hasExecution ? execution.rejected_count : <UnavailableValue />} />
         <MetricCard label="Fill Rate" value={<MetricValueText metric={execution?.fill_rate} percent />} />
         <MetricCard label="Rejection Rate" value={<MetricValueText metric={execution?.rejection_rate} percent />} />
       </div>
       <h3>Reject Reasons</h3>
       <DataTable
         columns={[
-          { key: "reason", header: "Reason", render: (row: { reason: string; count: number }) => row.reason },
+          { key: "reason", header: "Reason", render: (row: { reason: string; count: number }) => formatBackendLabel(row.reason) },
           { key: "count", header: "Count", align: "right", render: (row: { reason: string; count: number }) => formatQuantity(row.count) }
         ]}
         emptyTitle="No reject reasons yet"
@@ -84,18 +89,19 @@ export function AnalyticsExecutionSection({ analytics }: { analytics: AnalyticsR
 
 export function AnalyticsTradeQualitySection({ analytics }: { analytics: AnalyticsResponse | null }) {
   const tradeQuality = analytics?.trade_quality;
+  const hasTradeQuality = tradeQuality !== undefined && tradeQuality !== null;
 
   return (
     <>
       <div className="summary-grid">
-        <MetricCard label="Closed Round Trips" value={tradeQuality?.closed_count ?? 0} />
+        <MetricCard label="Closed Round Trips" value={hasTradeQuality ? tradeQuality.closed_count : <UnavailableValue />} />
         <MetricCard label="Win Rate" value={<MetricValueText metric={tradeQuality?.win_rate} percent />} />
         <MetricCard label="Avg Win" value={<MetricValueText metric={tradeQuality?.avg_win} />} />
         <MetricCard label="Avg Loss" value={<MetricValueText metric={tradeQuality?.avg_loss} />} />
         <MetricCard label="Payoff Ratio" value={<MetricValueText metric={tradeQuality?.payoff_ratio} />} />
         <MetricCard label="Profit Factor" value={<MetricValueText metric={tradeQuality?.profit_factor} />} />
-        <MetricCard label="Consecutive Wins" value={tradeQuality?.consecutive_wins ?? 0} />
-        <MetricCard label="Consecutive Losses" value={tradeQuality?.consecutive_losses ?? 0} />
+        <MetricCard label="Consecutive Wins" value={hasTradeQuality ? tradeQuality.consecutive_wins : <UnavailableValue />} />
+        <MetricCard label="Consecutive Losses" value={hasTradeQuality ? tradeQuality.consecutive_losses : <UnavailableValue />} />
         <MetricCard label="Avg Holding Days" value={<MetricValueText metric={tradeQuality?.avg_holding_days} />} />
       </div>
       <h3>Round Trips</h3>

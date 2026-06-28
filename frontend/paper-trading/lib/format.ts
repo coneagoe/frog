@@ -36,6 +36,18 @@ export function formatPercent(value: string | number | null | undefined): string
   return `${(numericValue * 100).toFixed(2)}%`;
 }
 
+export function formatBackendLabel(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+  return value
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .split(" ")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "-";
