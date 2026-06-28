@@ -140,3 +140,24 @@ def test_record_partial_sell_does_not_close_round_trip(tmp_path):
     assert cycle.return_pct is None
     assert cycle.holding_days is None
     engine.dispose()
+
+
+def test_rebuild_account_recreates_multiple_closed_cycles(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("rebuild-demo", Decimal("100000.00"))
+    for idx, side, price, amount, fees, trade_date in [
+        (1, OrderSide.BUY, "10.00", "1000.0000", "5.0000", date(2026, 6, 16)),
+        (2, OrderSide.SELL, "11.00", "1100.0000", "6.0000", date(2026, 6, 20)),
+        (3, OrderSide.BUY, "9.00", "900.0000", "5.0000", date(2026, 6, 21)),
+        (4, OrderSide.SELL, "8.00", "800.0000", "5.0000", date(2026, 6, 25)),
+    ]:
+        order = repo.create_order(account.id, "000001.SZ", side, 100, Decimal(price), trade_date, OrderStatus.FILLED)
+        repo.create_trade(order.id, account.id, "000001.SZ", side, 100, Decimal(price), Decimal(amount), Decimal(fees), trade_date)
+
+    cycles = RoundTripService(repo).rebuild_account(account.id)
+    session.commit()
+
+    assert [cycle.status for cycle in cycles] == ["closed", "closed"]
+    assert cycles[0].realized_pnl == Decimal("89.0000")
+    assert cycles[1].realized_pnl == Decimal("-110.0000")
+    engine.dispose()

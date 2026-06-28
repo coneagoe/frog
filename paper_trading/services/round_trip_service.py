@@ -54,3 +54,18 @@ class RoundTripService:
             values["holding_days"] = (trade.trade_date - cycle.open_trade_date).days
             values["status"] = "closed"
         self.repo.update_round_trip(cycle, **values)
+
+    def rebuild_account(self, account_id: int):
+        self.repo.delete_round_trips(account_id)
+        quantities: dict[str, int] = {}
+        trades = sorted(self.repo.list_trades(account_id), key=lambda trade: (trade.trade_date, trade.id))
+        for trade in trades:
+            side = OrderSide(str(trade.side))
+            current_quantity = quantities.get(trade.symbol, 0)
+            if side == OrderSide.BUY:
+                current_quantity += int(trade.quantity)
+            else:
+                current_quantity -= int(trade.quantity)
+            quantities[trade.symbol] = current_quantity
+            self.record_fill(trade, post_position_quantity=current_quantity)
+        return self.repo.list_round_trips(account_id)
