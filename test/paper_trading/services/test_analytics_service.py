@@ -219,12 +219,13 @@ def test_analytics_streak_uses_close_date_ordering(tmp_path):
     engine.dispose()
 
 
-def test_analytics_recent_round_trips_limit(tmp_path):
-    """Only the most recent 20 round trips should be returned in the response."""
+def test_analytics_recent_round_trips_limit_and_ordering(tmp_path):
+    """Only the most recent 20 round trips should be returned; closed rows come before open rows."""
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("limit-demo", Decimal("100000.00"))
 
-    for i in range(25):
+    # 20 closed trips (newest close dates near the end)
+    for i in range(20):
         rt = repo.create_round_trip(
             account.id,
             f"S{i}",
@@ -245,14 +246,52 @@ def test_analytics_recent_round_trips_limit(tmp_path):
             status="closed",
         )
 
+    # 10 open trips (no close date)
+    for i in range(20, 30):
+        repo.create_round_trip(
+            account.id,
+            f"O{i}",
+            i + 1,
+            date(2026, 6, 1 + i),
+            Decimal("1000.0000"),
+            Decimal("5.0000"),
+        )
+
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    # Aggregate metrics should reflect all 25 closed round trips
-    assert analytics.trade_quality.closed_count == 25
+    # Aggregate metrics should reflect all 20 closed round trips
+    assert analytics.trade_quality.closed_count == 20
     assert analytics.trade_quality.win_rate.value == Decimal("1.000000")
 
-    # But returned round trips should be limited to 20
+    # Returned rows: 20 (capped), all 20 closed come first, open rows excluded
     assert len(analytics.trade_quality.round_trips) == 20
+    for r in analytics.trade_quality.round_trips:
+        assert r.status == "closed"
+    engine.dispose()
+
+
+def test_analytics_recent_round_trips_limit_open_only(tmp_path):
+    """Early return with zero closed trips still applies the 20-row recent limit."""
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("open-only-demo", Decimal("100000.00"))
+
+    # 30 open-only round trips (no close date)
+    for i in range(30):
+        repo.create_round_trip(
+            account.id,
+            f"O{i}",
+            i + 1,
+            date(2026, 6, 1 + i),
+            Decimal("1000.0000"),
+            Decimal("5.0000"),
+        )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert analytics.trade_quality.closed_count == 0
+    assert len(analytics.trade_quality.round_trips) == 20
+    for r in analytics.trade_quality.round_trips:
+        assert r.status == "open"
     engine.dispose()
 
 
