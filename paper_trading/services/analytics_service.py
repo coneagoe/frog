@@ -59,7 +59,15 @@ class AnalyticsService:
             return OverviewAnalytics(total_return=MetricValue(value=None, reason="insufficient_data"))
 
         if not initial_cash:
-            return OverviewAnalytics(total_return=MetricValue(value=None, reason="invalid_initial_cash"))
+            latest = snapshots[-1]
+            return OverviewAnalytics(
+                total_assets=Decimal(latest.total_assets).quantize(Decimal("0.0001")),
+                cash_available=Decimal(latest.cash_available).quantize(Decimal("0.0001")),
+                market_value=Decimal(latest.market_value).quantize(Decimal("0.0001")),
+                realized_pnl=Decimal(latest.realized_pnl).quantize(Decimal("0.0001")),
+                unrealized_pnl=Decimal(latest.unrealized_pnl).quantize(Decimal("0.0001")),
+                total_return=MetricValue(value=None, reason="invalid_initial_cash"),
+            )
 
         latest = snapshots[-1]
         total_return_val = ((Decimal(latest.total_assets) - initial_cash) / initial_cash).quantize(_QUANTIZE)
@@ -131,8 +139,8 @@ class AnalyticsService:
             fill_rate = MetricValue(value=None, reason="insufficient_data")
             rejection_rate = MetricValue(value=None, reason="insufficient_data")
         else:
-            fill_rate = MetricValue(value=Decimal(str(filled / total)).quantize(_QUANTIZE))
-            rejection_rate = MetricValue(value=Decimal(str(rejected / total)).quantize(_QUANTIZE))
+            fill_rate = MetricValue(value=(Decimal(filled) / Decimal(total)).quantize(_QUANTIZE))
+            rejection_rate = MetricValue(value=(Decimal(rejected) / Decimal(total)).quantize(_QUANTIZE))
 
         reasons: dict[str, int] = {}
         for o in orders:
@@ -169,10 +177,16 @@ class AnalyticsService:
                 round_trips=[self._rt_to_response(rt) for rt in round_trips],
             )
 
+        # Sort closed by close date for streak calculation (per spec)
+        closed_sorted = sorted(
+            closed,
+            key=lambda rt: (rt.close_trade_date or date.min, rt.close_trade_id or rt.id),
+        )
+
         winners = [rt for rt in closed if (rt.realized_pnl or 0) > 0]
         losers = [rt for rt in closed if (rt.realized_pnl or 0) < 0]
 
-        win_rate = Decimal(str(len(winners) / closed_count)).quantize(_QUANTIZE) if closed_count else Decimal(0)
+        win_rate = (Decimal(len(winners)) / Decimal(closed_count)).quantize(_QUANTIZE) if closed_count else Decimal(0)
 
         avg_win = (
             self._mean_decimal([Decimal(rt.realized_pnl or 0) for rt in winners])
@@ -205,7 +219,7 @@ class AnalyticsService:
 
         cons_wins, cons_losses = 0, 0
         cur_w, cur_l = 0, 0
-        for rt in closed:
+        for rt in closed_sorted:
             pnl = rt.realized_pnl or 0
             if pnl > 0:
                 cur_w += 1
@@ -226,6 +240,17 @@ class AnalyticsService:
             else MetricValue(value=None, reason="insufficient_data")
         )
 
+        # Return most recent round trips (newest closed first, then open)
+        _RECENT_LIMIT = 20
+        sorted_for_display = sorted(
+            round_trips,
+            key=lambda rt: (
+                rt.close_trade_date or date.max,
+                rt.close_trade_id or (rt.id if rt.status == "closed" else 0),
+            ),
+            reverse=True,
+        )[:_RECENT_LIMIT]
+
         return TradeQualityAnalytics(
             closed_count=closed_count,
             win_rate=MetricValue(value=win_rate),
@@ -236,7 +261,7 @@ class AnalyticsService:
             consecutive_wins=cons_wins,
             consecutive_losses=cons_losses,
             avg_holding_days=avg_holding,
-            round_trips=[self._rt_to_response(rt) for rt in round_trips],
+            round_trips=[self._rt_to_response(rt) for rt in sorted_for_display],
         )
 
     @staticmethod

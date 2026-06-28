@@ -135,18 +135,18 @@ def test_analytics_no_orders_returns_insufficient_data_for_rates(tmp_path):
     engine.dispose()
 
 
-def test_analytics_zero_initial_cash_returns_invalid_initial_cash(tmp_path):
+def test_analytics_zero_initial_cash_preserves_snapshot_fields(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("zero-cash-demo", Decimal("0"))
     repo.save_snapshot(
         account_id=account.id,
         trade_date=date(2026, 6, 16),
-        cash_available=Decimal("0"),
+        cash_available=Decimal("50000.0000"),
         cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
-        total_assets=Decimal("100.0000"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
+        market_value=Decimal("30000.0000"),
+        total_assets=Decimal("80000.0000"),
+        realized_pnl=Decimal("2000.0000"),
+        unrealized_pnl=Decimal("-1000.0000"),
         position_count=0,
         order_count=0,
         trade_count=0,
@@ -156,6 +156,103 @@ def test_analytics_zero_initial_cash_returns_invalid_initial_cash(tmp_path):
 
     assert analytics.overview.total_return.reason == "invalid_initial_cash"
     assert analytics.overview.total_return.value is None
+    assert analytics.overview.total_assets == Decimal("80000.0000")
+    assert analytics.overview.cash_available == Decimal("50000.0000")
+    assert analytics.overview.market_value == Decimal("30000.0000")
+    assert analytics.overview.realized_pnl == Decimal("2000.0000")
+    assert analytics.overview.unrealized_pnl == Decimal("-1000.0000")
+    engine.dispose()
+
+
+def test_analytics_streak_uses_close_date_ordering(tmp_path):
+    """Streak calculation must order closed round trips by close date, not open date."""
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("streak-demo", Decimal("100000.00"))
+
+    # Round trips: first opened, third closed (loser), second closed (winner)
+    # When ordered by close date: loser then winner → max consecutive win = 1 (not 2)
+    rt1 = repo.create_round_trip(
+        account.id,
+        "A",
+        1,
+        date(2026, 6, 1),
+        Decimal("1000.0000"),
+        Decimal("5.0000"),
+    )
+    repo.update_round_trip(
+        rt1,
+        close_trade_id=2,
+        close_trade_date=date(2026, 6, 20),
+        exit_amount=Decimal("1100.0000"),
+        fees=Decimal("11.0000"),
+        realized_pnl=Decimal("89.0000"),
+        return_pct=Decimal("0.089000"),
+        holding_days=19,
+        status="closed",
+    )
+    rt2 = repo.create_round_trip(
+        account.id,
+        "B",
+        3,
+        date(2026, 6, 5),
+        Decimal("1000.0000"),
+        Decimal("5.0000"),
+    )
+    repo.update_round_trip(
+        rt2,
+        close_trade_id=4,
+        close_trade_date=date(2026, 6, 15),
+        exit_amount=Decimal("900.0000"),
+        fees=Decimal("5.0000"),
+        realized_pnl=Decimal("-105.0000"),
+        return_pct=Decimal("-0.105000"),
+        holding_days=10,
+        status="closed",
+    )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    # Ordered by close date: B (loser, 6/15) → A (winner, 6/20)
+    # Streaks: loss(1) → win(1) → consecutive_wins=1, consecutive_losses=1
+    assert analytics.trade_quality.consecutive_wins == 1
+    assert analytics.trade_quality.consecutive_losses == 1
+    engine.dispose()
+
+
+def test_analytics_recent_round_trips_limit(tmp_path):
+    """Only the most recent 20 round trips should be returned in the response."""
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("limit-demo", Decimal("100000.00"))
+
+    for i in range(25):
+        rt = repo.create_round_trip(
+            account.id,
+            f"S{i}",
+            i + 1,
+            date(2026, 6, 1),
+            Decimal("1000.0000"),
+            Decimal("5.0000"),
+        )
+        repo.update_round_trip(
+            rt,
+            close_trade_id=i + 2,
+            close_trade_date=date(2026, 6, 1 + i),
+            exit_amount=Decimal("1100.0000"),
+            fees=Decimal("11.0000"),
+            realized_pnl=Decimal("89.0000"),
+            return_pct=Decimal("0.089000"),
+            holding_days=1,
+            status="closed",
+        )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    # Aggregate metrics should reflect all 25 closed round trips
+    assert analytics.trade_quality.closed_count == 25
+    assert analytics.trade_quality.win_rate.value == Decimal("1.000000")
+
+    # But returned round trips should be limited to 20
+    assert len(analytics.trade_quality.round_trips) == 20
     engine.dispose()
 
 
