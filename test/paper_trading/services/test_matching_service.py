@@ -30,19 +30,19 @@ def _services(tmp_path):
     repo = PaperTradingRepository(session)
     trade_date = date(2026, 6, 16)
     storage = FakeHistoryStorage(
-            {
-                "000001": pd.DataFrame(
-                    {
-                        COL_STOCK_ID: ["000001", "000001"],
-                        COL_DATE: ["2026-06-16", "2026-06-17"],
-                        COL_OPEN: [9.5, 10.2],
-                        COL_HIGH: [10.5, 10.8],
-                        COL_LOW: [9.0, 10.0],
-                        COL_CLOSE: [10.0, 10.5],
-                    }
-                ),
-            }
-        )
+        {
+            "000001": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["000001", "000001"],
+                    COL_DATE: ["2026-06-16", "2026-06-17"],
+                    COL_OPEN: [9.5, 10.2],
+                    COL_HIGH: [10.5, 10.8],
+                    COL_LOW: [9.0, 10.0],
+                    COL_CLOSE: [10.0, 10.5],
+                }
+            ),
+        }
+    )
     market_data = StorageMarketDataProvider(
         storage,
         FakeTradeCalendar([date(2026, 6, 15), trade_date, date(2026, 6, 17)]),
