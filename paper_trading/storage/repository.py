@@ -48,6 +48,9 @@ class PaperTradingRepository:
         self.session.query(PaperCashLedger).filter(PaperCashLedger.account_id == account_id).delete(
             synchronize_session=False
         )
+        self.session.query(PaperPositionRoundTrip).filter(PaperPositionRoundTrip.account_id == account_id).delete(
+            synchronize_session=False
+        )
         self.session.query(PaperTrade).filter(PaperTrade.account_id == account_id).delete(synchronize_session=False)
         self.session.query(PaperOrder).filter(PaperOrder.account_id == account_id).delete(synchronize_session=False)
         self.session.query(PaperPositionLot).filter(PaperPositionLot.account_id == account_id).delete(
@@ -60,9 +63,6 @@ class PaperTradingRepository:
             synchronize_session=False
         )
         self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
-            synchronize_session=False
-        )
-        self.session.query(PaperPositionRoundTrip).filter(PaperPositionRoundTrip.account_id == account_id).delete(
             synchronize_session=False
         )
         self.session.delete(account)
@@ -421,7 +421,7 @@ class PaperTradingRepository:
                 PaperPositionRoundTrip.status == "open",
             )
             .order_by(PaperPositionRoundTrip.id.desc())
-            .one_or_none(),
+            .first(),
         )
 
     def update_round_trip(self, cycle: PaperPositionRoundTrip, **values: Any) -> PaperPositionRoundTrip:
