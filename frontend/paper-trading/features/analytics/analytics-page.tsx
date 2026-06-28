@@ -3,19 +3,22 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { listAccounts, listCashLedger, listSnapshots, listTrades } from "@/lib/api-client";
-import type { Account, CashLedgerEntry, Snapshot, Trade } from "@/lib/types";
+import { getAnalytics, listAccounts, listSnapshots } from "@/lib/api-client";
+import type { Account, AnalyticsResponse, Snapshot } from "@/lib/types";
 import { AnalyticsSummary } from "./analytics-summary";
-import { AnalyticsCashLedgerTable, AnalyticsTradeTable, SnapshotTable } from "./analytics-tables";
-import { AssetChart } from "./asset-chart";
+import {
+  AnalyticsActivitySection,
+  AnalyticsExecutionSection,
+  AnalyticsRiskSection,
+  AnalyticsTradeQualitySection
+} from "./analytics-tables";
 
 export function AnalyticsPage() {
   const searchParams = useSearchParams();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [cashLedger, setCashLedger] = useState<CashLedgerEntry[]>([]);
+  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
@@ -25,13 +28,11 @@ export function AnalyticsPage() {
     setError(null);
     if (clearExisting) {
       setSnapshots([]);
-      setTrades([]);
-      setCashLedger([]);
+      setAnalytics(null);
     }
-    const [nextSnapshots, nextTrades, nextCashLedger] = await Promise.allSettled([
+    const [nextSnapshots, nextAnalytics] = await Promise.allSettled([
       listSnapshots(accountId),
-      listTrades(accountId),
-      listCashLedger(accountId)
+      getAnalytics(accountId)
     ]);
 
     if (requestId !== requestIdRef.current) {
@@ -41,14 +42,11 @@ export function AnalyticsPage() {
     if (nextSnapshots.status === "fulfilled") {
       setSnapshots(nextSnapshots.value);
     }
-    if (nextTrades.status === "fulfilled") {
-      setTrades(nextTrades.value);
-    }
-    if (nextCashLedger.status === "fulfilled") {
-      setCashLedger(nextCashLedger.value);
+    if (nextAnalytics.status === "fulfilled") {
+      setAnalytics(nextAnalytics.value);
     }
 
-    const failed = [nextSnapshots, nextTrades, nextCashLedger].find((result) => result.status === "rejected");
+    const failed = [nextSnapshots, nextAnalytics].find((result) => result.status === "rejected");
     if (failed?.status === "rejected") {
       setError(failed.reason instanceof Error ? failed.reason.message : "Some analytics panels failed to load");
     }
@@ -111,14 +109,26 @@ export function AnalyticsPage() {
       {loading ? <div className="panel">Loading paper trading data...</div> : null}
       {!loading && accounts.length === 0 ? <div className="panel">No paper accounts yet. Create an account before viewing analytics.</div> : null}
       {error ? <ErrorBanner message={error} /> : null}
-      <AnalyticsSummary snapshot={latestSnapshot} />
       <section className="panel">
-        <div className="panel__header"><h2>Total Assets</h2></div>
-        <AssetChart snapshots={snapshots} />
+        <h2>Overview</h2>
+        <AnalyticsSummary analytics={analytics} snapshot={latestSnapshot} />
       </section>
-      <section className="panel"><h2>Snapshots</h2><SnapshotTable snapshots={snapshots} /></section>
-      <section className="panel"><h2>Trades</h2><AnalyticsTradeTable trades={trades} /></section>
-      <section className="panel"><h2>Cash Ledger</h2><AnalyticsCashLedgerTable entries={cashLedger} /></section>
+      <section className="panel">
+        <h2>Activity</h2>
+        <AnalyticsActivitySection analytics={analytics} />
+      </section>
+      <section className="panel">
+        <h2>Execution</h2>
+        <AnalyticsExecutionSection analytics={analytics} />
+      </section>
+      <section className="panel">
+        <h2>Trade Quality</h2>
+        <AnalyticsTradeQualitySection analytics={analytics} />
+      </section>
+      <section className="panel">
+        <h2>Risk &amp; Drawdown</h2>
+        <AnalyticsRiskSection analytics={analytics} snapshots={snapshots} />
+      </section>
     </section>
   );
 }

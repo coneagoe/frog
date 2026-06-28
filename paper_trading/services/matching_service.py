@@ -9,6 +9,7 @@ from paper_trading.domain.enums import (
 )
 from paper_trading.domain.fees import calculate_a_share_fees
 from paper_trading.domain.rules import ensure_price_in_daily_range
+from paper_trading.services.round_trip_service import RoundTripService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperOrder
@@ -25,6 +26,7 @@ class MatchingService:
         self.repo = repo
         self.market_data = market_data
         self.snapshot_service = snapshot_service
+        self.round_trip_service = RoundTripService(repo)
 
     def run(self, trade_date: date, account_id: int | None = None):
         run = self.repo.create_matching_run(trade_date, account_id, MatchingRunStatus.RUNNING.value)
@@ -94,8 +96,18 @@ class MatchingService:
         )
         if side == OrderSide.BUY:
             self._settle_buy(order, trade.id, amount, fees)
+            position = self.repo.get_position(order.account_id, order.symbol)
+            self.round_trip_service.record_fill(
+                trade,
+                post_position_quantity=0 if position is None else int(position.total_quantity or 0),
+            )
         else:
             self._settle_sell(order, trade.id, amount, fees)
+            position = self.repo.get_position(order.account_id, order.symbol)
+            self.round_trip_service.record_fill(
+                trade,
+                post_position_quantity=0 if position is None else int(position.total_quantity or 0),
+            )
         order.filled_quantity = quantity
         self.repo.update_order_status(order, OrderStatus.FILLED)
 
