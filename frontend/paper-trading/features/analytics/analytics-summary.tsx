@@ -13,13 +13,13 @@ export function MetricValueText({ metric, percent = false }: { metric: MetricVal
 export function AnalyticsSummary({ analytics, snapshot }: { analytics: AnalyticsResponse | null; snapshot: Snapshot | null }) {
   const overview = analytics?.overview;
   const cards = [
-    ["Total Assets", <MoneyText value={overview?.total_assets ?? snapshot?.total_assets} />],
-    ["Cash Available", <MoneyText value={overview?.cash_available ?? snapshot?.cash_available} />],
-    ["Cash Frozen", <MoneyText value={snapshot?.cash_frozen} />],
-    ["Market Value", <MoneyText value={overview?.market_value ?? snapshot?.market_value} />],
-    ["Realized PnL", <MoneyText value={overview?.realized_pnl ?? snapshot?.realized_pnl} />],
-    ["Unrealized PnL", <MoneyText value={overview?.unrealized_pnl ?? snapshot?.unrealized_pnl} />],
-    ["Total Return", <MetricValueText metric={overview?.total_return} percent />]
+    ["Total Assets", <MoneyText key="total-assets" value={overview?.total_assets ?? snapshot?.total_assets} />],
+    ["Cash Available", <MoneyText key="cash-available" value={overview?.cash_available ?? snapshot?.cash_available} />],
+    ["Cash Frozen", <MoneyText key="cash-frozen" value={snapshot?.cash_frozen} />],
+    ["Market Value", <MoneyText key="market-value" value={overview?.market_value ?? snapshot?.market_value} />],
+    ["Realized PnL", <MoneyText key="realized-pnl" value={overview?.realized_pnl ?? snapshot?.realized_pnl} />],
+    ["Unrealized PnL", <MoneyText key="unrealized-pnl" value={overview?.unrealized_pnl ?? snapshot?.unrealized_pnl} />],
+    ["Total Return", <MetricValueText key="total-return" metric={overview?.total_return} percent />]
   ] as const;
 
   return (
