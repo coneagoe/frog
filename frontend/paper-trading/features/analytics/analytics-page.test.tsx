@@ -96,13 +96,20 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("Execution")).toBeInTheDocument();
     expect(screen.getByText("Trade Quality")).toBeInTheDocument();
     expect(screen.getByText("Risk & Drawdown")).toBeInTheDocument();
-    expect(screen.getByText("INSUFFICIENT_CASH")).toBeInTheDocument();
+    expect(screen.getByText("Insufficient Cash")).toBeInTheDocument();
     expect(screen.getByText("000001.SZ")).toBeInTheDocument();
   });
 
   it("shows insufficient data reasons for unavailable metrics", async () => {
+    getAnalyticsMock.mockResolvedValueOnce(undefined as never);
     render(<AnalyticsPage />);
 
-    expect(await screen.findAllByText("insufficient_data")).not.toHaveLength(0);
+    const submittedOrdersCard = await screen.findByText("Submitted Orders");
+    const closedRoundTripsCard = screen.getByText("Closed Round Trips");
+
+    expect(submittedOrdersCard.closest(".metric-card")).toHaveTextContent("-");
+    expect(submittedOrdersCard.closest(".metric-card")).not.toHaveTextContent("0");
+    expect(closedRoundTripsCard.closest(".metric-card")).toHaveTextContent("-");
+    expect(closedRoundTripsCard.closest(".metric-card")).not.toHaveTextContent("0");
   });
 });

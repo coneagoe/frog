@@ -1,10 +1,10 @@
 import { MoneyText } from "@/components/money-text";
-import { formatPercent } from "@/lib/format";
+import { formatBackendLabel, formatPercent } from "@/lib/format";
 import type { AnalyticsResponse, MetricValue, Snapshot } from "@/lib/types";
 
 export function MetricValueText({ metric, percent = false }: { metric: MetricValue | null | undefined; percent?: boolean }) {
   if (!metric || metric.value === null || metric.value === undefined || metric.value === "") {
-    return <span>{metric?.reason ?? "-"}</span>;
+    return <span>{formatBackendLabel(metric?.reason)}</span>;
   }
 
   return <span>{percent ? formatPercent(metric.value) : metric.value}</span>;
