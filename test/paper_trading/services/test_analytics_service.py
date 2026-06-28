@@ -157,3 +157,41 @@ def test_analytics_zero_initial_cash_returns_invalid_initial_cash(tmp_path):
     assert analytics.overview.total_return.reason == "invalid_initial_cash"
     assert analytics.overview.total_return.value is None
     engine.dispose()
+
+
+def test_analytics_zero_first_snapshot_assets_returns_invalid_initial_assets_for_calmar(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("calmar-demo", Decimal("100000.00"))
+    # First snapshot has total_assets = 0 (invalid denominator)
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=date(2026, 6, 16),
+        cash_available=Decimal("0"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("0"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+    )
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=date(2026, 6, 17),
+        cash_available=Decimal("100000.0000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("100000.0000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+    )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert analytics.risk.calmar.reason == "invalid_initial_assets"
+    assert analytics.risk.calmar.value is None
+    engine.dispose()

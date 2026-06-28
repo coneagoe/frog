@@ -296,8 +296,11 @@ class AnalyticsService:
 
         sharpe = self._compute_sharpe(daily_returns)
         sortino = self._compute_sortino(daily_returns)
-        total_ret = (latest_ta - total_assets[0]) / total_assets[0] if total_assets[0] else Decimal(0)
-        calmar = self._compute_calmar(total_returns=total_ret, max_drawdown=max_dd)
+        if not total_assets[0]:
+            calmar = MetricValue(value=None, reason="invalid_initial_assets")
+        else:
+            total_ret = ((latest_ta - total_assets[0]) / total_assets[0]).quantize(_QUANTIZE)
+            calmar = self._compute_calmar(total_returns=total_ret, max_drawdown=max_dd)
 
         return RiskAnalytics(
             max_drawdown=MetricValue(value=max_dd.quantize(_QUANTIZE)),
