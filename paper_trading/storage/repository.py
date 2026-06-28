@@ -14,6 +14,7 @@ from paper_trading.storage.models import (
     PaperOrder,
     PaperPosition,
     PaperPositionLot,
+    PaperPositionRoundTrip,
     PaperTrade,
     PaperTradeValidityCheck,
 )
@@ -59,6 +60,9 @@ class PaperTradingRepository:
             synchronize_session=False
         )
         self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.query(PaperPositionRoundTrip).filter(PaperPositionRoundTrip.account_id == account_id).delete(
             synchronize_session=False
         )
         self.session.delete(account)
@@ -384,3 +388,60 @@ class PaperTradingRepository:
             .order_by(PaperPositionLot.buy_trade_date.asc(), PaperPositionLot.id.asc())
             .all()
         )
+
+    def create_round_trip(
+        self,
+        account_id: int,
+        symbol: str,
+        open_trade_id: int,
+        open_trade_date: date,
+        entry_amount: Decimal,
+        fees: Decimal,
+    ) -> PaperPositionRoundTrip:
+        cycle = PaperPositionRoundTrip(
+            account_id=account_id,
+            symbol=symbol,
+            open_trade_id=open_trade_id,
+            open_trade_date=open_trade_date,
+            entry_amount=entry_amount,
+            fees=fees,
+            status="open",
+        )
+        self.session.add(cycle)
+        self.session.flush()
+        return cycle
+
+    def get_open_round_trip(self, account_id: int, symbol: str) -> PaperPositionRoundTrip | None:
+        return cast(
+            PaperPositionRoundTrip | None,
+            self.session.query(PaperPositionRoundTrip)
+            .filter(
+                PaperPositionRoundTrip.account_id == account_id,
+                PaperPositionRoundTrip.symbol == symbol,
+                PaperPositionRoundTrip.status == "open",
+            )
+            .order_by(PaperPositionRoundTrip.id.desc())
+            .one_or_none(),
+        )
+
+    def update_round_trip(self, cycle: PaperPositionRoundTrip, **values: Any) -> PaperPositionRoundTrip:
+        for key, value in values.items():
+            setattr(cycle, key, value)
+        cycle.updated_at = datetime.now(timezone.utc)
+        self.session.flush()
+        return cycle
+
+    def list_round_trips(self, account_id: int) -> list[PaperPositionRoundTrip]:
+        return list(
+            self.session.query(PaperPositionRoundTrip)
+            .filter(PaperPositionRoundTrip.account_id == account_id)
+            .order_by(PaperPositionRoundTrip.open_trade_date.asc(), PaperPositionRoundTrip.id.asc())
+            .all()
+        )
+
+    def delete_round_trips(self, account_id: int) -> int:
+        deleted = self.session.query(PaperPositionRoundTrip).filter(
+            PaperPositionRoundTrip.account_id == account_id
+        ).delete(synchronize_session=False)
+        self.session.flush()
+        return int(deleted)

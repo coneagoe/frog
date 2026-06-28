@@ -39,6 +39,7 @@ BUSINESS_TABLES=(
   paper_orders
   paper_trade_validity_checks
   paper_trades
+  paper_position_round_trips
   paper_account_snapshots
   paper_matching_runs
 )
