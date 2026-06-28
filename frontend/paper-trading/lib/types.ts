@@ -6,6 +6,87 @@ export type Account = {
   base_currency: string;
 };
 
+export type MetricValue = {
+  value: string | null;
+  reason: string | null;
+};
+
+export type ActivityBucket = {
+  period: string;
+  order_count: number;
+  trade_count: number;
+  filled_count: number;
+  rejected_count: number;
+};
+
+export type RejectReasonBucket = {
+  reason: string;
+  count: number;
+};
+
+export type OverviewAnalytics = {
+  total_assets: string | null;
+  cash_available: string | null;
+  market_value: string | null;
+  realized_pnl: string | null;
+  unrealized_pnl: string | null;
+  total_return: MetricValue;
+};
+
+export type ExecutionAnalytics = {
+  order_count: number;
+  filled_count: number;
+  rejected_count: number;
+  fill_rate: MetricValue;
+  rejection_rate: MetricValue;
+  reject_reasons: RejectReasonBucket[];
+};
+
+export type RoundTrip = {
+  id: number;
+  symbol: string;
+  open_trade_date: string;
+  close_trade_date: string | null;
+  entry_amount: string;
+  exit_amount: string;
+  fees: string;
+  realized_pnl: string;
+  return_pct: string | null;
+  holding_days: number | null;
+  status: string;
+};
+
+export type TradeQualityAnalytics = {
+  closed_count: number;
+  win_rate: MetricValue;
+  avg_win: MetricValue;
+  avg_loss: MetricValue;
+  payoff_ratio: MetricValue;
+  profit_factor: MetricValue;
+  consecutive_wins: number;
+  consecutive_losses: number;
+  avg_holding_days: MetricValue;
+  round_trips: RoundTrip[];
+};
+
+export type RiskAnalytics = {
+  max_drawdown: MetricValue;
+  current_drawdown: MetricValue;
+  sharpe: MetricValue;
+  sortino: MetricValue;
+  calmar: MetricValue;
+};
+
+export type AnalyticsResponse = {
+  overview: OverviewAnalytics;
+  activity_daily: ActivityBucket[];
+  activity_weekly: ActivityBucket[];
+  activity_monthly: ActivityBucket[];
+  execution: ExecutionAnalytics;
+  trade_quality: TradeQualityAnalytics;
+  risk: RiskAnalytics;
+};
+
 export type Position = {
   symbol: string;
   total_quantity: number;
