@@ -35,8 +35,8 @@ class ExecutionAnalytics(BaseModel):
     order_count: int
     filled_count: int
     rejected_count: int
-    fill_rate: Decimal | None
-    rejection_rate: Decimal | None
+    fill_rate: MetricValue
+    rejection_rate: MetricValue
     reject_reasons: list[RejectReasonBucket]
 
 

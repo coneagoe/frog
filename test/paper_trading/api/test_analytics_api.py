@@ -23,5 +23,9 @@ def test_get_account_analytics_returns_execution_group(monkeypatch, sqlite_sessi
     assert response.status_code == 200
     payload = response.json()
     assert payload["execution"]["order_count"] == 0
+    assert payload["execution"]["fill_rate"]["reason"] == "insufficient_data"
+    assert payload["execution"]["fill_rate"]["value"] is None
+    assert payload["execution"]["rejection_rate"]["reason"] == "insufficient_data"
+    assert payload["execution"]["rejection_rate"]["value"] is None
     assert payload["trade_quality"]["closed_count"] == 0
     assert payload["risk"]["sharpe"]["reason"] == "insufficient_data"
