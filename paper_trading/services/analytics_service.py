@@ -22,7 +22,6 @@ from paper_trading.storage.models import (
 )
 from paper_trading.storage.repository import PaperTradingRepository
 
-_ONE_DAY = Decimal(1)
 _QUANTIZE = Decimal("0.000001")
 
 
@@ -59,10 +58,11 @@ class AnalyticsService:
         if not snapshots:
             return OverviewAnalytics(total_return=MetricValue(value=None, reason="insufficient_data"))
 
+        if not initial_cash:
+            return OverviewAnalytics(total_return=MetricValue(value=None, reason="invalid_initial_cash"))
+
         latest = snapshots[-1]
-        total_return_val = Decimal(0)
-        if initial_cash:
-            total_return_val = ((Decimal(latest.total_assets) - initial_cash) / initial_cash).quantize(_QUANTIZE)
+        total_return_val = ((Decimal(latest.total_assets) - initial_cash) / initial_cash).quantize(_QUANTIZE)
 
         return OverviewAnalytics(
             total_assets=Decimal(latest.total_assets).quantize(Decimal("0.0001")),
@@ -106,7 +106,7 @@ class AnalyticsService:
                 filled_count=v["filled_count"],
                 rejected_count=v["rejected_count"],
             )
-            for k, v in buckets.items()
+            for k, v in sorted(buckets.items())
         ]
 
     @staticmethod
@@ -127,8 +127,12 @@ class AnalyticsService:
         filled = sum(1 for o in orders if o.status == "filled")
         rejected = sum(1 for o in orders if o.status == "rejected")
 
-        fill_rate = Decimal(str(filled / total)).quantize(_QUANTIZE) if total else None
-        rejection_rate = Decimal(str(rejected / total)).quantize(_QUANTIZE) if total else None
+        if total == 0:
+            fill_rate = MetricValue(value=None, reason="insufficient_data")
+            rejection_rate = MetricValue(value=None, reason="insufficient_data")
+        else:
+            fill_rate = MetricValue(value=Decimal(str(filled / total)).quantize(_QUANTIZE))
+            rejection_rate = MetricValue(value=Decimal(str(rejected / total)).quantize(_QUANTIZE))
 
         reasons: dict[str, int] = {}
         for o in orders:
@@ -166,17 +170,19 @@ class AnalyticsService:
             )
 
         winners = [rt for rt in closed if (rt.realized_pnl or 0) > 0]
-        losers = [rt for rt in closed if (rt.realized_pnl or 0) <= 0]
+        losers = [rt for rt in closed if (rt.realized_pnl or 0) < 0]
 
         win_rate = Decimal(str(len(winners) / closed_count)).quantize(_QUANTIZE) if closed_count else Decimal(0)
 
         avg_win = (
             self._mean_decimal([Decimal(rt.realized_pnl or 0) for rt in winners])
-            if winners else MetricValue(value=None, reason="no_winners")
+            if winners
+            else MetricValue(value=None, reason="no_winners")
         )
         avg_loss = (
             self._mean_decimal([Decimal(rt.realized_pnl or 0) for rt in losers])
-            if losers else MetricValue(value=None, reason="no_losers")
+            if losers
+            else MetricValue(value=None, reason="no_losers")
         )
 
         payoff_ratio = MetricValue(value=None, reason="insufficient_data")
@@ -200,19 +206,24 @@ class AnalyticsService:
         cons_wins, cons_losses = 0, 0
         cur_w, cur_l = 0, 0
         for rt in closed:
-            if (rt.realized_pnl or 0) > 0:
+            pnl = rt.realized_pnl or 0
+            if pnl > 0:
                 cur_w += 1
                 cur_l = 0
-            else:
+            elif pnl < 0:
                 cur_l += 1
                 cur_w = 0
+            else:
+                # breakeven resets both streaks
+                cur_w = 0
+                cur_l = 0
             cons_wins = max(cons_wins, cur_w)
             cons_losses = max(cons_losses, cur_l)
 
         avg_holding = (
-            self._mean_decimal(
-                [Decimal(rt.holding_days or 0) for rt in closed if rt.holding_days is not None]
-            ) if closed else MetricValue(value=None, reason="insufficient_data")
+            self._mean_decimal([Decimal(rt.holding_days or 0) for rt in closed if rt.holding_days is not None])
+            if closed
+            else MetricValue(value=None, reason="insufficient_data")
         )
 
         return TradeQualityAnalytics(
