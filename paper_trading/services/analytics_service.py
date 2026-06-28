@@ -174,7 +174,7 @@ class AnalyticsService:
                 consecutive_wins=0,
                 consecutive_losses=0,
                 avg_holding_days=MetricValue(value=None, reason="insufficient_data"),
-                round_trips=[self._rt_to_response(rt) for rt in round_trips],
+                round_trips=[self._rt_to_response(rt) for rt in self._recent_round_trips_for_display(round_trips)],
             )
 
         # Sort closed by close date for streak calculation (per spec)
@@ -240,17 +240,6 @@ class AnalyticsService:
             else MetricValue(value=None, reason="insufficient_data")
         )
 
-        # Return most recent round trips (newest closed first, then open)
-        _RECENT_LIMIT = 20
-        sorted_for_display = sorted(
-            round_trips,
-            key=lambda rt: (
-                rt.close_trade_date or date.max,
-                rt.close_trade_id or (rt.id if rt.status == "closed" else 0),
-            ),
-            reverse=True,
-        )[:_RECENT_LIMIT]
-
         return TradeQualityAnalytics(
             closed_count=closed_count,
             win_rate=MetricValue(value=win_rate),
@@ -261,8 +250,24 @@ class AnalyticsService:
             consecutive_wins=cons_wins,
             consecutive_losses=cons_losses,
             avg_holding_days=avg_holding,
-            round_trips=[self._rt_to_response(rt) for rt in sorted_for_display],
+            round_trips=[self._rt_to_response(rt) for rt in self._recent_round_trips_for_display(round_trips)],
         )
+
+    @staticmethod
+    def _recent_round_trips_for_display(
+        round_trips: list[PaperPositionRoundTrip],
+    ) -> list[PaperPositionRoundTrip]:
+        """Return at most 20 round trips: closed rows first (newest close date),
+        then open rows (newest open date), each group newest-first."""
+        _RECENT_LIMIT = 20
+        return sorted(
+            round_trips,
+            key=lambda rt: (
+                0 if rt.status == "closed" else 1,
+                -(rt.close_trade_date.toordinal()) if rt.close_trade_date else 0,
+                -(rt.close_trade_id or 0),
+            ),
+        )[:_RECENT_LIMIT]
 
     @staticmethod
     def _mean_decimal(values: list[Decimal]) -> MetricValue:
