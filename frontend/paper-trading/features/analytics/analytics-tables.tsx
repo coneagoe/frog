@@ -96,8 +96,22 @@ export function AnalyticsTradeQualitySection({ analytics }: { analytics: Analyti
       <div className="summary-grid">
         <MetricCard label="Closed Round Trips" value={hasTradeQuality ? tradeQuality.closed_count : <UnavailableValue />} />
         <MetricCard label="Win Rate" value={<MetricValueText metric={tradeQuality?.win_rate} percent />} />
-        <MetricCard label="Avg Win" value={<MetricValueText metric={tradeQuality?.avg_win} />} />
-        <MetricCard label="Avg Loss" value={<MetricValueText metric={tradeQuality?.avg_loss} />} />
+        <MetricCard
+          label="Avg Win"
+          value={
+            tradeQuality?.avg_win?.value != null
+              ? <MoneyText value={tradeQuality.avg_win.value} />
+              : <MetricValueText metric={tradeQuality?.avg_win} />
+          }
+        />
+        <MetricCard
+          label="Avg Loss"
+          value={
+            tradeQuality?.avg_loss?.value != null
+              ? <MoneyText value={tradeQuality.avg_loss.value} />
+              : <MetricValueText metric={tradeQuality?.avg_loss} />
+          }
+        />
         <MetricCard label="Payoff Ratio" value={<MetricValueText metric={tradeQuality?.payoff_ratio} />} />
         <MetricCard label="Profit Factor" value={<MetricValueText metric={tradeQuality?.profit_factor} />} />
         <MetricCard label="Consecutive Wins" value={hasTradeQuality ? tradeQuality.consecutive_wins : <UnavailableValue />} />
