@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import { AccountsPage } from "@/features/accounts/accounts-page";
 
 export default function Page() {
-  return <AccountsPage />;
+  return (
+    <Suspense fallback={<div className="panel">Loading accounts...</div>}>
+      <AccountsPage />
+    </Suspense>
+  );
 }
