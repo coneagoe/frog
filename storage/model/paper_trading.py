@@ -21,6 +21,7 @@ tb_name_paper_positions = "paper_positions"
 tb_name_paper_position_lots = "paper_position_lots"
 tb_name_paper_orders = "paper_orders"
 tb_name_paper_trades = "paper_trades"
+tb_name_paper_position_round_trips = "paper_position_round_trips"
 tb_name_paper_account_snapshots = "paper_account_snapshots"
 tb_name_paper_matching_runs = "paper_matching_runs"
 tb_name_paper_trade_validity_checks = "paper_trade_validity_checks"
@@ -137,6 +138,27 @@ class PaperTrade(Base):
     fees = Column(Numeric(20, 4), nullable=False)
     trade_date = Column(Date, nullable=False, index=True)
     trade_time = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaperPositionRoundTrip(Base):
+    __tablename__ = tb_name_paper_position_round_trips
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    open_trade_id = Column(Integer, ForeignKey(f"{tb_name_paper_trades}.id"), nullable=False, index=True)
+    close_trade_id = Column(Integer, ForeignKey(f"{tb_name_paper_trades}.id"), nullable=True, index=True)
+    open_trade_date = Column(Date, nullable=False, index=True)
+    close_trade_date = Column(Date, nullable=True, index=True)
+    entry_amount = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    exit_amount = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    fees = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    realized_pnl = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    return_pct = Column(Numeric(20, 6), nullable=True)
+    holding_days = Column(Integer, nullable=True)
+    status = Column(String(20), nullable=False, server_default="open", index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class PaperAccountSnapshot(Base):
