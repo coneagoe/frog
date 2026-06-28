@@ -25,6 +25,17 @@ export function formatQuantity(value: number | null | undefined): string {
   return quantityFormatter.format(value);
 }
 
+export function formatPercent(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  const numericValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "-";
+  }
+  return `${(numericValue * 100).toFixed(2)}%`;
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return "-";

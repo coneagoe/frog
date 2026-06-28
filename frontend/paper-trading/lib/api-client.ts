@@ -1,6 +1,7 @@
 import { ApiError, parseApiError } from "./api-error";
 import type {
   Account,
+  AnalyticsResponse,
   CashLedgerEntry,
   CreateAccountInput,
   CreateMatchingRunInput,
@@ -42,6 +43,10 @@ export function createAccount(input: CreateAccountInput): Promise<Account> {
 
 export function listAccounts(): Promise<Account[]> {
   return apiGet<Account[]>("/accounts");
+}
+
+export function getAnalytics(accountId: number): Promise<AnalyticsResponse> {
+  return apiGet<AnalyticsResponse>(`/accounts/${accountId}/analytics`);
 }
 
 export function deleteAccount(accountId: number): Promise<void> {
