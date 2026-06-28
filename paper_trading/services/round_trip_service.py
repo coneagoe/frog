@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from paper_trading.domain.enums import OrderSide
-from paper_trading.storage.models import PaperTrade
+from paper_trading.storage.models import PaperPositionRoundTrip, PaperTrade
 from paper_trading.storage.repository import PaperTradingRepository
 
 
@@ -55,7 +55,7 @@ class RoundTripService:
             values["status"] = "closed"
         self.repo.update_round_trip(cycle, **values)
 
-    def rebuild_account(self, account_id: int):
+    def rebuild_account(self, account_id: int) -> list[PaperPositionRoundTrip]:
         self.repo.delete_round_trips(account_id)
         quantities: dict[str, int] = {}
         trades = sorted(self.repo.list_trades(account_id), key=lambda trade: (trade.trade_date, trade.id))
