@@ -3,54 +3,111 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { listAccounts } from "@/lib/api-client";
-import type { Account } from "@/lib/types";
+import { cancelOrder, listAccounts, listCashLedger, listOrders, listPositions, listTrades } from "@/lib/api-client";
+import type { Account, CashLedgerEntry, Order, Position, Trade } from "@/lib/types";
 import { OrderForm } from "./order-form";
 import { PriceChart } from "./price-chart";
+import { CashLedgerTable, OrderTable, PositionTable, TradeTable } from "./trading-tables";
 
 export function TradePage() {
   const searchParams = useSearchParams();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [symbol, setSymbol] = useState("");
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [cashLedger, setCashLedger] = useState<CashLedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
 
-  useEffect(() => {
+  async function loadAccountData(accountId: number, clearExisting = false) {
+    if (!accountId) {
+      return;
+    }
     const requestId = ++requestIdRef.current;
-    let cancelled = false;
+    setError(null);
+    if (clearExisting) {
+      setPositions([]);
+      setOrders([]);
+      setTrades([]);
+      setCashLedger([]);
+    }
+    const [nextPositions, nextOrders, nextTrades, nextCashLedger] = await Promise.allSettled([
+      listPositions(accountId),
+      listOrders(accountId),
+      listTrades(accountId),
+      listCashLedger(accountId)
+    ]);
+
+    if (requestId !== requestIdRef.current) {
+      return;
+    }
+
+    if (nextPositions.status === "fulfilled") {
+      setPositions(nextPositions.value);
+    }
+    if (nextOrders.status === "fulfilled") {
+      setOrders(nextOrders.value);
+    }
+    if (nextTrades.status === "fulfilled") {
+      setTrades(nextTrades.value);
+    }
+    if (nextCashLedger.status === "fulfilled") {
+      setCashLedger(nextCashLedger.value);
+    }
+
+    const failed = [nextPositions, nextOrders, nextTrades, nextCashLedger].find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") {
+      setError(failed.reason instanceof Error ? failed.reason.message : "Some trading panels failed to load");
+    }
+  }
+
+  async function refreshAccountData() {
+    if (selectedAccountId) {
+      await loadAccountData(selectedAccountId);
+    }
+  }
+
+  useEffect(() => {
     async function load() {
       setLoading(true);
       try {
         const nextAccounts = await listAccounts();
-        if (cancelled || requestId !== requestIdRef.current) return;
         setAccounts(nextAccounts);
         const requestedAccountId = Number(searchParams.get("accountId"));
         const firstAccountId = nextAccounts.some((account) => account.id === requestedAccountId)
           ? requestedAccountId
           : nextAccounts[0]?.id ?? null;
         setSelectedAccountId(firstAccountId);
+        if (firstAccountId) {
+          await loadAccountData(firstAccountId, true);
+        }
       } catch (err) {
-        if (!cancelled && requestId === requestIdRef.current) {
-          setError(err instanceof Error ? err.message : "Failed to load trading data");
-        }
+        setError(err instanceof Error ? err.message : "Failed to load trading data");
       } finally {
-        if (!cancelled && requestId === requestIdRef.current) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     }
     void load();
-    return () => { cancelled = true; };
   }, [searchParams]);
+
+  async function onCancel(orderId: number) {
+    try {
+      await cancelOrder(orderId);
+      await refreshAccountData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to cancel order");
+    }
+  }
 
   return (
     <section className="page">
       <div className="page__header">
         <div>
           <h1>Trade</h1>
-          <p className="muted">Submit paper orders.</p>
+          <p className="muted">Submit limit orders and inspect account state.</p>
         </div>
         <label>
           <span className="account-selector">
@@ -58,7 +115,9 @@ export function TradePage() {
             <select
               value={selectedAccountId ?? ""}
               onChange={(event) => {
-                setSelectedAccountId(Number(event.target.value));
+                const accountId = Number(event.target.value);
+                setSelectedAccountId(accountId);
+                void loadAccountData(accountId, true);
               }}
             >
               {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
@@ -78,9 +137,13 @@ export function TradePage() {
           <PriceChart symbol={symbol} />
         </div>
         <div className="grid">
-          <OrderForm accounts={accounts} selectedAccountId={selectedAccountId} onSubmitted={() => undefined} />
+          <OrderForm accounts={accounts} selectedAccountId={selectedAccountId} onSubmitted={() => refreshAccountData()} />
         </div>
       </div>
+      <section className="panel"><h2>Positions</h2><PositionTable positions={positions} /></section>
+      <section className="panel"><h2>Orders</h2><OrderTable orders={orders} onCancel={onCancel} /></section>
+      <section className="panel"><h2>Trades</h2><TradeTable trades={trades} /></section>
+      <section className="panel"><h2>Cash Ledger</h2><CashLedgerTable entries={cashLedger} /></section>
     </section>
   );
 }

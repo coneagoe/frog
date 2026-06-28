@@ -59,12 +59,10 @@ export PAPER_TRADING_API_TOKEN="change-me"
 npm run dev
 ```
 
-Open `http://localhost:3000/accounts`. The frontend has separate workspaces for accounts, order entry, historical orders, historical trades, and analytics:
+Open `http://localhost:3000/accounts`. The frontend has separate workspaces for accounts, trading, and analytics:
 
-- `Accounts`: create/delete accounts, select an account, and review its positions and cash ledger.
-- `Trade`: submit paper limit orders.
-- `Orders`: review historical orders and cancel cancellable orders.
-- `Trades`: review historical executions.
+- `Accounts`: create and delete paper accounts.
+- `Trade`: submit paper limit orders and inspect positions, orders, trades, and cash ledger for the selected account.
 - `Analytics`: review snapshots, total assets, trades, and cash movements.
 
 The bearer token is read only by Next.js route handlers. Browser code calls local `/api/paper/*` endpoints and does not receive `PAPER_TRADING_API_TOKEN`.
