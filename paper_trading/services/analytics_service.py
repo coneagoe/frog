@@ -264,8 +264,8 @@ class AnalyticsService:
             round_trips,
             key=lambda rt: (
                 0 if rt.status == "closed" else 1,
-                -(rt.close_trade_date.toordinal()) if rt.close_trade_date else 0,
-                -(rt.close_trade_id or 0),
+                -(rt.close_trade_date.toordinal()) if rt.close_trade_date else -(rt.open_trade_date.toordinal()),
+                -(rt.close_trade_id or 0) if rt.close_trade_date else -(rt.id or 0),
             ),
         )[:_RECENT_LIMIT]
 
