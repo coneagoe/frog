@@ -127,6 +127,13 @@ def test_daily_dag_has_both_hfq_and_bfq_partition_tasks():
     assert "REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY" in source
 
 
+def test_daily_dag_uses_weekdays_dag_id_without_hfq_suffix():
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+
+    assert '"download_stock_history_weekdays"' in source
+    assert '"download_stock_history_hfq_weekdays"' not in source
+
+
 def test_daily_dag_runs_paper_trading_matching_after_successful_aggregate():
     """The daily stock history DAG should trigger paper-trading matching after success."""
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
