@@ -210,8 +210,8 @@ class AnalyticsService:
 
         profit_factor = MetricValue(value=None, reason="insufficient_data")
         if winners:
-            total_win = sum(Decimal(rt.realized_pnl or 0) for rt in winners)
-            total_loss = sum(abs(Decimal(rt.realized_pnl or 0)) for rt in losers) if losers else Decimal(0)
+            total_win = sum((Decimal(rt.realized_pnl or 0) for rt in winners), Decimal("0"))
+            total_loss = sum((abs(Decimal(rt.realized_pnl or 0)) for rt in losers), Decimal("0"))
             if total_loss:
                 profit_factor = MetricValue(value=(total_win / total_loss).quantize(_QUANTIZE))
             else:
@@ -273,7 +273,7 @@ class AnalyticsService:
     def _mean_decimal(values: list[Decimal]) -> MetricValue:
         if not values:
             return MetricValue(value=None, reason="insufficient_data")
-        return MetricValue(value=(sum(values) / len(values)).quantize(_QUANTIZE))
+        return MetricValue(value=(sum(values, Decimal("0")) / Decimal(len(values))).quantize(_QUANTIZE))
 
     @staticmethod
     def _rt_to_response(rt: PaperPositionRoundTrip) -> RoundTripResponse:

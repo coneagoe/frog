@@ -193,6 +193,40 @@ def save_download_result_to_redis(*, partition_count: int, **context):
     return f"Results saved to Redis: {REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY}, result={result_str}"
 
 
+def run_paper_trading_matching_for_active_accounts(**context):
+    """Run paper-trading matching for all active accounts after successful download."""
+    from paper_trading.api.deps import get_market_data_provider, get_session  # noqa: E402
+    from paper_trading.domain.enums import AccountStatus  # noqa: E402
+    from paper_trading.services.matching_service import MatchingService  # noqa: E402
+    from paper_trading.services.snapshot_service import SnapshotService  # noqa: E402
+    from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
+
+    trade_date = datetime.now(tz=LOCAL_TZ).date()
+    session_generator = get_session()
+    session = next(session_generator)
+    try:
+        repo = PaperTradingRepository(session)
+        market_data = get_market_data_provider()
+        active_accounts = [account for account in repo.list_accounts() if account.status == AccountStatus.ACTIVE.value]
+        if not active_accounts:
+            return f"No active paper trading accounts for matching: trade_date={trade_date.isoformat()}"
+
+        runs = []
+        for account in active_accounts:
+            run = MatchingService(repo, market_data, SnapshotService(repo, market_data)).run(trade_date, account.id)
+            runs.append(run.id)
+        session.commit()
+        return (
+            "Paper trading matching completed: "
+            f"trade_date={trade_date.isoformat()}, accounts={len(active_accounts)}, runs={runs}"
+        )
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 # Create DAG
 dag = DAG(
     "download_stock_history_hfq_weekdays",
@@ -233,6 +267,14 @@ aggregate_task = PythonOperator(
     dag=dag,
 )
 
+paper_trading_matching_task = PythonOperator(
+    task_id="run_paper_trading_matching",
+    python_callable=run_paper_trading_matching_for_active_accounts,
+    dag=dag,
+)
+
 all_partition_tasks = hfq_partition_tasks + bfq_partition_tasks
 for _task in all_partition_tasks:
     _task >> aggregate_task
+
+aggregate_task >> paper_trading_matching_task

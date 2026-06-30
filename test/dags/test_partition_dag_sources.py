@@ -127,6 +127,30 @@ def test_daily_dag_has_both_hfq_and_bfq_partition_tasks():
     assert "REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY" in source
 
 
+def test_daily_dag_runs_paper_trading_matching_after_successful_aggregate():
+    """The daily stock history DAG should trigger paper-trading matching after success."""
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+
+    assert re.search(r"def run_paper_trading_matching_for_active_accounts\s*\(", source)
+    assert "AccountStatus.ACTIVE.value" in source
+    assert "MatchingService(repo, market_data, SnapshotService(repo, market_data)).run" in source
+    assert re.search(
+        r"paper_trading_matching_task\s*=\s*PythonOperator\([\s\S]*?"
+        r'task_id\s*=\s*"run_paper_trading_matching"',
+        source,
+    )
+    assert "aggregate_task >> paper_trading_matching_task" in source
+
+
+def test_daily_dag_paper_trading_matching_uses_local_trade_date_and_commits_once():
+    """Paper-trading matching should use the DAG local date and commit after all accounts."""
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+
+    assert "trade_date = datetime.now(tz=LOCAL_TZ).date()" in source
+    assert "session.commit()" in source
+    assert "session.close()" in source
+
+
 def test_etf_and_hk_docstrings_use_neutral_partition_language():
     for path in [
         ROOT / "dags/download_etf_daily.py",
