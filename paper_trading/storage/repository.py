@@ -440,8 +440,10 @@ class PaperTradingRepository:
         )
 
     def delete_round_trips(self, account_id: int) -> int:
-        deleted = self.session.query(PaperPositionRoundTrip).filter(
-            PaperPositionRoundTrip.account_id == account_id
-        ).delete(synchronize_session=False)
+        deleted = (
+            self.session.query(PaperPositionRoundTrip)
+            .filter(PaperPositionRoundTrip.account_id == account_id)
+            .delete(synchronize_session=False)
+        )
         self.session.flush()
         return int(deleted)
