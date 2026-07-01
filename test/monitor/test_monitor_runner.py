@@ -1,6 +1,10 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import pandas as pd
+
+from common.const import COL_CLOSE
 from monitor.monitor_runner import run_monitor
 
 
@@ -94,6 +98,31 @@ def test_run_monitor_auto_resets_state_when_condition_clears():
         run_monitor(frequency="daily")
 
     mock_storage.update_monitor_target_state.assert_called_with(1, False, triggered_at=None)
+
+
+def test_run_daily_monitor_uses_latest_history_close_for_ma_condition_when_realtime_price_missing():
+    target = _make_target(
+        stock_code="002558",
+        condition={"type": "price_cross_ma", "direction": "above", "period": 20},
+        note="巨人网络 超过 MA20",
+        last_state=False,
+    )
+    history_df = pd.DataFrame({COL_CLOSE: [25.0] * 19 + [28.0]})
+
+    mock_storage = MagicMock()
+    mock_storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=np.nan),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=history_df),
+        patch("monitor.monitor_runner.send_email") as mock_email,
+    ):
+        summary = run_monitor(frequency="daily")
+
+    mock_email.assert_called_once()
+    mock_storage.update_monitor_target_state.assert_called_once()
+    assert summary.triggered == 1
 
 
 def test_run_monitor_manual_mode_does_not_auto_reset():

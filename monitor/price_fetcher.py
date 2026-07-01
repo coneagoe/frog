@@ -2,7 +2,8 @@
 
 import os
 from datetime import date, timedelta
-from typing import Iterable, Optional
+from pathlib import Path
+from typing import Iterable, Optional, cast
 
 import numpy as np
 import pandas as pd
@@ -15,8 +16,35 @@ from storage import get_storage
 _CALENDAR_MULTIPLIER = 3
 
 
+def _format_tushare_date(value: date) -> str:
+    return value.strftime("%Y%m%d")
+
+
+def _env_file_candidates() -> list[Path]:
+    return [Path.cwd() / ".env", Path(__file__).resolve().parents[1] / ".env"]
+
+
+def _read_token_from_env_file() -> str | None:
+    for env_file in _env_file_candidates():
+        if not env_file.exists():
+            continue
+        try:
+            lines = env_file.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            name = name.strip().removeprefix("export ").strip()
+            if name == "TUSHARE_TOKEN":
+                return value.strip().strip('"').strip("'") or None
+    return None
+
+
 def _create_tushare_client():
-    token = os.getenv("TUSHARE_TOKEN")
+    token = os.getenv("TUSHARE_TOKEN") or _read_token_from_env_file()
     if not token:
         return None
 
@@ -44,6 +72,40 @@ def _to_ts_code(stock_code: str, market: str) -> str | None:
         suffix = ".SH" if normalized.startswith(("6", "9")) else ".SZ"
         return f"{normalized}{suffix}"
     return None
+
+
+def _fetch_a_share_daily_history_from_tushare(
+    stock_code: str, start_date: date, end_date: date
+) -> Optional[pd.DataFrame]:
+    pro = _create_tushare_client()
+    if pro is None:
+        return None
+
+    ts_code = _to_ts_code(stock_code, "A")
+    if ts_code is None:
+        return None
+
+    try:
+        df = pro.daily(
+            ts_code=ts_code,
+            start_date=_format_tushare_date(start_date),
+            end_date=_format_tushare_date(end_date),
+        )
+    except Exception:
+        return None
+
+    if df is None or df.empty or "trade_date" not in df.columns or "close" not in df.columns:
+        return None
+
+    result = df[["trade_date", "close"]].copy()
+    result["close"] = pd.to_numeric(result["close"], errors="coerce")
+    result = result.dropna(subset=["trade_date", "close"])
+    if result.empty:
+        return None
+
+    result = result.rename(columns={"trade_date": "日期", "close": "收盘"})
+    result["日期"] = result["日期"].astype(str)
+    return cast(pd.DataFrame, result.sort_values("日期").reset_index(drop=True))
 
 
 def _fetch_rt_k_map(pro, ts_codes: list[str]) -> dict[str, float]:
@@ -118,7 +180,10 @@ def fetch_price_map(items: Iterable[tuple[str, str]]) -> dict[tuple[str, str], f
 
 
 def fetch_price(stock_code: str, market: str) -> float:
-    return fetch_price_map([(stock_code, market)]).get((stock_code, market), np.nan)
+    price = fetch_price_map([(stock_code, market)]).get((stock_code, market), np.nan)
+    if price is None:
+        return float(np.nan)
+    return float(price)
 
 
 def fetch_current_price(stock_code: str, market: str) -> float:
@@ -142,9 +207,17 @@ def fetch_history_df(
         DataFrame with at least COL_CLOSE column, sorted ascending by date,
         or None if insufficient data.
     """
+    end_day = date.today()
+    start_day = end_day - timedelta(days=min_periods * _CALENDAR_MULTIPLIER)
+
+    if market == "A":
+        daily_df = _fetch_a_share_daily_history_from_tushare(stock_code, start_day, end_day)
+        if daily_df is not None and len(daily_df) >= min_periods:
+            return daily_df
+
     storage = get_storage()
-    end_date = date.today().isoformat()
-    start_date = (date.today() - timedelta(days=min_periods * _CALENDAR_MULTIPLIER)).isoformat()
+    end_date = end_day.isoformat()
+    start_date = start_day.isoformat()
 
     if market == "ETF":
         df = storage.load_history_data_etf(

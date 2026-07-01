@@ -22,6 +22,10 @@ def _compute_ma(series: pd.Series, period: int) -> float:
     return float(series.iloc[-period:].mean())
 
 
+def is_missing_number(value: Optional[float]) -> bool:
+    return value is None or bool(pd.isna(value))
+
+
 def _compute_rsi(series: pd.Series, period: int) -> float:
     """Compute Wilder RSI over `period` bars. Returns NaN if insufficient data."""
     if len(series) < period + 1:
@@ -65,19 +69,23 @@ def evaluate_condition(
 
     if ctype == "price_threshold":
         threshold = float(condition["value"])
-        if current_price is None:
+        if is_missing_number(current_price):
             return ConditionResult.INSUFFICIENT_DATA
-        triggered = current_price > threshold if direction == "above" else current_price < threshold
+        assert current_price is not None
+        price = float(current_price)
+        triggered = price > threshold if direction == "above" else price < threshold
         return ConditionResult.TRIGGERED if triggered else ConditionResult.NOT_TRIGGERED
 
     elif ctype == "price_cross_ma":
         period = int(condition["period"])
-        if history_df is None or current_price is None or len(history_df) < period:
+        if history_df is None or is_missing_number(current_price) or len(history_df) < period:
             return ConditionResult.INSUFFICIENT_DATA
+        assert current_price is not None
         ma = _compute_ma(history_df[COL_CLOSE], period)
         if np.isnan(ma):
             return ConditionResult.INSUFFICIENT_DATA
-        triggered = current_price > ma if direction == "above" else current_price < ma
+        price = float(current_price)
+        triggered = price > ma if direction == "above" else price < ma
         return ConditionResult.TRIGGERED if triggered else ConditionResult.NOT_TRIGGERED
 
     elif ctype == "ma_cross":
@@ -94,9 +102,11 @@ def evaluate_condition(
 
     elif ctype == "change_pct":
         threshold = float(condition["value"])
-        if change_pct is None:
+        if is_missing_number(change_pct):
             return ConditionResult.INSUFFICIENT_DATA
-        triggered = change_pct > threshold if direction == "above" else change_pct < threshold
+        assert change_pct is not None
+        pct = float(change_pct)
+        triggered = pct > threshold if direction == "above" else pct < threshold
         return ConditionResult.TRIGGERED if triggered else ConditionResult.NOT_TRIGGERED
 
     elif ctype == "rsi":

@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -98,6 +99,12 @@ def test_price_threshold_no_price_returns_insufficient():
     assert result == ConditionResult.INSUFFICIENT_DATA
 
 
+def test_price_threshold_nan_price_returns_insufficient():
+    cond = {"type": "price_threshold", "direction": "above", "value": 100.0}
+    result = evaluate_condition(cond, current_price=np.nan, history_df=None)
+    assert result == ConditionResult.INSUFFICIENT_DATA
+
+
 def test_price_cross_ma_above_triggers():
     # 20-day MA of 80.0 → price 90.0 is above MA
     closes = [80.0] * 20
@@ -105,6 +112,14 @@ def test_price_cross_ma_above_triggers():
     cond = {"type": "price_cross_ma", "direction": "above", "period": 20}
     result = evaluate_condition(cond, current_price=90.0, history_df=df)
     assert result == ConditionResult.TRIGGERED
+
+
+def test_price_cross_ma_nan_price_returns_insufficient():
+    closes = [80.0] * 20
+    df = _make_prices(closes)
+    cond = {"type": "price_cross_ma", "direction": "above", "period": 20}
+    result = evaluate_condition(cond, current_price=np.nan, history_df=df)
+    assert result == ConditionResult.INSUFFICIENT_DATA
 
 
 def test_price_cross_ma_below_triggers():
