@@ -5,8 +5,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+import pandas as pd
+
 from common.const import COL_CLOSE
-from monitor.condition import ConditionResult, evaluate_condition
+from monitor.condition import ConditionResult, evaluate_condition, is_missing_number
 from monitor.monitor_target_service import format_monitor_target_label, resolve_stock_name
 from monitor.price_fetcher import fetch_current_price, fetch_history_df
 from storage import get_storage
@@ -50,6 +52,21 @@ def _compute_change_pct(current_price: float, history_df) -> Optional[float]:
     return (current_price - prev_close) / prev_close * 100
 
 
+def _resolve_current_price(
+    frequency: str, condition: dict, current_price: Optional[float], history_df
+) -> Optional[float]:
+    if not is_missing_number(current_price):
+        return current_price
+    if frequency != "daily" or condition.get("type") != "price_cross_ma":
+        return current_price
+    if history_df is None or len(history_df) == 0:
+        return current_price
+    latest_close = pd.to_numeric(pd.Series([history_df[COL_CLOSE].iloc[-1]]), errors="coerce").iloc[0]
+    if pd.isna(latest_close):
+        return current_price
+    return float(latest_close)
+
+
 def run_monitor(frequency: str = "daily") -> MonitorSummary:
     """
     Load all enabled monitoring targets for the given frequency,
@@ -71,12 +88,14 @@ def run_monitor(frequency: str = "daily") -> MonitorSummary:
         try:
             condition = target.condition
             history_df = _build_history_for_condition(condition, target.stock_code, target.market)
-            current_price = fetch_current_price(target.stock_code, target.market)
+            current_price: Optional[float] = fetch_current_price(target.stock_code, target.market)
+            current_price = _resolve_current_price(frequency, condition, current_price, history_df)
 
             change_pct = None
             if condition.get("type") == "change_pct":
                 hist_for_pct = fetch_history_df(target.stock_code, target.market, min_periods=2)
-                change_pct = _compute_change_pct(current_price, hist_for_pct)
+                if current_price is not None:
+                    change_pct = _compute_change_pct(current_price, hist_for_pct)
 
             result = evaluate_condition(
                 condition,

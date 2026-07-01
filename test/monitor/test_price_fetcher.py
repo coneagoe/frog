@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
-from monitor.price_fetcher import fetch_current_price, fetch_price
+from monitor.price_fetcher import fetch_current_price, fetch_history_df, fetch_price
 
 
 def _install_tushare_stub(monkeypatch, pro_client):
@@ -29,8 +29,29 @@ def test_fetch_price_hk_uses_rt_hk_k(monkeypatch):
 
 
 def test_fetch_price_returns_nan_without_token(monkeypatch):
+    monkeypatch.setattr("monitor.price_fetcher._env_file_candidates", lambda: [])
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
     assert np.isnan(fetch_price("600519", "A"))
+
+
+def test_fetch_price_loads_token_from_env_file(monkeypatch, tmp_path):
+    class ProClient:
+        def rt_k(self, ts_code):
+            return pd.DataFrame([{"ts_code": ts_code, "close": 27.56}])
+
+    env_file = tmp_path / ".env"
+    env_file.write_text('TUSHARE_TOKEN="env-token"\n', encoding="utf-8")
+
+    def pro_api(token):
+        assert token == "env-token"
+        return ProClient()
+
+    ts_stub = SimpleNamespace(pro_api=pro_api)
+    monkeypatch.setitem(sys.modules, "tushare", ts_stub)
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.setattr("monitor.price_fetcher._env_file_candidates", lambda: [env_file])
+
+    assert fetch_price("002558", "A") == 27.56
 
 
 def test_fetch_price_returns_nan_on_api_error(monkeypatch):
@@ -60,3 +81,27 @@ def test_fetch_price_a_5xx_is_sz(monkeypatch):
     _install_tushare_stub(monkeypatch, pro_client)
 
     assert fetch_price("510300", "A") == 1.0
+
+
+def test_fetch_history_df_prefers_tushare_daily_for_a_share(monkeypatch):
+    class ProClient:
+        def daily(self, ts_code, start_date, end_date):
+            assert ts_code == "002558.SZ"
+            return pd.DataFrame(
+                [
+                    {"trade_date": "20260601", "close": 25.0},
+                    {"trade_date": "20260602", "close": 26.0},
+                    {"trade_date": "20260603", "close": 27.0},
+                ]
+            )
+
+    storage = SimpleNamespace(load_history_data_stock=lambda **kwargs: pd.DataFrame({"日期": ["old"], "收盘": [1.0]}))
+    monkeypatch.setenv("TUSHARE_TOKEN", "token")
+    _install_tushare_stub(monkeypatch, ProClient())
+    monkeypatch.setattr("monitor.price_fetcher.get_storage", lambda: storage)
+
+    result = fetch_history_df("002558", "A", min_periods=3)
+
+    assert result is not None
+    assert list(result["日期"]) == ["20260601", "20260602", "20260603"]
+    assert list(result["收盘"]) == [25.0, 26.0, 27.0]
