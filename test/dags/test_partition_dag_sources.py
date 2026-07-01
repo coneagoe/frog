@@ -135,12 +135,18 @@ def test_daily_dag_uses_weekdays_dag_id_without_hfq_suffix():
 
 
 def test_daily_dag_runs_paper_trading_matching_after_successful_aggregate():
-    """The daily stock history DAG should trigger paper-trading matching after success."""
+    """The daily stock history DAG should trigger paper-trading matching via HTTP after success."""
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
 
     assert re.search(r"def run_paper_trading_matching_for_active_accounts\s*\(", source)
-    assert "AccountStatus.ACTIVE.value" in source
-    assert "MatchingService(repo, market_data, SnapshotService(repo, market_data)).run" in source
+    assert "from paper_trading" not in source
+    assert "import paper_trading" not in source
+    assert "requests.post" in source
+    assert '"/paper/matching/runs"' in source
+    assert "PAPER_TRADING_API_BASE_URL" in source
+    assert "PAPER_TRADING_API_TOKEN" in source
+    assert "Authorization" in source
+    assert "raise_for_status()" in source
     assert re.search(
         r"paper_trading_matching_task\s*=\s*PythonOperator\([\s\S]*?"
         r'task_id\s*=\s*"run_paper_trading_matching"',
@@ -150,12 +156,21 @@ def test_daily_dag_runs_paper_trading_matching_after_successful_aggregate():
 
 
 def test_daily_dag_paper_trading_matching_uses_local_trade_date_and_commits_once():
-    """Paper-trading matching should use the DAG local date and commit after all accounts."""
+    """Paper-trading matching should use the DAG local date in the HTTP payload."""
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
 
     assert "trade_date = datetime.now(tz=LOCAL_TZ).date()" in source
-    assert "session.commit()" in source
-    assert "session.close()" in source
+    assert '"trade_date": trade_date.isoformat()' in source
+    assert "session.commit()" not in source
+    assert "session.close()" not in source
+
+
+def test_compose_passes_paper_trading_api_config_to_airflow():
+    """Airflow workers should be able to call the paper-trading backend over Docker DNS."""
+    source = read_source(ROOT / "docker-compose.yml")
+
+    assert "PAPER_TRADING_API_BASE_URL: http://paper-trading:8000" in source
+    assert "PAPER_TRADING_API_TOKEN" in source
 
 
 def test_etf_and_hk_docstrings_use_neutral_partition_language():

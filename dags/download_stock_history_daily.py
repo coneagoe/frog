@@ -6,6 +6,7 @@ import sys
 from datetime import datetime
 
 import redis
+import requests
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
@@ -195,36 +196,19 @@ def save_download_result_to_redis(*, partition_count: int, **context):
 
 def run_paper_trading_matching_for_active_accounts(**context):
     """Run paper-trading matching for all active accounts after successful download."""
-    from paper_trading.api.deps import get_market_data_provider, get_session  # noqa: E402
-    from paper_trading.domain.enums import AccountStatus  # noqa: E402
-    from paper_trading.services.matching_service import MatchingService  # noqa: E402
-    from paper_trading.services.snapshot_service import SnapshotService  # noqa: E402
-    from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
-
     trade_date = datetime.now(tz=LOCAL_TZ).date()
-    session_generator = get_session()
-    session = next(session_generator)
-    try:
-        repo = PaperTradingRepository(session)
-        market_data = get_market_data_provider()
-        active_accounts = [account for account in repo.list_accounts() if account.status == AccountStatus.ACTIVE.value]
-        if not active_accounts:
-            return f"No active paper trading accounts for matching: trade_date={trade_date.isoformat()}"
-
-        runs = []
-        for account in active_accounts:
-            run = MatchingService(repo, market_data, SnapshotService(repo, market_data)).run(trade_date, account.id)
-            runs.append(run.id)
-        session.commit()
-        return (
-            "Paper trading matching completed: "
-            f"trade_date={trade_date.isoformat()}, accounts={len(active_accounts)}, runs={runs}"
-        )
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    base_url = os.environ.get("PAPER_TRADING_API_BASE_URL", "http://paper-trading:8000").rstrip("/")
+    endpoint = "/paper/matching/runs"
+    token = os.environ["PAPER_TRADING_API_TOKEN"]
+    response = requests.post(
+        f"{base_url}{endpoint}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"trade_date": trade_date.isoformat()},
+        timeout=30,
+    )
+    response.raise_for_status()
+    result = response.json()
+    return f"Paper trading matching completed: trade_date={trade_date.isoformat()}, run_id={result.get('id')}"
 
 
 # Create DAG
