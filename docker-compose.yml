@@ -100,6 +100,8 @@ x-airflow-common: &airflow-common
     FROG_PROJECT_ROOT: /opt/airflow/frog
     # Airflow history-download partitioning (DAG creates up to 16 tasks; this controls active partitions)
     DOWNLOAD_PROCESS_COUNT: ${DOWNLOAD_PROCESS_COUNT:-4}
+    PAPER_TRADING_API_BASE_URL: http://paper-trading:8000
+    PAPER_TRADING_API_TOKEN: ${PAPER_TRADING_API_TOKEN:?PAPER_TRADING_API_TOKEN is required in .env}
     <<: [*db-common-env, *airflow-email-env, *airflow-admin-env]
   volumes:
     - ./dags:/opt/airflow/dags
@@ -241,6 +243,8 @@ services:
     depends_on:
       <<: *airflow-common-depends-on
       airflow-webserver:
+        condition: service_started
+      paper-trading:
         condition: service_started
 
   airflow-init:
