@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from tools.paper_trading_cli import EXIT_CODES, main
+from tools.paper_trading_cli import EXIT_CODES, main, run_paper_trading_matching
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -826,6 +826,21 @@ class TestTradeList:
 
 
 class TestMatchingRun:
+    def test_run_paper_trading_matching_builds_client_and_returns_result(self):
+        with patch("tools.paper_trading_cli.PaperTradingApiClient") as mock_cls:
+            client = mock_cls.return_value
+            client.run_matching.return_value = {"id": 123, "trade_date": "2024-01-15"}
+
+            result = run_paper_trading_matching(
+                "2024-01-15",
+                base_url="http://paper-trading:8000",
+                token="test-token",
+            )
+
+        mock_cls.assert_called_once_with(base_url="http://paper-trading:8000", token="test-token")
+        client.run_matching.assert_called_once_with(trade_date="2024-01-15", account_id=None)
+        assert result == {"id": 123, "trade_date": "2024-01-15"}
+
     def test_run_matching_calls_client(self):
         client = _mock_client()
         exit_code = main(["matching", "run", "--trade-date", "2024-01-15"], client=client)
