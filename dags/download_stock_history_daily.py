@@ -6,7 +6,6 @@ import sys
 from datetime import datetime
 
 import redis
-import requests
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
@@ -32,6 +31,7 @@ from common.const import (  # noqa: E402
     AdjustType,
     PeriodType,
 )
+from tools.paper_trading_cli import run_paper_trading_matching  # noqa: E402
 
 
 def get_redis_client() -> redis.Redis:
@@ -197,17 +197,11 @@ def save_download_result_to_redis(*, partition_count: int, **context):
 def run_paper_trading_matching_for_active_accounts(**context):
     """Run paper-trading matching for all active accounts after successful download."""
     trade_date = datetime.now(tz=LOCAL_TZ).date()
-    base_url = os.environ.get("PAPER_TRADING_API_BASE_URL", "http://paper-trading:8000").rstrip("/")
-    endpoint = "/paper/matching/runs"
-    token = os.environ["PAPER_TRADING_API_TOKEN"]
-    response = requests.post(
-        f"{base_url}{endpoint}",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"trade_date": trade_date.isoformat()},
-        timeout=30,
+    result = run_paper_trading_matching(
+        trade_date=trade_date.isoformat(),
+        base_url=os.environ.get("PAPER_TRADING_API_BASE_URL", "http://paper-trading:8000"),
+        token=os.environ["PAPER_TRADING_API_TOKEN"],
     )
-    response.raise_for_status()
-    result = response.json()
     return f"Paper trading matching completed: trade_date={trade_date.isoformat()}, run_id={result.get('id')}"
 
 

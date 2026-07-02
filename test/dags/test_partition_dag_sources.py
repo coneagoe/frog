@@ -135,18 +135,18 @@ def test_daily_dag_uses_weekdays_dag_id_without_hfq_suffix():
 
 
 def test_daily_dag_runs_paper_trading_matching_after_successful_aggregate():
-    """The daily stock history DAG should trigger paper-trading matching via HTTP after success."""
+    """The daily stock history DAG should trigger paper-trading matching via the CLI helper."""
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
 
     assert re.search(r"def run_paper_trading_matching_for_active_accounts\s*\(", source)
     assert "from paper_trading" not in source
     assert "import paper_trading" not in source
-    assert "requests.post" in source
-    assert '"/paper/matching/runs"' in source
+    assert "from tools.paper_trading_cli import run_paper_trading_matching" in source
+    assert "requests.post" not in source
+    assert '"/paper/matching/runs"' not in source
     assert "PAPER_TRADING_API_BASE_URL" in source
     assert "PAPER_TRADING_API_TOKEN" in source
-    assert "Authorization" in source
-    assert "raise_for_status()" in source
+    assert "run_paper_trading_matching(" in source
     assert re.search(
         r"paper_trading_matching_task\s*=\s*PythonOperator\([\s\S]*?"
         r'task_id\s*=\s*"run_paper_trading_matching"',
@@ -156,11 +156,11 @@ def test_daily_dag_runs_paper_trading_matching_after_successful_aggregate():
 
 
 def test_daily_dag_paper_trading_matching_uses_local_trade_date_and_commits_once():
-    """Paper-trading matching should use the DAG local date in the HTTP payload."""
+    """Paper-trading matching should use the DAG local date for matching."""
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
 
     assert "trade_date = datetime.now(tz=LOCAL_TZ).date()" in source
-    assert '"trade_date": trade_date.isoformat()' in source
+    assert "trade_date=trade_date.isoformat()" in source
     assert "session.commit()" not in source
     assert "session.close()" not in source
 

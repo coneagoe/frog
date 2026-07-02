@@ -167,6 +167,18 @@ class PaperTradingApiClient:
         return self._request("GET", f"/paper/accounts/{account_id}/snapshots")
 
 
+def run_paper_trading_matching(
+    trade_date: str,
+    *,
+    base_url: str | None = None,
+    token: str | None = None,
+    account_id: int | None = None,
+) -> dict[str, Any]:
+    _validate_trade_date(trade_date)
+    client = PaperTradingApiClient(base_url=base_url, token=token)
+    return client.run_matching(trade_date=trade_date, account_id=account_id)
+
+
 def _add_account_subparsers(subparsers: Any) -> None:
     acct = subparsers.add_parser("account", help="Manage paper trading accounts")
     acct_sub = acct.add_subparsers(dest="account_command", required=True, parser_class=_SafeParser)
