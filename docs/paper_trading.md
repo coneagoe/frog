@@ -79,7 +79,7 @@ export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
 
 uv run tools/paper_trading_cli.py account list
 uv run tools/paper_trading_cli.py account create --name demo --initial-cash 100000
-uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001.SZ --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-06-16
+uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-06-16
 uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account-id 1
 ```
 
@@ -87,6 +87,43 @@ Use `--json` when machine-readable output is needed:
 
 ```bash
 uv run tools/paper_trading_cli.py --json order list --account-id 1
+```
+
+## OpenClaw Conversation Order Entry
+
+OpenClaw can be used for conversation-based paper trading order entry. Conversation channels are outside this repository; this repository does not provide channel-specific webhook services or interactive card payloads.
+
+For natural-language order instructions, OpenClaw should parse the message, ask for missing fields, and send a structured confirmation before submitting the order.
+
+Example conversation:
+
+```text
+用户：账户1买入平安银行100股，10元以内
+
+OpenClaw：请确认录入以下模拟交易订单：
+
+账户：1
+方向：买入
+代码：000001
+数量：100
+限价：10.00
+交易日：2026-07-06
+
+回复“确认”提交订单，回复“取消”放弃。
+
+用户：确认
+```
+
+After confirmation, OpenClaw submits the order with the existing CLI:
+
+```bash
+uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-07-06
+```
+
+Order entry does not automatically run matching. Run matching only after a separate user instruction:
+
+```bash
+uv run tools/paper_trading_cli.py matching run --trade-date 2026-07-06 --account-id 1
 ```
 
 Use the raw API examples below when debugging auth, routing, or response-shape issues.
@@ -115,7 +152,7 @@ curl -X DELETE http://localhost:8000/paper/accounts/1 \
 curl -X POST http://localhost:8000/paper/accounts/1/orders \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"000001.SZ","side":"buy","quantity":100,"limit_price":"10.00","trade_date":"2026-06-16"}'
+  -d '{"symbol":"000001","side":"buy","quantity":100,"limit_price":"10.00","trade_date":"2026-06-16"}'
 ```
 
 Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, insufficient position, and A-share T+1 violation (same-day sell) are stored as rejected orders.

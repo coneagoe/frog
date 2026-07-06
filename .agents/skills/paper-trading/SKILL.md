@@ -90,6 +90,54 @@ Use `docs/paper_trading.md` for curl examples when investigating HTTP auth, back
 | Using suffixed A-share symbols like `601668.SH` or `000001.SZ` | Use suffixless 6-digit codes like `601668` or `000001`. |
 | Intercepting repeated order instructions as duplicates | Submit each repeated buy/sell instruction as a new order unless the user explicitly asks for status-only verification or duplicate prevention. |
 
+## OpenClaw Conversation Order Entry
+
+When OpenClaw receives a natural-language paper trading order instruction through any conversation channel, treat the channel as outside this repository. Do not mention, design, or require channel-specific webhook servers, interactive card payloads, or paper trading API extensions in this repository.
+
+For natural-language order instructions, use this confirmation-first flow:
+
+1. Parse the user's message into a draft order.
+2. Ask for any missing required field instead of guessing.
+3. Send a structured confirmation message in the same conversation.
+4. Submit the order only after the user gives explicit positive confirmation.
+5. Report the CLI result back to the user.
+
+Required fields before confirmation:
+
+- `account_id`: paper trading account ID. Do not guess it.
+- `symbol`: 6-digit A-share code such as `000001`. Do not add `.SH` or `.SZ`.
+- `side`: `buy` or `sell`.
+- `quantity`: integer quantity accepted by the CLI.
+- `limit_price`: explicit limit price. Do not convert vague phrases like `市价`, `差不多`, or `按现在价格` into a price.
+- `trade_date`: resolved date shown in the confirmation message. If the user says `今天`, show the actual date before submitting.
+
+Confirmation message format:
+
+```text
+请确认录入以下模拟交易订单：
+
+账户：1
+方向：买入
+代码：000001
+数量：100
+限价：10.00
+交易日：2026-07-06
+
+回复“确认”提交订单，回复“取消”放弃。
+```
+
+Only clear positive replies such as `确认`, `提交`, or `是，提交` authorize submission. Ambiguous replies are not confirmation; ask the user to reply with `确认` or `取消`.
+
+If the user changes the draft before confirmation, regenerate the complete confirmation message. If the user cancels, do not run the CLI.
+
+After confirmation, submit with the existing CLI:
+
+```bash
+uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-07-06
+```
+
+Do not automatically run matching after order entry. If the user wants matching, ask for or receive a separate matching instruction and use the existing matching command.
+
 ## Implementation Pointers
 
 - CLI wrapper: `tools/paper_trading_cli.py`
