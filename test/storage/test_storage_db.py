@@ -2612,6 +2612,18 @@ class TestSaveAndGetStkHoldernumber:
         assert COL_ANN_DATE in sql_called
         assert tb_name_stk_holdernumber in sql_called
 
+    def test_get_last_stk_holdernumber_ann_date_supports_real_dict_cursor_row(self, storage_db):
+        """RealDictCursor 返回字典行时应按公告日期列名取值"""
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+        mock_cursor.fetchone.return_value = {COL_ANN_DATE: "2024-03-15"}
+
+        result = storage_db.get_last_stk_holdernumber_ann_date("000001")
+
+        assert result == "2024-03-15"
+
     def test_get_last_stk_holdernumber_ann_date_no_data(self, storage_db):
         """无记录时返回 None"""
         mock_connection = Mock()
@@ -2815,6 +2827,17 @@ class TestSaveAndGetTop10Floatholders:
         sql_called = mock_cursor.execute.call_args[0][0]
         assert COL_ANN_DATE in sql_called
         assert tb_name_top10_floatholders in sql_called
+
+    def test_get_last_top10_floatholders_ann_date_supports_real_dict_cursor_row(self, storage_db):
+        mock_connection = Mock()
+        mock_cursor = Mock()
+        storage_db.connection = mock_connection
+        storage_db.cursor = mock_cursor
+        mock_cursor.fetchone.return_value = {COL_ANN_DATE: "2024-03-15"}
+
+        result = storage_db.get_last_top10_floatholders_ann_date("000001")
+
+        assert result == "2024-03-15"
 
     def test_get_last_top10_floatholders_ann_date_no_data(self, storage_db):
         mock_connection = Mock()

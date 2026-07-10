@@ -1424,11 +1424,14 @@ class StorageDb:
             self.cursor.execute(sql, (stock_id,))
             result = self.cursor.fetchone()
             if result:
-                return str(result[0])
+                result_row = cast(Any, result)
+                if COL_ANN_DATE in result_row:
+                    return str(result_row[COL_ANN_DATE])
+                return str(result_row[0])
             return None
 
         except Exception as e:
-            logger.error(f"获取股东人数最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}")
+            logger.exception(f"获取股东人数最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}")
             return None
 
     @connect_once
@@ -1455,11 +1458,14 @@ class StorageDb:
             self.cursor.execute(sql, (stock_id,))
             result = self.cursor.fetchone()
             if result:
-                return str(result[0])
+                result_row = cast(Any, result)
+                if COL_ANN_DATE in result_row:
+                    return str(result_row[COL_ANN_DATE])
+                return str(result_row[0])
             return None
 
         except Exception as e:
-            logger.error(f"获取前十大流通股东最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}")
+            logger.exception(f"获取前十大流通股东最新公告日期失败 - 股票代码: {stock_id}, 错误: {e}")
             return None
 
     def save_a_stock_basic(self, df: pd.DataFrame) -> bool:
