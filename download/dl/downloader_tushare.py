@@ -333,6 +333,45 @@ def _to_hk_ts_code(stock_id: str) -> str:
     return f"{stock_id}.HK"
 
 
+def _to_a_stock_ts_code(stock_id: str) -> str:
+    if not re.fullmatch(r"\d{6}", stock_id):
+        raise ValueError("Stock ID must be 6 digits.")
+    suffix = "SH" if stock_id.startswith("6") else "SZ"
+    return f"{stock_id}.{suffix}"
+
+
+def _pro_bar_freq(period: PeriodType) -> str:
+    freq_map = {
+        PeriodType.DAILY: "D",
+        PeriodType.WEEKLY: "W",
+        PeriodType.MONTHLY: "M",
+    }
+    return freq_map[period]
+
+
+def _normalize_a_stock_history_ts(df: pd.DataFrame, stock_id: str) -> pd.DataFrame:
+    column_mapping = {
+        "trade_date": COL_DATE,
+        "ts_code": COL_STOCK_ID,
+        "open": COL_OPEN,
+        "high": COL_HIGH,
+        "low": COL_LOW,
+        "close": COL_CLOSE,
+        "vol": COL_VOLUME,
+        "amount": COL_AMOUNT,
+        "pct_chg": COL_CHANGE_RATE,
+        "change": COL_CHANGE,
+    }
+    normalized = df.rename(columns=column_mapping).copy()
+    normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], format="%Y%m%d")
+    normalized[COL_STOCK_ID] = stock_id
+    numeric_columns = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_AMOUNT, COL_CHANGE_RATE, COL_CHANGE]
+    for column in numeric_columns:
+        if column in normalized.columns:
+            normalized[column] = pd.to_numeric(normalized[column], errors="coerce").fillna(0)
+    return normalized.sort_values(COL_DATE).reset_index(drop=True)
+
+
 @retrying.retry(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
@@ -359,6 +398,35 @@ def download_daily_basic_a_stock_ts(
     )
 
     return df
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+    retry_on_exception=retry_on_non_validation_errors,
+)
+def download_history_data_stock_ts(
+    stock_id: str,
+    start_date: str,
+    end_date: str,
+    period: PeriodType = PeriodType.DAILY,
+    adjust: AdjustType = AdjustType.QFQ,
+) -> pd.DataFrame:
+    client = _create_pro_client()
+    df = ts.pro_bar(
+        api=client,
+        ts_code=_to_a_stock_ts_code(stock_id),
+        start_date=convert_date(start_date),
+        end_date=convert_date(end_date),
+        freq=_pro_bar_freq(period),
+        adj=adjust.value or None,
+    )
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"Expected DataFrame, got {type(df)}")
+    if df.empty:
+        return df
+    return _normalize_a_stock_history_ts(df, stock_id)
 
 
 @retrying.retry(

@@ -1,7 +1,10 @@
+from common.const import AdjustType, PeriodType
+
 from .downloader_akshare import (
     download_general_info_etf_ak,
     download_general_info_hk_ggt_stock_ak,
     download_general_info_stock_ak,
+    download_history_data_stock_ak,
     download_history_data_us_index_ak,
 )
 from .downloader_baostock import (
@@ -16,11 +19,18 @@ from .downloader_tushare import (
     download_etf_daily,
     download_history_data_etf_ts,
     download_history_data_stock_hk_ts,
+    download_history_data_stock_ts,
     download_stk_holdernumber,
     download_stk_limit,
     download_suspend_d,
     download_top10_floatholders,
 )
+
+STOCK_HISTORY_PROVIDER_DOWNLOADERS = {
+    "baostock": download_history_data_stock_bs,
+    "tushare": download_history_data_stock_ts,
+    "akshare": download_history_data_stock_ak,
+}
 
 
 class Downloader:
@@ -44,3 +54,18 @@ class Downloader:
     dl_etf_daily = staticmethod(download_etf_daily)
     dl_stk_holdernumber = staticmethod(download_stk_holdernumber)
     dl_top10_floatholders = staticmethod(download_top10_floatholders)
+
+    def dl_history_data_stock_by_provider(
+        self,
+        provider: str,
+        stock_id: str,
+        start_date: str,
+        end_date: str,
+        period: PeriodType,
+        adjust: AdjustType,
+    ):
+        try:
+            downloader_func = STOCK_HISTORY_PROVIDER_DOWNLOADERS[provider]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported stock history provider: {provider}") from exc
+        return downloader_func(stock_id, start_date, end_date, period, adjust)

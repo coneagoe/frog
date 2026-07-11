@@ -19,9 +19,11 @@ from common.const import (  # noqa: E402
     COL_STOCK_ID,
     COL_STOCK_NAME,
     COL_VOLUME,
+    AdjustType,
     PeriodType,
 )
 from download.dl import Downloader  # noqa: E402
+from download.dl import downloader as downloader_module  # noqa: E402
 
 conf.parse_config()
 
@@ -247,6 +249,28 @@ class TestDownloader:
         assert Downloader.dl_history_data_stock.__name__ == "download_history_data_stock_bs"
         assert Downloader.dl_history_data_stock_hk.__name__ == "download_history_data_stock_hk_ts"
         assert Downloader.dl_history_data_us_index.__name__ == "download_history_data_us_index_ak"
+
+    def test_dl_history_data_stock_by_provider_dispatches_to_named_provider(self, monkeypatch):
+        calls = []
+
+        def fake_tushare(stock_id, start_date, end_date, period, adjust):
+            calls.append((stock_id, start_date, end_date, period, adjust))
+            return "ok"
+
+        monkeypatch.setitem(downloader_module.STOCK_HISTORY_PROVIDER_DOWNLOADERS, "tushare", fake_tushare)
+
+        result = Downloader().dl_history_data_stock_by_provider(
+            "tushare", "000001", "20240101", "20240102", PeriodType.DAILY, AdjustType.QFQ
+        )
+
+        assert result == "ok"
+        assert calls == [("000001", "20240101", "20240102", PeriodType.DAILY, AdjustType.QFQ)]
+
+    def test_dl_history_data_stock_by_provider_rejects_unknown_provider(self):
+        with pytest.raises(ValueError, match="Unsupported stock history provider: yahoo"):
+            Downloader().dl_history_data_stock_by_provider(
+                "yahoo", "000001", "20240101", "20240102", PeriodType.DAILY, AdjustType.QFQ
+            )
 
 
 if __name__ == "__main__":

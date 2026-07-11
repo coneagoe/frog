@@ -2,10 +2,24 @@ import importlib
 import sys
 import types
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pandas as pd
 import pytest
+
+from common.const import (
+    COL_AMOUNT,
+    COL_CLOSE,
+    COL_DATE,
+    COL_HIGH,
+    COL_LOW,
+    COL_OPEN,
+    COL_STOCK_ID,
+    COL_VOLUME,
+    AdjustType,
+    PeriodType,
+)
+from download.dl import downloader_tushare as dt
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -661,6 +675,68 @@ def test_throttle_records_timestamp_even_on_failed_api_call(downloader_ts_module
     assert (tmp_path / "last_call").exists(), "State file must be written on failed call"
     recorded = float((tmp_path / "last_call").read_text())
     assert recorded > 0
+
+
+# ── A-share history downloader tests ──────────────────────────────────────────
+
+
+def test_download_history_data_stock_ts_normalizes_pro_bar(monkeypatch):
+    pro_client = MagicMock(name="pro_client")
+    monkeypatch.setattr(dt, "_create_pro_client", lambda: pro_client)
+
+    def fake_pro_bar(**kwargs):
+        assert kwargs["api"] is pro_client
+        assert kwargs["ts_code"] == "000001.SZ"
+        assert kwargs["start_date"] == "20240101"
+        assert kwargs["end_date"] == "20240102"
+        assert kwargs["adj"] == "qfq"
+        assert kwargs["freq"] == "D"
+        return pd.DataFrame(
+            {
+                "trade_date": ["20240102", "20240101"],
+                "ts_code": ["000001.SZ", "000001.SZ"],
+                "open": [10.0, 9.0],
+                "high": [11.0, 10.0],
+                "low": [9.5, 8.8],
+                "close": [10.5, 9.5],
+                "vol": [100.0, 90.0],
+                "amount": [1000.0, 900.0],
+            }
+        )
+
+    monkeypatch.setattr(dt.ts, "pro_bar", fake_pro_bar)
+
+    df = dt.download_history_data_stock_ts("000001", "2024-01-01", "2024-01-02", PeriodType.DAILY, AdjustType.QFQ)
+
+    assert df[COL_DATE].tolist() == [pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")]
+    assert df[COL_STOCK_ID].tolist() == ["000001", "000001"]
+    assert df[[COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_AMOUNT]].notna().all().all()
+
+
+def test_download_history_data_stock_ts_uses_none_adj_for_bfq(monkeypatch):
+    monkeypatch.setattr(dt, "_create_pro_client", lambda: MagicMock(name="pro_client"))
+    captured = {}
+
+    def fake_pro_bar(**kwargs):
+        captured.update(kwargs)
+        return pd.DataFrame(
+            {
+                "trade_date": ["20240101"],
+                "ts_code": ["600000.SH"],
+                "open": [1],
+                "high": [1],
+                "low": [1],
+                "close": [1],
+                "vol": [1],
+                "amount": [1],
+            }
+        )
+
+    monkeypatch.setattr(dt.ts, "pro_bar", fake_pro_bar)
+
+    dt.download_history_data_stock_ts("600000", "20240101", "20240101", PeriodType.DAILY, AdjustType.BFQ)
+
+    assert captured["adj"] is None
 
 
 if __name__ == "__main__":
