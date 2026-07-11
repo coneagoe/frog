@@ -272,3 +272,47 @@ def test_download_history_data_stock_ak_filters_dates_and_sets_stock_id(monkeypa
 
     assert df[COL_DATE].tolist() == [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
     assert df[COL_STOCK_ID].tolist() == ["000001", "000001"]
+
+
+def test_download_history_data_stock_ak_missing_amount_raises(monkeypatch):
+    """Missing required '成交额' column in stock_zh_a_hist response must raise ValueError."""
+
+    def fake_stock_zh_a_hist(**kwargs):
+        return pd.DataFrame(
+            {
+                COL_DATE: ["2024-01-01"],
+                "开盘": [1.0],
+                "最高": [1.0],
+                "最低": [1.0],
+                "收盘": [1.0],
+                "成交量": [10],
+                # "成交额" intentionally omitted
+            }
+        )
+
+    monkeypatch.setattr(da.ak, "stock_zh_a_hist", fake_stock_zh_a_hist)
+
+    with pytest.raises(ValueError, match="Missing required column"):
+        da.download_history_data_stock_ak("000001", "20240101", "20240102", PeriodType.DAILY, AdjustType.QFQ)
+
+
+def test_download_history_data_stock_ak_missing_date_raises(monkeypatch):
+    """Missing required date column in stock_zh_a_hist response must raise ValueError."""
+
+    def fake_stock_zh_a_hist(**kwargs):
+        return pd.DataFrame(
+            {
+                # COL_DATE ("日期") intentionally omitted
+                "开盘": [1.0],
+                "最高": [1.0],
+                "最低": [1.0],
+                "收盘": [1.0],
+                "成交量": [10],
+                "成交额": [100],
+            }
+        )
+
+    monkeypatch.setattr(da.ak, "stock_zh_a_hist", fake_stock_zh_a_hist)
+
+    with pytest.raises(ValueError, match="Missing required column"):
+        da.download_history_data_stock_ak("000001", "20240101", "20240102", PeriodType.DAILY, AdjustType.QFQ)

@@ -391,13 +391,19 @@ def _normalize_a_stock_history_ts(df: pd.DataFrame, stock_id: str) -> pd.DataFra
         "change": COL_CHANGE,
     }
     normalized = df.rename(columns=column_mapping).copy()
+
+    # Validate all required columns exist after rename
+    _a_stock_history_required = [COL_DATE, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME, COL_AMOUNT]
+    for column in _a_stock_history_required:
+        if column not in normalized.columns:
+            raise ValueError(f"Missing required column '{column}' in TuShare pro_bar response")
+
     normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], format="%Y%m%d")
     normalized[COL_STOCK_ID] = stock_id
 
     # Required OHLCV/amount fields: raise on non-convertible values
     for column in _a_stock_history_required_numeric:
-        if column in normalized.columns:
-            normalized[column] = pd.to_numeric(normalized[column], errors="raise")
+        normalized[column] = pd.to_numeric(normalized[column], errors="raise")
 
     # Optional fields: coerce non-convertible to NaN, then fill with 0
     for column in _a_stock_history_optional_numeric:

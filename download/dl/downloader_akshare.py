@@ -166,6 +166,12 @@ def download_history_data_stock_ak(
     existing_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
     df = df.rename(columns=existing_mapping)
 
+    # Validate all required columns exist after rename
+    required_columns = [COL_DATE, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME, COL_AMOUNT]
+    for column in required_columns:
+        if column not in df.columns:
+            raise ValueError(f"Missing required column '{column}' in AkShare stock_zh_a_hist response")
+
     df[COL_DATE] = pd.to_datetime(df[COL_DATE])
     mask = (df[COL_DATE] >= pd.to_datetime(start_date)) & (df[COL_DATE] <= pd.to_datetime(end_date))
     df = df.loc[mask].copy()
@@ -174,8 +180,7 @@ def download_history_data_stock_ak(
     # Required OHLCV/amount fields: raise on non-convertible values
     required_numeric = [COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME, COL_AMOUNT]
     for column in required_numeric:
-        if column in df.columns:
-            df[column] = pd.to_numeric(df[column], errors="raise")
+        df[column] = pd.to_numeric(df[column], errors="raise")
 
     # Optional fields: coerce non-convertible to NaN, then fill with 0
     optional_numeric = [COL_CHANGE_RATE, COL_TURNOVER_RATE, COL_CHANGE]

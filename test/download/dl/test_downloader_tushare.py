@@ -739,5 +739,55 @@ def test_download_history_data_stock_ts_uses_none_adj_for_bfq(monkeypatch):
     assert captured["adj"] is None
 
 
+def test_download_history_data_stock_ts_missing_open_raises(monkeypatch):
+    """Missing required 'open' column in pro_bar response must raise ValueError."""
+    pro_client = MagicMock(name="pro_client")
+    monkeypatch.setattr(dt, "_create_pro_client", lambda: pro_client)
+
+    def fake_pro_bar(**kwargs):
+        return pd.DataFrame(
+            {
+                "trade_date": ["20240101"],
+                "ts_code": ["000001.SZ"],
+                # "open" intentionally omitted
+                "high": [11.0],
+                "low": [9.5],
+                "close": [10.5],
+                "vol": [100.0],
+                "amount": [1000.0],
+            }
+        )
+
+    monkeypatch.setattr(dt.ts, "pro_bar", fake_pro_bar)
+
+    with pytest.raises(ValueError, match="Missing required column"):
+        dt.download_history_data_stock_ts("000001", "2024-01-01", "2024-01-02")
+
+
+def test_download_history_data_stock_ts_missing_date_raises(monkeypatch):
+    """Missing required 'trade_date' column in pro_bar response must raise ValueError."""
+    pro_client = MagicMock(name="pro_client")
+    monkeypatch.setattr(dt, "_create_pro_client", lambda: pro_client)
+
+    def fake_pro_bar(**kwargs):
+        return pd.DataFrame(
+            {
+                # "trade_date" intentionally omitted
+                "ts_code": ["000001.SZ"],
+                "open": [10.0],
+                "high": [11.0],
+                "low": [9.5],
+                "close": [10.5],
+                "vol": [100.0],
+                "amount": [1000.0],
+            }
+        )
+
+    monkeypatch.setattr(dt.ts, "pro_bar", fake_pro_bar)
+
+    with pytest.raises(ValueError, match="Missing required column"):
+        dt.download_history_data_stock_ts("000001", "2024-01-01", "2024-01-02")
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
