@@ -29,6 +29,8 @@ from common.const import (
     PeriodType,
 )
 
+_REQUIRED_NUMERIC_FIELDS = frozenset({COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_AMOUNT})
+
 F = TypeVar("F", bound=Callable[..., Any])
 
 
@@ -54,10 +56,10 @@ def login(func: F) -> F:
         # Login to baostock
         lg = bs.login()
         if lg.error_code != "0":
-            logging.error(f"baostock error ({lg.error_code}): {lg.error_code}")
+            logging.error("baostock login failed (%s): %s", lg.error_code, lg.error_msg)
             if lg.error_code == "10001011":
                 print("IP已经加入黑名单, 需要去QQ群里求助")
-            exit(1)
+            raise ConnectionError(f"baostock login failed ({lg.error_code}): {lg.error_msg}")
 
         try:
             # Execute the wrapped function
@@ -168,7 +170,9 @@ def download_history_data_stock_bs(
 
     df[COL_STOCK_ID] = stock_id_org
 
-    # Replace empty values with 0 for numeric columns
+    # Replace empty/missing values with 0 for numeric columns.
+    # For required fields (open/high/low/close/volume/amount), raise on non-empty
+    # unconvertible values so that the provider fallback mechanism can trigger.
     numeric_columns = [
         COL_OPEN,
         COL_HIGH,
@@ -186,7 +190,16 @@ def download_history_data_stock_bs(
 
     for col in numeric_columns:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            if col in _REQUIRED_NUMERIC_FIELDS:
+                converted = pd.to_numeric(df[col], errors="coerce")
+                non_empty_mask = df[col].notna() & (df[col].astype(str).str.strip() != "")
+                failed_mask = non_empty_mask & converted.isna()
+                if failed_mask.any():
+                    bad_values = df.loc[failed_mask, col].unique().tolist()
+                    raise ValueError(f"Column '{col}' contains non-empty unconvertible value(s): {bad_values}")
+                df[col] = converted.fillna(0)
+            else:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     return df
 
