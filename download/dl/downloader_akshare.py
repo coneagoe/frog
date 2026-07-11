@@ -6,6 +6,8 @@ import retrying
 from requests.exceptions import ProxyError
 
 from common.const import (
+    COL_AMOUNT,
+    COL_CHANGE,
     COL_CHANGE_RATE,
     COL_CLOSE,
     COL_DATE,
@@ -149,15 +151,53 @@ def download_history_data_stock_ak(
     assert isinstance(df, pd.DataFrame), f"Expected DataFrame, got {type(df)}"
     assert not df.empty, f"download history data {stock_id} fail, please check"
 
+    # Map Chinese columns to canonical names
+    column_mapping = {
+        "开盘": COL_OPEN,
+        "最高": COL_HIGH,
+        "最低": COL_LOW,
+        "收盘": COL_CLOSE,
+        "成交量": COL_VOLUME,
+        "成交额": COL_AMOUNT,
+        "涨跌幅": COL_CHANGE_RATE,
+        "换手率": COL_TURNOVER_RATE,
+        "涨跌额": COL_CHANGE,
+    }
+    existing_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
+    df = df.rename(columns=existing_mapping)
+
     df[COL_DATE] = pd.to_datetime(df[COL_DATE])
     mask = (df[COL_DATE] >= pd.to_datetime(start_date)) & (df[COL_DATE] <= pd.to_datetime(end_date))
     df = df.loc[mask].copy()
     df[COL_STOCK_ID] = stock_id
 
-    numeric_columns = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, "成交额", COL_TURNOVER_RATE, COL_CHANGE_RATE]
-    for column in numeric_columns:
+    # Required OHLCV/amount fields: raise on non-convertible values
+    required_numeric = [COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME, COL_AMOUNT]
+    for column in required_numeric:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="raise")
+
+    # Optional fields: coerce non-convertible to NaN, then fill with 0
+    optional_numeric = [COL_CHANGE_RATE, COL_TURNOVER_RATE, COL_CHANGE]
+    for column in optional_numeric:
         if column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0)
+
+    # Keep only canonical A-share history columns
+    a_stock_history_columns = [
+        COL_DATE,
+        COL_STOCK_ID,
+        COL_OPEN,
+        COL_CLOSE,
+        COL_HIGH,
+        COL_LOW,
+        COL_VOLUME,
+        COL_AMOUNT,
+        COL_CHANGE_RATE,
+        COL_CHANGE,
+        COL_TURNOVER_RATE,
+    ]
+    df = df.reindex(columns=[c for c in a_stock_history_columns if c in df.columns])
 
     return df.reset_index(drop=True)
 

@@ -1,3 +1,5 @@
+import pandas as pd
+
 from common.const import AdjustType, PeriodType
 
 from .downloader_akshare import (
@@ -63,7 +65,7 @@ class Downloader:
         end_date: str,
         period: PeriodType,
         adjust: AdjustType,
-    ):
+    ) -> pd.DataFrame:
         try:
             downloader_func = STOCK_HISTORY_PROVIDER_DOWNLOADERS[provider]
         except KeyError as exc:
