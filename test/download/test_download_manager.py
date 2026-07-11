@@ -4,11 +4,22 @@ import sys
 from unittest.mock import MagicMock
 
 import pandas as pd
-import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from common.const import COL_DATE, COL_ETF_ID, AdjustType, PeriodType  # noqa: E402
+from common.const import (
+    COL_AMOUNT,
+    COL_CLOSE,
+    COL_DATE,
+    COL_ETF_ID,
+    COL_HIGH,
+    COL_LOW,
+    COL_OPEN,
+    COL_STOCK_ID,
+    COL_VOLUME,
+    AdjustType,
+    PeriodType,
+)  # noqa: E402
 
 
 def _make_manager(monkeypatch):
@@ -413,5 +424,131 @@ class TestDownloadTop10FloatholdersAStock:
         storage.save_top10_floatholders.assert_not_called()
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--tb=short"])
+class TestDownloadStockHistoryProviderFallback:
+    def test_download_stock_history_falls_back_after_provider_exception(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock", "tushare"])
+        storage.get_last_record.return_value = None
+        fallback_df = _stock_history_df()
+
+        def fake_provider(provider, stock_id, start_date, end_date, period, adjust):
+            if provider == "baostock":
+                raise RuntimeError("baostock unavailable")
+            return fallback_df
+
+        downloader.dl_history_data_stock_by_provider.side_effect = fake_provider
+        storage.save_history_data_stock.return_value = True
+
+        result = manager.download_stock_history("000001", PeriodType.DAILY, "20240101", "20240102", AdjustType.QFQ)
+
+        assert result is True
+        assert [call.args[0] for call in downloader.dl_history_data_stock_by_provider.call_args_list] == [
+            "baostock",
+            "tushare",
+        ]
+        storage.save_history_data_stock.assert_called_once()
+        saved_df = storage.save_history_data_stock.call_args[0][0]
+        pd.testing.assert_frame_equal(saved_df, fallback_df)
+        assert storage.save_history_data_stock.call_args[0][1:] == (PeriodType.DAILY, AdjustType.QFQ)
+
+    def test_download_stock_history_falls_back_after_empty_dataframe(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock", "tushare"])
+        storage.get_last_record.return_value = None
+        fallback_df = _stock_history_df()
+        downloader.dl_history_data_stock_by_provider.side_effect = [pd.DataFrame(), fallback_df]
+        storage.save_history_data_stock.return_value = True
+
+        result = manager.download_stock_history("000001", PeriodType.DAILY, "20240101", "20240102", AdjustType.QFQ)
+
+        assert result is True
+        storage.save_history_data_stock.assert_called_once()
+        saved_df = storage.save_history_data_stock.call_args[0][0]
+        pd.testing.assert_frame_equal(saved_df, fallback_df)
+        assert storage.save_history_data_stock.call_args[0][1:] == (PeriodType.DAILY, AdjustType.QFQ)
+
+    def test_download_stock_history_falls_back_after_missing_required_field(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock", "tushare"])
+        storage.get_last_record.return_value = None
+        invalid_df = _stock_history_df().drop(columns=[COL_CLOSE])
+        fallback_df = _stock_history_df()
+        downloader.dl_history_data_stock_by_provider.side_effect = [invalid_df, fallback_df]
+        storage.save_history_data_stock.return_value = True
+
+        result = manager.download_stock_history("000001", PeriodType.DAILY, "20240101", "20240102", AdjustType.QFQ)
+
+        assert result is True
+        storage.save_history_data_stock.assert_called_once()
+        saved_df = storage.save_history_data_stock.call_args[0][0]
+        pd.testing.assert_frame_equal(saved_df, fallback_df)
+        assert storage.save_history_data_stock.call_args[0][1:] == (PeriodType.DAILY, AdjustType.QFQ)
+
+    def test_download_stock_history_short_circuits_after_first_success(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock", "tushare", "akshare"])
+        storage.get_last_record.return_value = None
+        first_df = _stock_history_df()
+        downloader.dl_history_data_stock_by_provider.return_value = first_df
+        storage.save_history_data_stock.return_value = True
+
+        result = manager.download_stock_history("000001", PeriodType.DAILY, "20240101", "20240102", AdjustType.QFQ)
+
+        assert result is True
+        downloader.dl_history_data_stock_by_provider.assert_called_once()
+
+    def test_download_stock_history_save_failure_does_not_try_next_provider(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock", "tushare"])
+        storage.get_last_record.return_value = None
+        downloader.dl_history_data_stock_by_provider.return_value = _stock_history_df()
+        storage.save_history_data_stock.return_value = False
+
+        result = manager.download_stock_history("000001", PeriodType.DAILY, "20240101", "20240102", AdjustType.QFQ)
+
+        assert result is False
+        downloader.dl_history_data_stock_by_provider.assert_called_once()
+
+    def test_download_stock_history_all_providers_fail_returns_false(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock", "tushare"])
+        storage.get_last_record.return_value = None
+        downloader.dl_history_data_stock_by_provider.side_effect = RuntimeError("provider failed")
+
+        result = manager.download_stock_history("000001", PeriodType.DAILY, "20240101", "20240102", AdjustType.QFQ)
+
+        assert result is False
+        storage.save_history_data_stock.assert_not_called()
+
+    def test_download_stock_history_up_to_date_does_not_download(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock", "tushare"])
+        storage.get_last_record.return_value = {COL_DATE: "2024-01-03"}
+
+        result = manager.download_stock_history("000001", PeriodType.DAILY, "20240101", "20240102", AdjustType.QFQ)
+
+        assert result is True
+        downloader.dl_history_data_stock_by_provider.assert_not_called()
+        storage.save_history_data_stock.assert_not_called()
+
+
+def _stock_history_df(stock_id="000001"):
+    return pd.DataFrame(
+        {
+            COL_DATE: [pd.Timestamp("2024-01-01")],
+            COL_STOCK_ID: [stock_id],
+            COL_OPEN: [10.0],
+            COL_HIGH: [11.0],
+            COL_LOW: [9.0],
+            COL_CLOSE: [10.5],
+            COL_VOLUME: [1000.0],
+            COL_AMOUNT: [10000.0],
+        }
+    )

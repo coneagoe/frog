@@ -5,7 +5,20 @@ from typing import Any, Callable
 import pandas as pd
 import pandas_market_calendars as mcal
 
-from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType, SecurityType
+from common.const import (
+    COL_AMOUNT,
+    COL_CLOSE,
+    COL_DATE,
+    COL_HIGH,
+    COL_LOW,
+    COL_OPEN,
+    COL_STOCK_ID,
+    COL_VOLUME,
+    AdjustType,
+    PeriodType,
+    SecurityType,
+)
+from download.provider_order import parse_stock_history_provider_order
 from storage import (
     get_storage,
     get_table_name,
@@ -32,6 +45,38 @@ def _get_a_stock_ts_code(stock_id: str) -> str:
     if stock_id.startswith(("8", "4")):
         return stock_id + ".BJ"
     return stock_id + ".SZ"
+
+
+REQUIRED_STOCK_HISTORY_COLUMNS = (
+    COL_DATE,
+    COL_STOCK_ID,
+    COL_OPEN,
+    COL_HIGH,
+    COL_LOW,
+    COL_CLOSE,
+    COL_VOLUME,
+    COL_AMOUNT,
+)
+
+
+def _validate_stock_history_data(df: Any) -> pd.DataFrame:
+    if df is None:
+        raise ValueError("provider returned None")
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"provider returned {type(df)}, expected DataFrame")
+    if df.empty:
+        raise ValueError("provider returned empty DataFrame")
+
+    missing_columns = [column for column in REQUIRED_STOCK_HISTORY_COLUMNS if column not in df.columns]
+    if missing_columns:
+        raise ValueError(f"provider result missing required columns: {missing_columns}")
+
+    validated = df.copy()
+    validated[COL_DATE] = pd.to_datetime(validated[COL_DATE])
+    numeric_columns = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_AMOUNT]
+    for column in numeric_columns:
+        validated[column] = pd.to_numeric(validated[column], errors="raise")
+    return validated
 
 
 # Wrapper for dl_etf_daily to match the signature expected by _download_history_data
@@ -130,6 +175,59 @@ class DownloadManager:
             logging.error(f"Error processing history for {security_id}: {e}")
             return False
 
+    def _download_stock_history_with_fallback(
+        self,
+        stock_id: str,
+        start_date: str,
+        end_date: str,
+        period: PeriodType,
+        adjust: AdjustType,
+    ) -> pd.DataFrame | None:
+        provider_errors: dict[str, str] = {}
+        for provider in parse_stock_history_provider_order():
+            try:
+                logging.info(
+                    "Downloading stock history via %s: stock_id=%s, start_date=%s, end_date=%s, period=%s, adjust=%s",
+                    provider,
+                    stock_id,
+                    start_date,
+                    end_date,
+                    period.value,
+                    adjust.value,
+                )
+                df = self.downloader.dl_history_data_stock_by_provider(
+                    provider,
+                    stock_id,
+                    start_date,
+                    end_date,
+                    period,
+                    adjust,
+                )
+                validated = _validate_stock_history_data(df)
+                logging.info(
+                    "Downloaded stock history via %s: stock_id=%s, rows=%d",
+                    provider,
+                    stock_id,
+                    len(validated),
+                )
+                return validated
+            except Exception as exc:  # noqa: BLE001
+                provider_errors[provider] = str(exc)
+                logging.warning(  # noqa: E501
+                    "Stock history provider failed: provider=%s, stock_id=%s, "
+                    "start_date=%s, end_date=%s, period=%s, adjust=%s, error=%s",
+                    provider,
+                    stock_id,
+                    start_date,
+                    end_date,
+                    period.value,
+                    adjust.value,
+                    exc,
+                )
+
+        logging.error("All stock history providers failed for %s: %s", stock_id, provider_errors)
+        return None
+
     def download_stock_history(
         self,
         stock_id: str,
@@ -140,16 +238,29 @@ class DownloadManager:
     ) -> bool:
         table_name = get_table_name(SecurityType.STOCK, period, adjust)
 
-        return self._download_history_data(
-            table_name=table_name,
-            security_id=stock_id,
-            period=period,
-            start_date=start_date,
-            end_date=end_date,
-            adjust=adjust,
-            downloader_func=self.downloader.dl_history_data_stock,
-            storage_save_func=get_storage().save_history_data_stock,
-        )
+        try:
+            last_record = get_storage().get_last_record(table_name, stock_id)
+
+            if last_record is not None:
+                latest_date = pd.Timestamp(last_record[COL_DATE])
+                actual_start_ts = latest_date + pd.Timedelta(days=1)
+                actual_start_date = actual_start_ts.strftime("%Y%m%d")
+
+                if actual_start_ts > pd.to_datetime(end_date):
+                    logging.info(f"Data for {stock_id} is already up to date")
+                    return True
+            else:
+                actual_start_date = start_date
+
+            df = self._download_stock_history_with_fallback(stock_id, actual_start_date, end_date, period, adjust)
+            if df is None:
+                return False
+
+            return get_storage().save_history_data_stock(df, period, adjust)
+
+        except Exception as e:  # noqa: BLE001
+            logging.error(f"Error processing history for {stock_id}: {e}")
+            return False
 
     def download_all_stock_history(
         self,
