@@ -373,8 +373,8 @@ def test_download_history_data_stock_bs_invalid_stock_id(downloader_bs_module):
     assert bs_stub.logout.call_count == 3
 
 
-def test_download_history_data_stock_bs_login_blacklisted_exits(downloader_bs_module, capsys):
-    """Test login blacklist failure prints details and exits before querying."""
+def test_download_history_data_stock_bs_login_blacklisted_raises_connection_error(downloader_bs_module, capsys):
+    """Test login blacklist failure prints details and raises ConnectionError before querying."""
     module, bs_stub = downloader_bs_module
 
     # Mock failed login
@@ -385,16 +385,34 @@ def test_download_history_data_stock_bs_login_blacklisted_exits(downloader_bs_mo
     bs_stub.query_history_k_data_plus = Mock()
     bs_stub.logout = Mock()
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(ConnectionError, match="baostock login failed"):
         module.download_history_data_stock_bs(stock_id="000001", start_date="2024-01-01", end_date="2024-01-02")
 
-    assert exc_info.value.code == 1
     bs_stub.login.assert_called_once()
     bs_stub.query_history_k_data_plus.assert_not_called()
     bs_stub.logout.assert_not_called()
 
     captured = capsys.readouterr()
     assert "IP已经加入黑名单, 需要去QQ群里求助" in captured.out
+
+
+def test_download_history_data_stock_bs_login_generic_failure_raises_connection_error(downloader_bs_module):
+    """Test generic login failure raises ConnectionError (not exit)."""
+    module, bs_stub = downloader_bs_module
+
+    login_mock = Mock()
+    login_mock.error_code = "10003001"
+    login_mock.error_msg = "network error"
+    bs_stub.login = Mock(return_value=login_mock)
+    bs_stub.query_history_k_data_plus = Mock()
+    bs_stub.logout = Mock()
+
+    with pytest.raises(ConnectionError, match="baostock login failed \\(10003001\\): network error"):
+        module.download_history_data_stock_bs(stock_id="000001", start_date="2024-01-01", end_date="2024-01-02")
+
+    bs_stub.login.assert_called_once()
+    bs_stub.query_history_k_data_plus.assert_not_called()
+    bs_stub.logout.assert_not_called()
 
 
 def test_download_history_data_stock_bs_query_error(downloader_bs_module):
@@ -587,6 +605,61 @@ def test_download_history_data_stock_bs_empty_values_replaced_with_zero(
                 or result[col].dtype == "int64"
                 or result[col].dtype == "float64"
             )
+
+
+def test_download_history_data_stock_bs_unconvertible_required_field_raises(downloader_bs_module):
+    """Test that non-empty unconvertible values in required fields raise ValueError."""
+    module, bs_stub = downloader_bs_module
+
+    login_mock = Mock()
+    login_mock.error_code = "0"
+    login_mock.error_msg = "success"
+    bs_stub.login = Mock(return_value=login_mock)
+
+    query_mock = Mock()
+    query_mock.error_code = "0"
+    query_mock.fields = ["date", "code", "open", "high", "low", "close", "volume", "amount"]
+    query_mock.next = Mock(side_effect=[True, False])
+    query_mock.get_row_data = Mock(return_value=["2024-01-01", "000001", "abc", "10.5", "9.5", "10.2", "1000", "10000"])
+    bs_stub.query_history_k_data_plus = Mock(return_value=query_mock)
+    bs_stub.logout = Mock()
+
+    with pytest.raises(ValueError, match="Column '.*' contains non-empty unconvertible"):
+        module.download_history_data_stock_bs(
+            stock_id="000001",
+            start_date="2024-01-01",
+            end_date="2024-01-02",
+        )
+
+    bs_stub.logout.assert_called_once()
+
+
+def test_download_history_data_stock_bs_blank_required_fields_become_zero(downloader_bs_module):
+    """Test that blank/missing values in required fields are still replaced with 0."""
+    module, bs_stub = downloader_bs_module
+
+    login_mock = Mock()
+    login_mock.error_code = "0"
+    bs_stub.login = Mock(return_value=login_mock)
+
+    query_mock = Mock()
+    query_mock.error_code = "0"
+    query_mock.fields = ["date", "code", "open", "high", "low", "close", "volume", "amount"]
+    query_mock.next = Mock(side_effect=[True, False])
+    query_mock.get_row_data = Mock(return_value=["2024-01-01", "000001", "", "10.5", "9.5", "10.2", "", "10000"])
+    bs_stub.query_history_k_data_plus = Mock(return_value=query_mock)
+    bs_stub.logout = Mock()
+
+    result = module.download_history_data_stock_bs(
+        stock_id="000001",
+        start_date="2024-01-01",
+        end_date="2024-01-02",
+    )
+
+    assert result[COL_OPEN].iloc[0] == 0
+    assert result[COL_VOLUME].iloc[0] == 0
+    assert result[COL_CLOSE].iloc[0] == 10.2
+    assert result[COL_HIGH].iloc[0] == 10.5
 
 
 def test_validate_and_convert_date_valid_formats(downloader_bs_module):

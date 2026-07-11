@@ -149,10 +149,11 @@ def parse_download_config(config: ConfigParser):
     except KeyError:
         os.environ["DOWNLOAD_PROCESS_COUNT"] = "4"
 
-    try:
-        os.environ[STOCK_HISTORY_PROVIDER_ENV] = config["download"]["stock_history_provider_order"]
-    except KeyError:
-        os.environ[STOCK_HISTORY_PROVIDER_ENV] = ",".join(DEFAULT_STOCK_HISTORY_PROVIDER_ORDER)
+    if STOCK_HISTORY_PROVIDER_ENV not in os.environ:
+        try:
+            os.environ[STOCK_HISTORY_PROVIDER_ENV] = config["download"]["stock_history_provider_order"]
+        except KeyError:
+            os.environ[STOCK_HISTORY_PROVIDER_ENV] = ",".join(DEFAULT_STOCK_HISTORY_PROVIDER_ORDER)
 
 
 def parse_config():

@@ -26,3 +26,13 @@ def test_parse_download_config_uses_default_stock_history_provider_order(monkeyp
     parse_download_config(config)
 
     assert os.environ["DOWNLOAD_STOCK_HISTORY_PROVIDER_ORDER"] == "baostock,tushare,akshare"
+
+
+def test_parse_download_config_preserves_existing_env_var(monkeypatch):
+    monkeypatch.setenv("DOWNLOAD_STOCK_HISTORY_PROVIDER_ORDER", "tushare,akshare")
+    config = ConfigParser()
+    config.read_dict({"download": {"stock_history_provider_order": "baostock,tushare"}})
+
+    parse_download_config(config)
+
+    assert os.environ["DOWNLOAD_STOCK_HISTORY_PROVIDER_ORDER"] == "tushare,akshare"
