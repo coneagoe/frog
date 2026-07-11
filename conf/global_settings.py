@@ -3,6 +3,8 @@ import os
 from configparser import ConfigParser
 from pathlib import Path
 
+from download.provider_order import DEFAULT_STOCK_HISTORY_PROVIDER_ORDER, STOCK_HISTORY_PROVIDER_ENV
+
 config_file_name = "config.ini"
 
 
@@ -146,6 +148,11 @@ def parse_download_config(config: ConfigParser):
         os.environ["DOWNLOAD_PROCESS_COUNT"] = config["download"]["process_count"]
     except KeyError:
         os.environ["DOWNLOAD_PROCESS_COUNT"] = "4"
+
+    try:
+        os.environ[STOCK_HISTORY_PROVIDER_ENV] = config["download"]["stock_history_provider_order"]
+    except KeyError:
+        os.environ[STOCK_HISTORY_PROVIDER_ENV] = ",".join(DEFAULT_STOCK_HISTORY_PROVIDER_ORDER)
 
 
 def parse_config():
