@@ -1,4 +1,5 @@
 import pandas as pd
+from typing import Callable
 
 from common.const import AdjustType, PeriodType
 
@@ -28,7 +29,10 @@ from .downloader_tushare import (
     download_top10_floatholders,
 )
 
-STOCK_HISTORY_PROVIDER_DOWNLOADERS = {
+StockHistoryDownloader = Callable[[str, str, str, PeriodType, AdjustType], pd.DataFrame]
+
+
+STOCK_HISTORY_PROVIDER_DOWNLOADERS: dict[str, StockHistoryDownloader] = {
     "baostock": download_history_data_stock_bs,
     "tushare": download_history_data_stock_ts,
     "akshare": download_history_data_stock_ak,
