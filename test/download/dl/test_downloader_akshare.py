@@ -17,10 +17,8 @@ from download.dl import downloader_akshare as da  # noqa: E402
 @pytest.fixture(scope="function")
 def downloader_module(monkeypatch):
     module_name = "download.dl.downloader_akshare"
-    sys.modules.pop(module_name, None)
-    sys.modules.pop("akshare", None)
-    sys.modules.pop("retrying", None)
-    sys.modules.pop("utility", None)
+    for _mod in (module_name, "akshare", "retrying", "utility"):
+        monkeypatch.delitem(sys.modules, _mod, raising=False)
 
     ak_stub = types.SimpleNamespace()
     monkeypatch.setitem(sys.modules, "akshare", ak_stub)
@@ -179,65 +177,75 @@ def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
     monkeypatch,
 ):
     module_name = "download.dl.downloader_akshare"
-    sys.modules.pop(module_name, None)
-    sys.modules.pop("akshare", None)
-    sys.modules.pop("retrying", None)
-    sys.modules.pop("utility", None)
 
-    get_proxy_calls = 0
+    # Save original modules to restore after test to avoid pollution
+    _saved_modules = {}
+    for _mod_name in (module_name, "akshare", "retrying", "utility"):
+        _saved_modules[_mod_name] = sys.modules.get(_mod_name)
+        sys.modules.pop(_mod_name, None)
 
-    ak_stub = types.SimpleNamespace()
+    try:
+        get_proxy_calls = 0
 
-    def fail_with_proxy_error():
-        raise ConnectionError("proxy failed")
+        ak_stub = types.SimpleNamespace()
 
-    ak_stub.stock_info_a_code_name = fail_with_proxy_error
-    monkeypatch.setitem(sys.modules, "akshare", ak_stub)
+        def fail_with_proxy_error():
+            raise ConnectionError("proxy failed")
 
-    def retry_decorator(*args, **kwargs):
-        max_attempts = kwargs.get("stop_max_attempt_number", 1)
-        retry_on_exception = kwargs.get("retry_on_exception", lambda exc: True)
+        ak_stub.stock_info_a_code_name = fail_with_proxy_error
+        monkeypatch.setitem(sys.modules, "akshare", ak_stub)
 
-        def decorator(func):
-            def wrapped(*f_args, **f_kwargs):
-                attempts = 0
-                while True:
-                    try:
-                        return func(*f_args, **f_kwargs)
-                    except Exception as exc:
-                        attempts += 1
-                        if attempts >= max_attempts or not retry_on_exception(exc):
-                            raise
+        def retry_decorator(*args, **kwargs):
+            max_attempts = kwargs.get("stop_max_attempt_number", 1)
+            retry_on_exception = kwargs.get("retry_on_exception", lambda exc: True)
 
-            return wrapped
+            def decorator(func):
+                def wrapped(*f_args, **f_kwargs):
+                    attempts = 0
+                    while True:
+                        try:
+                            return func(*f_args, **f_kwargs)
+                        except Exception as exc:
+                            attempts += 1
+                            if attempts >= max_attempts or not retry_on_exception(exc):
+                                raise
 
-        return decorator
+                return wrapped
 
-    retrying_stub = types.ModuleType("retrying")
-    retrying_stub.retry = retry_decorator  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "retrying", retrying_stub)
+            return decorator
 
-    from utility import proxy as proxy_module
+        retrying_stub = types.ModuleType("retrying")
+        retrying_stub.retry = retry_decorator  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "retrying", retrying_stub)
 
-    def fake_get_proxy():
-        nonlocal get_proxy_calls
-        get_proxy_calls += 1
-        return {"http": "http://new:8080", "https": "http://new:8080"}
+        from utility import proxy as proxy_module
 
-    monkeypatch.setattr(proxy_module, "get_proxy", fake_get_proxy)
-    monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
+        def fake_get_proxy():
+            nonlocal get_proxy_calls
+            get_proxy_calls += 1
+            return {"http": "http://new:8080", "https": "http://new:8080"}
 
-    utility_stub = types.ModuleType("utility")
-    utility_stub.change_proxy = proxy_module.change_proxy  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "utility", utility_stub)
+        monkeypatch.setattr(proxy_module, "get_proxy", fake_get_proxy)
+        monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
 
-    module = importlib.import_module(module_name)
-    module = importlib.reload(module)
+        utility_stub = types.ModuleType("utility")
+        utility_stub.change_proxy = proxy_module.change_proxy  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "utility", utility_stub)
 
-    with pytest.raises(ProxyError, match="Maximum proxy retry attempts exceeded"):
-        module.download_general_info_stock_ak()
+        module = importlib.import_module(module_name)
+        module = importlib.reload(module)
 
-    assert get_proxy_calls == 3
+        with pytest.raises(ProxyError, match="Maximum proxy retry attempts exceeded"):
+            module.download_general_info_stock_ak()
+
+        assert get_proxy_calls == 3
+    finally:
+        # Restore original modules to prevent pollution of subsequent tests
+        for _mod_name, _mod in _saved_modules.items():
+            if _mod is not None:
+                sys.modules[_mod_name] = _mod
+            else:
+                sys.modules.pop(_mod_name, None)
 
 
 # ── A-share history downloader tests ──────────────────────────────────────────

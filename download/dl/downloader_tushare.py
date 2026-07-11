@@ -349,6 +349,34 @@ def _pro_bar_freq(period: PeriodType) -> str:
     return freq_map[period]
 
 
+_a_stock_history_columns = [
+    COL_DATE,
+    COL_STOCK_ID,
+    COL_OPEN,
+    COL_CLOSE,
+    COL_HIGH,
+    COL_LOW,
+    COL_VOLUME,
+    COL_AMOUNT,
+    COL_CHANGE_RATE,
+    COL_CHANGE,
+]
+
+_a_stock_history_required_numeric = [
+    COL_OPEN,
+    COL_CLOSE,
+    COL_HIGH,
+    COL_LOW,
+    COL_VOLUME,
+    COL_AMOUNT,
+]
+
+_a_stock_history_optional_numeric = [
+    COL_CHANGE_RATE,
+    COL_CHANGE,
+]
+
+
 def _normalize_a_stock_history_ts(df: pd.DataFrame, stock_id: str) -> pd.DataFrame:
     column_mapping = {
         "trade_date": COL_DATE,
@@ -365,10 +393,19 @@ def _normalize_a_stock_history_ts(df: pd.DataFrame, stock_id: str) -> pd.DataFra
     normalized = df.rename(columns=column_mapping).copy()
     normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], format="%Y%m%d")
     normalized[COL_STOCK_ID] = stock_id
-    numeric_columns = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_AMOUNT, COL_CHANGE_RATE, COL_CHANGE]
-    for column in numeric_columns:
+
+    # Required OHLCV/amount fields: raise on non-convertible values
+    for column in _a_stock_history_required_numeric:
+        if column in normalized.columns:
+            normalized[column] = pd.to_numeric(normalized[column], errors="raise")
+
+    # Optional fields: coerce non-convertible to NaN, then fill with 0
+    for column in _a_stock_history_optional_numeric:
         if column in normalized.columns:
             normalized[column] = pd.to_numeric(normalized[column], errors="coerce").fillna(0)
+
+    # Drop any columns not in the canonical set
+    normalized = normalized.reindex(columns=_a_stock_history_columns)
     return normalized.sort_values(COL_DATE).reset_index(drop=True)
 
 
