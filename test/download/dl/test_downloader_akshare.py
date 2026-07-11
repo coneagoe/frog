@@ -10,7 +10,8 @@ from requests.exceptions import ConnectionError, ProxyError
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from common.const import AdjustType, PeriodType  # noqa: E402
+from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType  # noqa: E402
+from download.dl import downloader_akshare as da  # noqa: E402
 
 
 @pytest.fixture(scope="function")
@@ -237,3 +238,29 @@ def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
         module.download_general_info_stock_ak()
 
     assert get_proxy_calls == 3
+
+
+# ── A-share history downloader tests ──────────────────────────────────────────
+
+
+def test_download_history_data_stock_ak_filters_dates_and_sets_stock_id(monkeypatch):
+    def fake_stock_zh_a_hist(**kwargs):
+        assert kwargs["symbol"] == "000001"
+        return pd.DataFrame(
+            {
+                COL_DATE: ["2024-01-01", "2024-01-02", "2024-01-03"],
+                "开盘": [1.0, 2.0, 3.0],
+                "最高": [1.0, 2.0, 3.0],
+                "最低": [1.0, 2.0, 3.0],
+                "收盘": [1.0, 2.0, 3.0],
+                "成交量": [10, 20, 30],
+                "成交额": [100, 200, 300],
+            }
+        )
+
+    monkeypatch.setattr(da.ak, "stock_zh_a_hist", fake_stock_zh_a_hist)
+
+    df = da.download_history_data_stock_ak("000001", "20240102", "20240103", PeriodType.DAILY, AdjustType.QFQ)
+
+    assert df[COL_DATE].tolist() == [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
+    assert df[COL_STOCK_ID].tolist() == ["000001", "000001"]

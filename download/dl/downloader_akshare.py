@@ -149,7 +149,17 @@ def download_history_data_stock_ak(
     assert isinstance(df, pd.DataFrame), f"Expected DataFrame, got {type(df)}"
     assert not df.empty, f"download history data {stock_id} fail, please check"
 
-    return df
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+    mask = (df[COL_DATE] >= pd.to_datetime(start_date)) & (df[COL_DATE] <= pd.to_datetime(end_date))
+    df = df.loc[mask].copy()
+    df[COL_STOCK_ID] = stock_id
+
+    numeric_columns = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, "成交额", COL_TURNOVER_RATE, COL_CHANGE_RATE]
+    for column in numeric_columns:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0)
+
+    return df.reset_index(drop=True)
 
 
 @_retry_non_proxy_errors(wait_fixed=5000, stop_max_attempt_number=5)
