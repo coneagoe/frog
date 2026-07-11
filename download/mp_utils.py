@@ -42,6 +42,39 @@ def _chunked(items: List[str], chunk_size: int) -> Iterable[List[str]]:
         yield items[i : i + chunk_size]  # noqa: E203
 
 
+def _download_stock_history_with_fallback(
+    downloader: Downloader,
+    security_id: str,
+    start_date: str,
+    end_date: str,
+    period: PeriodType,
+    adjust: AdjustType,
+) -> pd.DataFrame | None:
+    from .download_manager import _validate_stock_history_data
+    from .provider_order import parse_stock_history_provider_order
+
+    provider_errors: Dict[str, str] = {}
+    for provider in parse_stock_history_provider_order():
+        try:
+            df = downloader.dl_history_data_stock_by_provider(
+                provider,
+                security_id,
+                start_date,
+                end_date,
+                period,
+                adjust,
+            )
+            validated = _validate_stock_history_data(df)
+            logging.info("[A股] provider=%s security_id=%s rows=%d", provider, security_id, len(validated))
+            return validated
+        except Exception as exc:  # noqa: BLE001
+            provider_errors[provider] = str(exc)
+            logging.warning("[A股] provider=%s security_id=%s failed: %s", provider, security_id, exc)
+
+    logging.error("[A股] all providers failed for %s: %s", security_id, provider_errors)
+    return None
+
+
 def _history_batch_worker(
     security_type: SecurityType,
     ids: List[str],
@@ -96,10 +129,25 @@ def _history_batch_worker(
             else:
                 actual_start_date = start_date
 
-            df = downloader_func(security_id, actual_start_date, end_date, period, adjust)
+            if security_type == SecurityType.STOCK:
+                df = _download_stock_history_with_fallback(
+                    downloader,
+                    security_id,
+                    actual_start_date,
+                    end_date,
+                    period,
+                    adjust,
+                )
+            else:
+                df = downloader_func(security_id, actual_start_date, end_date, period, adjust)
 
             if df is None or df.empty:
-                success += 1
+                if security_type == SecurityType.STOCK:
+                    failed += 1
+                    failed_ids.append(security_id)
+                    errors[security_id] = "all stock history providers failed"
+                else:
+                    success += 1
                 continue
 
             ok = bool(save_func(df, period, adjust))
