@@ -253,17 +253,20 @@ class DownloadManager:
             else:
                 actual_start_date = start_date
 
-            trading_window = get_a_stock_trading_window(actual_start_date, end_date)
-            if trading_window is None:
-                logging.info(
-                    "No A-share trading days in range, skip stock history download: stock_id=%s, start_date=%s, end_date=%s",
-                    stock_id,
-                    actual_start_date,
-                    end_date,
-                )
-                return True
+            if period == PeriodType.DAILY:
+                trading_window = get_a_stock_trading_window(actual_start_date, end_date)
+                if trading_window is None:
+                    logging.info(
+                        "No A-share trading days in range, skip stock history download: stock_id=%s, start_date=%s, end_date=%s",
+                        stock_id,
+                        actual_start_date,
+                        end_date,
+                    )
+                    return True
+                window_start_date, window_end_date = trading_window
+            else:
+                window_start_date, window_end_date = actual_start_date, end_date
 
-            window_start_date, window_end_date = trading_window
             df = self._download_stock_history_with_fallback(
                 stock_id,
                 window_start_date,
