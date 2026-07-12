@@ -538,6 +538,35 @@ class TestDownloadStockHistoryProviderFallback:
         downloader.dl_history_data_stock_by_provider.assert_not_called()
         storage.save_history_data_stock.assert_not_called()
 
+    def test_download_stock_history_skips_when_no_trading_days_in_incremental_window(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        storage.get_last_record.return_value = {COL_DATE: "2026-07-10"}
+        monkeypatch.setattr(dm, "get_a_stock_trading_window", lambda start_date, end_date: None)
+
+        result = manager.download_stock_history("000026", PeriodType.DAILY, "20200101", "2026-07-12", AdjustType.HFQ)
+
+        assert result is True
+        downloader.dl_history_data_stock_by_provider.assert_not_called()
+        storage.save_history_data_stock.assert_not_called()
+
+    def test_download_stock_history_uses_trading_day_window_for_provider_calls(self, monkeypatch):
+        dm = importlib.import_module("download.download_manager")
+        manager, storage, downloader = _make_manager(monkeypatch)
+        monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock"])
+        monkeypatch.setattr(dm, "get_a_stock_trading_window", lambda start_date, end_date: ("20260713", "20260714"))
+        storage.get_last_record.return_value = {COL_DATE: "2026-07-10"}
+        fallback_df = _stock_history_df()
+        downloader.dl_history_data_stock_by_provider.return_value = fallback_df
+        storage.save_history_data_stock.return_value = True
+
+        result = manager.download_stock_history("000026", PeriodType.DAILY, "20200101", "2026-07-14", AdjustType.HFQ)
+
+        assert result is True
+        downloader.dl_history_data_stock_by_provider.assert_called_once_with(
+            "baostock", "000026", "20260713", "20260714", PeriodType.DAILY, AdjustType.HFQ
+        )
+
 
 def _stock_history_df(stock_id="000001"):
     return pd.DataFrame(

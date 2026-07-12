@@ -19,6 +19,7 @@ from common.const import (
     SecurityType,
 )
 from download.provider_order import parse_stock_history_provider_order
+from stock.market import get_a_stock_trading_window
 from storage import (
     get_storage,
     get_table_name,
@@ -252,7 +253,24 @@ class DownloadManager:
             else:
                 actual_start_date = start_date
 
-            df = self._download_stock_history_with_fallback(stock_id, actual_start_date, end_date, period, adjust)
+            trading_window = get_a_stock_trading_window(actual_start_date, end_date)
+            if trading_window is None:
+                logging.info(
+                    "No A-share trading days in range, skip stock history download: stock_id=%s, start_date=%s, end_date=%s",
+                    stock_id,
+                    actual_start_date,
+                    end_date,
+                )
+                return True
+
+            window_start_date, window_end_date = trading_window
+            df = self._download_stock_history_with_fallback(
+                stock_id,
+                window_start_date,
+                window_end_date,
+                period,
+                adjust,
+            )
             if df is None:
                 return False
 
