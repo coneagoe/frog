@@ -8,6 +8,25 @@ import pandas as pd
 import pandas_market_calendars as mcal
 
 
+def get_a_stock_trading_window(start_date: str, end_date: str) -> tuple[str, str] | None:
+    start_ts = pd.Timestamp(start_date).normalize()
+    end_ts = pd.Timestamp(end_date).normalize()
+
+    if start_ts > end_ts:
+        return None
+
+    market = mcal.get_calendar("XSHG")
+    schedule = market.schedule(start_date=start_ts, end_date=end_ts)
+    if schedule.empty:
+        return None
+
+    trading_days = schedule.index
+    return (
+        pd.Timestamp(trading_days[0]).strftime("%Y%m%d"),
+        pd.Timestamp(trading_days[-1]).strftime("%Y%m%d"),
+    )
+
+
 def is_testing():
     if os.getenv("TEST") in ["true", "on", "1"] or os.getenv("FROG_SERVER_CONFIG") in [
         "development",

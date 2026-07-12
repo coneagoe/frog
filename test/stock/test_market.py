@@ -7,6 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 import conf  # noqa: E402
 from stock.market import (  # noqa: E402
+    get_a_stock_trading_window,
     is_a_market_open,
     is_a_market_open_today,
     is_hk_market_open,
@@ -83,6 +84,18 @@ class TestIsHkMarketOpen(unittest.TestCase):
         self.assertFalse(is_hk_market_open("2025-04-13"))
         self.assertFalse(is_hk_market_open("2025-04-18"))
         self.assertFalse(is_hk_market_open("2025-05-01"))
+
+
+def test_get_a_stock_trading_window_returns_none_for_weekend_only_range():
+    assert get_a_stock_trading_window("20260711", "2026-07-12") is None
+
+
+def test_get_a_stock_trading_window_shrinks_range_to_trading_days():
+    assert get_a_stock_trading_window("20260711", "2026-07-14") == ("20260713", "20260714")
+
+
+def test_get_a_stock_trading_window_returns_none_when_start_after_end():
+    assert get_a_stock_trading_window("20260714", "20260713") is None
 
 
 if __name__ == "__main__":
