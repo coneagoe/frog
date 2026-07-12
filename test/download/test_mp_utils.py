@@ -125,3 +125,83 @@ def test_history_batch_worker_keeps_etf_single_provider_path(monkeypatch):
     assert result.failed == 0
     downloader.dl_history_data_stock_by_provider.assert_not_called()
     downloader.dl_history_data_etf.assert_called_once()
+
+
+def test_history_batch_worker_skips_stock_provider_when_no_trading_days(monkeypatch):
+    storage = MagicMock()
+    storage.get_last_record.return_value = {COL_DATE: "2026-07-10"}
+    monkeypatch.setattr(mp_utils, "get_storage", lambda: storage)
+    monkeypatch.setattr(mp_utils, "get_a_stock_trading_window", lambda start_date, end_date: None)
+
+    downloader = MagicMock()
+    monkeypatch.setattr(mp_utils, "Downloader", lambda: downloader)
+
+    result = mp_utils._history_batch_worker(
+        SecurityType.STOCK,
+        ["000026"],
+        PeriodType.DAILY.value,
+        AdjustType.HFQ.value,
+        "20200101",
+        "2026-07-12",
+    )
+
+    assert result.success == 1
+    assert result.failed == 0
+    downloader.dl_history_data_stock_by_provider.assert_not_called()
+    storage.save_history_data_stock.assert_not_called()
+
+
+def test_history_batch_worker_uses_trading_day_window_for_stock_provider(monkeypatch):
+    storage = MagicMock()
+    storage.get_last_record.return_value = {COL_DATE: "2026-07-10"}
+    storage.save_history_data_stock.return_value = True
+    monkeypatch.setattr(mp_utils, "get_storage", lambda: storage)
+    monkeypatch.setattr(download.provider_order, "parse_stock_history_provider_order", lambda: ["baostock"])
+    monkeypatch.setattr(mp_utils, "get_a_stock_trading_window", lambda start_date, end_date: ("20260713", "20260714"))
+
+    downloader = MagicMock()
+    fallback_df = _stock_history_df("000026")
+    downloader.dl_history_data_stock_by_provider.return_value = fallback_df
+    monkeypatch.setattr(mp_utils, "Downloader", lambda: downloader)
+
+    result = mp_utils._history_batch_worker(
+        SecurityType.STOCK,
+        ["000026"],
+        PeriodType.DAILY.value,
+        AdjustType.HFQ.value,
+        "20200101",
+        "2026-07-14",
+    )
+
+    assert result.success == 1
+    assert result.failed == 0
+    downloader.dl_history_data_stock_by_provider.assert_called_once_with(
+        "baostock", "000026", "20260713", "20260714", PeriodType.DAILY, AdjustType.HFQ
+    )
+
+
+def test_history_batch_worker_does_not_use_a_stock_window_for_etf(monkeypatch):
+    storage = MagicMock()
+    storage.get_last_record.return_value = None
+    storage.save_history_data_etf.return_value = True
+    monkeypatch.setattr(mp_utils, "get_storage", lambda: storage)
+
+    get_window = MagicMock(return_value=None)
+    monkeypatch.setattr(mp_utils, "get_a_stock_trading_window", get_window)
+
+    downloader = MagicMock()
+    downloader.dl_history_data_etf.return_value = pd.DataFrame({COL_DATE: [pd.Timestamp("2026-07-13")]})
+    monkeypatch.setattr(mp_utils, "Downloader", lambda: downloader)
+
+    result = mp_utils._history_batch_worker(
+        SecurityType.ETF,
+        ["510300"],
+        PeriodType.DAILY.value,
+        AdjustType.QFQ.value,
+        "20260711",
+        "2026-07-14",
+    )
+
+    assert result.success == 1
+    assert result.failed == 0
+    get_window.assert_not_called()

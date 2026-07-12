@@ -9,6 +9,7 @@ from typing import Dict, Iterable, List, Optional
 import pandas as pd
 
 from common.const import COL_DATE, AdjustType, PeriodType, SecurityType
+from stock.market import get_a_stock_trading_window
 from storage import get_storage, get_table_name
 
 from .dl import Downloader
@@ -130,11 +131,27 @@ def _history_batch_worker(
                 actual_start_date = start_date
 
             if security_type == SecurityType.STOCK:
+                if period == PeriodType.DAILY:
+                    trading_window = get_a_stock_trading_window(actual_start_date, end_date)
+                    if trading_window is None:
+                        logging.info(
+                            "[A股] No trading days in range, skip: security_id=%s, start_date=%s, end_date=%s",
+                            security_id,
+                            actual_start_date,
+                            end_date,
+                        )
+                        success += 1
+                        continue
+
+                    window_start_date, window_end_date = trading_window
+                else:
+                    window_start_date, window_end_date = actual_start_date, end_date
+
                 df = _download_stock_history_with_fallback(
                     downloader,
                     security_id,
-                    actual_start_date,
-                    end_date,
+                    window_start_date,
+                    window_end_date,
                     period,
                     adjust,
                 )
