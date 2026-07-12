@@ -257,7 +257,8 @@ class DownloadManager:
                 trading_window = get_a_stock_trading_window(actual_start_date, end_date)
                 if trading_window is None:
                     logging.info(
-                        "No A-share trading days in range, skip stock history download: stock_id=%s, start_date=%s, end_date=%s",
+                        "No A-share trading days in range, skip stock history download: "
+                        "stock_id=%s, start_date=%s, end_date=%s",
                         stock_id,
                         actual_start_date,
                         end_date,

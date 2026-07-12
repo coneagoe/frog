@@ -556,7 +556,8 @@ class TestDownloadStockHistoryProviderFallback:
         monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock"])
         call_args = []
         monkeypatch.setattr(
-            dm, "get_a_stock_trading_window",
+            dm,
+            "get_a_stock_trading_window",
             lambda start_date, end_date: call_args.append((start_date, end_date)) or ("20260713", "20260714"),
         )
         storage.get_last_record.return_value = {COL_DATE: "2026-07-10"}
@@ -578,7 +579,8 @@ class TestDownloadStockHistoryProviderFallback:
         monkeypatch.setattr(dm, "parse_stock_history_provider_order", lambda: ["baostock"])
         call_args = []
         monkeypatch.setattr(
-            dm, "get_a_stock_trading_window",
+            dm,
+            "get_a_stock_trading_window",
             lambda start_date, end_date: call_args.append((start_date, end_date)) or ("20260713", "20260714"),
         )
         storage.get_last_record.return_value = {COL_DATE: "2026-07-10"}
