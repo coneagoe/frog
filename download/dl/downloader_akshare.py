@@ -146,6 +146,8 @@ def download_history_data_stock_ak(
     df = ak.stock_zh_a_hist(
         symbol=stock_id,
         period=period.value,
+        start_date=start_date.replace("-", ""),
+        end_date=end_date.replace("-", ""),
         adjust=adjust.value,
     )
     assert isinstance(df, pd.DataFrame), f"Expected DataFrame, got {type(df)}"

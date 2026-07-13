@@ -254,6 +254,8 @@ def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
 def test_download_history_data_stock_ak_filters_dates_and_sets_stock_id(monkeypatch):
     def fake_stock_zh_a_hist(**kwargs):
         assert kwargs["symbol"] == "000001"
+        assert kwargs["start_date"] == "20240102"
+        assert kwargs["end_date"] == "20240103"
         return pd.DataFrame(
             {
                 COL_DATE: ["2024-01-01", "2024-01-02", "2024-01-03"],
@@ -268,7 +270,7 @@ def test_download_history_data_stock_ak_filters_dates_and_sets_stock_id(monkeypa
 
     monkeypatch.setattr(da.ak, "stock_zh_a_hist", fake_stock_zh_a_hist)
 
-    df = da.download_history_data_stock_ak("000001", "20240102", "20240103", PeriodType.DAILY, AdjustType.QFQ)
+    df = da.download_history_data_stock_ak("000001", "2024-01-02", "2024-01-03", PeriodType.DAILY, AdjustType.QFQ)
 
     assert df[COL_DATE].tolist() == [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
     assert df[COL_STOCK_ID].tolist() == ["000001", "000001"]
