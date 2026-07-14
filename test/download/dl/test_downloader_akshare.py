@@ -10,7 +10,7 @@ from requests.exceptions import ConnectionError, ProxyError
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType  # noqa: E402
+from common.const import COL_CHANGE, COL_DATE, COL_STOCK_ID, AdjustType, PeriodType  # noqa: E402
 from download.dl import downloader_akshare as da  # noqa: E402
 
 
@@ -265,6 +265,7 @@ def test_download_history_data_stock_ak_filters_dates_and_sets_stock_id(monkeypa
                 "收盘": [1.0, 2.0, 3.0],
                 "成交量": [10, 20, 30],
                 "成交额": [100, 200, 300],
+                "涨跌额": [0.0, 1.0, 1.0],
             }
         )
 
@@ -274,6 +275,7 @@ def test_download_history_data_stock_ak_filters_dates_and_sets_stock_id(monkeypa
 
     assert df[COL_DATE].tolist() == [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")]
     assert df[COL_STOCK_ID].tolist() == ["000001", "000001"]
+    assert COL_CHANGE not in df.columns
 
 
 def test_download_history_data_stock_ak_missing_amount_raises(monkeypatch):

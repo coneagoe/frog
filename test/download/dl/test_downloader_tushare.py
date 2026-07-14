@@ -9,6 +9,7 @@ import pytest
 
 from common.const import (
     COL_AMOUNT,
+    COL_CHANGE,
     COL_CLOSE,
     COL_DATE,
     COL_HIGH,
@@ -701,6 +702,7 @@ def test_download_history_data_stock_ts_normalizes_pro_bar(monkeypatch):
                 "close": [10.5, 9.5],
                 "vol": [100.0, 90.0],
                 "amount": [1000.0, 900.0],
+                "change": [1.0, 0.5],
             }
         )
 
@@ -710,6 +712,7 @@ def test_download_history_data_stock_ts_normalizes_pro_bar(monkeypatch):
 
     assert df[COL_DATE].tolist() == [pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")]
     assert df[COL_STOCK_ID].tolist() == ["000001", "000001"]
+    assert COL_CHANGE not in df.columns
     assert df[[COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_AMOUNT]].notna().all().all()
 
 

@@ -359,7 +359,6 @@ _a_stock_history_columns = [
     COL_VOLUME,
     COL_AMOUNT,
     COL_CHANGE_RATE,
-    COL_CHANGE,
 ]
 
 _a_stock_history_required_numeric = [
@@ -373,7 +372,6 @@ _a_stock_history_required_numeric = [
 
 _a_stock_history_optional_numeric = [
     COL_CHANGE_RATE,
-    COL_CHANGE,
 ]
 
 

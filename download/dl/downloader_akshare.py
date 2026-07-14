@@ -7,7 +7,6 @@ from requests.exceptions import ProxyError
 
 from common.const import (
     COL_AMOUNT,
-    COL_CHANGE,
     COL_CHANGE_RATE,
     COL_CLOSE,
     COL_DATE,
@@ -163,7 +162,6 @@ def download_history_data_stock_ak(
         "成交额": COL_AMOUNT,
         "涨跌幅": COL_CHANGE_RATE,
         "换手率": COL_TURNOVER_RATE,
-        "涨跌额": COL_CHANGE,
     }
     existing_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
     df = df.rename(columns=existing_mapping)
@@ -185,7 +183,7 @@ def download_history_data_stock_ak(
         df[column] = pd.to_numeric(df[column], errors="raise")
 
     # Optional fields: coerce non-convertible to NaN, then fill with 0
-    optional_numeric = [COL_CHANGE_RATE, COL_TURNOVER_RATE, COL_CHANGE]
+    optional_numeric = [COL_CHANGE_RATE, COL_TURNOVER_RATE]
     for column in optional_numeric:
         if column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0)
@@ -201,7 +199,6 @@ def download_history_data_stock_ak(
         COL_VOLUME,
         COL_AMOUNT,
         COL_CHANGE_RATE,
-        COL_CHANGE,
         COL_TURNOVER_RATE,
     ]
     df = df.reindex(columns=[c for c in a_stock_history_columns if c in df.columns])
