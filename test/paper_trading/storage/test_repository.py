@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -218,6 +219,93 @@ def test_round_trip_repository_creates_and_lists_closed_cycle(sqlite_session):
     assert rows[0].symbol == "000001.SZ"
     assert rows[0].status == "closed"
     assert rows[0].realized_pnl == Decimal("90.0000")
+
+
+def test_create_account_sets_default_fee_config(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+
+    account = repo.create_account(name="demo", initial_cash=Decimal("100000.00"))
+    session.commit()
+
+    assert account.fee_preset == "a_share"
+    assert account.commission_rate == Decimal("0.00030000")
+    assert account.min_commission == Decimal("5.0000")
+    assert account.stamp_duty_rate == Decimal("0.00050000")
+    assert account.transfer_fee_rate == Decimal("0.00001000")
+    engine.dispose()
+
+
+def test_create_account_accepts_custom_fee_config(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+
+    account = repo.create_account(
+        name="custom-fee",
+        initial_cash=Decimal("100000.00"),
+        fee_preset="a_share",
+        commission_rate=Decimal("0.00025"),
+        min_commission=Decimal("3.00"),
+        stamp_duty_rate=Decimal("0.0004"),
+        transfer_fee_rate=Decimal("0.00002"),
+    )
+    session.commit()
+
+    assert account.fee_preset == "a_share"
+    assert account.commission_rate == Decimal("0.00025000")
+    assert account.min_commission == Decimal("3.0000")
+    assert account.stamp_duty_rate == Decimal("0.00040000")
+    assert account.transfer_fee_rate == Decimal("0.00002000")
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["commission_rate", "min_commission", "stamp_duty_rate", "transfer_fee_rate"],
+)
+def test_create_account_rejects_negative_fee_config(tmp_path, field):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    values = {
+        "commission_rate": Decimal("0.0003"),
+        "min_commission": Decimal("5.00"),
+        "stamp_duty_rate": Decimal("0.0005"),
+        "transfer_fee_rate": Decimal("0.00001"),
+    }
+    values[field] = Decimal("-0.0001")
+
+    with pytest.raises(ValueError, match=field):
+        repo.create_account(name="negative-fee", initial_cash=Decimal("100000.00"), **values)
+    engine.dispose()
+
+
+def test_create_account_preserves_zero_fee_config(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+
+    account = repo.create_account(
+        name="zero-fee",
+        initial_cash=Decimal("100000.00"),
+        commission_rate=Decimal("0"),
+        min_commission=Decimal("0"),
+        stamp_duty_rate=Decimal("0"),
+        transfer_fee_rate=Decimal("0"),
+    )
+    session.commit()
+
+    assert account.commission_rate == Decimal("0E-8")
+    assert account.min_commission == Decimal("0.0000")
+    assert account.stamp_duty_rate == Decimal("0E-8")
+    assert account.transfer_fee_rate == Decimal("0E-8")
+    engine.dispose()
 
 
 def test_delete_account_removes_round_trips(sqlite_session):

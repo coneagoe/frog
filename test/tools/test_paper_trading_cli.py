@@ -292,6 +292,45 @@ class TestAccountCreate:
         exit_code = main(["account", "create", "--name", "X", "--initial-cash", "not-a-number"])
         assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
 
+    def test_create_account_passes_fee_config(self):
+        client = _mock_client()
+        with patch("tools.paper_trading_cli.PaperTradingApiClient", return_value=client):
+            rc = main(
+                [
+                    "--base-url",
+                    "http://localhost:8000",
+                    "--token",
+                    "token",
+                    "account",
+                    "create",
+                    "--name",
+                    "custom-fee",
+                    "--initial-cash",
+                    "100000.00",
+                    "--fee-preset",
+                    "a_share",
+                    "--commission-rate",
+                    "0.00025",
+                    "--min-commission",
+                    "3.00",
+                    "--stamp-duty-rate",
+                    "0.0004",
+                    "--transfer-fee-rate",
+                    "0.00002",
+                ]
+            )
+
+        assert rc == EXIT_CODES["OK"]
+        client.create_account.assert_called_once_with(
+            name="custom-fee",
+            initial_cash=Decimal("100000.00"),
+            fee_preset="a_share",
+            commission_rate=Decimal("0.00025"),
+            min_commission=Decimal("3.00"),
+            stamp_duty_rate=Decimal("0.0004"),
+            transfer_fee_rate=Decimal("0.00002"),
+        )
+
 
 class TestAccountList:
     def test_list_accounts_calls_client(self):

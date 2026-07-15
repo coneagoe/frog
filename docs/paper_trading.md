@@ -79,9 +79,12 @@ export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
 
 uv run tools/paper_trading_cli.py account list
 uv run tools/paper_trading_cli.py account create --name demo --initial-cash 100000
+uv run tools/paper_trading_cli.py account create --name custom-fee --initial-cash 100000 --fee-preset a_share --commission-rate 0.00025 --min-commission 5.00 --stamp-duty-rate 0.0005 --transfer-fee-rate 0.00001
 uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-06-16
 uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account-id 1
 ```
+
+Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. Explicit fee flags override the preset values for the new account.
 
 Use `--json` when machine-readable output is needed:
 
@@ -136,6 +139,17 @@ curl -X POST http://localhost:8000/paper/accounts \
   -H "Content-Type: application/json" \
   -d '{"name":"demo","initial_cash":"100000.00"}'
 ```
+
+To configure account fees at creation time, pass `fee_preset` and any fee overrides:
+
+```bash
+curl -X POST http://localhost:8000/paper/accounts \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"custom-fee","initial_cash":"100000.00","fee_preset":"a_share","commission_rate":"0.00025","min_commission":"5.00","stamp_duty_rate":"0.0005","transfer_fee_rate":"0.00001"}'
+```
+
+The only built-in preset is `a_share`. Fee values must be non-negative decimals; zero is valid for fee-free test accounts.
 
 ## Delete Account
 

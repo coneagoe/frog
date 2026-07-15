@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import (
@@ -30,6 +30,8 @@ def create_order(
     market_data: MarketDataProvider = Depends(get_market_data_provider),
 ):
     repo = PaperTradingRepository(session)
+    if repo.get_account(account_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
     order_service = OrderService(repo, market_data)
     order = order_service.place_order(
         account_id,

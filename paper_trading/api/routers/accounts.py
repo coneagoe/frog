@@ -17,7 +17,19 @@ router = APIRouter(prefix="/paper/accounts", dependencies=[Depends(require_api_t
 @router.post("", response_model=AccountResponse)
 def create_account(request: CreateAccountRequest, session: Session = Depends(get_session)):
     repo = PaperTradingRepository(session)
-    account = AccountService(repo).create_account(request.name, request.initial_cash)
+    service = AccountService(repo)
+    try:
+        account = service.create_account(
+            name=request.name,
+            initial_cash=request.initial_cash,
+            fee_preset=request.fee_preset,
+            commission_rate=request.commission_rate,
+            min_commission=request.min_commission,
+            stamp_duty_rate=request.stamp_duty_rate,
+            transfer_fee_rate=request.transfer_fee_rate,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     session.commit()
     return account
 

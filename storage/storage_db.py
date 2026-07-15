@@ -110,6 +110,7 @@ from .model import (
     tb_name_history_data_weekly_hk_stock_hfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
+    tb_name_paper_accounts,
     tb_name_paper_orders,
     tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
@@ -2326,6 +2327,20 @@ class StorageDb:
                 conn.execute(
                     text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN validity_checked_at TIMESTAMP WITH TIME ZONE")
                 )
+
+        if inspect(self.engine).has_table(tb_name_paper_accounts):
+            account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
+            account_fee_columns = {
+                "fee_preset": "VARCHAR(30) NOT NULL DEFAULT 'a_share'",
+                "commission_rate": "NUMERIC(20, 8) NOT NULL DEFAULT 0.0003",
+                "min_commission": "NUMERIC(20, 4) NOT NULL DEFAULT 5.00",
+                "stamp_duty_rate": "NUMERIC(20, 8) NOT NULL DEFAULT 0.0005",
+                "transfer_fee_rate": "NUMERIC(20, 8) NOT NULL DEFAULT 0.00001",
+            }
+            for column_name, ddl in account_fee_columns.items():
+                if column_name not in account_columns:
+                    with self.engine.begin() as conn:
+                        conn.execute(text(f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN {column_name} {ddl}"))
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:

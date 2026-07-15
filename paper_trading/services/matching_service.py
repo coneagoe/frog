@@ -7,7 +7,7 @@ from paper_trading.domain.enums import (
     OrderSide,
     OrderStatus,
 )
-from paper_trading.domain.fees import calculate_a_share_fees
+from paper_trading.domain.fees import calculate_a_share_fees, fee_config_from_account
 from paper_trading.domain.rules import ensure_price_in_daily_range
 from paper_trading.services.round_trip_service import RoundTripService
 from paper_trading.services.snapshot_service import SnapshotService
@@ -81,8 +81,11 @@ class MatchingService:
         side = OrderSide(order.side)
         price = Decimal(order.limit_price)
         quantity = int(order.quantity)
+        account = self.repo.get_account(order.account_id)
+        if account is None:
+            raise ValueError(f"paper account not found: {order.account_id}")
         amount = (Decimal(quantity) * price).quantize(Decimal("0.0001"))
-        fees = calculate_a_share_fees(side, amount).total.quantize(Decimal("0.0001"))
+        fees = calculate_a_share_fees(side, amount, fee_config_from_account(account)).total.quantize(Decimal("0.0001"))
         trade = self.repo.create_trade(
             order.id,
             order.account_id,
