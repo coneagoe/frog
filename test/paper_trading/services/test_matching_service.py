@@ -132,3 +132,49 @@ def test_matching_closes_round_trip_when_position_returns_to_zero(tmp_path):
     assert cycles[0].status == "closed"
     assert cycles[0].close_trade_date == next_date
     engine.dispose()
+
+
+def test_matching_uses_account_fee_config_for_trade_fees(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account(
+        "custom-fee",
+        Decimal("100000.00"),
+        commission_rate=Decimal("0.001"),
+        min_commission=Decimal("1.00"),
+        stamp_duty_rate=Decimal("0.0005"),
+        transfer_fee_rate=Decimal("0"),
+    )
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    matching_service.run(trade_date)
+    session.commit()
+
+    trades = repo.list_trades(account.id)
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    assert trades[0].fees == Decimal("1.0000")
+    assert repo.get_cash_available(account.id) == Decimal("98999.0000")
+    engine.dispose()
+
+
+def test_matching_uses_account_fee_config_for_sell_fees(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account(
+        "custom-sell-fee",
+        Decimal("100000.00"),
+        commission_rate=Decimal("0"),
+        min_commission=Decimal("0"),
+        stamp_duty_rate=Decimal("0.001"),
+        transfer_fee_rate=Decimal("0"),
+    )
+    repo.upsert_position(account.id, "000001.SZ", 200, 0, Decimal("1800.00"))
+    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.SELL, 100, Decimal("10.00"), trade_date)
+
+    matching_service.run(trade_date)
+    session.commit()
+
+    trades = repo.list_trades(account.id)
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    assert trades[0].fees == Decimal("1.0000")
+    assert repo.get_cash_available(account.id) == Decimal("100999.0000")
+    engine.dispose()

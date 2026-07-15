@@ -1,11 +1,16 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateAccountRequest(BaseModel):
     name: str
     initial_cash: Decimal
+    fee_preset: str | None = "a_share"
+    commission_rate: Decimal | None = Field(default=None, ge=0)
+    min_commission: Decimal | None = Field(default=None, ge=0)
+    stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
+    transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
 
 
 class AccountResponse(BaseModel):
@@ -14,6 +19,11 @@ class AccountResponse(BaseModel):
     id: int
     name: str
     initial_cash: Decimal
+    fee_preset: str
+    commission_rate: Decimal
+    min_commission: Decimal
+    stamp_duty_rate: Decimal
+    transfer_fee_rate: Decimal
     status: str
     base_currency: str
 

@@ -39,3 +39,53 @@ def test_delete_missing_account_returns_404(monkeypatch, sqlite_session):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "paper account not found: 999"
+
+
+def test_create_account_accepts_and_returns_fee_config(monkeypatch, sqlite_session):
+    client, headers = _client(monkeypatch, sqlite_session)
+
+    response = client.post(
+        "/paper/accounts",
+        json={
+            "name": "custom-fee",
+            "initial_cash": "100000.00",
+            "fee_preset": "a_share",
+            "commission_rate": "0.00025",
+            "min_commission": "3.00",
+            "stamp_duty_rate": "0.0004",
+            "transfer_fee_rate": "0.00002",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fee_preset"] == "a_share"
+    assert body["commission_rate"] == "0.00025000"
+    assert body["min_commission"] == "3.0000"
+    assert body["stamp_duty_rate"] == "0.00040000"
+    assert body["transfer_fee_rate"] == "0.00002000"
+
+
+def test_create_account_rejects_negative_fee_config(monkeypatch, sqlite_session):
+    client, headers = _client(monkeypatch, sqlite_session)
+
+    response = client.post(
+        "/paper/accounts",
+        json={"name": "bad-fee", "initial_cash": "100000.00", "commission_rate": "-0.0001"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_account_rejects_unknown_fee_preset(monkeypatch, sqlite_session):
+    client, headers = _client(monkeypatch, sqlite_session)
+
+    response = client.post(
+        "/paper/accounts",
+        json={"name": "unknown-preset", "initial_cash": "100000.00", "fee_preset": "unknown_preset"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422

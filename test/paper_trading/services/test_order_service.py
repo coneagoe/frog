@@ -457,3 +457,30 @@ def test_rejected_sell_order_has_validity_check(tmp_path):
     assert checks[0].status is not None
     assert checks[0].reason_code is not None
     engine.dispose()
+
+
+def test_place_buy_order_uses_account_fee_config(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account(
+        "custom-fee",
+        Decimal("100000.00"),
+        commission_rate=Decimal("0.001"),
+        min_commission=Decimal("1.00"),
+        stamp_duty_rate=Decimal("0.0005"),
+        transfer_fee_rate=Decimal("0"),
+    )
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.frozen_cash == Decimal("1001.0000")
+    assert repo.get_cash_available(account.id) == Decimal("98999.0000")
+    engine.dispose()

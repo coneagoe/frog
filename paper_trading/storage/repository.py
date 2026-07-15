@@ -6,6 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from paper_trading.domain.enums import CashEventType, OrderSide, OrderStatus
+from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.storage.models import (
     PaperAccount,
     PaperAccountSnapshot,
@@ -20,12 +21,43 @@ from paper_trading.storage.models import (
 )
 
 
+def _validate_fee_values(**values: Decimal | None) -> None:
+    for field_name, value in values.items():
+        if value is not None and value < 0:
+            raise ValueError(f"{field_name} must be non-negative")
+
+
 class PaperTradingRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_account(self, name: str, initial_cash: Decimal) -> PaperAccount:
-        account = PaperAccount(name=name, initial_cash=initial_cash)
+    def create_account(
+        self,
+        name: str,
+        initial_cash: Decimal,
+        fee_preset: str | None = None,
+        commission_rate: Decimal | None = None,
+        min_commission: Decimal | None = None,
+        stamp_duty_rate: Decimal | None = None,
+        transfer_fee_rate: Decimal | None = None,
+    ) -> PaperAccount:
+        _validate_fee_values(
+            commission_rate=commission_rate,
+            min_commission=min_commission,
+            stamp_duty_rate=stamp_duty_rate,
+            transfer_fee_rate=transfer_fee_rate,
+        )
+        preset_name = fee_preset or DEFAULT_FEE_PRESET
+        preset = get_fee_preset(preset_name)
+        account = PaperAccount(
+            name=name,
+            initial_cash=initial_cash,
+            fee_preset=preset_name,
+            commission_rate=commission_rate if commission_rate is not None else preset.commission_rate,
+            min_commission=min_commission if min_commission is not None else preset.min_commission,
+            stamp_duty_rate=stamp_duty_rate if stamp_duty_rate is not None else preset.stamp_duty_rate,
+            transfer_fee_rate=transfer_fee_rate if transfer_fee_rate is not None else preset.transfer_fee_rate,
+        )
         self.session.add(account)
         self.session.flush()
         self.add_cash_event(account.id, CashEventType.DEPOSIT, initial_cash, note="initial_cash")

@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from paper_trading.domain.enums import CashEventType, OrderSide, OrderStatus
 from paper_trading.domain.errors import PaperTradingError
-from paper_trading.domain.fees import calculate_a_share_fees
+from paper_trading.domain.fees import calculate_a_share_fees, fee_config_from_account
 from paper_trading.domain.rules import (
     ensure_lot_size,
     ensure_sufficient_cash,
@@ -97,8 +97,14 @@ class OrderService:
         trade_date: date,
         idempotency_key: str | None,
     ) -> PaperOrder:
+        account = self.repo.get_account(account_id)
+        if account is None:
+            raise ValueError(f"paper account not found: {account_id}")
         amount = Decimal(quantity) * limit_price
-        frozen_cash = (amount + calculate_a_share_fees(OrderSide.BUY, amount).total).quantize(Decimal("0.0001"))
+        fee_config = fee_config_from_account(account)
+        frozen_cash = (amount + calculate_a_share_fees(OrderSide.BUY, amount, fee_config).total).quantize(
+            Decimal("0.0001")
+        )
         ensure_sufficient_cash(self.repo.get_cash_available(account_id), frozen_cash)
         order = self.repo.create_order(
             account_id=account_id,

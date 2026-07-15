@@ -90,12 +90,28 @@ class PaperTradingApiClient:
         resp.raise_for_status()
         return resp.json()
 
-    def create_account(self, name: str, initial_cash: Decimal) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            "/paper/accounts",
-            json={"name": name, "initial_cash": str(initial_cash)},
-        )
+    def create_account(
+        self,
+        name: str,
+        initial_cash: Decimal,
+        fee_preset: str | None = None,
+        commission_rate: Decimal | None = None,
+        min_commission: Decimal | None = None,
+        stamp_duty_rate: Decimal | None = None,
+        transfer_fee_rate: Decimal | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"name": name, "initial_cash": str(initial_cash)}
+        if fee_preset is not None:
+            body["fee_preset"] = fee_preset
+        if commission_rate is not None:
+            body["commission_rate"] = str(commission_rate)
+        if min_commission is not None:
+            body["min_commission"] = str(min_commission)
+        if stamp_duty_rate is not None:
+            body["stamp_duty_rate"] = str(stamp_duty_rate)
+        if transfer_fee_rate is not None:
+            body["transfer_fee_rate"] = str(transfer_fee_rate)
+        return self._request("POST", "/paper/accounts", json=body)
 
     def list_accounts(self) -> list[dict[str, Any]]:
         return self._request("GET", "/paper/accounts")
@@ -185,6 +201,11 @@ def _add_account_subparsers(subparsers: Any) -> None:
     p_create = acct_sub.add_parser("create", help="Create a new account")
     p_create.add_argument("--name", required=True, help="Account name")
     p_create.add_argument("--initial-cash", required=True, help="Initial cash amount")
+    p_create.add_argument("--fee-preset", default=None, help="Fee preset name (default: a_share)")
+    p_create.add_argument("--commission-rate", default=None, help="Commission rate override")
+    p_create.add_argument("--min-commission", default=None, help="Minimum commission override")
+    p_create.add_argument("--stamp-duty-rate", default=None, help="Stamp duty rate override")
+    p_create.add_argument("--transfer-fee-rate", default=None, help="Transfer fee rate override")
     acct_sub.add_parser("list", help="List all accounts")
     p_get = acct_sub.add_parser("get", help="Get account details")
     p_get.add_argument("--account-id", type=int, required=True, help="Account ID")
@@ -313,7 +334,21 @@ def _validate_trade_date(value: str) -> str:
 def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:
     cmd = args.account_command
     if cmd == "create":
-        return client.create_account(name=args.name, initial_cash=_parse_decimal(args.initial_cash, "--initial-cash"))
+        kwargs: dict[str, Any] = {
+            "name": args.name,
+            "initial_cash": _parse_decimal(args.initial_cash, "--initial-cash"),
+        }
+        if args.fee_preset is not None:
+            kwargs["fee_preset"] = args.fee_preset
+        if args.commission_rate is not None:
+            kwargs["commission_rate"] = _parse_decimal(args.commission_rate, "--commission-rate")
+        if args.min_commission is not None:
+            kwargs["min_commission"] = _parse_decimal(args.min_commission, "--min-commission")
+        if args.stamp_duty_rate is not None:
+            kwargs["stamp_duty_rate"] = _parse_decimal(args.stamp_duty_rate, "--stamp-duty-rate")
+        if args.transfer_fee_rate is not None:
+            kwargs["transfer_fee_rate"] = _parse_decimal(args.transfer_fee_rate, "--transfer-fee-rate")
+        return client.create_account(**kwargs)
     if cmd == "list":
         return client.list_accounts()
     if cmd == "get":

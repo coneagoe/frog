@@ -141,6 +141,36 @@ def test_create_order_returns_validity_summary(monkeypatch, sqlite_session):
     assert "validity_checked_at" in payload
 
 
+def test_create_order_missing_account_returns_404(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    storage = FakeHistoryStorage({})
+    app.dependency_overrides[get_market_data_provider] = lambda: StorageMarketDataProvider(
+        storage,
+        FakeTradeCalendar([date(2026, 6, 16)]),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+
+    response = client.post(
+        "/paper/accounts/999/orders",
+        json={
+            "symbol": "000001.SZ",
+            "side": "buy",
+            "quantity": 100,
+            "limit_price": "10.00",
+            "trade_date": "2026-06-16",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "paper account not found: 999"
+
+
 def test_get_order_validity_checks_returns_evidence(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
     session = sqlite_session
