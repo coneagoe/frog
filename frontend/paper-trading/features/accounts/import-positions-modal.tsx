@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { importPositions } from "@/lib/api-client";
 import type { Account, ImportPositionsResult } from "@/lib/types";
 
@@ -27,6 +27,14 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (open && account) {
+      setRows([emptyRow()]);
+      setError(null);
+      setSubmitting(false);
+    }
+  }, [account, open]);
+
   if (!account || !open) {
     return null;
   }
@@ -46,6 +54,7 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
   }
 
   function removeRow(index: number) {
+    if (rows.length <= 1) return;
     setError(null);
     setRows((current) => current.filter((_, i) => i !== index));
   }
@@ -61,7 +70,7 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
         return `Row ${i + 1}: Quantity must be a whole number greater than 0`;
       }
       const price = Number(row.cost_price);
-      if (Number.isNaN(price) || price < 0) {
+      if (row.cost_price.trim() === "" || Number.isNaN(price) || price < 0) {
         return `Row ${i + 1}: Cost price must be a non-negative number`;
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(row.buy_trade_date)) {
@@ -96,7 +105,11 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
       onClose();
     } catch (err) {
       if (err instanceof Error) {
-        setError(err.message);
+        if (err.message.toLowerCase().includes("already has positions")) {
+          setError("This account already has positions. Import is only available for empty accounts.");
+        } else {
+          setError(err.message);
+        }
       } else {
         setError("Failed to import positions");
       }
@@ -115,7 +128,7 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
         aria-label={"Import positions for " + account.name}
       >
         <div className="modal__header">
-          <h2>Import positions — {account.name}</h2>
+          <h2>Import positions for {account.name}</h2>
         </div>
         <form onSubmit={onSubmit}>
           <div className="modal__body">
