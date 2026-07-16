@@ -60,6 +60,9 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
 
+    // Non-null assertion is safe: the early return above guarantees account is set
+    const acct = account!;
+
     // Client-side validation
     if (feeFieldKeys.some((key) => !isNonNegativeDecimal(feeValues[key]))) {
       setError("Fee settings must be non-negative numbers");
@@ -68,6 +71,7 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
 
     // No changes — early return to avoid calling the API with an empty diff
     if (!hasChanges) {
+      setError("Change at least one fee field before saving.");
       return;
     }
 
@@ -79,12 +83,12 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
       const input: UpdateAccountFeesInput = {};
       for (const key of feeFieldKeys) {
         const trimmed = feeValues[key].trim();
-        if (trimmed !== account[key]) {
+        if (trimmed !== acct[key]) {
           input[key] = trimmed;
         }
       }
 
-      const updatedAccount = await updateAccountFees(account.id, input);
+      const updatedAccount = await updateAccountFees(acct.id, input);
       await onSaved(updatedAccount);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update fees");
@@ -95,7 +99,7 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Edit fees">
+      <div className="modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={"Edit fees for " + account.name}>
         <div className="modal__header">
           <h2>Edit fees — {account.name}</h2>
         </div>
@@ -132,8 +136,8 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
             <button className="button button--secondary" onClick={onClose} type="button">
               Cancel
             </button>
-            <button className="button" disabled={submitting || !hasChanges} type="submit">
-              {submitting ? "Saving…" : "Save changes"}
+            <button className="button" disabled={submitting} type="submit">
+              {submitting ? "Saving…" : "Save fees"}
             </button>
           </div>
         </form>

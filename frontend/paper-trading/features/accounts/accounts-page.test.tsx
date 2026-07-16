@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAccount, deleteAccount, listAccounts, listCashLedger, listPositions } from "@/lib/api-client";
+import { createAccount, deleteAccount, listAccounts, listCashLedger, listPositions, updateAccountFees } from "@/lib/api-client";
 import { AccountsPage } from "./accounts-page";
 
 // Return the same URLSearchParams instance across renders for stable references.
@@ -16,7 +16,8 @@ vi.mock("@/lib/api-client", () => ({
   deleteAccount: vi.fn(),
   listAccounts: vi.fn(),
   listPositions: vi.fn(),
-  listCashLedger: vi.fn()
+  listCashLedger: vi.fn(),
+  updateAccountFees: vi.fn()
 }));
 
 const createAccountMock = vi.mocked(createAccount);
@@ -24,6 +25,7 @@ const deleteAccountMock = vi.mocked(deleteAccount);
 const listAccountsMock = vi.mocked(listAccounts);
 const listPositionsMock = vi.mocked(listPositions);
 const listCashLedgerMock = vi.mocked(listCashLedger);
+const updateAccountFeesMock = vi.mocked(updateAccountFees);
 
 const demoAccount = {
   id: 1,
@@ -412,5 +414,51 @@ describe("AccountsPage", () => {
     await waitFor(() => {
       expect(listPositionsMock).toHaveBeenCalledWith(2);
     });
+  });
+
+  it("opens the fee editor from the selected account header", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Edit fees" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Edit fees for demo" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Commission rate")).toHaveValue("0.000300");
+  });
+
+  it("saves fee changes and refreshes account data", async () => {
+    const updatedAccount = { ...demoAccount, commission_rate: "0.0002" };
+    listAccountsMock.mockResolvedValueOnce([demoAccount]).mockResolvedValueOnce([updatedAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+    updateAccountFeesMock.mockResolvedValue(updatedAccount);
+
+    render(<AccountsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Edit fees" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit fees for demo" });
+    await userEvent.clear(within(dialog).getByLabelText("Commission rate"));
+    await userEvent.type(within(dialog).getByLabelText("Commission rate"), "0.0002");
+    await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
+
+    expect(updateAccountFeesMock).toHaveBeenCalledWith(1, { commission_rate: "0.0002" });
+    await waitFor(() => expect(listAccountsMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog", { name: "Edit fees for demo" })).not.toBeInTheDocument();
+  });
+
+  it("shows validation errors without sending an empty patch", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Edit fees" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
+
+    expect(updateAccountFeesMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Change at least one fee field before saving.");
   });
 });
