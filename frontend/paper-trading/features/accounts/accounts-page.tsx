@@ -3,11 +3,12 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { deleteAccount, listAccounts, listCashLedger, listPositions } from "@/lib/api-client";
+import { deleteAccount, listAccounts, listCashLedger, listPositions, updateAccountFees } from "@/lib/api-client";
 import type { Account, CashLedgerEntry, Position } from "@/lib/types";
 import { CashLedgerTable, PositionTable } from "../trading/trading-tables";
 import { AccountList } from "./account-list";
 import { CreateAccountForm } from "./create-account-form";
+import { EditAccountFeesModal } from "./edit-account-fees-modal";
 
 export function AccountsPage() {
   const searchParams = useSearchParams();
@@ -18,8 +19,12 @@ export function AccountsPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [cashLedger, setCashLedger] = useState<CashLedgerEntry[]>([]);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [feeEditorAccount, setFeeEditorAccount] = useState<Account | null>(null);
+  const [feeEditorOpen, setFeeEditorOpen] = useState(false);
   const requestIdRef = useRef(0);
   const lastUrlParamRef = useRef<string | null>(null);
+
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
 
   async function loadAccountDetails(accountId: number, clearExisting = false) {
     if (!accountId) {
@@ -142,6 +147,21 @@ export function AccountsPage() {
     await refreshAccounts();
   }
 
+  async function handleFeeSaved(updatedAccount: Account) {
+    setFeeEditorOpen(false);
+    setFeeEditorAccount(null);
+    await refreshAccounts();
+    void loadAccountDetails(updatedAccount.id, true);
+  }
+
+  // Close fee editor if the selected account is no longer valid
+  useEffect(() => {
+    if (feeEditorOpen && (accounts.length === 0 || !accounts.find((a) => a.id === feeEditorAccount?.id))) {
+      setFeeEditorOpen(false);
+      setFeeEditorAccount(null);
+    }
+  }, [accounts, feeEditorAccount?.id, feeEditorOpen]);
+
   async function onDelete(account: Account) {
     const confirmed = window.confirm(
       `Delete paper account ${account.name}? This permanently removes all related trading data.`
@@ -181,6 +201,21 @@ export function AccountsPage() {
       </div>
       {selectedAccountId ? (
         <div>
+          <div className="panel__header">
+            <h2>{selectedAccount?.name ?? `Account #${selectedAccountId}`}</h2>
+            {selectedAccount ? (
+              <button
+                className="button button--secondary"
+                onClick={() => {
+                  setFeeEditorAccount(selectedAccount);
+                  setFeeEditorOpen(true);
+                }}
+                type="button"
+              >
+                Edit fees
+              </button>
+            ) : null}
+          </div>
           {detailError ? <ErrorBanner message={detailError} /> : null}
           <div className="grid grid--two">
             <section className="panel">
@@ -194,6 +229,15 @@ export function AccountsPage() {
           </div>
         </div>
       ) : null}
+      <EditAccountFeesModal
+        account={feeEditorAccount}
+        open={feeEditorOpen}
+        onClose={() => {
+          setFeeEditorOpen(false);
+          setFeeEditorAccount(null);
+        }}
+        onSaved={handleFeeSaved}
+      />
     </section>
   );
 }

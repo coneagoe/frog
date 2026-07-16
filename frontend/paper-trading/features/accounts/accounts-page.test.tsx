@@ -83,7 +83,7 @@ describe("AccountsPage", () => {
 
     expect(createAccountMock).toHaveBeenCalledWith({ name: "demo", initial_cash: "100000.00" });
     await waitFor(() => expect(listAccountsMock).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("demo")).toBeInTheDocument();
+    expect(await screen.findByRole("cell", { name: "demo" })).toBeInTheDocument();
   });
 
   it("creates an account with custom fee settings", async () => {
