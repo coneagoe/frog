@@ -151,6 +151,25 @@ curl -X POST http://localhost:8000/paper/accounts \
 
 The only built-in preset is `a_share`. Fee values must be non-negative decimals; zero is valid for fee-free test accounts.
 
+## Update Account Fees
+
+Update fee fields on an existing account. Fee changes apply only to future orders and trades; historical trades and cash ledger entries are not recalculated. The `fee_preset` field is not changed by the update command — only the explicitly provided fee values are modified.
+
+Only the fields you provide are updated; all omitted fields keep their current values. At least one fee field is required.
+
+```bash
+uv run tools/paper_trading_cli.py account update-fee --account-id 1 --commission-rate 0.0002 --min-commission 3
+```
+
+```bash
+curl -X PATCH http://localhost:8000/paper/accounts/1 \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"commission_rate":"0.0002","min_commission":"3.00"}'
+```
+
+All fee fields are optional in the request body. Supported fields: `commission_rate`, `min_commission`, `stamp_duty_rate`, `transfer_fee_rate`. Values must be non-negative decimals. An empty request body (no fee fields) is rejected with a 422 error.
+
 ## Delete Account
 
 Deleting an account permanently removes the paper account and its associated orders, trades, positions, position lots, snapshots, matching runs, and cash ledger entries.
