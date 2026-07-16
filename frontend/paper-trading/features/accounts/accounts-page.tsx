@@ -154,13 +154,13 @@ export function AccountsPage() {
     void loadAccountDetails(updatedAccount.id, true);
   }
 
-  // Close fee editor if the selected account is no longer valid
+  // Close fee editor if the selected account changes or is no longer valid
   useEffect(() => {
-    if (feeEditorOpen && (accounts.length === 0 || !accounts.find((a) => a.id === feeEditorAccount?.id))) {
+    if (feeEditorOpen && (accounts.length === 0 || !accounts.find((a) => a.id === feeEditorAccount?.id) || feeEditorAccount?.id !== selectedAccountId)) {
       setFeeEditorOpen(false);
       setFeeEditorAccount(null);
     }
-  }, [accounts, feeEditorAccount?.id, feeEditorOpen]);
+  }, [accounts, feeEditorAccount?.id, feeEditorOpen, selectedAccountId]);
 
   async function onDelete(account: Account) {
     const confirmed = window.confirm(
