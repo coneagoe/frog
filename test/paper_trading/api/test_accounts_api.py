@@ -89,3 +89,66 @@ def test_create_account_rejects_unknown_fee_preset(monkeypatch, sqlite_session):
     )
 
     assert response.status_code == 422
+
+
+def test_update_account_fees_updates_existing_account(monkeypatch, sqlite_session):
+    client, headers = _client(monkeypatch, sqlite_session)
+    created = client.post(
+        "/paper/accounts",
+        json={"name": "demo", "initial_cash": "100000.00"},
+        headers=headers,
+    ).json()
+
+    response = client.patch(
+        f"/paper/accounts/{created['id']}",
+        json={"commission_rate": "0.0002", "min_commission": "3.00"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["commission_rate"] == "0.00020000"
+    assert body["min_commission"] == "3.0000"
+
+
+def test_update_account_fees_rejects_negative_fee(monkeypatch, sqlite_session):
+    client, headers = _client(monkeypatch, sqlite_session)
+    created = client.post(
+        "/paper/accounts",
+        json={"name": "demo", "initial_cash": "100000.00"},
+        headers=headers,
+    ).json()
+
+    response = client.patch(
+        f"/paper/accounts/{created['id']}",
+        json={"commission_rate": "-0.0001"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_update_account_fees_rejects_empty_payload(monkeypatch, sqlite_session):
+    client, headers = _client(monkeypatch, sqlite_session)
+    created = client.post(
+        "/paper/accounts",
+        json={"name": "demo", "initial_cash": "100000.00"},
+        headers=headers,
+    ).json()
+
+    response = client.patch(f"/paper/accounts/{created['id']}", json={}, headers=headers)
+
+    assert response.status_code == 422
+
+
+def test_update_account_fees_returns_404_for_missing_account(monkeypatch, sqlite_session):
+    client, headers = _client(monkeypatch, sqlite_session)
+
+    response = client.patch(
+        "/paper/accounts/999",
+        json={"commission_rate": "0.0002"},
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "paper account not found: 999"
