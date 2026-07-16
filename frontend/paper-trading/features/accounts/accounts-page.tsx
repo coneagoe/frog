@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { deleteAccount, listAccounts, listCashLedger, listPositions } from "@/lib/api-client";
-import type { Account, CashLedgerEntry, Position } from "@/lib/types";
+import type { Account, CashLedgerEntry, ImportPositionsResult, Position } from "@/lib/types";
 import { CashLedgerTable, PositionTable } from "../trading/trading-tables";
 import { AccountList } from "./account-list";
 import { CreateAccountForm } from "./create-account-form";
@@ -23,6 +23,7 @@ export function AccountsPage() {
   const [feeEditorAccount, setFeeEditorAccount] = useState<Account | null>(null);
   const [feeEditorOpen, setFeeEditorOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importSuccess, setImportSuccess] = useState<ImportPositionsResult | null>(null);
   const requestIdRef = useRef(0);
   const lastUrlParamRef = useRef<string | null>(null);
   const selectedAccountIdRef = useRef(selectedAccountId);
@@ -113,6 +114,7 @@ export function AccountsPage() {
   useEffect(() => {
     if (accounts.length === 0) {
       setSelectedAccountId(null);
+      setImportSuccess(null);
       setPositions([]);
       setCashLedger([]);
       setDetailError(null);
@@ -127,6 +129,7 @@ export function AccountsPage() {
     if (currentUrlParam !== lastUrlParamRef.current) {
       lastUrlParamRef.current = currentUrlParam;
       if (paramIsValid && requestedAccountId !== selectedAccountId) {
+        setImportSuccess(null);
         setSelectedAccountId(requestedAccountId);
         void loadAccountDetails(requestedAccountId, true);
         return;
@@ -137,6 +140,7 @@ export function AccountsPage() {
     if (selectedAccountId === null || !accounts.find((a) => a.id === selectedAccountId)) {
       const targetId = paramIsValid ? requestedAccountId : accounts[0].id;
       lastUrlParamRef.current = currentUrlParam;
+      setImportSuccess(null);
       setSelectedAccountId(targetId);
       void loadAccountDetails(targetId, true);
     }
@@ -144,6 +148,7 @@ export function AccountsPage() {
 
   async function onSelect(account: Account) {
     setSelectedAccountId(account.id);
+    setImportSuccess(null);
     await loadAccountDetails(account.id, true);
   }
 
@@ -162,7 +167,8 @@ export function AccountsPage() {
     }
   }
 
-  async function handleImportComplete() {
+  async function handleImportComplete(result: ImportPositionsResult) {
+    setImportSuccess(result);
     setImportModalOpen(false);
     if (selectedAccountIdRef.current) {
       void loadAccountDetails(selectedAccountIdRef.current, true);
@@ -232,7 +238,10 @@ export function AccountsPage() {
                 </button>
                 <button
                   className="button button--secondary"
-                  onClick={() => setImportModalOpen(true)}
+                  onClick={() => {
+                    setImportSuccess(null);
+                    setImportModalOpen(true);
+                  }}
                   type="button"
                 >
                   Import positions
@@ -241,6 +250,11 @@ export function AccountsPage() {
             ) : null}
           </div>
           {detailError ? <ErrorBanner message={detailError} /> : null}
+          {importSuccess ? (
+            <div role="status" className="success-banner">
+              Imported {importSuccess.imported_count} position{importSuccess.imported_count !== 1 ? "s" : ""} across {importSuccess.lots_count} lot{importSuccess.lots_count !== 1 ? "s" : ""}.
+            </div>
+          ) : null}
           <div className="grid grid--two">
             <section className="panel">
               <h2>Positions</h2>

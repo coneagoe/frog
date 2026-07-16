@@ -531,11 +531,11 @@ describe("AccountsPage", () => {
     expect(within(dialog).getByText(/importing initializes existing holdings only/i)).toBeInTheDocument();
   });
 
-  it("imports positions, closes modal, and refreshes account details", async () => {
+  it("imports positions, shows success message, closes modal, and refreshes account details", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
     listCashLedgerMock.mockResolvedValue([]);
-    importPositionsMock.mockResolvedValue({ imported_count: 1, lots_count: 3 });
+    importPositionsMock.mockResolvedValue({ imported_count: 2, lots_count: 5 });
 
     render(<AccountsPage />);
 
@@ -553,6 +553,56 @@ describe("AccountsPage", () => {
     await waitFor(() => expect(listPositionsMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(listCashLedgerMock).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("dialog", { name: "Import positions for demo" })).not.toBeInTheDocument();
+
+    const success = screen.getByRole("status");
+    expect(success).toHaveTextContent("Imported 2 positions across 5 lots.");
+  });
+
+  it("clears the success message when opening the import modal again", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+    importPositionsMock.mockResolvedValue({ imported_count: 1, lots_count: 1 });
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
+    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
+    await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
+    await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
+    await userEvent.type(within(dialog).getByLabelText("Buy trade date"), "2026-01-15");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Import positions" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Imported 1 position across 1 lot."));
+
+    // Open the modal again — success message should disappear
+    await userEvent.click(screen.getByRole("button", { name: "Import positions" }));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("clears the success message when selecting a different account", async () => {
+    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    listAccountsMock.mockResolvedValue([demoAccount, account2]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+    importPositionsMock.mockResolvedValue({ imported_count: 1, lots_count: 1 });
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
+    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
+    await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
+    await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
+    await userEvent.type(within(dialog).getByLabelText("Buy trade date"), "2026-01-15");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Import positions" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Imported 1 position across 1 lot."));
+
+    // Switch to a different account
+    await userEvent.click(screen.getByRole("button", { name: "View prod" }));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("shows backend validation errors without closing the modal", async () => {
