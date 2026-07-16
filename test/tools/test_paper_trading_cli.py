@@ -447,9 +447,7 @@ class TestAccountImportPositions:
     def test_import_positions_calls_client(self, tmp_path):
         csv_path = tmp_path / "holdings.csv"
         csv_path.write_text(
-            "symbol,quantity,cost_price,buy_trade_date\n"
-            "000001,100,10.50,2026-01-15\n"
-            "000002,200,20.00,2026-02-01\n"
+            "symbol,quantity,cost_price,buy_trade_date\n000001,100,10.50,2026-01-15\n000002,200,20.00,2026-02-01\n"
         )
         client = _mock_client()
         client.import_positions.return_value = {"imported_count": 2, "positions": []}
@@ -519,10 +517,7 @@ class TestAccountImportPositions:
 
     def test_import_positions_strips_whitespace_from_symbols(self, tmp_path):
         csv_path = tmp_path / "holdings.csv"
-        csv_path.write_text(
-            "symbol,quantity,cost_price,buy_trade_date\n"
-            "  000001  ,100,10.50,2026-01-15\n"
-        )
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date\n  000001  ,100,10.50,2026-01-15\n")
         client = _mock_client()
         client.import_positions.return_value = {"imported_count": 1, "positions": []}
 
@@ -541,10 +536,7 @@ class TestAccountImportPositions:
 
     def test_import_positions_bad_quantity_is_validation_error(self, tmp_path):
         csv_path = tmp_path / "holdings.csv"
-        csv_path.write_text(
-            "symbol,quantity,cost_price,buy_trade_date\n"
-            "000001,not-int,10.50,2026-01-15\n"
-        )
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date\n000001,not-int,10.50,2026-01-15\n")
         client = _mock_client()
         exit_code = main(
             ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
@@ -554,10 +546,7 @@ class TestAccountImportPositions:
 
     def test_import_positions_bad_cost_price_is_validation_error(self, tmp_path):
         csv_path = tmp_path / "holdings.csv"
-        csv_path.write_text(
-            "symbol,quantity,cost_price,buy_trade_date\n"
-            "000001,100,not-a-price,2026-01-15\n"
-        )
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date\n000001,100,not-a-price,2026-01-15\n")
         client = _mock_client()
         exit_code = main(
             ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
@@ -567,19 +556,13 @@ class TestAccountImportPositions:
 
     def test_import_positions_bad_trade_date_is_validation_error(self, tmp_path):
         csv_path = tmp_path / "holdings.csv"
-        csv_path.write_text(
-            "symbol,quantity,cost_price,buy_trade_date\n"
-            "000001,100,10.50,not-a-date\n"
-        )
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date\n000001,100,10.50,not-a-date\n")
         client = _mock_client()
         exit_code = main(
             ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
             client=client,
         )
         assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
-
-
-
 
 
 class TestAccountUpdateFee:
