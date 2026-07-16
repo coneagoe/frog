@@ -156,6 +156,47 @@ def test_matching_uses_account_fee_config_for_trade_fees(tmp_path):
     engine.dispose()
 
 
+def test_fee_update_keeps_existing_trade_and_applies_to_future_order(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("fee-update", Decimal("100000.00"))
+    first_order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    matching_service.run(trade_date)
+    session.commit()
+
+    first_trade = repo.list_trades(account.id)[0]
+    original_trade_fee = first_trade.fees
+    original_cash_ledger = [
+        (entry.event_type, entry.amount, entry.trade_id)
+        for entry in repo.list_cash_ledger(account.id)
+    ]
+
+    repo.update_account_fees(
+        account.id,
+        commission_rate=Decimal("0.001"),
+        min_commission=Decimal("1.00"),
+        stamp_duty_rate=Decimal("0"),
+        transfer_fee_rate=Decimal("0"),
+    )
+    future_order = order_service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 17),
+    )
+    session.commit()
+
+    assert repo.get_order(first_order.id).status == OrderStatus.FILLED.value
+    assert repo.list_trades(account.id)[0].fees == original_trade_fee
+    assert [(entry.event_type, entry.amount, entry.trade_id) for entry in repo.list_cash_ledger(account.id)][
+        : len(original_cash_ledger)
+    ] == original_cash_ledger
+    assert future_order.status == OrderStatus.ACCEPTED.value
+    assert future_order.frozen_cash == Decimal("1001.0000")
+    engine.dispose()
+
+
 def test_matching_uses_account_fee_config_for_sell_fees(tmp_path):
     engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account(
