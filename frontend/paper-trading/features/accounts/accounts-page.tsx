@@ -4,11 +4,12 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { deleteAccount, listAccounts, listCashLedger, listPositions } from "@/lib/api-client";
-import type { Account, CashLedgerEntry, Position } from "@/lib/types";
+import type { Account, CashLedgerEntry, ImportPositionsResult, Position } from "@/lib/types";
 import { CashLedgerTable, PositionTable } from "../trading/trading-tables";
 import { AccountList } from "./account-list";
 import { CreateAccountForm } from "./create-account-form";
 import { EditAccountFeesModal } from "./edit-account-fees-modal";
+import { ImportPositionsModal } from "./import-positions-modal";
 
 export function AccountsPage() {
   const searchParams = useSearchParams();
@@ -21,6 +22,7 @@ export function AccountsPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [feeEditorAccount, setFeeEditorAccount] = useState<Account | null>(null);
   const [feeEditorOpen, setFeeEditorOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const requestIdRef = useRef(0);
   const lastUrlParamRef = useRef<string | null>(null);
   const selectedAccountIdRef = useRef(selectedAccountId);
@@ -160,6 +162,13 @@ export function AccountsPage() {
     }
   }
 
+  async function handleImportComplete(_result: ImportPositionsResult) {
+    setImportModalOpen(false);
+    if (selectedAccountIdRef.current) {
+      void loadAccountDetails(selectedAccountIdRef.current, true);
+    }
+  }
+
   // Close fee editor if the selected account changes or is no longer valid
   useEffect(() => {
     if (feeEditorOpen && (accounts.length === 0 || !accounts.find((a) => a.id === feeEditorAccount?.id) || feeEditorAccount?.id !== selectedAccountId)) {
@@ -210,16 +219,25 @@ export function AccountsPage() {
           <div className="panel__header">
             <h2>{selectedAccount?.name ?? `Account #${selectedAccountId}`}</h2>
             {selectedAccount ? (
-              <button
-                className="button button--secondary"
-                onClick={() => {
-                  setFeeEditorAccount(selectedAccount);
-                  setFeeEditorOpen(true);
-                }}
-                type="button"
-              >
-                Edit fees
-              </button>
+              <>
+                <button
+                  className="button button--secondary"
+                  onClick={() => {
+                    setFeeEditorAccount(selectedAccount);
+                    setFeeEditorOpen(true);
+                  }}
+                  type="button"
+                >
+                  Edit fees
+                </button>
+                <button
+                  className="button button--secondary"
+                  onClick={() => setImportModalOpen(true)}
+                  type="button"
+                >
+                  Import positions
+                </button>
+              </>
             ) : null}
           </div>
           {detailError ? <ErrorBanner message={detailError} /> : null}
@@ -243,6 +261,12 @@ export function AccountsPage() {
           setFeeEditorAccount(null);
         }}
         onSaved={handleFeeSaved}
+      />
+      <ImportPositionsModal
+        account={selectedAccount}
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onImported={handleImportComplete}
       />
     </section>
   );
