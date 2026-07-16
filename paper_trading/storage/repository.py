@@ -27,6 +27,11 @@ def _validate_fee_values(**values: Decimal | None) -> None:
             raise ValueError(f"{field_name} must be non-negative")
 
 
+def _require_fee_update(**values: Decimal | None) -> None:
+    if all(value is None for value in values.values()):
+        raise ValueError("at least one fee field is required")
+
+
 class PaperTradingRepository:
     def __init__(self, session: Session):
         self.session = session
@@ -68,6 +73,40 @@ class PaperTradingRepository:
 
     def list_accounts(self) -> list[PaperAccount]:
         return list(self.session.query(PaperAccount).order_by(PaperAccount.id.asc()).all())
+
+    def update_account_fees(
+        self,
+        account_id: int,
+        commission_rate: Decimal | None = None,
+        min_commission: Decimal | None = None,
+        stamp_duty_rate: Decimal | None = None,
+        transfer_fee_rate: Decimal | None = None,
+    ) -> PaperAccount | None:
+        _require_fee_update(
+            commission_rate=commission_rate,
+            min_commission=min_commission,
+            stamp_duty_rate=stamp_duty_rate,
+            transfer_fee_rate=transfer_fee_rate,
+        )
+        _validate_fee_values(
+            commission_rate=commission_rate,
+            min_commission=min_commission,
+            stamp_duty_rate=stamp_duty_rate,
+            transfer_fee_rate=transfer_fee_rate,
+        )
+        account = self.get_account(account_id)
+        if account is None:
+            return None
+        if commission_rate is not None:
+            account.commission_rate = commission_rate
+        if min_commission is not None:
+            account.min_commission = min_commission
+        if stamp_duty_rate is not None:
+            account.stamp_duty_rate = stamp_duty_rate
+        if transfer_fee_rate is not None:
+            account.transfer_fee_rate = transfer_fee_rate
+        self.session.flush()
+        return account
 
     def delete_account(self, account_id: int) -> bool:
         account = self.get_account(account_id)

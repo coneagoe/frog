@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CreateAccountRequest(BaseModel):
@@ -11,6 +13,29 @@ class CreateAccountRequest(BaseModel):
     min_commission: Decimal | None = Field(default=None, ge=0)
     stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
     transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
+
+
+class UpdateAccountFeeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    commission_rate: Decimal | None = Field(default=None, ge=0)
+    min_commission: Decimal | None = Field(default=None, ge=0)
+    stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
+    transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def require_fee_field(self) -> Self:
+        if all(
+            value is None
+            for value in (
+                self.commission_rate,
+                self.min_commission,
+                self.stamp_duty_rate,
+                self.transfer_fee_rate,
+            )
+        ):
+            raise ValueError("at least one fee field is required")
+        return self
 
 
 class AccountResponse(BaseModel):
