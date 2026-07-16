@@ -166,8 +166,7 @@ def test_fee_update_keeps_existing_trade_and_applies_to_future_order(tmp_path):
     first_trade = repo.list_trades(account.id)[0]
     original_trade_fee = first_trade.fees
     original_cash_ledger = [
-        (entry.event_type, entry.amount, entry.trade_id)
-        for entry in repo.list_cash_ledger(account.id)
+        (entry.event_type, entry.amount, entry.trade_id) for entry in repo.list_cash_ledger(account.id)
     ]
 
     repo.update_account_fees(
