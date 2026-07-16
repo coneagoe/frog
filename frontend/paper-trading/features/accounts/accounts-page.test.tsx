@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAccount, deleteAccount, listAccounts, listCashLedger, listPositions, updateAccountFees } from "@/lib/api-client";
+import { createAccount, deleteAccount, importPositions, listAccounts, listCashLedger, listPositions, updateAccountFees } from "@/lib/api-client";
 import { AccountsPage } from "./accounts-page";
 
 // Return the same URLSearchParams instance across renders for stable references.
@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api-client", () => ({
   createAccount: vi.fn(),
   deleteAccount: vi.fn(),
+  importPositions: vi.fn(),
   listAccounts: vi.fn(),
   listPositions: vi.fn(),
   listCashLedger: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/lib/api-client", () => ({
 
 const createAccountMock = vi.mocked(createAccount);
 const deleteAccountMock = vi.mocked(deleteAccount);
+const importPositionsMock = vi.mocked(importPositions);
 const listAccountsMock = vi.mocked(listAccounts);
 const listPositionsMock = vi.mocked(listPositions);
 const listCashLedgerMock = vi.mocked(listCashLedger);
@@ -503,5 +505,78 @@ describe("AccountsPage", () => {
 
     expect(updateAccountFeesMock).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("Change at least one fee field before saving.");
+  });
+
+  it("shows an Import positions button on the selected account panel", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+
+    expect(await screen.findByText("Positions")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import positions" })).toBeInTheDocument();
+  });
+
+  it("opens the import modal with a one-time import note", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    expect(within(dialog).getByText(/importing initializes existing holdings only/i)).toBeInTheDocument();
+  });
+
+  it("imports positions, closes modal, and refreshes account details", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+    importPositionsMock.mockResolvedValue({ imported_count: 1, lots_count: 3 });
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
+    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
+    await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
+    await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
+    await userEvent.type(within(dialog).getByLabelText("Buy trade date"), "2026-01-15");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Import positions" }));
+
+    expect(importPositionsMock).toHaveBeenCalledWith(1, {
+      positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15" }]
+    });
+    await waitFor(() => expect(listPositionsMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listCashLedgerMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog", { name: "Import positions for demo" })).not.toBeInTheDocument();
+  });
+
+  it("shows backend validation errors without closing the modal", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+    importPositionsMock.mockRejectedValue(new Error("Account already has positions"));
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
+    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
+    await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
+    await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
+    await userEvent.type(within(dialog).getByLabelText("Buy trade date"), "2026-01-15");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Import positions" }));
+
+    expect(importPositionsMock).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(within(dialog).getByRole("alert")).toHaveTextContent(
+        "This account already has positions. Import is only available for empty accounts."
+      );
+    });
+    expect(dialog).toBeInTheDocument();
   });
 });
