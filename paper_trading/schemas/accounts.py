@@ -1,7 +1,9 @@
+import re
+from datetime import date
 from decimal import Decimal
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CreateAccountRequest(BaseModel):
@@ -70,3 +72,37 @@ class CashLedgerResponse(BaseModel):
     event_type: str
     amount: Decimal
     note: str | None = None
+
+
+class ImportPositionItem(BaseModel):
+    symbol: str = Field(min_length=1)
+    quantity: int = Field(gt=0)
+    cost_price: Decimal = Field(ge=0)
+    buy_trade_date: date
+
+    @model_validator(mode="before")
+    @classmethod
+    def strip_symbol(cls, values: dict) -> dict:
+        if isinstance(values, dict) and "symbol" in values:
+            values["symbol"] = values["symbol"].strip()
+        return values
+
+    @field_validator("buy_trade_date", mode="before")
+    @classmethod
+    def validate_buy_trade_date_format(cls, value: object) -> object:
+        if isinstance(value, date):
+            return value
+        if not isinstance(value, str):
+            raise ValueError("buy_trade_date must be a YYYY-MM-DD string")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError("buy_trade_date must be in YYYY-MM-DD format")
+        return value
+
+
+class ImportPositionsRequest(BaseModel):
+    positions: list[ImportPositionItem] = Field(min_length=1)
+
+
+class ImportPositionsResponse(BaseModel):
+    imported_count: int
+    lots_count: int
