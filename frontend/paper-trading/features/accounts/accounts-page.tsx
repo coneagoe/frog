@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { deleteAccount, listAccounts, listCashLedger, listPositions, updateAccountFees } from "@/lib/api-client";
+import { deleteAccount, listAccounts, listCashLedger, listPositions } from "@/lib/api-client";
 import type { Account, CashLedgerEntry, Position } from "@/lib/types";
 import { CashLedgerTable, PositionTable } from "../trading/trading-tables";
 import { AccountList } from "./account-list";
