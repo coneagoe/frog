@@ -449,6 +449,49 @@ describe("AccountsPage", () => {
     expect(screen.queryByRole("dialog", { name: "Edit fees for demo" })).not.toBeInTheDocument();
   });
 
+  it("does not reload saved account details when that account is no longer selected", async () => {
+    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    const updatedAccount = { ...demoAccount, commission_rate: "0.0002" };
+
+    // Control when the fee update resolves so we can switch accounts mid-save
+    let resolveUpdate!: (value: unknown) => void;
+    updateAccountFeesMock.mockImplementation(() => new Promise((resolve) => { resolveUpdate = resolve; }));
+
+    listAccountsMock.mockResolvedValue([demoAccount, account2]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+    expect(await screen.findByText("Positions")).toBeInTheDocument();
+
+    // Open fee editor for demo (account 1)
+    await userEvent.click(screen.getByRole("button", { name: "Edit fees" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit fees for demo" });
+    expect(dialog).toBeInTheDocument();
+
+    // Change a field and click Save (save is pending because of the deferred promise)
+    await userEvent.clear(within(dialog).getByLabelText("Commission rate"));
+    await userEvent.type(within(dialog).getByLabelText("Commission rate"), "0.0002");
+    await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
+
+    // While the save is pending, switch to account 2
+    await userEvent.click(screen.getByRole("button", { name: "View prod" }));
+    expect(listPositionsMock).toHaveBeenCalledWith(2);
+
+    // Clear call counts so we can detect any stale calls for account 1
+    listPositionsMock.mockClear();
+    listCashLedgerMock.mockClear();
+
+    // Let the save complete
+    resolveUpdate(updatedAccount);
+
+    // After save completes, details for account 1 should NOT be reloaded
+    await waitFor(() => {
+      expect(listPositionsMock).not.toHaveBeenCalledWith(1);
+      expect(listCashLedgerMock).not.toHaveBeenCalledWith(1);
+    });
+  });
+
   it("shows validation errors without sending an empty patch", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);

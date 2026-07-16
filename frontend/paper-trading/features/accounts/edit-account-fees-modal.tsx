@@ -54,8 +54,11 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
     return null;
   }
 
-  // Determine whether at least one field has actually changed
-  const hasChanges = feeFieldKeys.some((key) => feeValues[key].trim() !== account[key]);
+  // Determine whether at least one field has actually changed to a non-empty value
+  const hasChanges = feeFieldKeys.some((key) => {
+    const trimmed = feeValues[key].trim();
+    return trimmed !== "" && trimmed !== account[key];
+  });
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -79,11 +82,11 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
     setError(null);
 
     try {
-      // Build payload with only changed fields
+      // Build payload with only changed fields; omit empty strings
       const input: UpdateAccountFeesInput = {};
       for (const key of feeFieldKeys) {
         const trimmed = feeValues[key].trim();
-        if (trimmed !== acct[key]) {
+        if (trimmed !== "" && trimmed !== acct[key]) {
           input[key] = trimmed;
         }
       }

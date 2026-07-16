@@ -65,6 +65,36 @@ describe("EditAccountFeesModal", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Change at least one fee field before saving.");
   });
 
+  it("omits cleared (empty) fields from the submitted payload", async () => {
+    const updatedAccount = { ...demoAccount, min_commission: "3.00" };
+    updateAccountFeesMock.mockResolvedValue(updatedAccount);
+    const onSaved = vi.fn();
+
+    render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={onSaved} />);
+    // Clear commission_rate to empty and change min_commission to a new value
+    await userEvent.clear(screen.getByLabelText("Commission rate"));
+    await userEvent.clear(screen.getByLabelText("Minimum commission (CNY)"));
+    await userEvent.type(screen.getByLabelText("Minimum commission (CNY)"), "3.00");
+    await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
+
+    // The cleared commission_rate should NOT be in the payload
+    expect(updateAccountFeesMock).toHaveBeenCalledWith(1, {
+      min_commission: "3.00"
+    });
+    expect(updateAccountFeesMock.mock.calls[0][1]).not.toHaveProperty("commission_rate");
+    expect(onSaved).toHaveBeenCalledWith(updatedAccount);
+  });
+
+  it("does not call the API when clearing a field is the only effective change", async () => {
+    render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={vi.fn()} />);
+    // Clear commission_rate to empty — the only "change"
+    await userEvent.clear(screen.getByLabelText("Commission rate"));
+    await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
+
+    expect(updateAccountFeesMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Change at least one fee field before saving.");
+  });
+
   it("keeps the modal open and shows a server error", async () => {
     updateAccountFeesMock.mockRejectedValue(new Error("Invalid decimal"));
 
