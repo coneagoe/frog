@@ -1,5 +1,4 @@
 from decimal import Decimal
-
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

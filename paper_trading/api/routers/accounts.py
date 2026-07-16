@@ -7,6 +7,7 @@ from paper_trading.schemas.accounts import (
     CashLedgerResponse,
     CreateAccountRequest,
     PositionResponse,
+    UpdateAccountFeeRequest,
 )
 from paper_trading.services.account_service import AccountService
 from paper_trading.storage.repository import PaperTradingRepository
@@ -52,6 +53,33 @@ def delete_account(account_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/{account_id}", response_model=AccountResponse)
+def update_account_fees(
+    account_id: int,
+    request: UpdateAccountFeeRequest,
+    session: Session = Depends(get_session),
+):
+    payload = request.model_dump(exclude_none=True)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="at least one fee field is required",
+        )
+    repo = PaperTradingRepository(session)
+    service = AccountService(repo)
+    try:
+        account = service.update_account_fees(account_id=account_id, **payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
+    session.commit()
+    return account
 
 
 @router.get("/{account_id}/positions", response_model=list[PositionResponse])
