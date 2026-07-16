@@ -23,6 +23,8 @@ export function AccountsPage() {
   const [feeEditorOpen, setFeeEditorOpen] = useState(false);
   const requestIdRef = useRef(0);
   const lastUrlParamRef = useRef<string | null>(null);
+  const selectedAccountIdRef = useRef(selectedAccountId);
+  selectedAccountIdRef.current = selectedAccountId;
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
 
@@ -151,7 +153,11 @@ export function AccountsPage() {
     setFeeEditorOpen(false);
     setFeeEditorAccount(null);
     await refreshAccounts();
-    void loadAccountDetails(updatedAccount.id, true);
+    // Only reload details if this account is still selected at completion time;
+    // the user may have clicked a different account during the async gap.
+    if (selectedAccountIdRef.current === updatedAccount.id) {
+      void loadAccountDetails(updatedAccount.id, true);
+    }
   }
 
   // Close fee editor if the selected account changes or is no longer valid
