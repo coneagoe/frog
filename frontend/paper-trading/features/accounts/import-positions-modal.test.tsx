@@ -67,6 +67,54 @@ describe("ImportPositionsModal", () => {
     expect(screen.getAllByLabelText("Symbol")).toHaveLength(1);
   });
 
+  it("removing the only row keeps at least one row", async () => {
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    expect(screen.getAllByLabelText("Symbol")).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove row" }));
+    expect(screen.getAllByLabelText("Symbol")).toHaveLength(1);
+  });
+
+  it("shows the visible heading Import positions for demo", () => {
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    expect(screen.getByText("Import positions for demo")).toBeInTheDocument();
+  });
+
+  it("blank cost price shows a validation alert and does not submit", async () => {
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText("Symbol"), "000001");
+    await userEvent.type(screen.getByLabelText("Quantity"), "100");
+    // cost_price left empty
+    await userEvent.type(screen.getByLabelText("Buy trade date"), "2026-01-15");
+
+    await userEvent.click(screen.getByRole("button", { name: "Import positions" }));
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(importPositionsMock).not.toHaveBeenCalled();
+  });
+
+  it("shows specific message when backend rejects with already has positions", async () => {
+    importPositionsMock.mockRejectedValue(new Error("Account already has positions"));
+
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
+    await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
+    await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
+    await userEvent.type(within(dialog).getByLabelText("Buy trade date"), "2026-01-15");
+
+    await userEvent.click(screen.getByRole("button", { name: "Import positions" }));
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(
+      "This account already has positions. Import is only available for empty accounts."
+    );
+  });
+
   it("submits a valid import payload", async () => {
     importPositionsMock.mockResolvedValue({ imported_count: 1, lots_count: 1 });
 
