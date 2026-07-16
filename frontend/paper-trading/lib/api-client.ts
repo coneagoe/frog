@@ -6,6 +6,8 @@ import type {
   CreateAccountInput,
   CreateMatchingRunInput,
   CreateOrderInput,
+  ImportPositionsInput,
+  ImportPositionsResult,
   MatchingRun,
   Order,
   Position,
@@ -88,4 +90,11 @@ export function createMatchingRun(input: CreateMatchingRunInput): Promise<Matchi
 
 export function updateAccountFees(accountId: number, input: UpdateAccountFeesInput): Promise<Account> {
   return apiRequest<Account>(`/accounts/${accountId}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function importPositions(accountId: number, input: ImportPositionsInput): Promise<ImportPositionsResult> {
+  return apiRequest<ImportPositionsResult>(`/accounts/${accountId}/positions/import`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
 }

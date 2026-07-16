@@ -196,3 +196,19 @@ export type CreateMatchingRunInput = {
   trade_date: string;
   account_id?: number;
 };
+
+export type ImportPositionInput = {
+  symbol: string;
+  quantity: number;
+  cost_price: string;
+  buy_trade_date: string;
+};
+
+export type ImportPositionsInput = {
+  positions: ImportPositionInput[];
+};
+
+export type ImportPositionsResult = {
+  imported_count: number;
+  lots_count: number;
+};
