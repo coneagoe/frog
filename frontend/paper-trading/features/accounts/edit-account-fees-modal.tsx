@@ -66,6 +66,11 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
       return;
     }
 
+    // No changes — early return to avoid calling the API with an empty diff
+    if (!hasChanges) {
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
 
