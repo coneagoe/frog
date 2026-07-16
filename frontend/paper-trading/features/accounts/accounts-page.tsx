@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { deleteAccount, listAccounts, listCashLedger, listPositions } from "@/lib/api-client";
-import type { Account, CashLedgerEntry, ImportPositionsResult, Position } from "@/lib/types";
+import type { Account, CashLedgerEntry, Position } from "@/lib/types";
 import { CashLedgerTable, PositionTable } from "../trading/trading-tables";
 import { AccountList } from "./account-list";
 import { CreateAccountForm } from "./create-account-form";
@@ -162,7 +162,7 @@ export function AccountsPage() {
     }
   }
 
-  async function handleImportComplete(_result: ImportPositionsResult) {
+  async function handleImportComplete() {
     setImportModalOpen(false);
     if (selectedAccountIdRef.current) {
       void loadAccountDetails(selectedAccountIdRef.current, true);
