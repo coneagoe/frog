@@ -34,5 +34,21 @@ class AccountService:
     def list_accounts(self) -> list[PaperAccount]:
         return self.repo.list_accounts()
 
+    def update_account_fees(
+        self,
+        account_id: int,
+        commission_rate: Decimal | None = None,
+        min_commission: Decimal | None = None,
+        stamp_duty_rate: Decimal | None = None,
+        transfer_fee_rate: Decimal | None = None,
+    ) -> PaperAccount | None:
+        return self.repo.update_account_fees(
+            account_id=account_id,
+            commission_rate=commission_rate,
+            min_commission=min_commission,
+            stamp_duty_rate=stamp_duty_rate,
+            transfer_fee_rate=transfer_fee_rate,
+        )
+
     def delete_account(self, account_id: int) -> bool:
         return self.repo.delete_account(account_id)

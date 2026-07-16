@@ -315,6 +315,64 @@ def test_create_account_preserves_zero_fee_config(tmp_path):
     engine.dispose()
 
 
+def test_update_account_fees_updates_only_provided_fields(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+
+    account = repo.create_account(name="demo", initial_cash=Decimal("100000.00"))
+    updated = repo.update_account_fees(
+        account.id,
+        commission_rate=Decimal("0.0002"),
+        min_commission=Decimal("3.00"),
+    )
+    session.commit()
+
+    assert updated is not None
+    assert updated.commission_rate == Decimal("0.00020000")
+    assert updated.min_commission == Decimal("3.0000")
+    assert updated.stamp_duty_rate == Decimal("0.00050000")
+    assert updated.transfer_fee_rate == Decimal("0.00001000")
+    engine.dispose()
+
+
+def test_update_account_fees_rejects_negative_values(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+
+    account = repo.create_account(name="demo", initial_cash=Decimal("100000.00"))
+
+    with pytest.raises(ValueError, match="commission_rate"):
+        repo.update_account_fees(account.id, commission_rate=Decimal("-0.0001"))
+    engine.dispose()
+
+
+def test_update_account_fees_rejects_empty_update(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+
+    account = repo.create_account(name="demo", initial_cash=Decimal("100000.00"))
+
+    with pytest.raises(ValueError, match="at least one fee field"):
+        repo.update_account_fees(account.id)
+    engine.dispose()
+
+
+def test_update_account_fees_returns_none_for_missing_account(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+
+    assert repo.update_account_fees(999, commission_rate=Decimal("0.0002")) is None
+    engine.dispose()
+
+
 def test_delete_account_removes_round_trips(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
