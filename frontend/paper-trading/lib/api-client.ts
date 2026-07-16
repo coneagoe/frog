@@ -10,7 +10,8 @@ import type {
   Order,
   Position,
   Snapshot,
-  Trade
+  Trade,
+  UpdateAccountFeesInput
 } from "./types";
 
 export { ApiError };
@@ -83,4 +84,8 @@ export function listSnapshots(accountId: number): Promise<Snapshot[]> {
 
 export function createMatchingRun(input: CreateMatchingRunInput): Promise<MatchingRun> {
   return apiRequest<MatchingRun>("/matching/runs", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateAccountFees(accountId: number, input: UpdateAccountFeesInput): Promise<Account> {
+  return apiRequest<Account>(`/accounts/${accountId}`, { method: "PATCH", body: JSON.stringify(input) });
 }

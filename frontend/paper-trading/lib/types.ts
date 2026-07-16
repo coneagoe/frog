@@ -176,6 +176,13 @@ export type CreateAccountInput = {
   transfer_fee_rate?: string;
 };
 
+export type UpdateAccountFeesInput = {
+  commission_rate?: string;
+  min_commission?: string;
+  stamp_duty_rate?: string;
+  transfer_fee_rate?: string;
+};
+
 export type CreateOrderInput = {
   symbol: string;
   side: OrderSide;
