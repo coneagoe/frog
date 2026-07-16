@@ -201,6 +201,25 @@ button {
   gap: 6px;
 }
 
+.form__fieldset {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+}
+
+.form__fieldset legend {
+  color: var(--text);
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.form__fieldset p {
+  margin: 0;
+}
+
 .form input,
 .form select {
   background: var(--panel-soft);
@@ -251,6 +270,15 @@ button {
 .status-badge--failed {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+.fee-config {
+  display: grid;
+  gap: 4px;
+}
+
+.fee-config small {
+  color: var(--muted);
 }
 
 .error-banner {

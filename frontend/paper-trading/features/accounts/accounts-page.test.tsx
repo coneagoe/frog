@@ -25,7 +25,18 @@ const listAccountsMock = vi.mocked(listAccounts);
 const listPositionsMock = vi.mocked(listPositions);
 const listCashLedgerMock = vi.mocked(listCashLedger);
 
-const demoAccount = { id: 1, name: "demo", initial_cash: "100000.00", status: "active", base_currency: "CNY" };
+const demoAccount = {
+  id: 1,
+  name: "demo",
+  initial_cash: "100000.00",
+  status: "active",
+  base_currency: "CNY",
+  fee_preset: "a_share",
+  commission_rate: "0.000300",
+  min_commission: "5.00",
+  stamp_duty_rate: "0.000500",
+  transfer_fee_rate: "0.000010"
+};
 
 describe("AccountsPage", () => {
   beforeEach(() => {
@@ -73,6 +84,80 @@ describe("AccountsPage", () => {
     expect(createAccountMock).toHaveBeenCalledWith({ name: "demo", initial_cash: "100000.00" });
     await waitFor(() => expect(listAccountsMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("demo")).toBeInTheDocument();
+  });
+
+  it("creates an account with custom fee settings", async () => {
+    listAccountsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+    createAccountMock.mockResolvedValue(demoAccount);
+
+    render(<AccountsPage />);
+    await userEvent.type(await screen.findByLabelText("Account name"), "demo");
+    await userEvent.clear(screen.getByLabelText("Commission rate"));
+    await userEvent.type(screen.getByLabelText("Commission rate"), "0.0002");
+    await userEvent.clear(screen.getByLabelText("Minimum commission (CNY)"));
+    await userEvent.type(screen.getByLabelText("Minimum commission (CNY)"), "3.00");
+    await userEvent.clear(screen.getByLabelText("Stamp duty rate"));
+    await userEvent.type(screen.getByLabelText("Stamp duty rate"), "0.0005");
+    await userEvent.clear(screen.getByLabelText("Transfer fee rate"));
+    await userEvent.type(screen.getByLabelText("Transfer fee rate"), "0.00001");
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(createAccountMock).toHaveBeenCalledWith({
+      name: "demo",
+      initial_cash: "100000.00",
+      fee_preset: "a_share",
+      commission_rate: "0.0002",
+      min_commission: "3.00",
+      stamp_duty_rate: "0.0005",
+      transfer_fee_rate: "0.00001"
+    });
+  });
+
+  it("omits blank optional fee fields when creating an account", async () => {
+    listAccountsMock.mockResolvedValue([]);
+    createAccountMock.mockResolvedValue(demoAccount);
+
+    render(<AccountsPage />);
+    await userEvent.type(await screen.findByLabelText("Account name"), "demo");
+    await userEvent.clear(screen.getByLabelText("Commission rate"));
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(createAccountMock).toHaveBeenCalledWith({
+      name: "demo",
+      initial_cash: "100000.00",
+      fee_preset: "a_share",
+      min_commission: "5.00",
+      stamp_duty_rate: "0.0005",
+      transfer_fee_rate: "0.00001"
+    });
+  });
+
+  it("rejects negative fee settings before submitting", async () => {
+    listAccountsMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+    await userEvent.type(await screen.findByLabelText("Account name"), "demo");
+    await userEvent.clear(screen.getByLabelText("Commission rate"));
+    await userEvent.type(screen.getByLabelText("Commission rate"), "-0.0001");
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Fee settings must be non-negative numbers");
+    expect(createAccountMock).not.toHaveBeenCalled();
+  });
+
+  it("renders account fee configuration", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+
+    expect(await screen.findByText("A-share default")).toBeInTheDocument();
+    expect(screen.getByText("Commission 0.000300, min 5.00")).toBeInTheDocument();
   });
 
   it("shows backend errors", async () => {

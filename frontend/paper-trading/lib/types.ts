@@ -4,6 +4,11 @@ export type Account = {
   initial_cash: string;
   status: string;
   base_currency: string;
+  fee_preset: string;
+  commission_rate: string;
+  min_commission: string;
+  stamp_duty_rate: string;
+  transfer_fee_rate: string;
 };
 
 export type MetricValue = {
@@ -164,6 +169,11 @@ export type MatchingRun = {
 export type CreateAccountInput = {
   name: string;
   initial_cash: string;
+  fee_preset?: string;
+  commission_rate?: string;
+  min_commission?: string;
+  stamp_duty_rate?: string;
+  transfer_fee_rate?: string;
 };
 
 export type CreateOrderInput = {

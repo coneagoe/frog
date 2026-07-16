@@ -3,10 +3,26 @@ import { MoneyText } from "@/components/money-text";
 import { StatusBadge } from "@/components/status-badge";
 import type { Account } from "@/lib/types";
 
+function formatFeePreset(preset: string) {
+  return preset === "a_share" ? "A-share default" : preset;
+}
+
+function renderFeeConfig(account: Account) {
+  return (
+    <div className="fee-config">
+      <span>{formatFeePreset(account.fee_preset)}</span>
+      <small>
+        Commission {account.commission_rate}, min {account.min_commission}
+      </small>
+    </div>
+  );
+}
+
 const accountColumns: Column<Account>[] = [
   { key: "selected", header: "", render: () => null },
   { key: "name", header: "Name", render: (account) => account.name },
   { key: "initial_cash", header: "Initial Cash", align: "right", render: (account) => <MoneyText value={account.initial_cash} /> },
+  { key: "fees", header: "Fees", render: renderFeeConfig },
   { key: "status", header: "Status", render: (account) => <StatusBadge value={account.status} /> },
   { key: "currency", header: "Currency", render: (account) => account.base_currency },
   {

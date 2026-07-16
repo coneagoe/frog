@@ -281,7 +281,14 @@ def test_create_account_rejects_negative_fee_config(tmp_path, field):
     values[field] = Decimal("-0.0001")
 
     with pytest.raises(ValueError, match=field):
-        repo.create_account(name="negative-fee", initial_cash=Decimal("100000.00"), **values)
+        repo.create_account(
+            name="negative-fee",
+            initial_cash=Decimal("100000.00"),
+            commission_rate=values["commission_rate"],
+            min_commission=values["min_commission"],
+            stamp_duty_rate=values["stamp_duty_rate"],
+            transfer_fee_rate=values["transfer_fee_rate"],
+        )
     engine.dispose()
 
 
