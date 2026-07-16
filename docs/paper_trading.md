@@ -71,7 +71,7 @@ The bearer token is read only by Next.js route handlers. Browser code calls loca
 
 ## CLI Wrapper
 
-For day-to-day account, order, trade, matching, and snapshot management, prefer the repo-local CLI wrapper instead of hand-written `curl`:
+For day-to-day account, order, trade, matching, snapshot, and import management, prefer the repo-local CLI wrapper instead of hand-written `curl`:
 
 ```bash
 export PAPER_TRADING_API_TOKEN="change-me"
@@ -91,6 +91,39 @@ Use `--json` when machine-readable output is needed:
 ```bash
 uv run tools/paper_trading_cli.py --json order list --account-id 1
 ```
+
+### Import Existing Holdings
+
+New paper trading accounts can import pre-existing stock holdings. The import seeds positions and lots without creating trades, orders, or cash ledger entries. Imported lots carry a real `buy_trade_date` so later sells satisfy existing T+1 validation.
+
+Import is only allowed for accounts with no existing positions or lots.
+
+CSV format (columns: `symbol`, `quantity`, `cost_price`, `buy_trade_date`):
+
+```csv
+symbol,quantity,cost_price,buy_trade_date
+000001,100,10.50,2026-01-15
+000002,200,20.00,2026-02-01
+```
+
+```bash
+uv run tools/paper_trading_cli.py account import-positions --account-id 1 --file holdings.csv
+```
+
+```bash
+curl -X POST http://localhost:8000/paper/accounts/1/positions/import \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"positions":[{"symbol":"000001","quantity":100,"cost_price":"10.50","buy_trade_date":"2026-01-15"}]}'
+```
+
+Validation rules:
+- `symbol` is required and whitespace-trimmed.
+- `quantity` must be a positive integer.
+- `cost_price` must be a non-negative decimal.
+- `buy_trade_date` must be a valid calendar date in `YYYY-MM-DD` format.
+- Duplicate symbols create separate lots and aggregate into one position per symbol.
+- Import is rejected if the account does not exist (404) or already has positions (422).
 
 ## OpenClaw Conversation Order Entry
 

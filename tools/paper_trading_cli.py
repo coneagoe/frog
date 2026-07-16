@@ -201,6 +201,13 @@ class PaperTradingApiClient:
     def list_snapshots(self, account_id: int) -> list[dict[str, Any]]:
         return self._request("GET", f"/paper/accounts/{account_id}/snapshots")
 
+    def import_positions(self, account_id: int, positions: list[dict[str, Any]]) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/paper/accounts/{account_id}/positions/import",
+            json={"positions": positions},
+        )
+
 
 def run_paper_trading_matching(
     trade_date: str,
@@ -234,6 +241,11 @@ def _add_account_subparsers(subparsers: Any) -> None:
     p_pos.add_argument("--account-id", type=int, required=True, help="Account ID")
     p_cl = acct_sub.add_parser("cash-ledger", help="List cash ledger entries")
     p_cl.add_argument("--account-id", type=int, required=True, help="Account ID")
+    p_import = acct_sub.add_parser("import-positions", help="Import existing holdings from CSV")
+    p_import.add_argument("--account-id", type=int, required=True, help="Account ID")
+    p_import.add_argument(
+        "--file", required=True, help="Path to CSV (columns: symbol,quantity,cost_price,buy_trade_date)"
+    )
     p_update = acct_sub.add_parser("update-fee", help="Update account fee fields")
     p_update.add_argument("--account-id", type=int, required=True, help="Account ID")
     p_update.add_argument("--commission-rate", default=None, help="Commission rate override")
@@ -391,6 +403,8 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
         return client.list_positions(account_id=args.account_id)
     if cmd == "cash-ledger":
         return client.list_cash_ledger(account_id=args.account_id)
+    if cmd == "import-positions":
+        return _handle_import_positions(client, args)
     if cmd == "update-fee":
         kwargs: dict[str, Any] = {}
         if args.commission_rate is not None:
@@ -408,6 +422,63 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
             raise _ParserError("at least one fee field is required")
         return client.update_account_fees(account_id=args.account_id, **kwargs)
     raise _ParserError(f"unknown account command: {cmd}")
+
+
+def _validate_buy_trade_date(value: str) -> str:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise _ParserError(f"invalid buy_trade_date: {value!r} is not a valid YYYY-MM-DD date")
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise _ParserError(f"invalid buy_trade_date: {value!r} is not a valid calendar date") from None
+    return value
+
+
+def _handle_import_positions(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:
+    import csv
+
+    try:
+        with open(args.file, newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+    except FileNotFoundError:
+        raise _ParserError(f"file not found: {args.file}") from None
+
+    required = {"symbol", "quantity", "cost_price", "buy_trade_date"}
+    if not rows:
+        raise _ParserError("CSV file is empty (no data rows)")
+    missing = required - set(rows[0].keys())
+    if missing:
+        raise _ParserError(f"CSV missing required columns: {', '.join(sorted(missing))}")
+
+    positions: list[dict[str, Any]] = []
+    for i, row in enumerate(rows, start=2):
+        symbol = row.get("symbol", "").strip()
+        if not symbol:
+            raise _ParserError(f"row {i}: symbol is required")
+        try:
+            quantity = int(row["quantity"])
+        except (ValueError, TypeError):
+            raise _ParserError(f"row {i}: quantity must be an integer")
+        if quantity <= 0:
+            raise _ParserError(f"row {i}: quantity must be positive")
+        try:
+            cost_price = str(Decimal(row["cost_price"]))
+        except Exception:
+            raise _ParserError(f"row {i}: cost_price is not a valid decimal")
+        if Decimal(row["cost_price"]) < 0:
+            raise _ParserError(f"row {i}: cost_price must be non-negative")
+        buy_trade_date = _validate_buy_trade_date(row.get("buy_trade_date", ""))
+        positions.append(
+            {
+                "symbol": symbol,
+                "quantity": quantity,
+                "cost_price": cost_price,
+                "buy_trade_date": buy_trade_date,
+            }
+        )
+
+    return client.import_positions(account_id=args.account_id, positions=positions)
 
 
 def _handle_order(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:

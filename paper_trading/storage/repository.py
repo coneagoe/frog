@@ -304,6 +304,13 @@ class PaperTradingRepository:
             .all()
         )
 
+    def count_position_lots(self, account_id: int) -> int:
+        return int(
+            self.session.query(func.count(PaperPositionLot.id))
+            .filter(PaperPositionLot.account_id == account_id)
+            .scalar()
+        )
+
     def upsert_position(
         self,
         account_id: int,

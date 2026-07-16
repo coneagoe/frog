@@ -443,6 +443,145 @@ class TestAccountCashLedger:
         assert "deposit" in capsys.readouterr().out
 
 
+class TestAccountImportPositions:
+    def test_import_positions_calls_client(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text(
+            "symbol,quantity,cost_price,buy_trade_date\n"
+            "000001,100,10.50,2026-01-15\n"
+            "000002,200,20.00,2026-02-01\n"
+        )
+        client = _mock_client()
+        client.import_positions.return_value = {"imported_count": 2, "positions": []}
+
+        exit_code = main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
+            client=client,
+        )
+
+        assert exit_code == EXIT_CODES["OK"]
+        client.import_positions.assert_called_once_with(
+            account_id=1,
+            positions=[
+                {"symbol": "000001", "quantity": 100, "cost_price": "10.50", "buy_trade_date": "2026-01-15"},
+                {"symbol": "000002", "quantity": 200, "cost_price": "20.00", "buy_trade_date": "2026-02-01"},
+            ],
+        )
+
+    def test_import_positions_json_output(self, tmp_path, capsys):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date\n000001,100,10.50,2026-01-15\n")
+        client = _mock_client()
+        client.import_positions.return_value = {"imported_count": 1, "positions": []}
+
+        exit_code = main(
+            ["--json", "account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
+            client=client,
+        )
+
+        assert exit_code == EXIT_CODES["OK"]
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["imported_count"] == 1
+
+    def test_import_positions_missing_file_is_validation_error(self):
+        exit_code = main(
+            ["account", "import-positions", "--account-id", "1", "--file", "/nonexistent/file.csv"],
+        )
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_import_positions_missing_account_id_is_validation_error(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date\n000001,100,10.50,2026-01-15\n")
+        exit_code = main(
+            ["account", "import-positions", "--file", str(csv_path)],
+        )
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_import_positions_empty_csv_is_validation_error(self, tmp_path):
+        csv_path = tmp_path / "empty.csv"
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date\n")
+        client = _mock_client()
+        exit_code = main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
+            client=client,
+        )
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_import_positions_missing_columns_is_validation_error(self, tmp_path):
+        csv_path = tmp_path / "bad.csv"
+        csv_path.write_text("symbol,quantity\n000001,100\n")
+        client = _mock_client()
+        exit_code = main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
+            client=client,
+        )
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_import_positions_strips_whitespace_from_symbols(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text(
+            "symbol,quantity,cost_price,buy_trade_date\n"
+            "  000001  ,100,10.50,2026-01-15\n"
+        )
+        client = _mock_client()
+        client.import_positions.return_value = {"imported_count": 1, "positions": []}
+
+        exit_code = main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
+            client=client,
+        )
+
+        assert exit_code == EXIT_CODES["OK"]
+        client.import_positions.assert_called_once_with(
+            account_id=1,
+            positions=[
+                {"symbol": "000001", "quantity": 100, "cost_price": "10.50", "buy_trade_date": "2026-01-15"},
+            ],
+        )
+
+    def test_import_positions_bad_quantity_is_validation_error(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text(
+            "symbol,quantity,cost_price,buy_trade_date\n"
+            "000001,not-int,10.50,2026-01-15\n"
+        )
+        client = _mock_client()
+        exit_code = main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
+            client=client,
+        )
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_import_positions_bad_cost_price_is_validation_error(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text(
+            "symbol,quantity,cost_price,buy_trade_date\n"
+            "000001,100,not-a-price,2026-01-15\n"
+        )
+        client = _mock_client()
+        exit_code = main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
+            client=client,
+        )
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_import_positions_bad_trade_date_is_validation_error(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text(
+            "symbol,quantity,cost_price,buy_trade_date\n"
+            "000001,100,10.50,not-a-date\n"
+        )
+        client = _mock_client()
+        exit_code = main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)],
+            client=client,
+        )
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+
+
+
+
 class TestAccountUpdateFee:
     def test_update_account_fees_calls_client_with_partial_payload(self):
         client = _mock_client()

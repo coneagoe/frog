@@ -6,6 +6,8 @@ from paper_trading.schemas.accounts import (
     AccountResponse,
     CashLedgerResponse,
     CreateAccountRequest,
+    ImportPositionsRequest,
+    ImportPositionsResponse,
     PositionResponse,
     UpdateAccountFeeRequest,
 )
@@ -90,3 +92,24 @@ def list_positions(account_id: int, session: Session = Depends(get_session)):
 @router.get("/{account_id}/cash-ledger", response_model=list[CashLedgerResponse])
 def list_cash_ledger(account_id: int, session: Session = Depends(get_session)):
     return PaperTradingRepository(session).list_cash_ledger(account_id)
+
+
+@router.post("/{account_id}/positions/import", response_model=ImportPositionsResponse)
+def import_positions(
+    account_id: int,
+    request: ImportPositionsRequest,
+    session: Session = Depends(get_session),
+):
+    repo = PaperTradingRepository(session)
+    service = AccountService(repo)
+    try:
+        service.import_positions(account_id, request.positions)
+    except ValueError as exc:
+        msg = str(exc)
+        if "paper account not found" in msg:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=msg) from exc
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=msg) from exc
+    session.commit()
+    positions = repo.get_positions(account_id)
+    lots_count = repo.count_position_lots(account_id)
+    return ImportPositionsResponse(imported_count=len(positions), lots_count=lots_count)
