@@ -122,6 +122,25 @@ class PaperTradingApiClient:
     def delete_account(self, account_id: int) -> dict[str, Any]:
         return self._request("DELETE", f"/paper/accounts/{account_id}")
 
+    def update_account_fees(
+        self,
+        account_id: int,
+        commission_rate: Decimal | None = None,
+        min_commission: Decimal | None = None,
+        stamp_duty_rate: Decimal | None = None,
+        transfer_fee_rate: Decimal | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if commission_rate is not None:
+            body["commission_rate"] = str(commission_rate)
+        if min_commission is not None:
+            body["min_commission"] = str(min_commission)
+        if stamp_duty_rate is not None:
+            body["stamp_duty_rate"] = str(stamp_duty_rate)
+        if transfer_fee_rate is not None:
+            body["transfer_fee_rate"] = str(transfer_fee_rate)
+        return self._request("PATCH", f"/paper/accounts/{account_id}", json=body)
+
     def list_positions(self, account_id: int) -> list[dict[str, Any]]:
         return self._request("GET", f"/paper/accounts/{account_id}/positions")
 
@@ -215,6 +234,12 @@ def _add_account_subparsers(subparsers: Any) -> None:
     p_pos.add_argument("--account-id", type=int, required=True, help="Account ID")
     p_cl = acct_sub.add_parser("cash-ledger", help="List cash ledger entries")
     p_cl.add_argument("--account-id", type=int, required=True, help="Account ID")
+    p_update = acct_sub.add_parser("update-fee", help="Update account fee fields")
+    p_update.add_argument("--account-id", type=int, required=True, help="Account ID")
+    p_update.add_argument("--commission-rate", default=None, help="Commission rate override")
+    p_update.add_argument("--min-commission", default=None, help="Minimum commission override")
+    p_update.add_argument("--stamp-duty-rate", default=None, help="Stamp duty rate override")
+    p_update.add_argument("--transfer-fee-rate", default=None, help="Transfer fee rate override")
 
 
 def _add_order_subparsers(subparsers: Any) -> None:
@@ -321,6 +346,13 @@ def _parse_decimal(value: str, label: str) -> Decimal:
         raise _ParserError(f"invalid {label}: {value!r} is not a valid decimal number") from None
 
 
+def _parse_non_negative_decimal(value: str, label: str) -> Decimal:
+    parsed = _parse_decimal(value, label)
+    if parsed < 0:
+        raise _ParserError(f"invalid {label}: must be non-negative")
+    return parsed
+
+
 def _validate_trade_date(value: str) -> str:
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         raise _ParserError(f"invalid --trade-date: {value!r} is not a valid YYYY-MM-DD date")
@@ -359,6 +391,22 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
         return client.list_positions(account_id=args.account_id)
     if cmd == "cash-ledger":
         return client.list_cash_ledger(account_id=args.account_id)
+    if cmd == "update-fee":
+        kwargs: dict[str, Any] = {}
+        if args.commission_rate is not None:
+            kwargs["commission_rate"] = _parse_non_negative_decimal(args.commission_rate, "--commission-rate")
+        if args.min_commission is not None:
+            kwargs["min_commission"] = _parse_non_negative_decimal(args.min_commission, "--min-commission")
+        if args.stamp_duty_rate is not None:
+            kwargs["stamp_duty_rate"] = _parse_non_negative_decimal(args.stamp_duty_rate, "--stamp-duty-rate")
+        if args.transfer_fee_rate is not None:
+            kwargs["transfer_fee_rate"] = _parse_non_negative_decimal(
+                args.transfer_fee_rate,
+                "--transfer-fee-rate",
+            )
+        if not kwargs:
+            raise _ParserError("at least one fee field is required")
+        return client.update_account_fees(account_id=args.account_id, **kwargs)
     raise _ParserError(f"unknown account command: {cmd}")
 
 

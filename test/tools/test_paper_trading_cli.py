@@ -443,6 +443,51 @@ class TestAccountCashLedger:
         assert "deposit" in capsys.readouterr().out
 
 
+class TestAccountUpdateFee:
+    def test_update_account_fees_calls_client_with_partial_payload(self):
+        client = _mock_client()
+        client.update_account_fees.return_value = client.get_account.return_value
+
+        exit_code = main(
+            [
+                "account",
+                "update-fee",
+                "--account-id",
+                "1",
+                "--commission-rate",
+                "0.0002",
+                "--min-commission",
+                "3",
+            ],
+            client=client,
+        )
+
+        assert exit_code == EXIT_CODES["OK"]
+        client.update_account_fees.assert_called_once_with(
+            account_id=1,
+            commission_rate=Decimal("0.0002"),
+            min_commission=Decimal("3"),
+        )
+
+    def test_update_account_fees_rejects_empty_payload(self):
+        client = _mock_client()
+
+        exit_code = main(["account", "update-fee", "--account-id", "1"], client=client)
+
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_update_account_fees_rejects_negative_fee(self):
+        client = _mock_client()
+
+        exit_code = main(
+            ["account", "update-fee", "--account-id", "1", "--commission-rate", "-0.0001"],
+            client=client,
+        )
+
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+        client.update_account_fees.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Order commands
 # ---------------------------------------------------------------------------
