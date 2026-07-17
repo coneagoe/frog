@@ -116,6 +116,16 @@ describe("EditAccountFeesModal", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Change at least one fee field before saving.");
   });
 
+  it("rejects exponent notation like 1e-3 in fee fields", async () => {
+    render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={vi.fn()} />);
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
+    await userEvent.type(screen.getByLabelText("Commission rate (%)"), "1e-3");
+    await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
+
+    expect(updateAccountFeesMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Fee settings must be non-negative numbers");
+  });
+
   it("keeps the modal open and shows a server error", async () => {
     updateAccountFeesMock.mockRejectedValue(new Error("Invalid decimal"));
 
