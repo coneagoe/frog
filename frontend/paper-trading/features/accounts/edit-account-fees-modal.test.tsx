@@ -37,6 +37,27 @@ describe("EditAccountFeesModal", () => {
     expect(screen.getByLabelText("Transfer fee rate (%)")).toHaveValue("0.001");
   });
 
+  it("displays decimal rate 0.0057 as percent 0.57", async () => {
+    const account0057 = { ...demoAccount, commission_rate: "0.005700" };
+    render(<EditAccountFeesModal account={account0057} open onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(screen.getByLabelText("Commission rate (%)")).toHaveValue("0.57");
+  });
+
+  it("sends 0.57 percent as 0.0057 decimal rate on save", async () => {
+    const updatedAccount = { ...demoAccount, commission_rate: "0.0057" };
+    updateAccountFeesMock.mockResolvedValue(updatedAccount);
+    const onSaved = vi.fn();
+
+    render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={onSaved} />);
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
+    await userEvent.type(screen.getByLabelText("Commission rate (%)"), "0.57");
+    await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
+
+    expect(updateAccountFeesMock).toHaveBeenCalledWith(1, { commission_rate: "0.0057" });
+    expect(onSaved).toHaveBeenCalledWith(updatedAccount);
+  });
+
   it("sends only changed fee fields on save", async () => {
     const updatedAccount = { ...demoAccount, commission_rate: "0.0002", min_commission: "3.00" };
     updateAccountFeesMock.mockResolvedValue(updatedAccount);

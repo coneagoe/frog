@@ -19,12 +19,69 @@ function isNonNegativeDecimal(value: string) {
   return value.trim() === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0);
 }
 
-function decimalRateToPercent(value: string) {
-  return (Number(value) * 100).toString();
+function decimalRateToPercent(value: string): string {
+  // String-safe conversion: move decimal point 2 places right.
+  // Avoids floating-point artifacts like 0.5700000000000001 from Number("0.0057") * 100.
+  const s = value.trim();
+  if (s === "") return "";
+  const dotIdx = s.indexOf(".");
+  let intPart: string;
+  let fracPart: string;
+  if (dotIdx === -1) {
+    intPart = s;
+    fracPart = "";
+  } else {
+    intPart = s.slice(0, dotIdx);
+    fracPart = s.slice(dotIdx + 1);
+  }
+  // Move the first 2 digits of fracPart to the end of intPart
+  const takeFromFrac = Math.min(2, fracPart.length);
+  const moved = fracPart.slice(0, takeFromFrac);
+  fracPart = fracPart.slice(takeFromFrac);
+  intPart = intPart + moved + "0".repeat(2 - takeFromFrac);
+  let result: string;
+  if (fracPart === "") {
+    result = intPart;
+  } else {
+    result = intPart + "." + fracPart;
+  }
+  // Normalize: strip leading zeros (keep at least 1 digit before decimal)
+  const rDotIdx = result.indexOf(".");
+  if (rDotIdx >= 0) {
+    const before = result.slice(0, rDotIdx).replace(/^0+/, "") || "0";
+    result = before + result.slice(rDotIdx);
+  } else {
+    result = result.replace(/^0+/, "") || "0";
+  }
+  // Strip trailing zeros after decimal and trailing dot
+  result = result.replace(/\.?0+$/, "");
+  if (result.startsWith(".")) result = "0" + result;
+  return result;
 }
 
-function percentToDecimalRate(value: string) {
-  return (Number(value) / 100).toString();
+function percentToDecimalRate(value: string): string {
+  // String-safe conversion: move decimal point 2 places left.
+  // Avoids floating-point artifacts like 0.0057000000000000005 from Number("0.57") / 100.
+  const s = value.trim();
+  if (s === "") return "";
+  const dotIdx = s.indexOf(".");
+  let intPart: string;
+  let fracPart: string;
+  if (dotIdx === -1) {
+    intPart = s;
+    fracPart = "";
+  } else {
+    intPart = s.slice(0, dotIdx);
+    fracPart = s.slice(dotIdx + 1);
+  }
+  const takeFromInt = Math.min(2, intPart.length);
+  const moved = intPart.slice(intPart.length - takeFromInt);
+  intPart = intPart.slice(0, intPart.length - takeFromInt) || "0";
+  fracPart = "0".repeat(2 - takeFromInt) + moved + fracPart;
+  let result = intPart + "." + fracPart;
+  result = result.replace(/\.?0+$/, "");
+  if (result === "") result = "0";
+  return result;
 }
 
 function displayValueForField(key: FeeFieldKey, value: string) {

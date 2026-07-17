@@ -17,8 +17,31 @@ function isNonNegativeDecimal(value: string) {
   return value.trim() === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0);
 }
 
-function percentToDecimalRate(value: string) {
-  return (Number(value) / 100).toString();
+function percentToDecimalRate(value: string): string {
+  // String-safe conversion: move decimal point 2 places left.
+  // Avoids floating-point artifacts like 0.0057000000000000005 from Number("0.57") / 100.
+  const s = value.trim();
+  if (s === "") return "";
+  const dotIdx = s.indexOf(".");
+  let intPart: string;
+  let fracPart: string;
+  if (dotIdx === -1) {
+    intPart = s;
+    fracPart = "";
+  } else {
+    intPart = s.slice(0, dotIdx);
+    fracPart = s.slice(dotIdx + 1);
+  }
+  // Move the last 2 digits of intPart into the front of fracPart
+  const takeFromInt = Math.min(2, intPart.length);
+  const moved = intPart.slice(intPart.length - takeFromInt);
+  intPart = intPart.slice(0, intPart.length - takeFromInt) || "0";
+  fracPart = "0".repeat(2 - takeFromInt) + moved + fracPart;
+  let result = intPart + "." + fracPart;
+  // Normalize: strip trailing zeros and trailing dot
+  result = result.replace(/\.?0+$/, "");
+  if (result === "") result = "0";
+  return result;
 }
 
 export function CreateAccountForm({ onCreated }: { onCreated: (account: Account) => Promise<void> | void }) {
