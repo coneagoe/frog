@@ -29,3 +29,29 @@ concerns: None.
 - Mobile fallback (`.import-grid__row` collapses to `1fr`; `.import-grid__header` is `display: none`) is completely untouched.
 
 **concerns**: None.
+
+---
+
+## Review Fix (Finding 3 — Safe viewport gutter)
+
+**status**: FIXED
+**files changed**: frontend/paper-trading/app/globals.css
+**commits made**: 64944be
+**test command run**: cd frontend/paper-trading && npm run test -- features/accounts/import-positions-modal.test.tsx
+**exact test result summary**: 1 test file passed, 14 tests passed, 0 failed
+**self-review**:
+
+### Finding 3 — `.modal.import-modal` scoping missing safe viewport gutter
+- Changed `.modal.import-modal` from `max-width: min(100%, 880px)` to the brief-equivalent safe sizing:
+  ```css
+  .modal.import-modal {
+    max-width: 760px;
+    width: min(100%, calc(100vw - 32px));
+  }
+  ```
+- `max-width: 760px` sets a comfortable cap for the 5-column grid layout (down from 880px), providing ~80px of padding breathing room.
+- `width: min(100%, calc(100vw - 32px))` ensures the modal never exceeds the viewport width minus a 16px gutter on each side, preserving the safe viewport margin that was absent in the previous `min(100%, 880px)` formulation.
+- The `calc(100vw - 32px)` is the key addition — it guarantees a minimum 16px gap between the modal edge and the viewport on small screens, preventing the modal from butting up against the viewport edge.
+- Base `.modal` remains unchanged (`max-width: 480px; width: 100%;`), so non-import modals keep their original sizing.
+
+**concerns**: None.
