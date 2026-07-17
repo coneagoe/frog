@@ -327,7 +327,8 @@ button {
 }
 
 .modal.import-modal {
-  max-width: min(100%, 880px);
+  max-width: 760px;
+  width: min(100%, calc(100vw - 32px));
 }
 
 .modal__header {
