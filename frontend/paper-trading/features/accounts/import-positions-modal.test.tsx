@@ -85,7 +85,7 @@ describe("ImportPositionsModal", () => {
     expect(screen.getByText("2 rows ready for input")).toBeInTheDocument();
   });
 
-  it("removing a row does not leave the table visually empty", async () => {
+  it("removing a row does not leave the grid visually empty", async () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Add row" }));

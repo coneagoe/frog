@@ -123,7 +123,7 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal"
+        className="modal import-modal"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
