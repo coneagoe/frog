@@ -28,10 +28,12 @@ describe("ImportPositionsModal", () => {
     vi.resetAllMocks();
   });
 
-  it("shows the title Import positions for demo", () => {
+  it("shows the import workspace title and selected account context", () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
-    expect(screen.getByRole("dialog", { name: "Import positions for demo" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Import initial positions for demo" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Import initial positions" })).toBeInTheDocument();
+    expect(screen.getByText("Account: demo")).toBeInTheDocument();
   });
 
   it("starts with one editable row", () => {
@@ -40,12 +42,31 @@ describe("ImportPositionsModal", () => {
     expect(screen.getAllByLabelText("Symbol")).toHaveLength(1);
   });
 
-  it("shows the note that import is one-time and does not change cash", () => {
+  it("shows visible YYYY-MM-DD guidance on the buy date input", () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
-    expect(
-      screen.getByText("Importing initializes existing holdings only and does not change cash.")
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Buy trade date")).toHaveAttribute("placeholder", "YYYY-MM-DD");
+    expect(screen.getByText("YYYY-MM-DD")).toBeInTheDocument();
+  });
+
+  it("renders one aligned import grid header and row", () => {
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    const grid = screen.getByTestId("import-positions-grid");
+    expect(within(grid).getByText("Symbol")).toBeInTheDocument();
+    expect(within(grid).getByText("Quantity")).toBeInTheDocument();
+    expect(within(grid).getByText("Cost price")).toBeInTheDocument();
+    expect(within(grid).getByText("Buy date")).toBeInTheDocument();
+    expect(within(grid).getAllByTestId("import-position-row")).toHaveLength(1);
+  });
+
+  it("shows concise import guidance before the editable grid", () => {
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    expect(screen.getByText("Set starting holdings for this account. Cash will not change.")).toBeInTheDocument();
+    expect(screen.getByText("Use this once for an empty account.")).toBeInTheDocument();
+    expect(screen.getByText("Lots with the same symbol are allowed.")).toBeInTheDocument();
+    expect(screen.getByText("Importing positions does not add or remove cash.")).toBeInTheDocument();
   });
 
   it("adding a row increases the number of row groups", async () => {
@@ -54,6 +75,14 @@ describe("ImportPositionsModal", () => {
     expect(screen.getAllByLabelText("Symbol")).toHaveLength(1);
     await userEvent.click(screen.getByRole("button", { name: "Add row" }));
     expect(screen.getAllByLabelText("Symbol")).toHaveLength(2);
+  });
+
+  it("updates the footer row count as rows are added", async () => {
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+
+    expect(screen.getByText("1 row ready for input")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add row" }));
+    expect(screen.getByText("2 rows ready for input")).toBeInTheDocument();
   });
 
   it("removing a row does not leave the table visually empty", async () => {
@@ -76,12 +105,6 @@ describe("ImportPositionsModal", () => {
     expect(screen.getAllByLabelText("Symbol")).toHaveLength(1);
   });
 
-  it("shows the visible heading Import positions for demo", () => {
-    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
-
-    expect(screen.getByText("Import positions for demo")).toBeInTheDocument();
-  });
-
   it("blank cost price shows a validation alert and does not submit", async () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
@@ -101,7 +124,7 @@ describe("ImportPositionsModal", () => {
 
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
-    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    const dialog = screen.getByRole("dialog", { name: "Import initial positions for demo" });
     await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
     await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
     await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
@@ -120,7 +143,7 @@ describe("ImportPositionsModal", () => {
 
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
-    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    const dialog = screen.getByRole("dialog", { name: "Import initial positions for demo" });
     await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
     await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
     await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
