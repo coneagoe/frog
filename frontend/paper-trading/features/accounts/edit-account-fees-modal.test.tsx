@@ -31,10 +31,10 @@ describe("EditAccountFeesModal", () => {
   it("prefills the current fee values when opened", async () => {
     render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={vi.fn()} />);
 
-    expect(screen.getByLabelText("Commission rate")).toHaveValue("0.000300");
+    expect(screen.getByLabelText("Commission rate (%)")).toHaveValue("0.03");
     expect(screen.getByLabelText("Minimum commission (CNY)")).toHaveValue("5.00");
-    expect(screen.getByLabelText("Stamp duty rate")).toHaveValue("0.000500");
-    expect(screen.getByLabelText("Transfer fee rate")).toHaveValue("0.000010");
+    expect(screen.getByLabelText("Stamp duty rate (%)")).toHaveValue("0.05");
+    expect(screen.getByLabelText("Transfer fee rate (%)")).toHaveValue("0.001");
   });
 
   it("sends only changed fee fields on save", async () => {
@@ -43,8 +43,8 @@ describe("EditAccountFeesModal", () => {
     const onSaved = vi.fn();
 
     render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={onSaved} />);
-    await userEvent.clear(screen.getByLabelText("Commission rate"));
-    await userEvent.type(screen.getByLabelText("Commission rate"), "0.0002");
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
+    await userEvent.type(screen.getByLabelText("Commission rate (%)"), "0.02");
     await userEvent.clear(screen.getByLabelText("Minimum commission (CNY)"));
     await userEvent.type(screen.getByLabelText("Minimum commission (CNY)"), "3.00");
     await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
@@ -72,7 +72,7 @@ describe("EditAccountFeesModal", () => {
 
     render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={onSaved} />);
     // Clear commission_rate to empty and change min_commission to a new value
-    await userEvent.clear(screen.getByLabelText("Commission rate"));
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
     await userEvent.clear(screen.getByLabelText("Minimum commission (CNY)"));
     await userEvent.type(screen.getByLabelText("Minimum commission (CNY)"), "3.00");
     await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
@@ -88,7 +88,7 @@ describe("EditAccountFeesModal", () => {
   it("does not call the API when clearing a field is the only effective change", async () => {
     render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={vi.fn()} />);
     // Clear commission_rate to empty — the only "change"
-    await userEvent.clear(screen.getByLabelText("Commission rate"));
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
     await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
 
     expect(updateAccountFeesMock).not.toHaveBeenCalled();
@@ -99,8 +99,8 @@ describe("EditAccountFeesModal", () => {
     updateAccountFeesMock.mockRejectedValue(new Error("Invalid decimal"));
 
     render(<EditAccountFeesModal account={demoAccount} open onClose={vi.fn()} onSaved={vi.fn()} />);
-    await userEvent.clear(screen.getByLabelText("Commission rate"));
-    await userEvent.type(screen.getByLabelText("Commission rate"), "0.0002");
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
+    await userEvent.type(screen.getByLabelText("Commission rate (%)"), "0.02");
     await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid decimal");

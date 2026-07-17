@@ -436,7 +436,7 @@ describe("AccountsPage", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Edit fees for demo" });
     expect(dialog).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("Commission rate")).toHaveValue("0.000300");
+    expect(within(dialog).getByLabelText("Commission rate (%)")).toHaveValue("0.03");
   });
 
   it("saves fee changes and refreshes account data", async () => {
@@ -449,8 +449,8 @@ describe("AccountsPage", () => {
     render(<AccountsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Edit fees" }));
     const dialog = screen.getByRole("dialog", { name: "Edit fees for demo" });
-    await userEvent.clear(within(dialog).getByLabelText("Commission rate"));
-    await userEvent.type(within(dialog).getByLabelText("Commission rate"), "0.0002");
+    await userEvent.clear(within(dialog).getByLabelText("Commission rate (%)"));
+    await userEvent.type(within(dialog).getByLabelText("Commission rate (%)"), "0.02");
     await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
 
     expect(updateAccountFeesMock).toHaveBeenCalledWith(1, { commission_rate: "0.0002" });
@@ -479,8 +479,8 @@ describe("AccountsPage", () => {
     expect(dialog).toBeInTheDocument();
 
     // Change a field and click Save (save is pending because of the deferred promise)
-    await userEvent.clear(within(dialog).getByLabelText("Commission rate"));
-    await userEvent.type(within(dialog).getByLabelText("Commission rate"), "0.0002");
+    await userEvent.clear(within(dialog).getByLabelText("Commission rate (%)"));
+    await userEvent.type(within(dialog).getByLabelText("Commission rate (%)"), "0.02");
     await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
 
     // While the save is pending, switch to account 2

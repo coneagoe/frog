@@ -5,10 +5,10 @@ import { updateAccountFees } from "@/lib/api-client";
 import type { Account, UpdateAccountFeesInput } from "@/lib/types";
 
 const feeFields = [
-  { key: "commission_rate", label: "Commission rate" },
-  { key: "min_commission", label: "Minimum commission (CNY)" },
-  { key: "stamp_duty_rate", label: "Stamp duty rate" },
-  { key: "transfer_fee_rate", label: "Transfer fee rate" }
+  { key: "commission_rate", label: "Commission rate (%)", kind: "rate" },
+  { key: "min_commission", label: "Minimum commission (CNY)", kind: "money" },
+  { key: "stamp_duty_rate", label: "Stamp duty rate (%)", kind: "rate" },
+  { key: "transfer_fee_rate", label: "Transfer fee rate (%)", kind: "rate" }
 ] as const;
 
 const feeFieldKeys = feeFields.map((f) => f.key);
@@ -17,6 +17,24 @@ type FeeFieldKey = (typeof feeFields)[number]["key"];
 
 function isNonNegativeDecimal(value: string) {
   return value.trim() === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0);
+}
+
+function decimalRateToPercent(value: string) {
+  return (Number(value) * 100).toString();
+}
+
+function percentToDecimalRate(value: string) {
+  return (Number(value) / 100).toString();
+}
+
+function displayValueForField(key: FeeFieldKey, value: string) {
+  const field = feeFields.find((item) => item.key === key);
+  return field?.kind === "rate" ? decimalRateToPercent(value) : value;
+}
+
+function apiValueForField(key: FeeFieldKey, value: string) {
+  const field = feeFields.find((item) => item.key === key);
+  return field?.kind === "rate" ? percentToDecimalRate(value) : value;
 }
 
 type EditAccountFeesModalProps = {
@@ -40,10 +58,10 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
   useEffect(() => {
     if (account && open) {
       setFeeValues({
-        commission_rate: account.commission_rate,
-        min_commission: account.min_commission,
-        stamp_duty_rate: account.stamp_duty_rate,
-        transfer_fee_rate: account.transfer_fee_rate
+        commission_rate: displayValueForField("commission_rate", account.commission_rate),
+        min_commission: displayValueForField("min_commission", account.min_commission),
+        stamp_duty_rate: displayValueForField("stamp_duty_rate", account.stamp_duty_rate),
+        transfer_fee_rate: displayValueForField("transfer_fee_rate", account.transfer_fee_rate)
       });
       setError(null);
       setSubmitting(false);
@@ -57,7 +75,7 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
   // Determine whether at least one field has actually changed to a non-empty value
   const hasChanges = feeFieldKeys.some((key) => {
     const trimmed = feeValues[key].trim();
-    return trimmed !== "" && trimmed !== account[key];
+    return trimmed !== "" && trimmed !== displayValueForField(key, account[key]);
   });
 
   async function onSubmit(event: React.FormEvent) {
@@ -86,8 +104,8 @@ export function EditAccountFeesModal({ account, open, onClose, onSaved }: EditAc
       const input: UpdateAccountFeesInput = {};
       for (const key of feeFieldKeys) {
         const trimmed = feeValues[key].trim();
-        if (trimmed !== "" && trimmed !== acct[key]) {
-          input[key] = trimmed;
+        if (trimmed !== "" && trimmed !== displayValueForField(key, acct[key])) {
+          input[key] = apiValueForField(key, trimmed);
         }
       }
 
