@@ -211,7 +211,7 @@ export function AccountsPage() {
         <CreateAccountForm onCreated={onCreated} />
         <section className="panel">
           <div className="panel__header">
-            <h2>Paper Accounts</h2>
+            <h2>Accounts</h2>
             <button className="button button--secondary" onClick={() => void refreshAccounts()} type="button">
               Refresh
             </button>
