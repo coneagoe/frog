@@ -53,11 +53,13 @@ describe("ImportPositionsModal", () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
     const grid = screen.getByTestId("import-positions-grid");
+    expect(within(grid).getByTestId("import-grid-header")).toBeInTheDocument();
+    expect(within(grid).getByTestId("import-position-row")).toBeInTheDocument();
+    expect(within(grid).getAllByTestId("import-position-row")).toHaveLength(1);
     expect(within(grid).getAllByText("Symbol")).toHaveLength(2);
     expect(within(grid).getAllByText("Quantity")).toHaveLength(2);
     expect(within(grid).getAllByText("Cost price")).toHaveLength(2);
     expect(within(grid).getAllByText("Buy date")).toHaveLength(2);
-    expect(within(grid).getAllByTestId("import-position-row")).toHaveLength(1);
   });
 
   it("shows concise import guidance before the editable grid", () => {
