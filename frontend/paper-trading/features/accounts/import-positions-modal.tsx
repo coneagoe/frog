@@ -59,6 +59,8 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
     setRows((current) => current.filter((_, i) => i !== index));
   }
 
+  const rowSummary = `${rows.length} ${rows.length === 1 ? "row" : "rows"} ready for input`;
+
   function validate(): string | null {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -125,84 +127,110 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={"Import positions for " + account.name}
+        aria-label={"Import initial positions for " + account.name}
       >
-        <div className="modal__header">
-          <h2>Import positions for {account.name}</h2>
+        <div className="modal__header import-modal__header">
+          <div>
+            <p className="import-modal__eyebrow">Account: {account.name}</p>
+            <h2>Import initial positions</h2>
+            <p className="import-modal__intro">Set starting holdings for this account. Cash will not change.</p>
+          </div>
         </div>
         <form onSubmit={onSubmit}>
-          <div className="modal__body">
-            <table className="form">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Quantity</th>
-                  <th>Cost price</th>
-                  <th>Buy trade date</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row, index) => (
-                  <tr key={index}>
-                    <td>
-                      <input
-                        aria-label="Symbol"
-                        value={row.symbol}
-                        onChange={(e) => updateRow(index, "symbol", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label="Quantity"
-                        inputMode="numeric"
-                        value={row.quantity}
-                        onChange={(e) => updateRow(index, "quantity", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label="Cost price"
-                        inputMode="decimal"
-                        value={row.cost_price}
-                        onChange={(e) => updateRow(index, "cost_price", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        aria-label="Buy trade date"
-                        value={row.buy_trade_date}
-                        onChange={(e) => updateRow(index, "buy_trade_date", e.target.value)}
-                      />
-                    </td>
-                    <td>
-                      <button type="button" aria-label="Remove row" onClick={() => removeRow(index)}>
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <button type="button" onClick={addRow}>
-              Add row
-            </button>
-            <p className="modal__note">
-              Importing initializes existing holdings only and does not change cash.
-            </p>
+          <div className="modal__body import-modal__body">
+            <div className="import-modal__rules" aria-label="Import rules">
+              <span>Use this once for an empty account.</span>
+              <span>Lots with the same symbol are allowed.</span>
+              <span>Importing positions does not add or remove cash.</span>
+            </div>
+
             {error ? (
               <div role="alert" className="error-banner">
                 {error}
               </div>
             ) : null}
+
+            <div className="import-grid" data-testid="import-positions-grid">
+              <div className="import-grid__header" aria-hidden="true">
+                <span>Symbol</span>
+                <span>Quantity</span>
+                <span>Cost price</span>
+                <span>Buy date</span>
+                <span>Action</span>
+              </div>
+
+              {rows.map((row, index) => (
+                <div className="import-grid__row" data-testid="import-position-row" key={index}>
+                  <label className="import-grid__field">
+                    <span>Symbol</span>
+                    <input
+                      aria-label="Symbol"
+                      autoComplete="off"
+                      placeholder="000001"
+                      value={row.symbol}
+                      onChange={(e) => updateRow(index, "symbol", e.target.value)}
+                    />
+                  </label>
+
+                  <label className="import-grid__field">
+                    <span>Quantity</span>
+                    <input
+                      aria-label="Quantity"
+                      inputMode="numeric"
+                      placeholder="100"
+                      value={row.quantity}
+                      onChange={(e) => updateRow(index, "quantity", e.target.value)}
+                    />
+                  </label>
+
+                  <label className="import-grid__field">
+                    <span>Cost price</span>
+                    <input
+                      aria-label="Cost price"
+                      inputMode="decimal"
+                      placeholder="10.23"
+                      value={row.cost_price}
+                      onChange={(e) => updateRow(index, "cost_price", e.target.value)}
+                    />
+                  </label>
+
+                  <label className="import-grid__field">
+                    <span>Buy date</span>
+                    <input
+                      aria-label="Buy trade date"
+                      inputMode="numeric"
+                      placeholder="YYYY-MM-DD"
+                      value={row.buy_trade_date}
+                      onChange={(e) => updateRow(index, "buy_trade_date", e.target.value)}
+                    />
+                    <small>YYYY-MM-DD</small>
+                  </label>
+
+                  <div className="import-grid__action">
+                    <button type="button" aria-label="Remove row" onClick={() => removeRow(index)}>
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="import-modal__grid-actions">
+              <button className="button button--secondary" type="button" onClick={addRow}>
+                Add row
+              </button>
+            </div>
           </div>
-          <div className="modal__footer">
-            <button className="button button--secondary" onClick={onClose} type="button">
-              Cancel
-            </button>
-            <button className="button" disabled={submitting} type="submit">
-              {submitting ? "Importing…" : "Import positions"}
-            </button>
+          <div className="modal__footer import-modal__footer">
+            <p className="import-modal__footer-note">{rowSummary}</p>
+            <div className="import-modal__footer-actions">
+              <button className="button button--secondary" onClick={onClose} type="button">
+                Cancel
+              </button>
+              <button className="button" disabled={submitting} type="submit">
+                {submitting ? "Importing…" : "Import positions"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
