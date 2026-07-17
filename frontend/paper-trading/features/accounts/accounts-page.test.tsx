@@ -125,6 +125,27 @@ describe("AccountsPage", () => {
     });
   });
 
+  it("converts 0.57 percent to 0.0057 decimal rate on create", async () => {
+    listAccountsMock.mockResolvedValue([]);
+    createAccountMock.mockResolvedValue(demoAccount);
+
+    render(<AccountsPage />);
+    await userEvent.type(await screen.findByLabelText("Account name"), "demo");
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
+    await userEvent.type(screen.getByLabelText("Commission rate (%)"), "0.57");
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(createAccountMock).toHaveBeenCalledWith({
+      name: "demo",
+      initial_cash: "100000.00",
+      fee_preset: "a_share",
+      commission_rate: "0.0057",
+      min_commission: "5.00",
+      stamp_duty_rate: "0.0005",
+      transfer_fee_rate: "0.00001"
+    });
+  });
+
   it("omits blank optional fee fields when creating an account", async () => {
     listAccountsMock.mockResolvedValue([]);
     createAccountMock.mockResolvedValue(demoAccount);
@@ -456,6 +477,36 @@ describe("AccountsPage", () => {
     expect(updateAccountFeesMock).toHaveBeenCalledWith(1, { commission_rate: "0.0002" });
     await waitFor(() => expect(listAccountsMock).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("dialog", { name: "Edit fees for demo" })).not.toBeInTheDocument();
+  });
+
+  it("displays decimal rate 0.0057 as percent 0.57 in the fee editor", async () => {
+    const account0057 = { ...demoAccount, commission_rate: "0.005700" };
+    listAccountsMock.mockResolvedValue([account0057]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Edit fees" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Edit fees for demo" });
+    expect(within(dialog).getByLabelText("Commission rate (%)")).toHaveValue("0.57");
+  });
+
+  it("saves 0.57 percent as 0.0057 decimal rate in the fee editor", async () => {
+    const updatedAccount = { ...demoAccount, commission_rate: "0.0057" };
+    listAccountsMock.mockResolvedValueOnce([demoAccount]).mockResolvedValueOnce([updatedAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+    updateAccountFeesMock.mockResolvedValue(updatedAccount);
+
+    render(<AccountsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Edit fees" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit fees for demo" });
+    await userEvent.clear(within(dialog).getByLabelText("Commission rate (%)"));
+    await userEvent.type(within(dialog).getByLabelText("Commission rate (%)"), "0.57");
+    await userEvent.click(screen.getByRole("button", { name: "Save fees" }));
+
+    expect(updateAccountFeesMock).toHaveBeenCalledWith(1, { commission_rate: "0.0057" });
   });
 
   it("does not reload saved account details when that account is no longer selected", async () => {
