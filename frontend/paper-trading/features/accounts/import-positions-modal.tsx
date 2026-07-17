@@ -151,7 +151,7 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
             ) : null}
 
             <div className="import-grid" data-testid="import-positions-grid">
-              <div className="import-grid__header" aria-hidden="true">
+              <div className="import-grid__header" aria-hidden="true" data-testid="import-grid-header">
                 <span>Symbol</span>
                 <span>Quantity</span>
                 <span>Cost price</span>
@@ -198,7 +198,6 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
                     <span>Buy date</span>
                     <input
                       aria-label="Buy trade date"
-                      inputMode="numeric"
                       placeholder="YYYY-MM-DD"
                       value={row.buy_trade_date}
                       onChange={(e) => updateRow(index, "buy_trade_date", e.target.value)}
