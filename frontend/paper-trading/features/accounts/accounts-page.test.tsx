@@ -56,6 +56,10 @@ describe("AccountsPage", () => {
     render(<AccountsPage />);
 
     expect(await screen.findByText("demo")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Accounts" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Paper Accounts" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Initial Cash" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Fees" })).not.toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Trade" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Analytics" })).not.toBeInTheDocument();
@@ -153,15 +157,18 @@ describe("AccountsPage", () => {
     expect(createAccountMock).not.toHaveBeenCalled();
   });
 
-  it("renders account fee configuration", async () => {
+  it("keeps account fee details out of the account list", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
     listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
-    expect(await screen.findByText("A-share default")).toBeInTheDocument();
-    expect(screen.getByText("Commission 0.000300, min 5.00")).toBeInTheDocument();
+    expect(await screen.findByText("demo")).toBeInTheDocument();
+    const accountTable = screen.getByRole("table");
+    expect(within(accountTable).queryByText("¥100,000.00")).not.toBeInTheDocument();
+    expect(within(accountTable).queryByText("A-share default")).not.toBeInTheDocument();
+    expect(within(accountTable).queryByText("Commission 0.000300, min 5.00")).not.toBeInTheDocument();
   });
 
   it("shows backend errors", async () => {
