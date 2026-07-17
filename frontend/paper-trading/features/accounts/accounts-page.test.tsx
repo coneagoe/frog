@@ -534,8 +534,8 @@ describe("AccountsPage", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
 
-    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
-    expect(within(dialog).getByText(/importing initializes existing holdings only/i)).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "Import initial positions for demo" });
+    expect(within(dialog).getByText(/set starting holdings for this account/i)).toBeInTheDocument();
   });
 
   it("imports positions, shows success message, closes modal, and refreshes account details", async () => {
@@ -547,7 +547,7 @@ describe("AccountsPage", () => {
     render(<AccountsPage />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
-    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    const dialog = screen.getByRole("dialog", { name: "Import initial positions for demo" });
     await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
     await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
     await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
@@ -559,7 +559,7 @@ describe("AccountsPage", () => {
     });
     await waitFor(() => expect(listPositionsMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(listCashLedgerMock).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole("dialog", { name: "Import positions for demo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Import initial positions for demo" })).not.toBeInTheDocument();
 
     const success = screen.getByRole("status");
     expect(success).toHaveTextContent("Imported 2 positions across 5 lots.");
@@ -574,7 +574,7 @@ describe("AccountsPage", () => {
     render(<AccountsPage />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
-    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    const dialog = screen.getByRole("dialog", { name: "Import initial positions for demo" });
     await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
     await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
     await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
@@ -598,7 +598,7 @@ describe("AccountsPage", () => {
     render(<AccountsPage />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
-    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    const dialog = screen.getByRole("dialog", { name: "Import initial positions for demo" });
     await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
     await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
     await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
@@ -621,7 +621,7 @@ describe("AccountsPage", () => {
     render(<AccountsPage />);
 
     await userEvent.click(await screen.findByRole("button", { name: "Import positions" }));
-    const dialog = screen.getByRole("dialog", { name: "Import positions for demo" });
+    const dialog = screen.getByRole("dialog", { name: "Import initial positions for demo" });
     await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001");
     await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
     await userEvent.type(within(dialog).getByLabelText("Cost price"), "10.23");
