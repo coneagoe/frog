@@ -14,7 +14,10 @@ const feeFields = [
 type FeeFieldKey = (typeof feeFields)[number]["key"];
 
 function isNonNegativeDecimal(value: string) {
-  return value.trim() === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0);
+  // Only accept plain non-negative decimal strings (e.g. "0.57", ".5", "10").
+  // Reject exponent notation like "1e-3" which Number() would accept but our
+  // string-based percent/decimal shifters cannot handle.
+  return /^\s*$|^\d+(\.\d*)?$|^\.\d+$/.test(value);
 }
 
 function percentToDecimalRate(value: string): string {

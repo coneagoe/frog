@@ -178,6 +178,19 @@ describe("AccountsPage", () => {
     expect(createAccountMock).not.toHaveBeenCalled();
   });
 
+  it("rejects exponent notation like 1e-3 in fee fields on create", async () => {
+    listAccountsMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+    await userEvent.type(await screen.findByLabelText("Account name"), "demo");
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
+    await userEvent.type(screen.getByLabelText("Commission rate (%)"), "1e-3");
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Fee settings must be non-negative numbers");
+    expect(createAccountMock).not.toHaveBeenCalled();
+  });
+
   it("keeps account fee details out of the account list", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
