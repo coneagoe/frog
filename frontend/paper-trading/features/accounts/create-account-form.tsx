@@ -5,10 +5,10 @@ import { createAccount } from "@/lib/api-client";
 import type { Account, CreateAccountInput } from "@/lib/types";
 
 const feeFields = [
-  { key: "commission_rate", label: "Commission rate", defaultValue: "0.0003" },
-  { key: "min_commission", label: "Minimum commission (CNY)", defaultValue: "5.00" },
-  { key: "stamp_duty_rate", label: "Stamp duty rate", defaultValue: "0.0005" },
-  { key: "transfer_fee_rate", label: "Transfer fee rate", defaultValue: "0.00001" }
+  { key: "commission_rate", label: "Commission rate (%)", defaultValue: "0.03", kind: "rate" },
+  { key: "min_commission", label: "Minimum commission (CNY)", defaultValue: "5.00", kind: "money" },
+  { key: "stamp_duty_rate", label: "Stamp duty rate (%)", defaultValue: "0.05", kind: "rate" },
+  { key: "transfer_fee_rate", label: "Transfer fee rate (%)", defaultValue: "0.001", kind: "rate" }
 ] as const;
 
 type FeeFieldKey = (typeof feeFields)[number]["key"];
@@ -17,14 +17,18 @@ function isNonNegativeDecimal(value: string) {
   return value.trim() === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0);
 }
 
+function percentToDecimalRate(value: string) {
+  return (Number(value) / 100).toString();
+}
+
 export function CreateAccountForm({ onCreated }: { onCreated: (account: Account) => Promise<void> | void }) {
   const [name, setName] = useState("");
   const [initialCash, setInitialCash] = useState("100000.00");
   const [feeValues, setFeeValues] = useState<Record<FeeFieldKey, string>>({
-    commission_rate: "0.0003",
+    commission_rate: "0.03",
     min_commission: "5.00",
-    stamp_duty_rate: "0.0005",
-    transfer_fee_rate: "0.00001"
+    stamp_duty_rate: "0.05",
+    transfer_fee_rate: "0.001"
   });
   const [feeChanged, setFeeChanged] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +49,7 @@ export function CreateAccountForm({ onCreated }: { onCreated: (account: Account)
         for (const field of feeFields) {
           const value = feeValues[field.key].trim();
           if (value !== "") {
-            input[field.key] = value;
+            input[field.key] = field.kind === "rate" ? percentToDecimalRate(value) : value;
           }
         }
       }
