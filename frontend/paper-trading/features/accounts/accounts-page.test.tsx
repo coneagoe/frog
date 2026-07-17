@@ -104,14 +104,14 @@ describe("AccountsPage", () => {
 
     render(<AccountsPage />);
     await userEvent.type(await screen.findByLabelText("Account name"), "demo");
-    await userEvent.clear(screen.getByLabelText("Commission rate"));
-    await userEvent.type(screen.getByLabelText("Commission rate"), "0.0002");
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
+    await userEvent.type(screen.getByLabelText("Commission rate (%)"), "0.02");
     await userEvent.clear(screen.getByLabelText("Minimum commission (CNY)"));
     await userEvent.type(screen.getByLabelText("Minimum commission (CNY)"), "3.00");
-    await userEvent.clear(screen.getByLabelText("Stamp duty rate"));
-    await userEvent.type(screen.getByLabelText("Stamp duty rate"), "0.0005");
-    await userEvent.clear(screen.getByLabelText("Transfer fee rate"));
-    await userEvent.type(screen.getByLabelText("Transfer fee rate"), "0.00001");
+    await userEvent.clear(screen.getByLabelText("Stamp duty rate (%)"));
+    await userEvent.type(screen.getByLabelText("Stamp duty rate (%)"), "0.05");
+    await userEvent.clear(screen.getByLabelText("Transfer fee rate (%)"));
+    await userEvent.type(screen.getByLabelText("Transfer fee rate (%)"), "0.001");
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(createAccountMock).toHaveBeenCalledWith({
@@ -131,7 +131,7 @@ describe("AccountsPage", () => {
 
     render(<AccountsPage />);
     await userEvent.type(await screen.findByLabelText("Account name"), "demo");
-    await userEvent.clear(screen.getByLabelText("Commission rate"));
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(createAccountMock).toHaveBeenCalledWith({
@@ -149,8 +149,8 @@ describe("AccountsPage", () => {
 
     render(<AccountsPage />);
     await userEvent.type(await screen.findByLabelText("Account name"), "demo");
-    await userEvent.clear(screen.getByLabelText("Commission rate"));
-    await userEvent.type(screen.getByLabelText("Commission rate"), "-0.0001");
+    await userEvent.clear(screen.getByLabelText("Commission rate (%)"));
+    await userEvent.type(screen.getByLabelText("Commission rate (%)"), "-0.01");
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Fee settings must be non-negative numbers");
