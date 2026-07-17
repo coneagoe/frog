@@ -46,17 +46,17 @@ describe("ImportPositionsModal", () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
     expect(screen.getByLabelText("Buy trade date")).toHaveAttribute("placeholder", "YYYY-MM-DD");
-    expect(screen.getByText("YYYY-MM-DD")).toBeInTheDocument();
+    expect(screen.getByText("YYYY-MM-DD", { selector: "small" })).toBeInTheDocument();
   });
 
   it("renders one aligned import grid header and row", () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
     const grid = screen.getByTestId("import-positions-grid");
-    expect(within(grid).getByText("Symbol")).toBeInTheDocument();
-    expect(within(grid).getByText("Quantity")).toBeInTheDocument();
-    expect(within(grid).getByText("Cost price")).toBeInTheDocument();
-    expect(within(grid).getByText("Buy date")).toBeInTheDocument();
+    expect(within(grid).getAllByText("Symbol")).toHaveLength(2);
+    expect(within(grid).getAllByText("Quantity")).toHaveLength(2);
+    expect(within(grid).getAllByText("Cost price")).toHaveLength(2);
+    expect(within(grid).getAllByText("Buy date")).toHaveLength(2);
     expect(within(grid).getAllByTestId("import-position-row")).toHaveLength(1);
   });
 
