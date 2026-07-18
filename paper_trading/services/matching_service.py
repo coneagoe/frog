@@ -96,6 +96,7 @@ class MatchingService:
             amount,
             fees,
             order.trade_date,
+            comment=order.comment,
         )
         if side == OrderSide.BUY:
             self._settle_buy(order, trade.id, amount, fees)

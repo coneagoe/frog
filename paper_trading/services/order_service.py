@@ -35,6 +35,7 @@ class OrderService:
         limit_price: Decimal,
         trade_date: date,
         idempotency_key: str | None = None,
+        comment: str | None = None,
     ) -> PaperOrder:
         try:
             ensure_lot_size(quantity)
@@ -52,8 +53,9 @@ class OrderService:
                     limit_price,
                     trade_date,
                     idempotency_key,
+                    comment,
                 )
-            return self._accept_sell_order(account_id, symbol, quantity, limit_price, trade_date, idempotency_key)
+            return self._accept_sell_order(account_id, symbol, quantity, limit_price, trade_date, idempotency_key, comment)
         except PaperTradingError as exc:
             order = self.repo.create_order(
                 account_id=account_id,
@@ -66,6 +68,7 @@ class OrderService:
                 rejection_code=exc.code,
                 rejection_reason=exc.message,
                 idempotency_key=idempotency_key,
+                comment=comment,
             )
             self.validity_service.analyze_order(order)
             return order
@@ -88,6 +91,10 @@ class OrderService:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         return self.repo.update_order_status(order, OrderStatus.CANCELLED)
 
+    def update_order_comment(self, order_id: int, comment: str | None) -> PaperOrder:
+        order = self.repo.get_order(order_id)
+        return self.repo.update_order_comment(order, comment)
+
     def _accept_buy_order(
         self,
         account_id: int,
@@ -96,6 +103,7 @@ class OrderService:
         limit_price: Decimal,
         trade_date: date,
         idempotency_key: str | None,
+        comment: str | None = None,
     ) -> PaperOrder:
         account = self.repo.get_account(account_id)
         if account is None:
@@ -116,6 +124,7 @@ class OrderService:
             status=OrderStatus.ACCEPTED,
             frozen_cash=frozen_cash,
             idempotency_key=idempotency_key,
+            comment=comment,
         )
         self.repo.add_cash_event(
             account_id,
@@ -135,6 +144,7 @@ class OrderService:
         limit_price: Decimal,
         trade_date: date,
         idempotency_key: str | None,
+        comment: str | None = None,
     ) -> PaperOrder:
         position = self.repo.get_position(account_id, symbol)
         total_sellable = (
@@ -170,6 +180,7 @@ class OrderService:
             status=OrderStatus.ACCEPTED,
             frozen_quantity=quantity,
             idempotency_key=idempotency_key,
+            comment=comment,
         )
         self.validity_service.analyze_order(order)
         return order
