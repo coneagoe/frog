@@ -179,6 +179,7 @@ def _mock_client(**kwargs) -> MagicMock:
                 "amount": "15000.00",
                 "fees": "15.00",
                 "trade_date": "2024-01-15",
+                "comment": None,
             }
         ]
         client.run_matching.return_value = {
@@ -910,13 +911,20 @@ class TestOrderCreate:
             [
                 "order",
                 "create",
-                "--account-id", "1",
-                "--symbol", "AAPL",
-                "--side", "buy",
-                "--quantity", "100",
-                "--limit-price", "150.00",
-                "--trade-date", "2024-01-15",
-                "--comment", "突破买入",
+                "--account-id",
+                "1",
+                "--symbol",
+                "AAPL",
+                "--side",
+                "buy",
+                "--quantity",
+                "100",
+                "--limit-price",
+                "150.00",
+                "--trade-date",
+                "2024-01-15",
+                "--comment",
+                "突破买入",
             ],
             client=client,
         )
@@ -1055,8 +1063,10 @@ class TestOrderUpdateComment:
             [
                 "order",
                 "update-comment",
-                "--order-id", "10",
-                "--comment", "回踩确认后买入",
+                "--order-id",
+                "10",
+                "--comment",
+                "回踩确认后买入",
             ],
             client=client,
         )
@@ -1088,8 +1098,10 @@ class TestOrderUpdateComment:
             [
                 "order",
                 "update-comment",
-                "--order-id", "10",
-                "--comment", "",
+                "--order-id",
+                "10",
+                "--comment",
+                "",
             ],
             client=client,
         )

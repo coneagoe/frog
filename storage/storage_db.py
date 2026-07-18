@@ -2300,6 +2300,10 @@ class StorageDb:
         - Creates ``paper_trade_validity_checks`` if it does not exist.
         - Adds validity columns to an existing ``paper_orders`` table that
           predates the validity-analysis feature.
+        - Adds fee columns to an existing ``paper_accounts`` table that
+          predates the configurable-fees feature.
+        - Adds ``comment`` column to ``paper_orders`` and ``paper_trades``
+          for the optional order/trade comment feature.
 
         Safe to call even when the ``paper_orders`` table does not exist yet
         (e.g. on a fresh install where ``Base.metadata.create_all`` will

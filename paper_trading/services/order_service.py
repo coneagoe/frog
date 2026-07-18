@@ -55,7 +55,9 @@ class OrderService:
                     idempotency_key,
                     comment,
                 )
-            return self._accept_sell_order(account_id, symbol, quantity, limit_price, trade_date, idempotency_key, comment)
+            return self._accept_sell_order(
+                account_id, symbol, quantity, limit_price, trade_date, idempotency_key, comment
+            )
         except PaperTradingError as exc:
             order = self.repo.create_order(
                 account_id=account_id,

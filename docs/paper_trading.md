@@ -80,7 +80,9 @@ export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
 uv run tools/paper_trading_cli.py account list
 uv run tools/paper_trading_cli.py account create --name demo --initial-cash 100000
 uv run tools/paper_trading_cli.py account create --name custom-fee --initial-cash 100000 --fee-preset a_share --commission-rate 0.00025 --min-commission 5.00 --stamp-duty-rate 0.0005 --transfer-fee-rate 0.00001
-uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-06-16
+uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-07-18 --comment "突破买入"
+uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment "回踩确认后买入"
+uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment ""
 uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account-id 1
 ```
 
@@ -218,7 +220,7 @@ curl -X DELETE http://localhost:8000/paper/accounts/1 \
 curl -X POST http://localhost:8000/paper/accounts/1/orders \
   -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"000001","side":"buy","quantity":100,"limit_price":"10.00","trade_date":"2026-06-16"}'
+  -d '{"symbol":"000001","side":"buy","quantity":100,"limit_price":"10.00","trade_date":"2026-06-16","comment":"突破买入"}'
 ```
 
 Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, insufficient position, and A-share T+1 violation (same-day sell) are stored as rejected orders.

@@ -223,7 +223,9 @@ def test_matching_uses_account_fee_config_for_sell_fees(tmp_path):
 def test_matching_copies_order_comment_to_trade(tmp_path):
     engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
-    order = order_service.place_order(account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), trade_date, comment="突破买入")
+    order = order_service.place_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), trade_date, comment="突破买入"
+    )
 
     matching_service.run(trade_date)
     session.commit()
