@@ -206,3 +206,86 @@ def test_get_order_validity_checks_returns_evidence(monkeypatch, sqlite_session)
     payload = response.json()
     assert payload[0]["order_id"] == order_id
     assert payload[0]["data_granularity"] == "daily"
+
+
+def test_order_comment_is_created_copied_to_trade_and_updated(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    storage = FakeHistoryStorage(
+        {
+            "000001": pd.DataFrame(
+                [
+                    {
+                        COL_DATE: "2026-07-18",
+                        COL_OPEN: "9.90",
+                        COL_HIGH: "10.10",
+                        COL_LOW: "9.80",
+                        COL_CLOSE: "10.00",
+                    }
+                ]
+            )
+        }
+    )
+    app.dependency_overrides[get_market_data_provider] = lambda: StorageMarketDataProvider(
+        storage,
+        FakeTradeCalendar([date(2026, 7, 18)]),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    account_response = client.post(
+        "/paper/accounts", json={"name": "demo", "initial_cash": "100000.00"}, headers=headers
+    )
+    account_id = account_response.json()["id"]
+
+    # Create order with comment
+    response = client.post(
+        f"/paper/accounts/{account_id}/orders",
+        json={
+            "symbol": "000001.SZ",
+            "side": "buy",
+            "quantity": 100,
+            "limit_price": "10.00",
+            "trade_date": "2026-07-18",
+            "comment": "突破买入",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["comment"] == "突破买入"
+
+    # Trade list has the same comment
+    trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
+    trades = trades_response.json()
+    assert len(trades) == 1
+    assert trades[0]["comment"] == "突破买入"
+
+    # PATCH with new comment updates both order and trade
+    order_id = payload["id"]
+    patch_response = client.patch(
+        f"/paper/orders/{order_id}/comment",
+        json={"comment": "回踩确认后买入"},
+        headers=headers,
+    )
+    assert patch_response.status_code == 200
+    updated = patch_response.json()
+    assert updated["comment"] == "回踩确认后买入"
+
+    trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
+    assert trades_response.json()[0]["comment"] == "回踩确认后买入"
+
+    # PATCH with empty string returns comment is None and trade comment is None
+    patch_response = client.patch(
+        f"/paper/orders/{order_id}/comment",
+        json={"comment": ""},
+        headers=headers,
+    )
+    assert patch_response.status_code == 200
+    updated = patch_response.json()
+    assert updated["comment"] is None
+
+    trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
+    assert trades_response.json()[0]["comment"] is None

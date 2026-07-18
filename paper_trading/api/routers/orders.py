@@ -12,6 +12,7 @@ from paper_trading.schemas.orders import (
     OrderResponse,
     TradeResponse,
     TradeValidityCheckResponse,
+    UpdateOrderCommentRequest,
 )
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_service import OrderService
@@ -41,6 +42,7 @@ def create_order(
         request.limit_price,
         request.trade_date,
         request.idempotency_key,
+        request.comment,
     )
     if order.status == OrderStatus.ACCEPTED.value:
         snapshot_service = SnapshotService(repo, market_data)
@@ -64,6 +66,14 @@ def get_order(order_id: int, session: Session = Depends(get_session)):
 def cancel_order(order_id: int, session: Session = Depends(get_session)):
     repo = PaperTradingRepository(session)
     order = OrderService(repo, get_market_data_provider()).cancel_order(order_id)
+    session.commit()
+    return order
+
+
+@router.patch("/orders/{order_id}/comment", response_model=OrderResponse)
+def update_order_comment(order_id: int, request: UpdateOrderCommentRequest, session: Session = Depends(get_session)):
+    repo = PaperTradingRepository(session)
+    order = OrderService(repo, get_market_data_provider()).update_order_comment(order_id, request.comment)
     session.commit()
     return order
 

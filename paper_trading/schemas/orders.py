@@ -13,6 +13,7 @@ class CreateOrderRequest(BaseModel):
     limit_price: Decimal
     trade_date: date
     idempotency_key: str | None = None
+    comment: str | None = None
 
 
 class OrderResponse(BaseModel):
@@ -31,9 +32,14 @@ class OrderResponse(BaseModel):
     frozen_quantity: int
     rejection_code: str | None = None
     rejection_reason: str | None = None
+    comment: str | None = None
     validity_status: str | None = None
     validity_reason: str | None = None
     validity_checked_at: datetime | None = None
+
+
+class UpdateOrderCommentRequest(BaseModel):
+    comment: str | None = None
 
 
 class TradeValidityCheckResponse(BaseModel):
@@ -73,3 +79,4 @@ class TradeResponse(BaseModel):
     amount: Decimal
     fees: Decimal
     trade_date: date
+    comment: str | None = None
