@@ -676,7 +676,7 @@ class TestEnsureBlackroomRecordsTable:
 
 class TestEnsurePaperTradingSchema:
     def test_migrates_legacy_paper_orders_columns(self, tmp_path, monkeypatch):
-        """ensure_paper_trading_schema adds validity and comment columns to legacy paper_orders and paper_trades tables."""
+        """ensure_paper_trading_schema adds validity/comment columns to legacy paper_orders and paper_trades."""
         from sqlalchemy import create_engine as real_create_engine
         from sqlalchemy import inspect
 

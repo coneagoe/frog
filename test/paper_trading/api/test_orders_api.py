@@ -34,7 +34,7 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
     response = client.post(
         f"/paper/accounts/{account_id}/orders",
         json={
-            "symbol": "000001.SZ",
+            "symbol": "000001",
             "side": "buy",
             "quantity": 100,
             "limit_price": "10.00",
@@ -46,7 +46,7 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "accepted"
-    assert payload["symbol"] == "000001.SZ"
+    assert payload["symbol"] == "000001"
     assert payload["quantity"] == 100
     assert payload["limit_price"] == "10.0000"
 
@@ -86,7 +86,7 @@ def test_create_order_auto_matches_when_limit_is_touched(monkeypatch, sqlite_ses
     response = client.post(
         f"/paper/accounts/{account_id}/orders",
         json={
-            "symbol": "000001.SZ",
+            "symbol": "000001",
             "side": "buy",
             "quantity": 100,
             "limit_price": "10.00",
@@ -126,7 +126,7 @@ def test_create_order_returns_validity_summary(monkeypatch, sqlite_session):
     response = client.post(
         f"/paper/accounts/{account_id}/orders",
         json={
-            "symbol": "000001.SZ",
+            "symbol": "000001",
             "side": "buy",
             "quantity": 100,
             "limit_price": "10.00",
@@ -158,7 +158,7 @@ def test_create_order_missing_account_returns_404(monkeypatch, sqlite_session):
     response = client.post(
         "/paper/accounts/999/orders",
         json={
-            "symbol": "000001.SZ",
+            "symbol": "000001",
             "side": "buy",
             "quantity": 100,
             "limit_price": "10.00",
@@ -191,7 +191,7 @@ def test_get_order_validity_checks_returns_evidence(monkeypatch, sqlite_session)
     order_response = client.post(
         f"/paper/accounts/{account_id}/orders",
         json={
-            "symbol": "000001.SZ",
+            "symbol": "000001",
             "side": "buy",
             "quantity": 100,
             "limit_price": "10.00",
@@ -244,7 +244,7 @@ def test_order_comment_is_created_copied_to_trade_and_updated(monkeypatch, sqlit
     response = client.post(
         f"/paper/accounts/{account_id}/orders",
         json={
-            "symbol": "000001.SZ",
+            "symbol": "000001",
             "side": "buy",
             "quantity": 100,
             "limit_price": "10.00",
