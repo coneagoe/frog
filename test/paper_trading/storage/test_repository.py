@@ -423,7 +423,7 @@ def test_update_order_comment_syncs_linked_trades_and_clears_blank(tmp_path):
         OrderStatus.ACCEPTED,
         comment="old",
     )
-    repo.create_trade(
+    trade = repo.create_trade(
         order.id,
         account.id,
         "000001",
@@ -436,13 +436,20 @@ def test_update_order_comment_syncs_linked_trades_and_clears_blank(tmp_path):
         comment="old",
     )
 
+    # Keep a linked PaperTrade object loaded before the update
+    loaded_trade = repo.list_trades(account.id)[0]
+    assert loaded_trade.id == trade.id
+    assert loaded_trade.comment == "old"
+
     repo.update_order_comment(order, "new reason")
     assert repo.get_order(order.id).comment == "new reason"
-    assert repo.list_trades(account.id)[0].comment == "new reason"
+    # Loaded trade object observes the updated comment in-memory
+    assert loaded_trade.comment == "new reason"
 
     repo.update_order_comment(order, "")
     assert repo.get_order(order.id).comment is None
-    assert repo.list_trades(account.id)[0].comment is None
+    # Loaded trade object observes the cleared comment in-memory
+    assert loaded_trade.comment is None
     engine.dispose()
 
 

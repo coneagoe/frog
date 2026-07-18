@@ -289,3 +289,26 @@ def test_order_comment_is_created_copied_to_trade_and_updated(monkeypatch, sqlit
 
     trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
     assert trades_response.json()[0]["comment"] is None
+
+
+def test_update_order_comment_missing_order_returns_404(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    storage = FakeHistoryStorage({})
+    app.dependency_overrides[get_market_data_provider] = lambda: StorageMarketDataProvider(
+        storage,
+        FakeTradeCalendar([date(2026, 7, 18)]),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+
+    response = client.patch(
+        "/paper/orders/99999/comment",
+        json={"comment": "new reason"},
+        headers=headers,
+    )
+    assert response.status_code == 404
+    assert "paper order not found: 99999" in response.json()["detail"]
