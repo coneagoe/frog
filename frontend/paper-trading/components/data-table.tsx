@@ -12,19 +12,22 @@ export function DataTable<T>({
   columns,
   getRowKey,
   rows,
-  emptyTitle
+  emptyTitle,
+  density = "default"
 }: {
   columns: Column<T>[];
   getRowKey: (row: T) => string | number;
   rows: T[];
   emptyTitle: string;
+  density?: "default" | "compact";
 }) {
   if (rows.length === 0) {
     return <EmptyState title={emptyTitle} />;
   }
+  const isCompact = density === "compact";
   return (
-    <div className="table-wrap">
-      <table className="table">
+    <div className={isCompact ? "table-wrap table-wrap--compact" : "table-wrap"}>
+      <table className={isCompact ? "table table--compact" : "table"}>
         <thead>
           <tr>
             {columns.map((column) => (
