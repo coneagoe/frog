@@ -74,6 +74,7 @@ def _mock_client(**kwargs) -> MagicMock:
             "quantity": 100,
             "limit_price": "150.00",
             "trade_date": "2024-01-15",
+            "comment": None,
             "status": "pending",
             "filled_quantity": 0,
             "frozen_cash": "15000.00",
@@ -93,6 +94,7 @@ def _mock_client(**kwargs) -> MagicMock:
                 "quantity": 100,
                 "limit_price": "150.00",
                 "trade_date": "2024-01-15",
+                "comment": None,
                 "status": "pending",
                 "filled_quantity": 0,
                 "frozen_cash": "15000.00",
@@ -112,6 +114,7 @@ def _mock_client(**kwargs) -> MagicMock:
             "quantity": 100,
             "limit_price": "150.00",
             "trade_date": "2024-01-15",
+            "comment": None,
             "status": "filled",
             "filled_quantity": 100,
             "frozen_cash": "0.00",
@@ -130,6 +133,7 @@ def _mock_client(**kwargs) -> MagicMock:
             "quantity": 100,
             "limit_price": "150.00",
             "trade_date": "2024-01-15",
+            "comment": None,
             "status": "cancelled",
             "filled_quantity": 0,
             "frozen_cash": "0.00",
@@ -646,6 +650,7 @@ class TestOrderCreate:
             limit_price=Decimal("150.00"),
             trade_date="2024-01-15",
             idempotency_key=None,
+            comment=None,
         )
 
     def test_create_order_with_idempotency_key(self):
@@ -680,6 +685,7 @@ class TestOrderCreate:
             limit_price=Decimal("160.00"),
             trade_date="2024-01-16",
             idempotency_key="my-key-123",
+            comment=None,
         )
 
     def test_create_order_json(self, capsys):
@@ -898,6 +904,34 @@ class TestOrderCreate:
         out = capsys.readouterr().out
         assert "trade-date" in out.lower() or "2024-02-30" in out
 
+    def test_create_order_with_comment(self):
+        client = _mock_client()
+        exit_code = main(
+            [
+                "order",
+                "create",
+                "--account-id", "1",
+                "--symbol", "AAPL",
+                "--side", "buy",
+                "--quantity", "100",
+                "--limit-price", "150.00",
+                "--trade-date", "2024-01-15",
+                "--comment", "突破买入",
+            ],
+            client=client,
+        )
+        assert exit_code == EXIT_CODES["OK"]
+        client.create_order.assert_called_once_with(
+            account_id=1,
+            symbol="AAPL",
+            side="buy",
+            quantity=100,
+            limit_price=Decimal("150.00"),
+            trade_date="2024-01-15",
+            idempotency_key=None,
+            comment="突破买入",
+        )
+
 
 class TestOrderList:
     def test_list_orders_calls_client(self):
@@ -993,6 +1027,74 @@ class TestOrderValidityChecks:
     def test_validity_checks_missing_args(self):
         exit_code = main(["order", "validity-checks", "--account-id", "1"])
         assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+
+class TestOrderUpdateComment:
+    def test_update_comment_calls_client(self):
+        client = _mock_client()
+        client.update_order_comment.return_value = {
+            "id": 10,
+            "account_id": 1,
+            "symbol": "AAPL",
+            "side": "buy",
+            "quantity": 100,
+            "limit_price": "150.00",
+            "trade_date": "2024-01-15",
+            "comment": "回踩确认后买入",
+            "status": "pending",
+            "filled_quantity": 0,
+            "frozen_cash": "15000.00",
+            "frozen_quantity": 0,
+            "rejection_code": None,
+            "rejection_reason": None,
+            "validity_status": None,
+            "validity_reason": None,
+            "validity_checked_at": None,
+        }
+        exit_code = main(
+            [
+                "order",
+                "update-comment",
+                "--order-id", "10",
+                "--comment", "回踩确认后买入",
+            ],
+            client=client,
+        )
+        assert exit_code == EXIT_CODES["OK"]
+        client.update_order_comment.assert_called_once_with(order_id=10, comment="回踩确认后买入")
+
+    def test_clear_comment(self):
+        client = _mock_client()
+        client.update_order_comment.return_value = {
+            "id": 10,
+            "account_id": 1,
+            "symbol": "AAPL",
+            "side": "buy",
+            "quantity": 100,
+            "limit_price": "150.00",
+            "trade_date": "2024-01-15",
+            "comment": "",
+            "status": "pending",
+            "filled_quantity": 0,
+            "frozen_cash": "15000.00",
+            "frozen_quantity": 0,
+            "rejection_code": None,
+            "rejection_reason": None,
+            "validity_status": None,
+            "validity_reason": None,
+            "validity_checked_at": None,
+        }
+        exit_code = main(
+            [
+                "order",
+                "update-comment",
+                "--order-id", "10",
+                "--comment", "",
+            ],
+            client=client,
+        )
+        assert exit_code == EXIT_CODES["OK"]
+        client.update_order_comment.assert_called_once_with(order_id=10, comment="")
 
 
 # ---------------------------------------------------------------------------

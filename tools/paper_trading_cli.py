@@ -16,7 +16,8 @@ Commands:
   account positions --account-id ID
   account cash-ledger --account-id ID
   order create --account-id ID --symbol SYMBOL --side buy|sell --quantity N
-               --limit-price PRICE --trade-date YYYY-MM-DD [--idempotency-key KEY]
+               --limit-price PRICE --trade-date YYYY-MM-DD [--idempotency-key KEY] [--comment TEXT]
+  order update-comment --order-id ID --comment TEXT
   order list --account-id ID
   order get --order-id ID
   order cancel --order-id ID
@@ -156,6 +157,7 @@ class PaperTradingApiClient:
         limit_price: Decimal,
         trade_date: str,
         idempotency_key: str | None = None,
+        comment: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "symbol": symbol,
@@ -166,6 +168,8 @@ class PaperTradingApiClient:
         }
         if idempotency_key is not None:
             body["idempotency_key"] = idempotency_key
+        if comment is not None:
+            body["comment"] = comment
         return self._request("POST", f"/paper/accounts/{account_id}/orders", json=body)
 
     def list_orders(self, account_id: int) -> list[dict[str, Any]]:
@@ -176,6 +180,9 @@ class PaperTradingApiClient:
 
     def cancel_order(self, order_id: int) -> dict[str, Any]:
         return self._request("POST", f"/paper/orders/{order_id}/cancel")
+
+    def update_order_comment(self, order_id: int, comment: str | None) -> dict[str, Any]:
+        return self._request("PATCH", f"/paper/orders/{order_id}/comment", json={"comment": comment})
 
     def list_order_validity_checks(self, account_id: int, order_id: int) -> list[dict[str, Any]]:
         return self._request(
@@ -265,6 +272,7 @@ def _add_order_subparsers(subparsers: Any) -> None:
     p_create.add_argument("--limit-price", required=True)
     p_create.add_argument("--trade-date", required=True)
     p_create.add_argument("--idempotency-key", default=None)
+    p_create.add_argument("--comment", default=None)
     p_list = order_sub.add_parser("list", help="List orders for an account")
     p_list.add_argument("--account-id", type=int, required=True)
     p_get = order_sub.add_parser("get", help="Get order details")
@@ -274,6 +282,9 @@ def _add_order_subparsers(subparsers: Any) -> None:
     p_vc = order_sub.add_parser("validity-checks", help="List order validity checks")
     p_vc.add_argument("--account-id", type=int, required=True)
     p_vc.add_argument("--order-id", type=int, required=True)
+    p_uc = order_sub.add_parser("update-comment", help="Update order comment")
+    p_uc.add_argument("--order-id", type=int, required=True)
+    p_uc.add_argument("--comment", required=True)
 
 
 def _add_trade_subparsers(subparsers: Any) -> None:
@@ -492,6 +503,7 @@ def _handle_order(client: PaperTradingApiClient, args: argparse.Namespace) -> An
             limit_price=_parse_decimal(args.limit_price, "--limit-price"),
             trade_date=_validate_trade_date(args.trade_date),
             idempotency_key=args.idempotency_key,
+            comment=args.comment,
         )
     if cmd == "list":
         return client.list_orders(account_id=args.account_id)
@@ -501,6 +513,8 @@ def _handle_order(client: PaperTradingApiClient, args: argparse.Namespace) -> An
         return client.cancel_order(order_id=args.order_id)
     if cmd == "validity-checks":
         return client.list_order_validity_checks(account_id=args.account_id, order_id=args.order_id)
+    if cmd == "update-comment":
+        return client.update_order_comment(order_id=args.order_id, comment=args.comment)
     raise _ParserError(f"unknown order command: {cmd}")
 
 
