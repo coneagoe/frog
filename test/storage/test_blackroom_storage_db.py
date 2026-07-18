@@ -676,7 +676,7 @@ class TestEnsureBlackroomRecordsTable:
 
 class TestEnsurePaperTradingSchema:
     def test_migrates_legacy_paper_orders_columns(self, tmp_path, monkeypatch):
-        """ensure_paper_trading_schema adds validity columns to an existing paper_orders table."""
+        """ensure_paper_trading_schema adds validity and comment columns to legacy paper_orders and paper_trades tables."""
         from sqlalchemy import create_engine as real_create_engine
         from sqlalchemy import inspect
 
@@ -707,6 +707,25 @@ class TestEnsurePaperTradingSchema:
                     """
                 )
             )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_trades (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        order_id INTEGER NOT NULL,
+                        account_id INTEGER NOT NULL,
+                        symbol VARCHAR(20) NOT NULL,
+                        side VARCHAR(10) NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        price NUMERIC(20,4) NOT NULL,
+                        amount NUMERIC(20,4) NOT NULL,
+                        fees NUMERIC(20,4) NOT NULL,
+                        trade_date DATE NOT NULL,
+                        trade_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
 
         reset_storage()
         mock_config = Mock(spec=StorageConfig)
@@ -724,9 +743,12 @@ class TestEnsurePaperTradingSchema:
         db.ensure_paper_trading_schema()
 
         columns = {row["name"] for row in inspect(engine).get_columns("paper_orders")}
+        trade_columns = {row["name"] for row in inspect(engine).get_columns("paper_trades")}
         assert "validity_status" in columns
         assert "validity_reason" in columns
         assert "validity_checked_at" in columns
+        assert "comment" in columns
+        assert "comment" in trade_columns
         reset_storage()
 
     def test_creates_paper_trade_validity_checks_table(self, tmp_path, monkeypatch):

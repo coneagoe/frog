@@ -20,7 +20,10 @@ def test_paper_trading_tables_are_registered(tmp_path):
     assert tb_name_paper_trade_validity_checks in inspector.get_table_names()
 
     order_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_orders)}
-    assert {"validity_status", "validity_reason", "validity_checked_at"} <= order_columns
+    assert {"validity_status", "validity_reason", "validity_checked_at", "comment"} <= order_columns
+
+    trade_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_trades)}
+    assert "comment" in trade_columns
 
     check_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_trade_validity_checks)}
     assert {

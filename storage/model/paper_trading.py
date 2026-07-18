@@ -98,6 +98,7 @@ class PaperOrder(Base):
     idempotency_key = Column(String(100), nullable=True, unique=True)
     rejection_code = Column(String(50), nullable=True)
     rejection_reason = Column(Text, nullable=True)
+    comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     validity_status = Column(String(20), nullable=True, index=True)
@@ -142,6 +143,7 @@ class PaperTrade(Base):
     amount = Column(Numeric(20, 4), nullable=False)
     fees = Column(Numeric(20, 4), nullable=False)
     trade_date = Column(Date, nullable=False, index=True)
+    comment = Column(Text, nullable=True)
     trade_time = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

@@ -180,6 +180,12 @@ class PaperTradingRepository:
         )
         return Decimal(total).quantize(Decimal("0.0001"))
 
+    @staticmethod
+    def _normalize_comment(comment: str | None) -> str | None:
+        if comment is None or comment == "":
+            return None
+        return comment
+
     def create_order(
         self,
         account_id: int,
@@ -194,6 +200,7 @@ class PaperTradingRepository:
         idempotency_key: str | None = None,
         rejection_code: str | None = None,
         rejection_reason: str | None = None,
+        comment: str | None = None,
     ) -> PaperOrder:
         order = PaperOrder(
             account_id=account_id,
@@ -208,6 +215,7 @@ class PaperTradingRepository:
             idempotency_key=idempotency_key,
             rejection_code=rejection_code,
             rejection_reason=rejection_reason,
+            comment=self._normalize_comment(comment),
         )
         self.session.add(order)
         self.session.flush()
@@ -432,6 +440,7 @@ class PaperTradingRepository:
         amount: Decimal,
         fees: Decimal,
         trade_date: date,
+        comment: str | None = None,
     ) -> PaperTrade:
         trade = PaperTrade(
             order_id=order_id,
@@ -443,10 +452,22 @@ class PaperTradingRepository:
             amount=amount,
             fees=fees,
             trade_date=trade_date,
+            comment=self._normalize_comment(comment),
         )
         self.session.add(trade)
         self.session.flush()
         return trade
+
+    def update_order_comment(self, order: PaperOrder, comment: str | None) -> PaperOrder:
+        normalized = self._normalize_comment(comment)
+        order.comment = normalized
+        order.updated_at = datetime.now(timezone.utc)
+        self.session.query(PaperTrade).filter(PaperTrade.order_id == order.id).update(
+            {PaperTrade.comment: normalized},
+            synchronize_session=False,
+        )
+        self.session.flush()
+        return order
 
     def get_position(self, account_id: int, symbol: str) -> PaperPosition | None:
         return cast(
