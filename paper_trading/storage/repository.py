@@ -464,7 +464,7 @@ class PaperTradingRepository:
         order.updated_at = datetime.now(timezone.utc)
         self.session.query(PaperTrade).filter(PaperTrade.order_id == order.id).update(
             {PaperTrade.comment: normalized},
-            synchronize_session=False,
+            synchronize_session="fetch",
         )
         self.session.flush()
         return order
