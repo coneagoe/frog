@@ -86,6 +86,8 @@ uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment 
 uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account-id 1
 ```
 
+The `order update-comment` command with `--comment ""` clears the stored comment to `NULL` on the order and all linked trades.
+
 Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. Explicit fee flags override the preset values for the new account.
 
 Use `--json` when machine-readable output is needed:
@@ -225,6 +227,28 @@ curl -X POST http://localhost:8000/paper/accounts/1/orders \
 
 Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, insufficient position, and A-share T+1 violation (same-day sell) are stored as rejected orders.
 
+## Update Order Comment
+
+Update the comment on an existing order. The new value is synced to all trades linked to that order.
+
+```bash
+curl -X PATCH http://localhost:8000/paper/orders/1/comment \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"comment":"回踩确认后买入"}'
+```
+
+Setting `"comment": ""` clears the stored value to `NULL` on the order and all linked trades:
+
+```bash
+curl -X PATCH http://localhost:8000/paper/orders/1/comment \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"comment":""}'
+```
+
+The order and its linked trades return `"comment": null` in API responses after clearing.
+
 ## Trade Validity Analysis
 
 Paper trading records the original trading intent and analyzes whether the operation was valid for the specified `trade_date`. The order lifecycle status (`accepted`, `rejected`, `filled`, `cancelled`) remains separate from validity status.
@@ -256,6 +280,26 @@ curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1
 curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1/trades
 curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1/snapshots
 curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1/cash-ledger
+```
+
+Trade responses include the `comment` field:
+
+```json
+[
+  {
+    "id": 1,
+    "order_id": 1,
+    "account_id": 1,
+    "symbol": "000001",
+    "side": "buy",
+    "quantity": 100,
+    "price": "10.00",
+    "amount": "1000.00",
+    "fees": "5.00",
+    "trade_date": "2026-07-18",
+    "comment": "突破买入"
+  }
+]
 ```
 
 Snapshots are generated after matching and use close prices for valuation.
