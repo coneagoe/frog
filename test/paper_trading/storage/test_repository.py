@@ -373,6 +373,39 @@ def test_update_account_fees_returns_none_for_missing_account(tmp_path):
     engine.dispose()
 
 
+def test_order_and_trade_comments_are_persisted(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper_comments.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    order = repo.create_order(account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), date(2026, 7, 18), OrderStatus.ACCEPTED, comment="突破买入")
+    repo.create_trade(order.id, account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), Decimal("1000.00"), Decimal("5.00"), date(2026, 7, 18), comment="突破买入")
+
+    assert repo.get_order(order.id).comment == "突破买入"
+    assert repo.list_trades(account.id)[0].comment == "突破买入"
+    engine.dispose()
+
+
+def test_update_order_comment_syncs_linked_trades_and_clears_blank(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper_comment_update.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    order = repo.create_order(account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), date(2026, 7, 18), OrderStatus.ACCEPTED, comment="old")
+    repo.create_trade(order.id, account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), Decimal("1000.00"), Decimal("5.00"), date(2026, 7, 18), comment="old")
+
+    repo.update_order_comment(order, "new reason")
+    assert repo.get_order(order.id).comment == "new reason"
+    assert repo.list_trades(account.id)[0].comment == "new reason"
+
+    repo.update_order_comment(order, "")
+    assert repo.get_order(order.id).comment is None
+    assert repo.list_trades(account.id)[0].comment is None
+    engine.dispose()
+
+
 def test_delete_account_removes_round_trips(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
