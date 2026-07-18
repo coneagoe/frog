@@ -4,7 +4,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { formatDate, formatQuantity } from "@/lib/format";
 import type { CashLedgerEntry, Order, Position, Trade } from "@/lib/types";
 
-export function PositionTable({ positions }: { positions: Position[] }) {
+export function PositionTable({ density, positions }: { density?: "default" | "compact"; positions: Position[] }) {
   const columns: Column<Position>[] = [
     { key: "symbol", header: "Symbol", render: (row) => row.symbol },
     { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity) },
@@ -12,7 +12,7 @@ export function PositionTable({ positions }: { positions: Position[] }) {
     { key: "cost", header: "Cost", align: "right", render: (row) => <MoneyText value={row.cost_amount} /> },
     { key: "pnl", header: "Realized PnL", align: "right", render: (row) => <MoneyText value={row.realized_pnl} /> }
   ];
-  return <DataTable columns={columns} emptyTitle="No positions" getRowKey={(row) => row.symbol} rows={positions} />;
+  return <DataTable columns={columns} density={density} emptyTitle="No positions" getRowKey={(row) => row.symbol} rows={positions} />;
 }
 
 export function OrderTable({ orders, onCancel }: { orders: Order[]; onCancel: (orderId: number) => void }) {
@@ -48,12 +48,12 @@ export function TradeTable({ trades }: { trades: Trade[] }) {
   return <DataTable columns={columns} emptyTitle="No trades" getRowKey={(row) => row.id} rows={trades} />;
 }
 
-export function CashLedgerTable({ entries }: { entries: CashLedgerEntry[] }) {
+export function CashLedgerTable({ density, entries }: { density?: "default" | "compact"; entries: CashLedgerEntry[] }) {
   const columns: Column<CashLedgerEntry>[] = [
     { key: "id", header: "ID", render: (row) => row.id },
     { key: "event", header: "Event", render: (row) => row.event_type },
     { key: "amount", header: "Amount", align: "right", render: (row) => <MoneyText value={row.amount} /> },
     { key: "note", header: "Note", render: (row) => row.note ?? "-" }
   ];
-  return <DataTable columns={columns} emptyTitle="No cash ledger entries" getRowKey={(row) => row.id} rows={entries} />;
+  return <DataTable columns={columns} density={density} emptyTitle="No cash ledger entries" getRowKey={(row) => row.id} rows={entries} />;
 }

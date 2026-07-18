@@ -323,6 +323,23 @@ describe("AccountsPage", () => {
     expect(screen.getByText("Cash Ledger")).toBeInTheDocument();
   });
 
+  it("uses compact tables for account positions and cash ledger", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([
+      { symbol: "000001", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00" }
+    ]);
+    listCashLedgerMock.mockResolvedValue([
+      { id: 1, account_id: 1, event_type: "deposit", amount: "100000.00", note: "Initial deposit" }
+    ]);
+
+    const { container } = render(<AccountsPage />);
+
+    expect(await screen.findByText("Positions")).toBeInTheDocument();
+    const compactTables = container.querySelectorAll(".table.table--compact");
+    expect(compactTables).toHaveLength(2);
+    expect(container.querySelectorAll(".table-wrap.table-wrap--compact")).toHaveLength(2);
+  });
+
   it("switches positions and cash ledger when selecting a different account", async () => {
     const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);

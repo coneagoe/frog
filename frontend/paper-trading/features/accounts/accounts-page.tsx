@@ -258,11 +258,11 @@ export function AccountsPage() {
           <div className="grid grid--two">
             <section className="panel">
               <h2>Positions</h2>
-              <PositionTable positions={positions} />
+              <PositionTable density="compact" positions={positions} />
             </section>
             <section className="panel">
               <h2>Cash Ledger</h2>
-              <CashLedgerTable entries={cashLedger} />
+              <CashLedgerTable density="compact" entries={cashLedger} />
             </section>
           </div>
         </div>

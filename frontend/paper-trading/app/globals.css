@@ -171,12 +171,30 @@ button {
   width: 100%;
 }
 
+.table--compact {
+  min-width: 0;
+  table-layout: auto;
+}
+
 .table th,
 .table td {
   border-bottom: 1px solid var(--border);
   padding: 10px 8px;
   text-align: left;
   white-space: nowrap;
+}
+
+.table--compact th,
+.table--compact td {
+  padding: 8px 6px;
+}
+
+.table--compact th {
+  letter-spacing: 0.02em;
+}
+
+.table--compact td:last-child {
+  white-space: normal;
 }
 
 .table th {
