@@ -19,6 +19,7 @@ export function OrderForm({
   const [quantity, setQuantity] = useState("100");
   const [limitPrice, setLimitPrice] = useState("");
   const [tradeDate, setTradeDate] = useState("");
+  const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const numericQuantity = Number(quantity);
@@ -33,15 +34,18 @@ export function OrderForm({
     setSubmitting(true);
     setError(null);
     try {
+      const commentTrimmed = comment.trim();
       await createOrder(accountId, {
         symbol: symbol.trim().toUpperCase(),
         side,
         quantity: Number(quantity),
         limit_price: limitPrice,
-        trade_date: tradeDate
+        trade_date: tradeDate,
+        ...(commentTrimmed ? { comment: commentTrimmed } : {})
       });
       await onSubmitted();
       setSymbol("");
+      setComment("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit order");
     } finally {
@@ -92,6 +96,10 @@ export function OrderForm({
           onChange={(event) => setTradeDate(event.target.value)}
           required
         />
+      </label>
+      <label>
+        Comment
+        <input aria-label="Comment" value={comment} onChange={(event) => setComment(event.target.value)} />
       </label>
       {error ? <div className="error-banner" role="alert">{error}</div> : null}
       <button className="button" disabled={submitting || accountId === 0} type="submit">

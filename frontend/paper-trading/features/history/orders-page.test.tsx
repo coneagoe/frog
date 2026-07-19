@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cancelOrder, listAccounts, listOrders } from "@/lib/api-client";
+import { cancelOrder, listAccounts, listOrders, updateOrderComment } from "@/lib/api-client";
 import { OrdersPage } from "./orders-page";
 
 const mockSearchParams = vi.hoisted(() => new URLSearchParams());
@@ -12,12 +12,14 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api-client", () => ({
   listAccounts: vi.fn(),
   listOrders: vi.fn(),
-  cancelOrder: vi.fn()
+  cancelOrder: vi.fn(),
+  updateOrderComment: vi.fn()
 }));
 
 const listAccountsMock = vi.mocked(listAccounts);
 const listOrdersMock = vi.mocked(listOrders);
 const cancelOrderMock = vi.mocked(cancelOrder);
+const updateOrderCommentMock = vi.mocked(updateOrderComment);
 
 const mockAccount = { id: 1, name: "demo", initial_cash: "100000.00", status: "active", base_currency: "CNY" };
 const mockOrder = {
@@ -33,7 +35,8 @@ const mockOrder = {
   frozen_cash: "15000.00",
   frozen_quantity: 100,
   rejection_code: null,
-  rejection_reason: null
+  rejection_reason: null,
+  comment: null
 };
 
 describe("OrdersPage", () => {
@@ -184,6 +187,129 @@ describe("OrdersPage", () => {
     // After data loads, loading should disappear and orders should render
     expect(await screen.findByText("AAPL")).toBeInTheDocument();
     expect(screen.queryByText("Loading orders...")).not.toBeInTheDocument();
+  });
+
+  it("renders comment column with dash for null", async () => {
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([mockOrder]);
+
+    render(<OrdersPage />);
+
+    expect(await screen.findByText("Comment")).toBeInTheDocument();
+    expect(screen.getByText("-")).toBeInTheDocument();
+  });
+
+  it("renders comment text when non-null", async () => {
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([{ ...mockOrder, comment: "my rationale" }]);
+
+    render(<OrdersPage />);
+
+    expect(await screen.findByText("my rationale")).toBeInTheDocument();
+  });
+
+  it("renders dash when order comment is an empty string", async () => {
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([{ ...mockOrder, comment: "" }]);
+
+    render(<OrdersPage />);
+
+    expect(await screen.findByText("-")).toBeInTheDocument();
+  });
+
+  it("shows Edit button on orders", async () => {
+    const user = userEvent.setup();
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([mockOrder]);
+
+    render(<OrdersPage />);
+
+    expect(await screen.findByText("Edit")).toBeInTheDocument();
+    await user.click(screen.getByText("Edit"));
+    expect(screen.getByDisplayValue("")).toBeInTheDocument();
+  });
+
+  it("shows inline edit controls and saves comment", async () => {
+    const user = userEvent.setup();
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([{ ...mockOrder, comment: "old comment" }]);
+    updateOrderCommentMock.mockResolvedValue({ ...mockOrder, id: 42, comment: "updated comment" });
+
+    render(<OrdersPage />);
+
+    expect(await screen.findByText("old comment")).toBeInTheDocument();
+    await user.click(screen.getByText("Edit"));
+
+    const input = screen.getByDisplayValue("old comment");
+    await user.clear(input);
+    await user.type(input, "updated comment");
+    await user.click(screen.getByText("Save"));
+
+    expect(updateOrderCommentMock).toHaveBeenCalledWith(42, "updated comment");
+    expect(await screen.findByText("updated comment")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  });
+
+  it("cancels inline edit without saving", async () => {
+    const user = userEvent.setup();
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([{ ...mockOrder, comment: "original" }]);
+
+    render(<OrdersPage />);
+
+    expect(await screen.findByText("original")).toBeInTheDocument();
+    await user.click(screen.getByText("Edit"));
+
+    const input = screen.getByDisplayValue("original");
+    await user.clear(input);
+    await user.type(input, "changed but cancelled");
+    await user.click(screen.getByText("Cancel"));
+
+    expect(updateOrderCommentMock).not.toHaveBeenCalled();
+    expect(screen.getByText("original")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+  });
+
+  it("clears comment to dash when saving empty string", async () => {
+    const user = userEvent.setup();
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([{ ...mockOrder, comment: "to clear" }]);
+    updateOrderCommentMock.mockResolvedValue({ ...mockOrder, id: 42, comment: null });
+
+    render(<OrdersPage />);
+
+    expect(await screen.findByText("to clear")).toBeInTheDocument();
+    await user.click(screen.getByText("Edit"));
+
+    const input = screen.getByDisplayValue("to clear");
+    await user.clear(input);
+    await user.click(screen.getByText("Save"));
+
+    expect(updateOrderCommentMock).toHaveBeenCalledWith(42, "");
+    expect(await screen.findByText("-")).toBeInTheDocument();
+  });
+
+  it("shows ErrorBanner when updateOrderComment fails", async () => {
+    const user = userEvent.setup();
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([{ ...mockOrder, comment: "original" }]);
+    updateOrderCommentMock.mockRejectedValue(new Error("order not found"));
+
+    render(<OrdersPage />);
+
+    expect(await screen.findByText("original")).toBeInTheDocument();
+    await user.click(screen.getByText("Edit"));
+
+    const input = screen.getByDisplayValue("original");
+    await user.clear(input);
+    await user.type(input, "new value");
+    await user.click(screen.getByText("Save"));
+
+    await screen.findByRole("alert");
+    expect(screen.getByRole("alert")).toHaveTextContent("order not found");
+    // Should remain in edit mode on error
+    expect(screen.getByDisplayValue("new value")).toBeInTheDocument();
+    expect(screen.getByText("Cancel")).toBeInTheDocument();
   });
 
   it("does not overwrite orders with stale cancel refresh after account switch", async () => {

@@ -72,6 +72,10 @@ export function cancelOrder(orderId: number): Promise<Order> {
   return apiRequest<Order>(`/orders/${orderId}/cancel`, { method: "POST" });
 }
 
+export function updateOrderComment(orderId: number, comment: string): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/comment`, { method: "PATCH", body: JSON.stringify({ comment }) });
+}
+
 export function listTrades(accountId: number): Promise<Trade[]> {
   return apiGet<Trade[]>(`/accounts/${accountId}/trades`);
 }

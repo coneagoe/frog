@@ -124,6 +124,7 @@ export type Order = {
   frozen_quantity: number;
   rejection_code: string | null;
   rejection_reason: string | null;
+  comment: string | null;
 };
 
 export type Trade = {
@@ -137,6 +138,7 @@ export type Trade = {
   amount: string;
   fees: string;
   trade_date: string;
+  comment: string | null;
 };
 
 export type Snapshot = {
@@ -190,6 +192,7 @@ export type CreateOrderInput = {
   limit_price: string;
   trade_date: string;
   idempotency_key?: string;
+  comment?: string | null;
 };
 
 export type CreateMatchingRunInput = {

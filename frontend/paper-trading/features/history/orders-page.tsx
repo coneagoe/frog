@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { cancelOrder, listAccounts, listOrders } from "@/lib/api-client";
+import { cancelOrder, listAccounts, listOrders, updateOrderComment } from "@/lib/api-client";
 import type { Account, Order } from "@/lib/types";
 import { OrderTable } from "@/features/trading/trading-tables";
 
@@ -14,6 +14,8 @@ export function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState("");
   const requestIdRef = useRef(0);
 
   async function loadOrders(accountId: number) {
@@ -28,6 +30,34 @@ export function OrdersPage() {
     } catch (err) {
       if (requestId === requestIdRef.current) {
         setError(err instanceof Error ? err.message : "Failed to load orders");
+      }
+    }
+  }
+
+  function handleEditStart(orderId: number) {
+    const order = orders.find((o) => o.id === orderId);
+    setEditingOrderId(orderId);
+    setEditingValue(order?.comment ?? "");
+  }
+
+  function handleEditCancel() {
+    setEditingOrderId(null);
+    setEditingValue("");
+  }
+
+  async function handleEditSave(orderId: number) {
+    const requestId = ++requestIdRef.current;
+    setError(null);
+    try {
+      const updatedOrder = await updateOrderComment(orderId, editingValue);
+      if (requestId === requestIdRef.current) {
+        setOrders((prev) => prev.map((o) => (o.id === orderId ? updatedOrder : o)));
+        setEditingOrderId(null);
+        setEditingValue("");
+      }
+    } catch (err) {
+      if (requestId === requestIdRef.current) {
+        setError(err instanceof Error ? err.message : "Failed to update comment");
       }
     }
   }
@@ -104,7 +134,16 @@ export function OrdersPage() {
       {loading ? <div className="panel">Loading orders...</div> : null}
       {!loading && accounts.length === 0 ? <div className="panel">No paper accounts yet. Create an account before viewing orders.</div> : null}
       {error ? <ErrorBanner message={error} /> : null}
-      <OrderTable orders={orders} onCancel={handleCancel} />
+      <OrderTable
+        orders={orders}
+        onCancel={handleCancel}
+        editingOrderId={editingOrderId}
+        editingValue={editingValue}
+        onEditStart={handleEditStart}
+        onEditValueChange={setEditingValue}
+        onEditSave={handleEditSave}
+        onEditCancel={handleEditCancel}
+      />
     </section>
   );
 }

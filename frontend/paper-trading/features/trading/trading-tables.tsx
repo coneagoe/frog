@@ -15,8 +15,27 @@ export function PositionTable({ density, positions }: { density?: "default" | "c
   return <DataTable columns={columns} density={density} emptyTitle="No positions" getRowKey={(row) => row.symbol} rows={positions} />;
 }
 
-export function OrderTable({ orders, onCancel }: { orders: Order[]; onCancel: (orderId: number) => void }) {
+export function OrderTable({
+  orders,
+  onCancel,
+  editingOrderId,
+  editingValue,
+  onEditStart,
+  onEditValueChange,
+  onEditSave,
+  onEditCancel
+}: {
+  orders: Order[];
+  onCancel: (orderId: number) => void;
+  editingOrderId?: number | null;
+  editingValue?: string;
+  onEditStart?: (orderId: number) => void;
+  onEditValueChange?: (value: string) => void;
+  onEditSave?: (orderId: number) => void;
+  onEditCancel?: () => void;
+}) {
   const cancellable = new Set(["accepted", "new", "partially_filled"]);
+  const canEdit = typeof onEditStart === "function";
   const columns: Column<Order>[] = [
     { key: "id", header: "ID", render: (row) => row.id },
     { key: "symbol", header: "Symbol", render: (row) => row.symbol },
@@ -26,9 +45,42 @@ export function OrderTable({ orders, onCancel }: { orders: Order[]; onCancel: (o
     { key: "date", header: "Date", render: (row) => formatDate(row.trade_date) },
     { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
     {
+      key: "comment",
+      header: "Comment",
+      render: (row) => {
+        if (canEdit && editingOrderId === row.id) {
+          return (
+            <input
+              aria-label="Edit comment"
+              value={editingValue ?? ""}
+              onChange={(event) => onEditValueChange?.(event.target.value)}
+            />
+          );
+        }
+        return <>{row.comment || "-"}</>;
+      }
+    },
+    {
       key: "action",
       header: "Action",
-      render: (row) => cancellable.has(row.status) ? <button className="button button--secondary" onClick={() => onCancel(row.id)} type="button">Cancel</button> : null
+      render: (row) => {
+        if (canEdit && editingOrderId === row.id) {
+          return (
+            <>
+              <button className="button" onClick={() => onEditSave?.(row.id)} type="button">Save</button>
+              <button className="button button--secondary" onClick={() => onEditCancel?.()} type="button">Cancel</button>
+            </>
+          );
+        }
+        return (
+          <>
+            {cancellable.has(row.status)
+              ? <button className="button button--secondary" onClick={() => onCancel(row.id)} type="button">Cancel</button>
+              : null}
+            {canEdit ? <button className="button button--secondary" onClick={() => onEditStart?.(row.id)} type="button">Edit</button> : null}
+          </>
+        );
+      }
     }
   ];
   return <DataTable columns={columns} emptyTitle="No orders" getRowKey={(row) => row.id} rows={orders} />;
@@ -43,7 +95,8 @@ export function TradeTable({ trades }: { trades: Trade[] }) {
     { key: "price", header: "Price", align: "right", render: (row) => <MoneyText value={row.price} /> },
     { key: "amount", header: "Amount", align: "right", render: (row) => <MoneyText value={row.amount} /> },
     { key: "fees", header: "Fees", align: "right", render: (row) => <MoneyText value={row.fees} /> },
-    { key: "date", header: "Date", render: (row) => formatDate(row.trade_date) }
+    { key: "date", header: "Date", render: (row) => formatDate(row.trade_date) },
+    { key: "comment", header: "Comment", render: (row) => row.comment || "-" }
   ];
   return <DataTable columns={columns} emptyTitle="No trades" getRowKey={(row) => row.id} rows={trades} />;
 }
