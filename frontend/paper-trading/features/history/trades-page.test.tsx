@@ -28,7 +28,8 @@ const mockTrade = {
   price: "150.00",
   amount: "15000.00",
   fees: "15.00",
-  trade_date: "2026-06-27"
+  trade_date: "2026-06-27",
+  comment: null
 };
 
 describe("TradesPage", () => {
@@ -48,6 +49,34 @@ describe("TradesPage", () => {
     expect(listAccountsMock.mock.calls.length).toBeGreaterThanOrEqual(1);
     // listTrades must be called with the first account id explicitly
     expect(listTradesMock).toHaveBeenCalledWith(1);
+  });
+
+  it("renders comment column with dash for null", async () => {
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listTradesMock.mockResolvedValue([mockTrade]);
+
+    render(<TradesPage />);
+
+    expect(await screen.findByText("Comment")).toBeInTheDocument();
+    expect(screen.getByText("-")).toBeInTheDocument();
+  });
+
+  it("renders comment text when non-null", async () => {
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listTradesMock.mockResolvedValue([{ ...mockTrade, comment: "trade rationale" }]);
+
+    render(<TradesPage />);
+
+    expect(await screen.findByText("trade rationale")).toBeInTheDocument();
+  });
+
+  it("renders dash when trade comment is an empty string", async () => {
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listTradesMock.mockResolvedValue([{ ...mockTrade, comment: "" }]);
+
+    render(<TradesPage />);
+
+    expect(await screen.findByText("-")).toBeInTheDocument();
   });
 
   it("renders muted copy about review of historical paper executions", async () => {

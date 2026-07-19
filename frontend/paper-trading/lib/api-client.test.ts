@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiGet, createAccount, importPositions } from "./api-client";
+import { ApiError, apiGet, createAccount, importPositions, updateOrderComment } from "./api-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -35,6 +35,32 @@ describe("api client", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/paper/accounts",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "demo", initial_cash: "100000.00" }) })
+    );
+  });
+
+  it("sends updateOrderComment PATCH", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1, comment: "updated" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await updateOrderComment(42, "updated comment");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/orders/42/comment",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ comment: "updated comment" })
+      })
+    );
+  });
+
+  it("sends empty string to clear comment", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1, comment: null }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await updateOrderComment(42, "");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/orders/42/comment",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ comment: "" })
+      })
     );
   });
 
