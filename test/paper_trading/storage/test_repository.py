@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import CashEventType, OrderSide, OrderStatus
 from paper_trading.storage.models import PaperTradeValidityCheck
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -493,3 +493,285 @@ def test_delete_account_removes_round_trips(sqlite_session):
     sqlite_session.commit()
 
     assert repo.list_round_trips(account.id) == []
+
+
+def test_delete_order_returns_deleted_order_and_removes_row(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("demo", Decimal("100000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 7, 19),
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0000"),
+    )
+    sqlite_session.commit()
+
+    deleted = repo.delete_order(order.id)
+
+    assert deleted is not None
+    assert deleted.id == order.id
+    sqlite_session.flush()
+    with pytest.raises(KeyError):
+        repo.get_order(order.id)
+
+
+def test_clear_account_rebuild_state_preserves_initial_cash(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("demo", Decimal("100000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 7, 19),
+        OrderStatus.FILLED,
+    )
+    trade = repo.create_trade(
+        order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        Decimal("1000.0000"),
+        Decimal("5.0000"),
+        date(2026, 7, 19),
+    )
+    repo.add_cash_event(account.id, CashEventType.TRADE, Decimal("-1005.0000"), order_id=order.id, trade_id=trade.id)
+    # Trade-derived position/lot — should be deleted by clear_account_rebuild_state
+    repo.upsert_position(
+        account.id, "000001", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("1005.0000"), source="trade"
+    )
+    repo.create_position_lot(account.id, "000001", date(2026, 7, 19), 100, 100, Decimal("10.00"), source="trade")
+    # Imported lot with remaining_quantity < original_quantity (simulating a sell reducing it)
+    # This lot must be reset to original_quantity after clear.
+    repo.create_position_lot(
+        account.id,
+        "000002",
+        date(2026, 7, 1),
+        original_quantity=300,
+        remaining_quantity=100,
+        cost_price=Decimal("9.00"),
+        source="imported",
+    )
+    # Imported aggregate position (may have been mutated by trades) — will be rebuilt from lots
+    repo.upsert_position(
+        account.id, "000002", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("900.0000"), source="imported"
+    )
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=date(2026, 7, 19),
+        cash_available=Decimal("98995"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("1000"),
+        total_assets=Decimal("99995"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=1,
+        order_count=1,
+        trade_count=1,
+    )
+    sqlite_session.commit()
+
+    repo.clear_account_rebuild_state(account.id)
+
+    assert repo.list_trades(account.id) == []
+    # Trade-derived lot deleted
+    assert repo.count_position_lots(account.id) == 1
+    # Imported lot's remaining_quantity reset to original_quantity
+    lots = repo.get_lots(account.id, "000002")
+    assert len(lots) == 1
+    assert lots[0].remaining_quantity == 300
+    assert lots[0].original_quantity == 300
+    # All positions rebuilt from imported lots only
+    positions = repo.get_positions(account.id)
+    assert len(positions) == 1
+    assert positions[0].symbol == "000002"
+    assert positions[0].source == "imported"
+    assert positions[0].total_quantity == 300
+    assert positions[0].cost_amount == Decimal("2700.0000")  # 300 * 9.00
+    assert repo.list_snapshots(account.id) == []
+    ledger = repo.list_cash_ledger(account.id)
+    assert len(ledger) == 1
+    assert ledger[0].note == "initial_cash"
+    assert Decimal(ledger[0].amount) == Decimal("100000.0000")
+
+
+def test_clear_account_rebuild_state_resets_same_symbol_imported_after_trade(sqlite_session):
+    """Imported position for a symbol is rebuilt from imported lots even when
+    trade-derived lots for the same symbol existed."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("demo", Decimal("100000"))
+
+    # Imported baseline: 200 shares @ 9.00
+    repo.create_position_lot(
+        account.id,
+        "000001",
+        date(2026, 7, 1),
+        original_quantity=200,
+        remaining_quantity=200,
+        cost_price=Decimal("9.00"),
+        source="imported",
+    )
+    repo.upsert_position(
+        account.id,
+        "000001",
+        total_quantity=200,
+        frozen_quantity=0,
+        cost_amount=Decimal("1800.0000"),
+        source="imported",
+    )
+    # Trade buy on same symbol: 100 shares @ 10.00 — mutates aggregate position
+    repo.create_position_lot(
+        account.id,
+        "000001",
+        date(2026, 7, 19),
+        original_quantity=100,
+        remaining_quantity=100,
+        cost_price=Decimal("10.00"),
+        source="trade",
+    )
+    repo.upsert_position(
+        account.id,
+        "000001",
+        total_quantity=300,
+        frozen_quantity=0,
+        cost_amount=Decimal("2800.0000"),
+        source="trade",
+    )
+    sqlite_session.commit()
+
+    repo.clear_account_rebuild_state(account.id)
+
+    # Trade lot deleted; imported lot reset to original_quantity
+    lots = repo.get_lots(account.id, "000001")
+    assert len(lots) == 1
+    assert lots[0].source == "imported"
+    assert lots[0].remaining_quantity == 200
+    # Position rebuilt from imported lot only
+    positions = repo.get_positions(account.id)
+    assert len(positions) == 1
+    assert positions[0].symbol == "000001"
+    assert positions[0].source == "imported"
+    assert positions[0].total_quantity == 200
+    assert positions[0].cost_amount == Decimal("1800.0000")
+
+
+def test_reset_orders_for_replay_resets_replayable_statuses(sqlite_session):
+    """Orders with ACCEPTED, FILLED, PARTIALLY_FILLED, NEW statuses get reset."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("demo", Decimal("100000"))
+
+    # Create orders with various replayable statuses and rejection info set
+    statuses = [
+        OrderStatus.ACCEPTED,
+        OrderStatus.FILLED,
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.NEW,
+    ]
+    orders = {}
+    for i, status in enumerate(statuses):
+        orders[status] = repo.create_order(
+            account.id,
+            f"00000{i}",
+            OrderSide.BUY,
+            100,
+            Decimal("10.00"),
+            date(2026, 7, 19),
+            status,
+            frozen_cash=Decimal("1005.0000"),
+            rejection_code="REJ001" if status != OrderStatus.ACCEPTED else None,
+            rejection_reason="some reason" if status != OrderStatus.ACCEPTED else None,
+        )
+        # Set filled_quantity via raw update since create_order doesn't expose it
+        if status in (OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED):
+            orders[status].filled_quantity = 50
+    sqlite_session.commit()
+
+    repo.reset_orders_for_replay(account.id)
+
+    for status, order in orders.items():
+        reloaded = repo.get_order(order.id)
+        assert reloaded.status == OrderStatus.ACCEPTED.value, f"{status} should reset to ACCEPTED"
+        assert reloaded.filled_quantity == 0, f"{status} filled_quantity should be 0"
+        assert reloaded.rejection_code is None, f"{status} rejection_code should be None"
+        assert reloaded.rejection_reason is None, f"{status} rejection_reason should be None"
+
+
+def test_reset_orders_for_replay_preserves_canceled_rejected(sqlite_session):
+    """Orders with CANCELLED or REJECTED status remain unchanged."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("demo", Decimal("100000"))
+
+    rejected = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 7, 19),
+        OrderStatus.REJECTED,
+        frozen_cash=Decimal("0"),
+        rejection_code="BAD_SYMBOL",
+        rejection_reason="unknown symbol",
+    )
+    rejected.filled_quantity = 0
+    cancelled = repo.create_order(
+        account.id,
+        "000002",
+        OrderSide.SELL,
+        50,
+        Decimal("20.00"),
+        date(2026, 7, 20),
+        OrderStatus.CANCELLED,
+        frozen_cash=Decimal("0"),
+    )
+    sqlite_session.commit()
+
+    repo.reset_orders_for_replay(account.id)
+
+    reloaded_rejected = repo.get_order(rejected.id)
+    assert reloaded_rejected.status == OrderStatus.REJECTED.value
+    assert reloaded_rejected.rejection_code == "BAD_SYMBOL"
+    assert reloaded_rejected.rejection_reason == "unknown symbol"
+
+    reloaded_cancelled = repo.get_order(cancelled.id)
+    assert reloaded_cancelled.status == OrderStatus.CANCELLED.value
+    assert reloaded_cancelled.rejection_code is None
+    assert reloaded_cancelled.rejection_reason is None
+
+
+def test_list_order_trade_dates_returns_sorted_distinct_dates(sqlite_session):
+    """list_order_trade_dates returns distinct trade_dates sorted ascending."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("demo", Decimal("100000"))
+
+    # Create orders with various trade dates including duplicates
+    dates = [date(2026, 7, 21), date(2026, 7, 19), date(2026, 7, 20), date(2026, 7, 19), date(2026, 7, 22)]
+    for i, d in enumerate(dates):
+        repo.create_order(
+            account.id,
+            f"00000{i}",
+            OrderSide.BUY,
+            100,
+            Decimal("10.00"),
+            d,
+            OrderStatus.ACCEPTED,
+            frozen_cash=Decimal("1005.0000"),
+        )
+    sqlite_session.commit()
+
+    result = repo.list_order_trade_dates(account.id)
+
+    assert result == [date(2026, 7, 19), date(2026, 7, 20), date(2026, 7, 21), date(2026, 7, 22)]

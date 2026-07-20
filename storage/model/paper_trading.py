@@ -67,6 +67,7 @@ class PaperPosition(Base):
     frozen_quantity = Column(Integer, nullable=False, server_default=text("0"))
     cost_amount = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
     realized_pnl = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    source = Column(String(20), nullable=False, server_default="trade")
 
 
 class PaperPositionLot(Base):
@@ -79,6 +80,7 @@ class PaperPositionLot(Base):
     original_quantity = Column(Integer, nullable=False)
     remaining_quantity = Column(Integer, nullable=False)
     cost_price = Column(Numeric(20, 4), nullable=False)
+    source = Column(String(20), nullable=False, server_default="trade")
 
 
 class PaperOrder(Base):

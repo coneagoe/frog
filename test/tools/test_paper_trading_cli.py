@@ -125,6 +125,7 @@ def _mock_client(**kwargs) -> MagicMock:
             "validity_reason": None,
             "validity_checked_at": None,
         }
+        client.delete_order.return_value = {"deleted": True, "order_id": 123}
         client.cancel_order.return_value = {
             "id": 10,
             "account_id": 1,
@@ -1035,6 +1036,34 @@ class TestOrderValidityChecks:
     def test_validity_checks_missing_args(self):
         exit_code = main(["order", "validity-checks", "--account-id", "1"])
         assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+
+class TestOrderDelete:
+    def test_delete_order_calls_client(self):
+        client = _mock_client()
+        result = main(["order", "delete", "--order-id", "123"], client=client)
+        assert result == EXIT_CODES["OK"]
+        client.delete_order.assert_called_once_with(order_id=123)
+
+    def test_delete_order_json(self, capsys):
+        client = _mock_client()
+        exit_code = main(["--json", "order", "delete", "--order-id", "123"], client=client)
+        assert exit_code == EXIT_CODES["OK"]
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["deleted"] is True
+        assert payload["order_id"] == 123
+
+    def test_delete_order_text(self, capsys):
+        client = _mock_client()
+        exit_code = main(["order", "delete", "--order-id", "123"], client=client)
+        assert exit_code == EXIT_CODES["OK"]
+        out = capsys.readouterr().out
+        assert "deleted" in out.lower()
+        assert "123" in out
+
+    def test_delete_order_missing_order_id(self):
+        result = main(["order", "delete"])
+        assert result == EXIT_CODES["VALIDATION_ERROR"]
 
 
 class TestOrderUpdateComment:
