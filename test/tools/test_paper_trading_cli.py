@@ -616,6 +616,224 @@ class TestAccountUpdateFee:
         client.update_account_fees.assert_not_called()
 
 
+class TestAccountDeposit:
+    def test_account_deposit_command_calls_client(self, capsys):
+        client = _mock_client()
+        client.deposit_cash.return_value = {
+            "account_id": 1,
+            "cash_available": "125000.0000",
+            "net_asset_value": "1.000000",
+            "share_count": "125000.000000",
+            "ledger": {
+                "id": 2,
+                "event_type": "deposit",
+                "amount": "25000.0000",
+                "share_delta": "25000.000000",
+            },
+        }
+        with patch("tools.paper_trading_cli.PaperTradingApiClient", return_value=client):
+            code = main(
+                [
+                    "--token",
+                    "secret",
+                    "account",
+                    "deposit",
+                    "--account-id",
+                    "1",
+                    "--amount",
+                    "25000",
+                    "--trade-date",
+                    "2026-07-20",
+                    "--note",
+                    "add cash",
+                ]
+            )
+        assert code == EXIT_CODES["OK"]
+        client.deposit_cash.assert_called_once_with(1, Decimal("25000"), "2026-07-20", "add cash")
+        assert "Cash Available" in capsys.readouterr().out
+
+    def test_account_deposit_json_output(self, capsys):
+        client = _mock_client()
+        client.deposit_cash.return_value = {
+            "account_id": 1,
+            "cash_available": "125000.0000",
+            "net_asset_value": "1.000000",
+            "share_count": "125000.000000",
+            "ledger": {
+                "id": 2,
+                "event_type": "deposit",
+                "amount": "25000.0000",
+                "share_delta": "25000.000000",
+            },
+        }
+        with patch("tools.paper_trading_cli.PaperTradingApiClient", return_value=client):
+            code = main(
+                [
+                    "--json",
+                    "--token",
+                    "secret",
+                    "account",
+                    "deposit",
+                    "--account-id",
+                    "1",
+                    "--amount",
+                    "25000",
+                    "--trade-date",
+                    "2026-07-20",
+                    "--note",
+                    "add cash",
+                ]
+            )
+        assert code == EXIT_CODES["OK"]
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["cash_available"] == "125000.0000"
+
+    def test_account_deposit_missing_account_id_is_validation_error(self):
+        code = main(["--token", "secret", "account", "deposit", "--amount", "25000", "--trade-date", "2026-07-20"])
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_account_deposit_missing_amount_is_validation_error(self):
+        code = main(["--token", "secret", "account", "deposit", "--account-id", "1", "--trade-date", "2026-07-20"])
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_account_deposit_missing_trade_date_is_validation_error(self):
+        code = main(["--token", "secret", "account", "deposit", "--account-id", "1", "--amount", "25000"])
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_account_deposit_bad_amount_is_validation_error(self):
+        code = main(
+            [
+                "--token",
+                "secret",
+                "account",
+                "deposit",
+                "--account-id",
+                "1",
+                "--amount",
+                "not-a-number",
+                "--trade-date",
+                "2026-07-20",
+            ]
+        )
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_account_deposit_bad_trade_date_is_validation_error(self, capsys):
+        client = _mock_client()
+        code = main(
+            [
+                "--token",
+                "secret",
+                "account",
+                "deposit",
+                "--account-id",
+                "1",
+                "--amount",
+                "25000",
+                "--trade-date",
+                "bad-date",
+            ],
+            client=client,
+        )
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+        client.deposit_cash.assert_not_called()
+
+
+class TestAccountWithdraw:
+    def test_account_withdraw_command_calls_client(self):
+        client = _mock_client()
+        client.withdraw_cash.return_value = {
+            "account_id": 1,
+            "cash_available": "95000.0000",
+            "net_asset_value": "1.000000",
+            "share_count": "95000.000000",
+            "ledger": {
+                "id": 2,
+                "event_type": "withdrawal",
+                "amount": "-5000.0000",
+                "share_delta": "-5000.000000",
+            },
+        }
+        with patch("tools.paper_trading_cli.PaperTradingApiClient", return_value=client):
+            code = main(
+                [
+                    "--token",
+                    "secret",
+                    "account",
+                    "withdraw",
+                    "--account-id",
+                    "1",
+                    "--amount",
+                    "5000",
+                    "--trade-date",
+                    "2026-07-20",
+                ]
+            )
+        assert code == EXIT_CODES["OK"]
+        client.withdraw_cash.assert_called_once_with(1, Decimal("5000"), "2026-07-20", None)
+
+    def test_account_withdraw_json_output(self, capsys):
+        client = _mock_client()
+        client.withdraw_cash.return_value = {
+            "account_id": 1,
+            "cash_available": "95000.0000",
+            "net_asset_value": "1.000000",
+            "share_count": "95000.000000",
+            "ledger": {
+                "id": 2,
+                "event_type": "withdrawal",
+                "amount": "-5000.0000",
+                "share_delta": "-5000.000000",
+            },
+        }
+        with patch("tools.paper_trading_cli.PaperTradingApiClient", return_value=client):
+            code = main(
+                [
+                    "--json",
+                    "--token",
+                    "secret",
+                    "account",
+                    "withdraw",
+                    "--account-id",
+                    "1",
+                    "--amount",
+                    "5000",
+                    "--trade-date",
+                    "2026-07-20",
+                ]
+            )
+        assert code == EXIT_CODES["OK"]
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["cash_available"] == "95000.0000"
+
+    def test_account_withdraw_missing_account_id_is_validation_error(self):
+        code = main(["--token", "secret", "account", "withdraw", "--amount", "5000", "--trade-date", "2026-07-20"])
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_account_withdraw_missing_amount_is_validation_error(self):
+        code = main(["--token", "secret", "account", "withdraw", "--account-id", "1", "--trade-date", "2026-07-20"])
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+
+    def test_account_withdraw_bad_trade_date_is_validation_error(self, capsys):
+        client = _mock_client()
+        code = main(
+            [
+                "--token",
+                "secret",
+                "account",
+                "withdraw",
+                "--account-id",
+                "1",
+                "--amount",
+                "5000",
+                "--trade-date",
+                "bad-date",
+            ],
+            client=client,
+        )
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+        client.withdraw_cash.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Order commands
 # ---------------------------------------------------------------------------
