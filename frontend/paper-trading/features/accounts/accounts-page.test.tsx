@@ -348,6 +348,20 @@ describe("AccountsPage", () => {
     expect(container.querySelectorAll(".table-wrap.table-wrap--compact")).toHaveLength(2);
   });
 
+  it("renders cash ledger NAV and share delta columns", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([
+      { id: 1, account_id: 1, event_type: "withdrawal", amount: "-5000.0000", trade_date: "2026-07-20", net_asset_value: "1.250000", share_delta: "-4000.000000", note: "cash out" }
+    ]);
+
+    render(<AccountsPage />);
+
+    expect(await screen.findByText("Withdrawal")).toBeInTheDocument();
+    expect(screen.getByText("1.250000")).toBeInTheDocument();
+    expect(screen.getByText("-4000.000000")).toBeInTheDocument();
+  });
+
   it("switches positions and cash ledger when selecting a different account", async () => {
     const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);

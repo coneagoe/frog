@@ -39,7 +39,10 @@ export type OverviewAnalytics = {
   market_value: string | null;
   realized_pnl: string | null;
   unrealized_pnl: string | null;
+  net_asset_value: string | null;
+  share_count: string | null;
   total_return: MetricValue;
+  simple_asset_return: MetricValue | null;
 };
 
 export type ExecutionAnalytics = {
@@ -158,6 +161,11 @@ export type Snapshot = {
   total_assets: string;
   realized_pnl: string;
   unrealized_pnl: string;
+  net_asset_value: string | null;
+  share_count: string | null;
+  cumulative_deposit: string | null;
+  cumulative_withdrawal: string | null;
+  net_cash_flow: string | null;
   position_count: number;
   order_count: number;
   trade_count: number;

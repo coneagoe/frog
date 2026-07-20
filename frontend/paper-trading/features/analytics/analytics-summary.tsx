@@ -13,13 +13,10 @@ export function MetricValueText({ metric, percent = false }: { metric: MetricVal
 export function AnalyticsSummary({ analytics, snapshot }: { analytics: AnalyticsResponse | null; snapshot: Snapshot | null }) {
   const overview = analytics?.overview;
   const cards = [
-    ["Total Assets", <MoneyText key="total-assets" value={overview?.total_assets ?? snapshot?.total_assets} />],
-    ["Cash Available", <MoneyText key="cash-available" value={overview?.cash_available ?? snapshot?.cash_available} />],
-    ["Cash Frozen", <MoneyText key="cash-frozen" value={snapshot?.cash_frozen} />],
-    ["Market Value", <MoneyText key="market-value" value={overview?.market_value ?? snapshot?.market_value} />],
-    ["Realized PnL", <MoneyText key="realized-pnl" value={overview?.realized_pnl ?? snapshot?.realized_pnl} />],
-    ["Unrealized PnL", <MoneyText key="unrealized-pnl" value={overview?.unrealized_pnl ?? snapshot?.unrealized_pnl} />],
-    ["Total Return", <MetricValueText key="total-return" metric={overview?.total_return} percent />]
+    ["Unit NAV", overview?.net_asset_value ?? snapshot?.net_asset_value ?? "-"],
+    ["Share Count", overview?.share_count ?? snapshot?.share_count ?? "-"],
+    ["NAV Return", <MetricValueText key="nav-return" metric={overview?.total_return} percent />],
+    ["Simple Asset Return", <MetricValueText key="simple-return" metric={overview?.simple_asset_return} percent />]
   ] as const;
 
   return (
