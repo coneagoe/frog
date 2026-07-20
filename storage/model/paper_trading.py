@@ -33,6 +33,10 @@ class PaperAccount(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False, unique=True)
     initial_cash = Column(Numeric(20, 4), nullable=False)
+    share_count = Column(Numeric(20, 6), nullable=False, server_default=text("0"))
+    net_asset_value = Column(Numeric(20, 6), nullable=False, server_default=text("1"))
+    cumulative_deposit = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    cumulative_withdrawal = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
     fee_preset = Column(String(30), nullable=False, server_default="a_share")
     commission_rate = Column(Numeric(20, 8), nullable=False, server_default=text("0.0003"))
     min_commission = Column(Numeric(20, 4), nullable=False, server_default=text("5.00"))
@@ -52,6 +56,9 @@ class PaperCashLedger(Base):
     amount = Column(Numeric(20, 4), nullable=False)
     order_id = Column(Integer, nullable=True, index=True)
     trade_id = Column(Integer, nullable=True, index=True)
+    trade_date = Column(Date, nullable=True, index=True)
+    net_asset_value = Column(Numeric(20, 6), nullable=True)
+    share_delta = Column(Numeric(20, 6), nullable=True)
     occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     note = Column(Text, nullable=True)
 
@@ -186,6 +193,11 @@ class PaperAccountSnapshot(Base):
     position_count = Column(Integer, nullable=False)
     order_count = Column(Integer, nullable=False)
     trade_count = Column(Integer, nullable=False)
+    net_asset_value = Column(Numeric(20, 6), nullable=True)
+    share_count = Column(Numeric(20, 6), nullable=True)
+    cumulative_deposit = Column(Numeric(20, 4), nullable=True)
+    cumulative_withdrawal = Column(Numeric(20, 4), nullable=True)
+    net_cash_flow = Column(Numeric(20, 4), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

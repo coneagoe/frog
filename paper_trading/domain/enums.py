@@ -22,6 +22,7 @@ class OrderStatus(StrEnum):
 
 class CashEventType(StrEnum):
     DEPOSIT = "deposit"
+    WITHDRAWAL = "withdrawal"
     FREEZE = "freeze"
     RELEASE = "release"
     TRADE = "trade"
