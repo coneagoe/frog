@@ -112,6 +112,8 @@ from .model import (
     tb_name_ingredient_500,
     tb_name_paper_accounts,
     tb_name_paper_orders,
+    tb_name_paper_position_lots,
+    tb_name_paper_positions,
     tb_name_paper_trades,
     tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
@@ -2356,6 +2358,15 @@ class StorageDb:
             if "comment" not in trade_columns:
                 with self.engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE {tb_name_paper_trades} ADD COLUMN comment TEXT"))
+
+        # Add source marker columns to positions and lots tables.
+        source_ddl = "VARCHAR(20) NOT NULL DEFAULT 'trade'"
+        for tb_name in (tb_name_paper_positions, tb_name_paper_position_lots):
+            if inspect(self.engine).has_table(tb_name):
+                cols = {c["name"] for c in inspect(self.engine).get_columns(tb_name)}
+                if "source" not in cols:
+                    with self.engine.begin() as conn:
+                        conn.execute(text(f"ALTER TABLE {tb_name} ADD COLUMN source {source_ddl}"))
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:

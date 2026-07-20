@@ -18,6 +18,8 @@ export function PositionTable({ density, positions }: { density?: "default" | "c
 export function OrderTable({
   orders,
   onCancel,
+  onDelete,
+  deletingOrderId,
   editingOrderId,
   editingValue,
   onEditStart,
@@ -27,6 +29,8 @@ export function OrderTable({
 }: {
   orders: Order[];
   onCancel: (orderId: number) => void;
+  onDelete?: (orderId: number) => void;
+  deletingOrderId?: number | null;
   editingOrderId?: number | null;
   editingValue?: string;
   onEditStart?: (orderId: number) => void;
@@ -78,6 +82,16 @@ export function OrderTable({
               ? <button className="button button--secondary" onClick={() => onCancel(row.id)} type="button">Cancel</button>
               : null}
             {canEdit ? <button className="button button--secondary" onClick={() => onEditStart?.(row.id)} type="button">Edit</button> : null}
+            {onDelete ? (
+              <button
+                className="button button--secondary"
+                disabled={deletingOrderId === row.id}
+                onClick={() => onDelete(row.id)}
+                type="button"
+              >
+                {deletingOrderId === row.id ? "Deleting..." : "Delete"}
+              </button>
+            ) : null}
           </>
         );
       }

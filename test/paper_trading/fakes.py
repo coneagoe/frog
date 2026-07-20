@@ -1,9 +1,11 @@
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 import pandas as pd
 
 from common.const import COL_DATE
+from paper_trading.storage.market_data import DailyBar
 
 
 class FakeHistoryStorage:
@@ -35,3 +37,33 @@ class FakeTradeCalendar:
             if candidate > trade_date:
                 return candidate
         return trade_date
+
+
+class FakeMarketDataProvider:
+    """Market data provider that makes all orders match by default.
+
+    The returned DailyBar has a wide price range (low=1, high=100) so every
+    limit price falls within range.  Override by passing explicit bars.
+    """
+
+    def __init__(self, bars: dict[tuple[str, date], DailyBar] | None = None):
+        self._bars = bars or {}
+
+    def is_trade_date(self, trade_date: date) -> bool:
+        return True
+
+    def next_trade_date(self, trade_date: date) -> date:
+        return trade_date
+
+    def get_daily_bar(self, symbol: str, trade_date: date) -> DailyBar:
+        key = (symbol, trade_date)
+        if key in self._bars:
+            return self._bars[key]
+        return DailyBar(
+            symbol=symbol,
+            trade_date=trade_date,
+            open=Decimal("10"),
+            high=Decimal("100"),
+            low=Decimal("1"),
+            close=Decimal("50"),
+        )

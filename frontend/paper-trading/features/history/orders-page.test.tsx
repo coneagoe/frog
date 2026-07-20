@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cancelOrder, listAccounts, listOrders, updateOrderComment } from "@/lib/api-client";
+import { cancelOrder, deleteOrder, listAccounts, listOrders, updateOrderComment } from "@/lib/api-client";
 import { OrdersPage } from "./orders-page";
 
 const mockSearchParams = vi.hoisted(() => new URLSearchParams());
@@ -13,12 +13,14 @@ vi.mock("@/lib/api-client", () => ({
   listAccounts: vi.fn(),
   listOrders: vi.fn(),
   cancelOrder: vi.fn(),
+  deleteOrder: vi.fn(),
   updateOrderComment: vi.fn()
 }));
 
 const listAccountsMock = vi.mocked(listAccounts);
 const listOrdersMock = vi.mocked(listOrders);
 const cancelOrderMock = vi.mocked(cancelOrder);
+const deleteOrderMock = vi.mocked(deleteOrder);
 const updateOrderCommentMock = vi.mocked(updateOrderComment);
 
 const mockAccount = { id: 1, name: "demo", initial_cash: "100000.00", status: "active", base_currency: "CNY" };
@@ -310,6 +312,63 @@ describe("OrdersPage", () => {
     // Should remain in edit mode on error
     expect(screen.getByDisplayValue("new value")).toBeInTheDocument();
     expect(screen.getByText("Cancel")).toBeInTheDocument();
+  });
+
+  it("does not delete an order when confirmation is cancelled", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([mockOrder]);
+
+    render(<OrdersPage />);
+
+    await screen.findByText("AAPL");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(deleteOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the exact confirmation message when deleting an order", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([mockOrder]);
+
+    render(<OrdersPage />);
+
+    await screen.findByText("AAPL");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Delete this order? Filled trades, cash ledger, positions, and snapshots for this paper account will be recalculated."
+    );
+  });
+
+  it("deletes an order and reloads orders after confirmation", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([mockOrder]);
+    deleteOrderMock.mockResolvedValue(undefined);
+
+    render(<OrdersPage />);
+
+    await screen.findByText("AAPL");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(deleteOrderMock).toHaveBeenCalledWith(42);
+    await waitFor(() => expect(listOrdersMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("shows an error when deleting an order fails", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue([mockOrder]);
+    deleteOrderMock.mockRejectedValue(new Error("Failed to delete order"));
+
+    render(<OrdersPage />);
+
+    await screen.findByText("AAPL");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Failed to delete order");
   });
 
   it("does not overwrite orders with stale cancel refresh after account switch", async () => {
