@@ -55,6 +55,8 @@ class PaperTradingRepository:
         )
         preset_name = fee_preset or DEFAULT_FEE_PRESET
         preset = get_fee_preset(preset_name)
+        initial_nav = Decimal("1.000000")
+        initial_shares = Decimal(initial_cash).quantize(Decimal("0.000001"))
         account = PaperAccount(
             name=name,
             initial_cash=initial_cash,
@@ -63,10 +65,21 @@ class PaperTradingRepository:
             min_commission=min_commission if min_commission is not None else preset.min_commission,
             stamp_duty_rate=stamp_duty_rate if stamp_duty_rate is not None else preset.stamp_duty_rate,
             transfer_fee_rate=transfer_fee_rate if transfer_fee_rate is not None else preset.transfer_fee_rate,
+            share_count=initial_shares,
+            net_asset_value=initial_nav,
+            cumulative_deposit=Decimal(initial_cash).quantize(Decimal("0.0001")),
+            cumulative_withdrawal=Decimal("0.0000"),
         )
         self.session.add(account)
         self.session.flush()
-        self.add_cash_event(account.id, CashEventType.DEPOSIT, initial_cash, note="initial_cash")
+        self.add_cash_event(
+            account.id,
+            CashEventType.DEPOSIT,
+            Decimal(initial_cash).quantize(Decimal("0.0001")),
+            net_asset_value=initial_nav,
+            share_delta=initial_shares,
+            note="initial_cash",
+        )
         return account
 
     def get_account(self, account_id: int) -> PaperAccount | None:
@@ -149,6 +162,9 @@ class PaperTradingRepository:
         order_id: int | None = None,
         trade_id: int | None = None,
         note: str | None = None,
+        trade_date: date | None = None,
+        net_asset_value: Decimal | None = None,
+        share_delta: Decimal | None = None,
     ) -> PaperCashLedger:
         event = PaperCashLedger(
             account_id=account_id,
@@ -156,11 +172,30 @@ class PaperTradingRepository:
             amount=amount,
             order_id=order_id,
             trade_id=trade_id,
+            trade_date=trade_date,
+            net_asset_value=net_asset_value,
+            share_delta=share_delta,
             note=note,
         )
         self.session.add(event)
         self.session.flush()
         return event
+
+    def update_account_nav_state(
+        self,
+        account: PaperAccount,
+        *,
+        share_count: Decimal,
+        net_asset_value: Decimal,
+        cumulative_deposit: Decimal,
+        cumulative_withdrawal: Decimal,
+    ) -> PaperAccount:
+        account.share_count = share_count.quantize(Decimal("0.000001"))
+        account.net_asset_value = net_asset_value.quantize(Decimal("0.000001"))
+        account.cumulative_deposit = cumulative_deposit.quantize(Decimal("0.0001"))
+        account.cumulative_withdrawal = cumulative_withdrawal.quantize(Decimal("0.0001"))
+        self.session.flush()
+        return account
 
     def get_cash_available(self, account_id: int) -> Decimal:
         total = (

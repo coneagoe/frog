@@ -11,6 +11,42 @@ from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
 
+def test_create_account_initializes_nav_share_state(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    account = repo.create_account("nav-demo", Decimal("100000.00"))
+    ledger = repo.list_cash_ledger(account.id)
+
+    assert account.net_asset_value == Decimal("1.000000")
+    assert account.share_count == Decimal("100000.000000")
+    assert account.cumulative_deposit == Decimal("100000.0000")
+    assert account.cumulative_withdrawal == Decimal("0.0000")
+    assert ledger[0].event_type == "deposit"
+    assert ledger[0].net_asset_value == Decimal("1.000000")
+    assert ledger[0].share_delta == Decimal("100000.000000")
+
+
+def test_add_cash_event_persists_nav_share_fields(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("cash-event-demo", Decimal("100000.00"))
+
+    event = repo.add_cash_event(
+        account.id,
+        CashEventType.WITHDRAWAL,
+        Decimal("-5000.0000"),
+        trade_date=date(2026, 7, 20),
+        net_asset_value=Decimal("1.250000"),
+        share_delta=Decimal("-4000.000000"),
+        note="withdraw",
+    )
+
+    assert event.trade_date == date(2026, 7, 20)
+    assert event.net_asset_value == Decimal("1.250000")
+    assert event.share_delta == Decimal("-4000.000000")
+
+
 def test_create_account_deposits_initial_cash(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'repo.db'}")
     Base.metadata.create_all(engine)
