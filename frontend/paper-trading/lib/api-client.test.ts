@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiGet, createAccount, importPositions, updateOrderComment } from "./api-client";
+import { ApiError, apiGet, createAccount, depositCash, importPositions, updateOrderComment, withdrawCash } from "./api-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -98,5 +98,21 @@ describe("ApiError", () => {
       code: "HTTP_ERROR",
       message: "backend failed"
     });
+  });
+});
+
+describe("cash flow API", () => {
+  it("posts deposit cash payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ account_id: 7 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await depositCash(7, { amount: "10000", trade_date: "2026-07-20", note: "add cash" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/paper/accounts/7/cash/deposit", expect.objectContaining({ method: "POST", body: JSON.stringify({ amount: "10000", trade_date: "2026-07-20", note: "add cash" }) }));
+  });
+
+  it("posts withdraw cash payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ account_id: 7 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await withdrawCash(7, { amount: "5000", trade_date: "2026-07-20" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/paper/accounts/7/cash/withdraw", expect.objectContaining({ method: "POST", body: JSON.stringify({ amount: "5000", trade_date: "2026-07-20" }) }));
   });
 });

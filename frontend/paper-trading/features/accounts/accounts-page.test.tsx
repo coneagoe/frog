@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAccount, deleteAccount, importPositions, listAccounts, listCashLedger, listPositions, updateAccountFees } from "@/lib/api-client";
+import { createAccount, deleteAccount, depositCash, importPositions, listAccounts, listCashLedger, listPositions, updateAccountFees, withdrawCash } from "@/lib/api-client";
 import { AccountsPage } from "./accounts-page";
 
 // Return the same URLSearchParams instance across renders for stable references.
@@ -14,20 +14,24 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api-client", () => ({
   createAccount: vi.fn(),
   deleteAccount: vi.fn(),
+  depositCash: vi.fn(),
   importPositions: vi.fn(),
   listAccounts: vi.fn(),
   listPositions: vi.fn(),
   listCashLedger: vi.fn(),
-  updateAccountFees: vi.fn()
+  updateAccountFees: vi.fn(),
+  withdrawCash: vi.fn()
 }));
 
 const createAccountMock = vi.mocked(createAccount);
 const deleteAccountMock = vi.mocked(deleteAccount);
+const depositCashMock = vi.mocked(depositCash);
 const importPositionsMock = vi.mocked(importPositions);
 const listAccountsMock = vi.mocked(listAccounts);
 const listPositionsMock = vi.mocked(listPositions);
 const listCashLedgerMock = vi.mocked(listCashLedger);
 const updateAccountFeesMock = vi.mocked(updateAccountFees);
+const withdrawCashMock = vi.mocked(withdrawCash);
 
 const demoAccount = {
   id: 1,
@@ -39,7 +43,11 @@ const demoAccount = {
   commission_rate: "0.000300",
   min_commission: "5.00",
   stamp_duty_rate: "0.000500",
-  transfer_fee_rate: "0.000010"
+  transfer_fee_rate: "0.000010",
+  share_count: "100000.000000",
+  net_asset_value: "1.000000",
+  cumulative_deposit: "100000.0000",
+  cumulative_withdrawal: "0.0000"
 };
 
 describe("AccountsPage", () => {
@@ -716,5 +724,76 @@ describe("AccountsPage", () => {
       );
     });
     expect(dialog).toBeInTheDocument();
+  });
+
+  it("shows Deposit and Withdraw buttons on the selected account panel", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+
+    expect(await screen.findByText("Positions")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deposit" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Withdraw" })).toBeInTheDocument();
+  });
+
+  it("opens deposit modal from the Deposit button", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Deposit" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Deposit cash for demo" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Deposit" })).toBeInTheDocument();
+  });
+
+  it("opens withdraw modal from the Withdraw button", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([]);
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Withdraw" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Withdraw cash from demo" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Withdraw" })).toBeInTheDocument();
+  });
+
+  it("submits a deposit from the account page and refreshes", async () => {
+    const ledgerEntry = { id: 1, account_id: 1, event_type: "deposit", amount: "100000.0000", note: "Initial deposit", trade_date: null, net_asset_value: null, share_delta: null };
+
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    listCashLedgerMock.mockResolvedValue([ledgerEntry]);
+    depositCashMock.mockResolvedValue({
+      account_id: 1,
+      cash_available: "110000.0000",
+      net_asset_value: "1.000000",
+      share_count: "110000.000000",
+      ledger: { ...ledgerEntry, id: 2, amount: "10000.0000", note: "add", event_type: "deposit" }
+    });
+
+    render(<AccountsPage />);
+
+    await userEvent.click(await screen.findByRole("button", { name: "Deposit" }));
+    const dialog = screen.getByRole("dialog", { name: "Deposit cash for demo" });
+    await userEvent.type(within(dialog).getByLabelText("Amount"), "10000");
+    await userEvent.clear(within(dialog).getByLabelText("Trade date"));
+    await userEvent.type(within(dialog).getByLabelText("Trade date"), "2026-07-20");
+    await userEvent.type(within(dialog).getByLabelText("Note"), "add");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Deposit" }));
+
+    expect(depositCashMock).toHaveBeenCalledWith(1, { amount: "10000", trade_date: "2026-07-20", note: "add" });
+    await waitFor(() => {
+      expect(listAccountsMock).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.queryByRole("dialog", { name: "Deposit cash for demo" })).not.toBeInTheDocument();
   });
 });

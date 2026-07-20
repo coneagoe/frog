@@ -7,6 +7,7 @@ import { deleteAccount, listAccounts, listCashLedger, listPositions } from "@/li
 import type { Account, CashLedgerEntry, ImportPositionsResult, Position } from "@/lib/types";
 import { CashLedgerTable, PositionTable } from "../trading/trading-tables";
 import { AccountList } from "./account-list";
+import { CashFlowModal } from "./cash-flow-modal";
 import { CreateAccountForm } from "./create-account-form";
 import { EditAccountFeesModal } from "./edit-account-fees-modal";
 import { ImportPositionsModal } from "./import-positions-modal";
@@ -24,12 +25,14 @@ export function AccountsPage() {
   const [feeEditorOpen, setFeeEditorOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importSuccess, setImportSuccess] = useState<ImportPositionsResult | null>(null);
+  const [cashFlowMode, setCashFlowMode] = useState<"deposit" | "withdraw" | null>(null);
   const requestIdRef = useRef(0);
   const lastUrlParamRef = useRef<string | null>(null);
   const selectedAccountIdRef = useRef(selectedAccountId);
   selectedAccountIdRef.current = selectedAccountId;
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
+  const cashAvailable = cashLedger.reduce((sum, entry) => sum + Number(entry.amount), 0).toFixed(4);
 
   async function loadAccountDetails(accountId: number, clearExisting = false) {
     if (!accountId) {
@@ -246,6 +249,12 @@ export function AccountsPage() {
                 >
                   Import positions
                 </button>
+                <button className="button button--secondary" onClick={() => setCashFlowMode("deposit")} type="button">
+                  Deposit
+                </button>
+                <button className="button button--secondary" onClick={() => setCashFlowMode("withdraw")} type="button">
+                  Withdraw
+                </button>
               </>
             ) : null}
           </div>
@@ -281,6 +290,19 @@ export function AccountsPage() {
         open={importModalOpen}
         onClose={() => setImportModalOpen(false)}
         onImported={handleImportComplete}
+      />
+      <CashFlowModal
+        account={selectedAccount}
+        cashAvailable={cashAvailable}
+        mode={cashFlowMode ?? "deposit"}
+        open={cashFlowMode !== null}
+        onClose={() => setCashFlowMode(null)}
+        onCompleted={async () => {
+          await refreshAccounts();
+          if (selectedAccountIdRef.current) {
+            await loadAccountDetails(selectedAccountIdRef.current, true);
+          }
+        }}
       />
     </section>
   );
