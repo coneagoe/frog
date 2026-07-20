@@ -68,6 +68,7 @@ class AccountService:
                 original_quantity=item.quantity,
                 remaining_quantity=item.quantity,
                 cost_price=item.cost_price,
+                source="imported",
             )
         # Aggregate positions per symbol (one position per symbol)
         from collections import defaultdict
@@ -85,4 +86,5 @@ class AccountService:
                 frozen_quantity=0,
                 cost_amount=total_cost[symbol],
                 realized_pnl=Decimal("0"),
+                source="imported",
             )

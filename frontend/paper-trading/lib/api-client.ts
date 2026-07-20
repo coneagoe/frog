@@ -72,6 +72,10 @@ export function cancelOrder(orderId: number): Promise<Order> {
   return apiRequest<Order>(`/orders/${orderId}/cancel`, { method: "POST" });
 }
 
+export function deleteOrder(orderId: number): Promise<void> {
+  return apiRequest<void>(`/orders/${orderId}`, { method: "DELETE" });
+}
+
 export function updateOrderComment(orderId: number, comment: string): Promise<Order> {
   return apiRequest<Order>(`/orders/${orderId}/comment`, { method: "PATCH", body: JSON.stringify({ comment }) });
 }
