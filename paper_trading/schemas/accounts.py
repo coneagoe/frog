@@ -52,6 +52,10 @@ class AccountResponse(BaseModel):
     transfer_fee_rate: Decimal
     status: str
     base_currency: str
+    share_count: Decimal
+    net_asset_value: Decimal
+    cumulative_deposit: Decimal
+    cumulative_withdrawal: Decimal
 
 
 class PositionResponse(BaseModel):
@@ -71,6 +75,9 @@ class CashLedgerResponse(BaseModel):
     account_id: int
     event_type: str
     amount: Decimal
+    trade_date: date | None = None
+    net_asset_value: Decimal | None = None
+    share_delta: Decimal | None = None
     note: str | None = None
 
 
@@ -106,3 +113,17 @@ class ImportPositionsRequest(BaseModel):
 class ImportPositionsResponse(BaseModel):
     imported_count: int
     lots_count: int
+
+
+class CashFlowRequest(BaseModel):
+    amount: Decimal = Field(gt=0)
+    trade_date: date
+    note: str | None = None
+
+
+class CashFlowResponse(BaseModel):
+    account_id: int
+    cash_available: Decimal
+    net_asset_value: Decimal
+    share_count: Decimal
+    ledger: CashLedgerResponse
