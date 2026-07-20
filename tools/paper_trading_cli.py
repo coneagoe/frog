@@ -181,6 +181,9 @@ class PaperTradingApiClient:
     def cancel_order(self, order_id: int) -> dict[str, Any]:
         return self._request("POST", f"/paper/orders/{order_id}/cancel")
 
+    def delete_order(self, order_id: int) -> None:
+        self._request("DELETE", f"/paper/orders/{order_id}")
+
     def update_order_comment(self, order_id: int, comment: str | None) -> dict[str, Any]:
         return self._request("PATCH", f"/paper/orders/{order_id}/comment", json={"comment": comment})
 
@@ -285,6 +288,8 @@ def _add_order_subparsers(subparsers: Any) -> None:
     p_uc = order_sub.add_parser("update-comment", help="Update order comment")
     p_uc.add_argument("--order-id", type=int, required=True)
     p_uc.add_argument("--comment", required=True)
+    p_delete = order_sub.add_parser("delete", help="Delete an order and rebuild account history")
+    p_delete.add_argument("--order-id", type=int, required=True)
 
 
 def _add_trade_subparsers(subparsers: Any) -> None:
@@ -515,6 +520,9 @@ def _handle_order(client: PaperTradingApiClient, args: argparse.Namespace) -> An
         return client.list_order_validity_checks(account_id=args.account_id, order_id=args.order_id)
     if cmd == "update-comment":
         return client.update_order_comment(order_id=args.order_id, comment=args.comment)
+    if cmd == "delete":
+        client.delete_order(order_id=args.order_id)
+        return {"deleted": True, "order_id": args.order_id}
     raise _ParserError(f"unknown order command: {cmd}")
 
 

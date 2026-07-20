@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { cancelOrder, listAccounts, listOrders, updateOrderComment } from "@/lib/api-client";
+import { cancelOrder, deleteOrder, listAccounts, listOrders, updateOrderComment } from "@/lib/api-client";
 import type { Account, Order } from "@/lib/types";
 import { OrderTable } from "@/features/trading/trading-tables";
 
@@ -16,6 +16,7 @@ export function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<number | null>(null);
   const [editingValue, setEditingValue] = useState("");
+  const [deletingOrderId, setDeletingOrderId] = useState<number | null>(null);
   const requestIdRef = useRef(0);
 
   async function loadOrders(accountId: number) {
@@ -74,6 +75,29 @@ export function OrdersPage() {
       if (requestId === requestIdRef.current) {
         setError(err instanceof Error ? err.message : "Failed to cancel order");
       }
+    }
+  }
+
+  async function handleDelete(orderId: number) {
+    const confirmed = window.confirm(
+      "Delete this order? Filled trades, cash ledger, positions, and snapshots for this paper account will be recalculated."
+    );
+    if (!confirmed) return;
+
+    const requestId = ++requestIdRef.current;
+    setDeletingOrderId(orderId);
+    setError(null);
+    try {
+      await deleteOrder(orderId);
+      if (requestId === requestIdRef.current && selectedAccountId) {
+        await loadOrders(selectedAccountId);
+      }
+    } catch (err) {
+      if (requestId === requestIdRef.current) {
+        setError(err instanceof Error ? err.message : "Failed to delete order");
+      }
+    } finally {
+      setDeletingOrderId((current) => (current === orderId ? null : current));
     }
   }
 
@@ -137,6 +161,8 @@ export function OrdersPage() {
       <OrderTable
         orders={orders}
         onCancel={handleCancel}
+        onDelete={handleDelete}
+        deletingOrderId={deletingOrderId}
         editingOrderId={editingOrderId}
         editingValue={editingValue}
         onEditStart={handleEditStart}

@@ -62,6 +62,37 @@ class MatchingService:
             MatchingRunStatus.COMPLETED.value,
         )
 
+    def match_order(self, order: PaperOrder) -> str:
+        """Match a single accepted order.
+
+        Returns one of ``'filled'``, ``'skipped'``, ``'rejected'``, or
+        ``'failed'``.  Does NOT create a matching run record or generate a
+        snapshot — callers handle those.
+
+        Semantics follow :meth:`run`:
+        * ``'filled'``  — order was filled, status updated to FILLED.
+        * ``'rejected'`` — symbol suspended (calls _reject_order).
+        * ``'skipped'``  — price out of range; order stays ACCEPTED.
+        * ``'failed'``   — market data unavailable or fill error; order
+          stays ACCEPTED with no side effects (matching *failed* outcome).
+        """
+        try:
+            bar = self.market_data.get_daily_bar(order.symbol, order.trade_date)
+        except Exception:
+            return "failed"  # matches run() outer except → failed counter
+        if bar.suspended:
+            self._reject_order(order, "SUSPENDED_SYMBOL", "Symbol is suspended")
+            return "rejected"
+        try:
+            ensure_price_in_daily_range(Decimal(order.limit_price), bar.low, bar.high)
+        except Exception:
+            return "skipped"  # stays ACCEPTED
+        try:
+            self._fill_order(order)
+            return "filled"
+        except Exception:
+            return "failed"  # stays ACCEPTED (run() outer except → failed)
+
     def _reject_order(self, order: PaperOrder, code: str, reason: str) -> None:
         if Decimal(order.frozen_cash or 0) > 0:
             self.repo.add_cash_event(

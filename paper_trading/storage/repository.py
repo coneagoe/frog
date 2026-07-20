@@ -1,11 +1,12 @@
+from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from paper_trading.domain.enums import CashEventType, OrderSide, OrderStatus
+from paper_trading.domain.enums import REPLAY_REJECTION_MARKER, CashEventType, OrderSide, OrderStatus
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.storage.models import (
     PaperAccount,
@@ -327,10 +328,11 @@ class PaperTradingRepository:
         frozen_quantity: int,
         cost_amount: Decimal,
         realized_pnl: Decimal = Decimal("0"),
+        source: str = "trade",
     ) -> PaperPosition:
         position = self.get_position(account_id, symbol)
         if position is None:
-            position = PaperPosition(account_id=account_id, symbol=symbol)
+            position = PaperPosition(account_id=account_id, symbol=symbol, source=source)
             self.session.add(position)
         position.total_quantity = total_quantity
         position.frozen_quantity = frozen_quantity
@@ -347,6 +349,7 @@ class PaperTradingRepository:
         original_quantity: int,
         remaining_quantity: int,
         cost_price: Decimal,
+        source: str = "trade",
     ) -> PaperPositionLot:
         lot = PaperPositionLot(
             account_id=account_id,
@@ -355,6 +358,7 @@ class PaperTradingRepository:
             original_quantity=original_quantity,
             remaining_quantity=remaining_quantity,
             cost_price=cost_price,
+            source=source,
         )
         self.session.add(lot)
         self.session.flush()
@@ -546,3 +550,121 @@ class PaperTradingRepository:
         )
         self.session.flush()
         return int(deleted)
+
+    def delete_order(self, order_id: int) -> PaperOrder | None:
+        order = cast(PaperOrder | None, self.session.get(PaperOrder, order_id))
+        if order is None:
+            return None
+        self.session.delete(order)
+        return order
+
+    def clear_account_rebuild_state(self, account_id: int) -> None:
+        self.session.query(PaperTradeValidityCheck).filter(PaperTradeValidityCheck.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.query(PaperCashLedger).filter(
+            PaperCashLedger.account_id == account_id,
+            or_(PaperCashLedger.note.is_(None), PaperCashLedger.note != "initial_cash"),
+        ).delete(synchronize_session=False)
+        self.session.query(PaperPositionRoundTrip).filter(PaperPositionRoundTrip.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.query(PaperTrade).filter(PaperTrade.account_id == account_id).delete(synchronize_session=False)
+        self.session.query(PaperAccountSnapshot).filter(PaperAccountSnapshot.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        # Delete trade-derived lots; imported lots are the durable baseline.
+        self.session.query(PaperPositionLot).filter(
+            PaperPositionLot.account_id == account_id,
+            PaperPositionLot.source == "trade",
+        ).delete(synchronize_session=False)
+        # Reset imported lots to their original quantity (undo any sell reductions).
+        self.session.query(PaperPositionLot).filter(
+            PaperPositionLot.account_id == account_id,
+            PaperPositionLot.source == "imported",
+        ).update(
+            {PaperPositionLot.remaining_quantity: PaperPositionLot.original_quantity},
+            synchronize_session=False,
+        )
+        # Delete all positions (aggregate state must be rebuilt from imported lots).
+        self.session.query(PaperPosition).filter(PaperPosition.account_id == account_id).delete(
+            synchronize_session="fetch"
+        )
+        # Rebuild aggregate positions from surviving imported lots.
+        lots = (
+            self.session.query(PaperPositionLot)
+            .filter(
+                PaperPositionLot.account_id == account_id,
+                PaperPositionLot.source == "imported",
+            )
+            .all()
+        )
+        total_qty: dict[str, int] = defaultdict(int)
+        total_cost: dict[str, Decimal] = defaultdict(Decimal)
+        for lot in lots:
+            total_qty[lot.symbol] += int(lot.remaining_quantity)
+            total_cost[lot.symbol] += Decimal(lot.cost_price) * int(lot.remaining_quantity)
+        for symbol in total_qty:
+            position = PaperPosition(
+                account_id=account_id,
+                symbol=symbol,
+                total_quantity=total_qty[symbol],
+                frozen_quantity=0,
+                cost_amount=total_cost[symbol].quantize(Decimal("0.0001")),
+                realized_pnl=Decimal("0"),
+                source="imported",
+            )
+            self.session.add(position)
+        self.session.flush()
+
+    def reset_orders_for_replay(self, account_id: int) -> None:
+        # Reset orders that can be replayed (active statuses).
+        self.session.query(PaperOrder).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.status.in_(
+                [
+                    OrderStatus.ACCEPTED.value,
+                    OrderStatus.FILLED.value,
+                    OrderStatus.PARTIALLY_FILLED.value,
+                    OrderStatus.NEW.value,
+                ]
+            ),
+        ).update(
+            {
+                PaperOrder.status: OrderStatus.ACCEPTED.value,
+                PaperOrder.filled_quantity: 0,
+                PaperOrder.rejection_code: None,
+                PaperOrder.rejection_reason: None,
+            },
+            synchronize_session=False,
+        )
+        # Also reset REJECTED orders whose rejection was induced by a prior
+        # replay (carry the replay marker).  These rejections may become
+        # resolvable after a later delete and should be reconsidered.
+        self.session.query(PaperOrder).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.status == OrderStatus.REJECTED.value,
+            PaperOrder.rejection_reason.like(f"{REPLAY_REJECTION_MARKER}%"),
+        ).update(
+            {
+                PaperOrder.status: OrderStatus.ACCEPTED.value,
+                PaperOrder.filled_quantity: 0,
+                PaperOrder.rejection_code: None,
+                PaperOrder.rejection_reason: None,
+            },
+            synchronize_session=False,
+        )
+        self.session.flush()
+
+    def list_order_trade_dates(self, account_id: int) -> list[date]:
+        rows = (
+            self.session.query(PaperOrder.trade_date)
+            .filter(PaperOrder.account_id == account_id)
+            .distinct()
+            .order_by(PaperOrder.trade_date.asc())
+            .all()
+        )
+        return [row[0] for row in rows]

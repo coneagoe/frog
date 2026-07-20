@@ -39,3 +39,10 @@ class TradeValidityStatus(StrEnum):
     SUSPICIOUS = "suspicious"
     INVALID = "invalid"
     UNCHECKED = "unchecked"
+
+
+# Marker prefix for rejection reasons set by OrderDeleteService replay.
+# reset_orders_for_replay uses this to distinguish replay-induced rejections
+# (which may become resolvable after a later delete) from original/business
+# rejections (which should persist).
+REPLAY_REJECTION_MARKER = "[replay]"

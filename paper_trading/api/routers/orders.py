@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import (
@@ -15,6 +15,7 @@ from paper_trading.schemas.orders import (
     UpdateOrderCommentRequest,
 )
 from paper_trading.services.matching_service import MatchingService
+from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import MarketDataProvider
@@ -68,6 +69,20 @@ def cancel_order(order_id: int, session: Session = Depends(get_session)):
     order = OrderService(repo, get_market_data_provider()).cancel_order(order_id)
     session.commit()
     return order
+
+
+@router.delete("/orders/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_order(
+    order_id: int,
+    session: Session = Depends(get_session),
+    market_data: MarketDataProvider = Depends(get_market_data_provider),
+):
+    repo = PaperTradingRepository(session)
+    deleted = OrderDeleteService(repo, market_data).delete_order(order_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper order not found: {order_id}")
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/orders/{order_id}/comment", response_model=OrderResponse)

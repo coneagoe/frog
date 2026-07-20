@@ -63,7 +63,7 @@ Open `http://localhost:3000/accounts`. The frontend has separate workspaces for 
 
 - `Accounts`: create/delete accounts, select an account, and review its positions and cash ledger.
 - `Trade`: submit paper limit orders.
-- `Orders`: review historical orders and cancel cancellable orders.
+- `Orders`: review historical orders, cancel cancellable orders, and delete orders.
 - `Trades`: review historical executions.
 - `Analytics`: review snapshots, total assets, trades, and cash movements.
 
@@ -83,6 +83,7 @@ uv run tools/paper_trading_cli.py account create --name custom-fee --initial-cas
 uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-07-18 --comment "突破买入"
 uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment "回踩确认后买入"
 uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment ""
+uv run tools/paper_trading_cli.py order delete --order-id 123
 uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account-id 1
 ```
 
@@ -248,6 +249,21 @@ curl -X PATCH http://localhost:8000/paper/orders/1/comment \
 ```
 
 The order and its linked trades return `"comment": null` in API responses after clearing.
+
+### Delete an order
+
+Deleting an order hard-deletes the order. If the order had already filled, the paper trading backend recalculates the account's trades, cash ledger, positions, position lots, round trips, matching runs, validity checks, and snapshots from the remaining order history.
+
+```bash
+uv run tools/paper_trading_cli.py order delete --order-id 123
+```
+
+Raw API:
+
+```bash
+curl -X DELETE "$PAPER_TRADING_API_BASE_URL/paper/orders/123" \
+  -H "Authorization: Bearer $PAPER_TRADING_API_TOKEN"
+```
 
 ## Trade Validity Analysis
 
