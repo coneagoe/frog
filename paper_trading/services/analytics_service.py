@@ -81,7 +81,9 @@ class AnalyticsService:
             total_return = MetricValue(value=((latest_nav - first_nav) / first_nav).quantize(_QUANTIZE))
         simple_asset_return = MetricValue(value=None, reason="invalid_initial_cash")
         if initial_cash and initial_cash > 0:
-            simple_asset_return = MetricValue(value=((Decimal(latest.total_assets) - initial_cash) / initial_cash).quantize(_QUANTIZE))
+            simple_asset_return = MetricValue(
+                value=((Decimal(latest.total_assets) - initial_cash) / initial_cash).quantize(_QUANTIZE)
+            )
 
         return OverviewAnalytics(
             total_assets=Decimal(latest.total_assets).quantize(Decimal("0.0001")),
@@ -89,7 +91,9 @@ class AnalyticsService:
             market_value=Decimal(latest.market_value).quantize(Decimal("0.0001")),
             realized_pnl=Decimal(latest.realized_pnl).quantize(Decimal("0.0001")),
             unrealized_pnl=Decimal(latest.unrealized_pnl).quantize(Decimal("0.0001")),
-            net_asset_value=Decimal(latest.net_asset_value).quantize(_QUANTIZE) if latest.net_asset_value is not None else None,
+            net_asset_value=Decimal(latest.net_asset_value).quantize(_QUANTIZE)
+            if latest.net_asset_value is not None
+            else None,
             share_count=Decimal(latest.share_count).quantize(_QUANTIZE) if latest.share_count is not None else None,
             total_return=total_return,
             simple_asset_return=simple_asset_return,

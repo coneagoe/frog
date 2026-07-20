@@ -217,6 +217,19 @@ curl -X DELETE http://localhost:8000/paper/accounts/1 \
   -H "Authorization: Bearer change-me"
 ```
 
+## Deposits and Withdrawals
+
+Paper trading accounts support external cash flows through account-scoped deposit and withdrawal operations. Deposits add available cash and mint account shares at the current unit NAV. Withdrawals reduce available cash and redeem account shares at the current unit NAV. Withdrawals cannot exceed available cash and do not automatically sell positions or use frozen cash.
+
+Use these CLI commands:
+
+```bash
+uv run tools/paper_trading_cli.py account deposit --account-id 1 --amount 10000 --trade-date 2026-07-20 --note "add cash"
+uv run tools/paper_trading_cli.py account withdraw --account-id 1 --amount 5000 --trade-date 2026-07-20 --note "withdraw cash"
+```
+
+The matching and snapshot flow treats cash flows as pre-market effective on their `trade_date`. A cash flow changes account scale and share count but does not by itself change unit NAV.
+
 ## Create Limit Order
 
 ```bash
@@ -330,5 +343,7 @@ The response includes:
 - Execution: fill rate, rejection rate, and reject reason distribution.
 - Trade quality: full-position round-trip win rate, payoff ratio, profit factor, average win/loss, consecutive wins/losses, and holding days.
 - Risk: total return, max drawdown, current drawdown, and optional Sharpe, Sortino, and Calmar metrics.
+
+`total_return` now represents NAV return: latest unit NAV versus the first valid unit NAV. `simple_asset_return` is the old scale-sensitive reference metric based on total assets versus initial cash. Drawdown and risk-adjusted metrics use the NAV series so deposits and withdrawals do not appear as trading gains or losses.
 
 Round-trip metrics use full-position cycles. A cycle opens when an account's symbol quantity moves from zero to positive and closes when that symbol returns to zero. Partial exits update the open cycle but do not count as closed round trips.

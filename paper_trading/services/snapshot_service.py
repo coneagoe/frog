@@ -58,5 +58,7 @@ class SnapshotService:
             share_count=share_count,
             cumulative_deposit=Decimal(account.cumulative_deposit or 0).quantize(Decimal("0.0001")),
             cumulative_withdrawal=Decimal(account.cumulative_withdrawal or 0).quantize(Decimal("0.0001")),
-            net_cash_flow=(Decimal(account.cumulative_deposit or 0) - Decimal(account.cumulative_withdrawal or 0)).quantize(Decimal("0.0001")),
+            net_cash_flow=(
+                Decimal(account.cumulative_deposit or 0) - Decimal(account.cumulative_withdrawal or 0)
+            ).quantize(Decimal("0.0001")),
         )
