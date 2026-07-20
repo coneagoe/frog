@@ -211,6 +211,22 @@ class PaperTradingApiClient:
     def list_snapshots(self, account_id: int) -> list[dict[str, Any]]:
         return self._request("GET", f"/paper/accounts/{account_id}/snapshots")
 
+    def deposit_cash(
+        self, account_id: int, amount: Decimal, trade_date: str, note: str | None = None
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"amount": str(amount), "trade_date": trade_date}
+        if note is not None:
+            body["note"] = note
+        return self._request("POST", f"/paper/accounts/{account_id}/cash/deposit", json=body)
+
+    def withdraw_cash(
+        self, account_id: int, amount: Decimal, trade_date: str, note: str | None = None
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"amount": str(amount), "trade_date": trade_date}
+        if note is not None:
+            body["note"] = note
+        return self._request("POST", f"/paper/accounts/{account_id}/cash/withdraw", json=body)
+
     def import_positions(self, account_id: int, positions: list[dict[str, Any]]) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -256,6 +272,16 @@ def _add_account_subparsers(subparsers: Any) -> None:
     p_import.add_argument(
         "--file", required=True, help="Path to CSV (columns: symbol,quantity,cost_price,buy_trade_date)"
     )
+    p_deposit = acct_sub.add_parser("deposit", help="Deposit cash into an account")
+    p_deposit.add_argument("--account-id", type=int, required=True, help="Account ID")
+    p_deposit.add_argument("--amount", required=True, help="Positive cash amount")
+    p_deposit.add_argument("--trade-date", required=True, help="Effective date YYYY-MM-DD")
+    p_deposit.add_argument("--note", default=None, help="Optional note")
+    p_withdraw = acct_sub.add_parser("withdraw", help="Withdraw available cash from an account")
+    p_withdraw.add_argument("--account-id", type=int, required=True, help="Account ID")
+    p_withdraw.add_argument("--amount", required=True, help="Positive cash amount")
+    p_withdraw.add_argument("--trade-date", required=True, help="Effective date YYYY-MM-DD")
+    p_withdraw.add_argument("--note", default=None, help="Optional note")
     p_update = acct_sub.add_parser("update-fee", help="Update account fee fields")
     p_update.add_argument("--account-id", type=int, required=True, help="Account ID")
     p_update.add_argument("--commission-rate", default=None, help="Commission rate override")
@@ -419,6 +445,12 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
         return client.list_positions(account_id=args.account_id)
     if cmd == "cash-ledger":
         return client.list_cash_ledger(account_id=args.account_id)
+    if cmd == "deposit":
+        _validate_trade_date(args.trade_date)
+        return client.deposit_cash(args.account_id, _parse_decimal(args.amount, "amount"), args.trade_date, args.note)
+    if cmd == "withdraw":
+        _validate_trade_date(args.trade_date)
+        return client.withdraw_cash(args.account_id, _parse_decimal(args.amount, "amount"), args.trade_date, args.note)
     if cmd == "import-positions":
         return _handle_import_positions(client, args)
     if cmd == "update-fee":
