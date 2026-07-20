@@ -31,7 +31,10 @@ const analyticsPayload = {
     market_value: "15000.0000",
     realized_pnl: "6000.0000",
     unrealized_pnl: "500.0000",
-    total_return: { value: "0.060000", reason: null }
+    net_asset_value: "1.050000",
+    share_count: "1000",
+    total_return: { value: "0.060000", reason: null },
+    simple_asset_return: { value: "0.050000", reason: null }
   },
   activity_daily: [{ period: "2026-06-16", order_count: 3, trade_count: 2, filled_count: 2, rejected_count: 1 }],
   activity_weekly: [{ period: "2026-W25", order_count: 3, trade_count: 2, filled_count: 2, rejected_count: 1 }],
@@ -98,6 +101,15 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("Risk & Drawdown")).toBeInTheDocument();
     expect(screen.getByText("Insufficient Cash")).toBeInTheDocument();
     expect(screen.getByText("000001.SZ")).toBeInTheDocument();
+  });
+
+  it("renders NAV analytics fields", async () => {
+    render(<AnalyticsPage />);
+
+    expect(await screen.findByText("NAV Return")).toBeInTheDocument();
+    expect(screen.getByText("Unit NAV")).toBeInTheDocument();
+    expect(screen.getByText("Share Count")).toBeInTheDocument();
+    expect(screen.getByText("1.050000")).toBeInTheDocument();
   });
 
   it("shows insufficient data reasons for unavailable metrics", async () => {

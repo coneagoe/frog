@@ -115,11 +115,22 @@ export function TradeTable({ trades }: { trades: Trade[] }) {
   return <DataTable columns={columns} emptyTitle="No trades" getRowKey={(row) => row.id} rows={trades} />;
 }
 
+const cashEventLabels: Record<string, string> = {
+  deposit: "Deposit",
+  withdrawal: "Withdrawal",
+  freeze: "Freeze",
+  release: "Release",
+  trade: "Trade",
+  fee: "Fee"
+};
+
 export function CashLedgerTable({ density, entries }: { density?: "default" | "compact"; entries: CashLedgerEntry[] }) {
   const columns: Column<CashLedgerEntry>[] = [
-    { key: "id", header: "ID", render: (row) => row.id },
-    { key: "event", header: "Event", render: (row) => row.event_type },
+    { key: "event", header: "Event", render: (row) => cashEventLabels[row.event_type] ?? row.event_type },
+    { key: "date", header: "Date", render: (row) => row.trade_date ? formatDate(row.trade_date) : "-" },
     { key: "amount", header: "Amount", align: "right", render: (row) => <MoneyText value={row.amount} /> },
+    { key: "nav", header: "NAV", align: "right", render: (row) => row.net_asset_value ?? "-" },
+    { key: "shares", header: "Share Delta", align: "right", render: (row) => row.share_delta ?? "-" },
     { key: "note", header: "Note", render: (row) => row.note ?? "-" }
   ];
   return <DataTable columns={columns} density={density} emptyTitle="No cash ledger entries" getRowKey={(row) => row.id} rows={entries} />;
