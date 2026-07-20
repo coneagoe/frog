@@ -59,6 +59,41 @@ def test_generate_snapshot_values_positions_at_close(tmp_path):
     engine.dispose()
 
 
+def test_generate_snapshot_persists_nav_fields(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_nav.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    repo.upsert_position(account.id, "000001.SZ", 100, 0, Decimal("900.00"))
+    storage = FakeHistoryStorage(
+        {
+            "000001": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["000001"],
+                    COL_DATE: ["2026-06-16"],
+                    COL_OPEN: [9.0],
+                    COL_HIGH: [11.0],
+                    COL_LOW: [8.0],
+                    COL_CLOSE: [10.0],
+                }
+            ),
+        }
+    )
+    market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16)]))
+
+    snapshot = SnapshotService(repo, market_data).generate_snapshot(account.id, date(2026, 6, 16))
+
+    assert snapshot.total_assets == Decimal("101000.0000")
+    assert snapshot.share_count == Decimal("100000.000000")
+    assert snapshot.net_asset_value == Decimal("1.010000")
+    assert snapshot.cumulative_deposit == Decimal("100000.0000")
+    assert snapshot.cumulative_withdrawal == Decimal("0.0000")
+    assert snapshot.net_cash_flow == Decimal("100000.0000")
+    assert account.net_asset_value == Decimal("1.010000")
+    engine.dispose()
+
+
 def test_generate_snapshot_updates_existing_account_date_snapshot(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_upsert.db'}")
     Base.metadata.create_all(engine)

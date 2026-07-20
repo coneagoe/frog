@@ -28,7 +28,10 @@ class OverviewAnalytics(BaseModel):
     market_value: Decimal | None = None
     realized_pnl: Decimal | None = None
     unrealized_pnl: Decimal | None = None
+    net_asset_value: Decimal | None = None
+    share_count: Decimal | None = None
     total_return: MetricValue
+    simple_asset_return: MetricValue | None = None
 
 
 class ExecutionAnalytics(BaseModel):
