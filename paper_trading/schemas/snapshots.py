@@ -19,3 +19,8 @@ class SnapshotResponse(BaseModel):
     position_count: int
     order_count: int
     trade_count: int
+    net_asset_value: Decimal | None = None
+    share_count: Decimal | None = None
+    cumulative_deposit: Decimal | None = None
+    cumulative_withdrawal: Decimal | None = None
+    net_cash_flow: Decimal | None = None

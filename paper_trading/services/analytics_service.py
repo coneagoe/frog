@@ -44,12 +44,25 @@ class AnalyticsService:
             activity_monthly=self._activity(orders, trades, "monthly"),
             execution=self._execution(orders),
             trade_quality=self._trade_quality(round_trips),
-            risk=self._risk(snapshots),
+            risk=self._risk(snapshots, account.initial_cash),
         )
 
     # ------------------------------------------------------------------
     # Overview
     # ------------------------------------------------------------------
+    @staticmethod
+    def _snapshot_nav(snapshot: PaperAccountSnapshot, initial_cash: Decimal) -> Decimal | None:
+        if snapshot.net_asset_value is not None:
+            return Decimal(snapshot.net_asset_value).quantize(_QUANTIZE)
+        if initial_cash and initial_cash > 0:
+            return (Decimal(snapshot.total_assets) / initial_cash).quantize(_QUANTIZE)
+        return None
+
+    @staticmethod
+    def _nav_series(snapshots: list[PaperAccountSnapshot], initial_cash: Decimal) -> list[Decimal]:
+        values = [AnalyticsService._snapshot_nav(snapshot, initial_cash) for snapshot in snapshots]
+        return [value for value in values if value is not None]
+
     def _overview(
         self,
         initial_cash: Decimal,
@@ -58,19 +71,17 @@ class AnalyticsService:
         if not snapshots:
             return OverviewAnalytics(total_return=MetricValue(value=None, reason="insufficient_data"))
 
-        if not initial_cash:
-            latest = snapshots[-1]
-            return OverviewAnalytics(
-                total_assets=Decimal(latest.total_assets).quantize(Decimal("0.0001")),
-                cash_available=Decimal(latest.cash_available).quantize(Decimal("0.0001")),
-                market_value=Decimal(latest.market_value).quantize(Decimal("0.0001")),
-                realized_pnl=Decimal(latest.realized_pnl).quantize(Decimal("0.0001")),
-                unrealized_pnl=Decimal(latest.unrealized_pnl).quantize(Decimal("0.0001")),
-                total_return=MetricValue(value=None, reason="invalid_initial_cash"),
-            )
-
         latest = snapshots[-1]
-        total_return_val = ((Decimal(latest.total_assets) - initial_cash) / initial_cash).quantize(_QUANTIZE)
+
+        first_nav = self._snapshot_nav(snapshots[0], initial_cash)
+        latest_nav = self._snapshot_nav(latest, initial_cash)
+        if first_nav is None or first_nav <= 0 or latest_nav is None:
+            total_return = MetricValue(value=None, reason="invalid_nav")
+        else:
+            total_return = MetricValue(value=((latest_nav - first_nav) / first_nav).quantize(_QUANTIZE))
+        simple_asset_return = MetricValue(value=None, reason="invalid_initial_cash")
+        if initial_cash and initial_cash > 0:
+            simple_asset_return = MetricValue(value=((Decimal(latest.total_assets) - initial_cash) / initial_cash).quantize(_QUANTIZE))
 
         return OverviewAnalytics(
             total_assets=Decimal(latest.total_assets).quantize(Decimal("0.0001")),
@@ -78,7 +89,10 @@ class AnalyticsService:
             market_value=Decimal(latest.market_value).quantize(Decimal("0.0001")),
             realized_pnl=Decimal(latest.realized_pnl).quantize(Decimal("0.0001")),
             unrealized_pnl=Decimal(latest.unrealized_pnl).quantize(Decimal("0.0001")),
-            total_return=MetricValue(value=total_return_val),
+            net_asset_value=Decimal(latest.net_asset_value).quantize(_QUANTIZE) if latest.net_asset_value is not None else None,
+            share_count=Decimal(latest.share_count).quantize(_QUANTIZE) if latest.share_count is not None else None,
+            total_return=total_return,
+            simple_asset_return=simple_asset_return,
         )
 
     # ------------------------------------------------------------------
@@ -294,42 +308,42 @@ class AnalyticsService:
     # ------------------------------------------------------------------
     # Risk
     # ------------------------------------------------------------------
-    def _risk(self, snapshots: list[PaperAccountSnapshot]) -> RiskAnalytics:
-        if not snapshots:
+    def _risk(self, snapshots: list[PaperAccountSnapshot], initial_cash: Decimal) -> RiskAnalytics:
+        navs = self._nav_series(snapshots, initial_cash)
+        if len(navs) < 2:
+            metric = MetricValue(value=None, reason="insufficient_data")
             return RiskAnalytics(
-                max_drawdown=MetricValue(value=None, reason="insufficient_data"),
-                current_drawdown=MetricValue(value=None, reason="insufficient_data"),
-                sharpe=MetricValue(value=None, reason="insufficient_data"),
-                sortino=MetricValue(value=None, reason="insufficient_data"),
-                calmar=MetricValue(value=None, reason="insufficient_data"),
+                max_drawdown=metric,
+                current_drawdown=metric,
+                sharpe=metric,
+                sortino=metric,
+                calmar=metric,
             )
 
-        total_assets = [Decimal(s.total_assets) for s in snapshots]
-        peak = total_assets[0]
-        max_dd = Decimal(0)
-        for ta in total_assets:
-            if ta > peak:
-                peak = ta
-            dd = (ta - peak) / peak if peak else Decimal(0)
+        peak = navs[0]
+        max_dd = Decimal("0")
+        for nav in navs:
+            if nav > peak:
+                peak = nav
+            dd = (nav - peak) / peak if peak else Decimal("0")
             if dd < max_dd:
                 max_dd = dd
 
-        latest_ta = total_assets[-1]
-        current_dd = (latest_ta - peak) / peak if peak else Decimal(0)
+        current_dd = ((navs[-1] - max(navs)) / max(navs)).quantize(_QUANTIZE) if max(navs) else Decimal("0.000000")
 
         # Compute daily returns for sharpe / sortino
         daily_returns: list[Decimal] = []
-        for i in range(1, len(total_assets)):
-            prev = total_assets[i - 1]
+        for i in range(1, len(navs)):
+            prev = navs[i - 1]
             if prev:
-                daily_returns.append(((total_assets[i] - prev) / prev).quantize(_QUANTIZE))
+                daily_returns.append(((navs[i] - prev) / prev).quantize(_QUANTIZE))
 
         sharpe = self._compute_sharpe(daily_returns)
         sortino = self._compute_sortino(daily_returns)
-        if not total_assets[0]:
+        if not navs[0]:
             calmar = MetricValue(value=None, reason="invalid_initial_assets")
         else:
-            total_ret = ((latest_ta - total_assets[0]) / total_assets[0]).quantize(_QUANTIZE)
+            total_ret = ((navs[-1] - navs[0]) / navs[0]).quantize(_QUANTIZE)
             calmar = self._compute_calmar(total_returns=total_ret, max_drawdown=max_dd)
 
         return RiskAnalytics(

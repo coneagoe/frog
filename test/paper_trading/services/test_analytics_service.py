@@ -154,7 +154,7 @@ def test_analytics_zero_initial_cash_preserves_snapshot_fields(tmp_path):
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.reason == "invalid_initial_cash"
+    assert analytics.overview.total_return.reason == "invalid_nav"
     assert analytics.overview.total_return.value is None
     assert analytics.overview.total_assets == Decimal("80000.0000")
     assert analytics.overview.cash_available == Decimal("50000.0000")
@@ -333,4 +333,52 @@ def test_analytics_zero_first_snapshot_assets_returns_invalid_initial_assets_for
 
     assert analytics.risk.calmar.reason == "invalid_initial_assets"
     assert analytics.risk.calmar.value is None
+    engine.dispose()
+
+
+def test_analytics_uses_nav_return_not_total_assets_after_deposit(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("nav-return-demo", Decimal("100000.00"))
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=date(2026, 6, 16),
+        cash_available=Decimal("100000.0000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("100000.0000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=Decimal("1.000000"),
+        share_count=Decimal("100000.000000"),
+        cumulative_deposit=Decimal("100000.0000"),
+        cumulative_withdrawal=Decimal("0.0000"),
+        net_cash_flow=Decimal("100000.0000"),
+    )
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=date(2026, 6, 17),
+        cash_available=Decimal("150000.0000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("150000.0000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=Decimal("1.000000"),
+        share_count=Decimal("150000.000000"),
+        cumulative_deposit=Decimal("150000.0000"),
+        cumulative_withdrawal=Decimal("0.0000"),
+        net_cash_flow=Decimal("150000.0000"),
+    )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert analytics.overview.total_return.value == Decimal("0.000000")
+    assert analytics.overview.simple_asset_return.value == Decimal("0.500000")
+    assert analytics.risk.max_drawdown.value == Decimal("0.000000")
     engine.dispose()
