@@ -9,6 +9,10 @@ export type Account = {
   min_commission: string;
   stamp_duty_rate: string;
   transfer_fee_rate: string;
+  share_count: string;
+  net_asset_value: string;
+  cumulative_deposit: string;
+  cumulative_withdrawal: string;
 };
 
 export type MetricValue = {
@@ -105,6 +109,9 @@ export type CashLedgerEntry = {
   account_id: number;
   event_type: string;
   amount: string;
+  trade_date: string | null;
+  net_asset_value: string | null;
+  share_delta: string | null;
   note: string | null;
 };
 
@@ -215,3 +222,6 @@ export type ImportPositionsResult = {
   imported_count: number;
   lots_count: number;
 };
+
+export type CashFlowInput = { amount: string; trade_date: string; note?: string };
+export type CashFlowResult = { account_id: number; cash_available: string; net_asset_value: string; share_count: string; ledger: CashLedgerEntry };

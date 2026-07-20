@@ -2,6 +2,8 @@ import { ApiError, parseApiError } from "./api-error";
 import type {
   Account,
   AnalyticsResponse,
+  CashFlowInput,
+  CashFlowResult,
   CashLedgerEntry,
   CreateAccountInput,
   CreateMatchingRunInput,
@@ -105,4 +107,12 @@ export function importPositions(accountId: number, input: ImportPositionsInput):
     method: "POST",
     body: JSON.stringify(input)
   });
+}
+
+export function depositCash(accountId: number, input: CashFlowInput): Promise<CashFlowResult> {
+  return apiRequest<CashFlowResult>(`/accounts/${accountId}/cash/deposit`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function withdrawCash(accountId: number, input: CashFlowInput): Promise<CashFlowResult> {
+  return apiRequest<CashFlowResult>(`/accounts/${accountId}/cash/withdraw`, { method: "POST", body: JSON.stringify(input) });
 }
