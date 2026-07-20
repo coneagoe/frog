@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from paper_trading.api.deps import get_session, require_api_token
 from paper_trading.schemas.accounts import (
     AccountResponse,
+    CashFlowRequest,
+    CashFlowResponse,
     CashLedgerResponse,
     CreateAccountRequest,
     ImportPositionsRequest,
@@ -12,6 +14,7 @@ from paper_trading.schemas.accounts import (
     UpdateAccountFeeRequest,
 )
 from paper_trading.services.account_service import AccountService
+from paper_trading.services.cash_service import CashService
 from paper_trading.storage.repository import PaperTradingRepository
 
 router = APIRouter(prefix="/paper/accounts", dependencies=[Depends(require_api_token)])
@@ -113,3 +116,39 @@ def import_positions(
     positions = repo.get_positions(account_id)
     lots_count = repo.count_position_lots(account_id)
     return ImportPositionsResponse(imported_count=len(positions), lots_count=lots_count)
+
+
+def _cash_flow_response(result) -> CashFlowResponse:
+    return CashFlowResponse(
+        account_id=result.account.id,
+        cash_available=result.cash_available,
+        net_asset_value=result.account.net_asset_value,
+        share_count=result.account.share_count,
+        ledger=result.ledger,
+    )
+
+
+@router.post("/{account_id}/cash/deposit", response_model=CashFlowResponse)
+def deposit_cash(account_id: int, request: CashFlowRequest, session: Session = Depends(get_session)):
+    service = CashService(PaperTradingRepository(session))
+    try:
+        result = service.deposit(account_id, request.amount, request.trade_date, request.note)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    session.commit()
+    return _cash_flow_response(result)
+
+
+@router.post("/{account_id}/cash/withdraw", response_model=CashFlowResponse)
+def withdraw_cash(account_id: int, request: CashFlowRequest, session: Session = Depends(get_session)):
+    service = CashService(PaperTradingRepository(session))
+    try:
+        result = service.withdraw(account_id, request.amount, request.trade_date, request.note)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    session.commit()
+    return _cash_flow_response(result)

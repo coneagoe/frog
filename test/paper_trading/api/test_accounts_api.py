@@ -404,3 +404,40 @@ class TestImportPositionsAPI:
         )
 
         assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Cash Flow API
+# ---------------------------------------------------------------------------
+
+
+def test_deposit_endpoint_returns_cash_flow_response(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+    account_id = _create_account(client, headers)
+
+    response = client.post(
+        f"/paper/accounts/{account_id}/cash/deposit",
+        json={"amount": "25000.00", "trade_date": "2026-07-20", "note": "add cash"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ledger"]["event_type"] == "deposit"
+    assert body["ledger"]["share_delta"] == "25000.000000"
+    assert body["cash_available"] == "125000.0000"
+    assert body["share_count"] == "125000.000000"
+
+
+def test_withdraw_endpoint_rejects_excess_cash(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+    account_id = _create_account(client, headers)
+
+    response = client.post(
+        f"/paper/accounts/{account_id}/cash/withdraw",
+        json={"amount": "100001.00", "trade_date": "2026-07-20"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert "exceeds available cash" in response.json()["detail"]
