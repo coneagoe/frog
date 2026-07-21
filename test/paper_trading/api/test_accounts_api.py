@@ -27,6 +27,16 @@ def _create_account(client, headers):
     return resp.json()["id"]
 
 
+def test_api_startup_bootstraps_storage_schema(monkeypatch):
+    calls: list[None] = []
+    monkeypatch.setattr("paper_trading.api.app.get_storage", lambda: calls.append(None))
+
+    with TestClient(create_app()):
+        pass
+
+    assert calls == [None]
+
+
 def test_delete_account_removes_account_from_list(monkeypatch, sqlite_session):
     client, headers, _ = _client(monkeypatch, sqlite_session)
     account_response = client.post(
