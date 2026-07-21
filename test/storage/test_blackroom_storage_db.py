@@ -844,3 +844,165 @@ class TestEnsurePaperTradingSchema:
         assert "validity_reason" in columns
         assert "validity_checked_at" in columns
         reset_storage()
+
+    def test_migrates_legacy_paper_trading_nav_cash_flow_columns(self, tmp_path, monkeypatch):
+        """ensure_paper_trading_schema adds NAV/cash-flow columns to legacy paper trading tables."""
+        from sqlalchemy import create_engine as real_create_engine
+        from sqlalchemy import inspect
+
+        sqlite_url = f"sqlite:///{tmp_path}/legacy_pt_nav_schema.db"
+        engine = real_create_engine(sqlite_url)
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_accounts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name VARCHAR(100) NOT NULL UNIQUE,
+                        initial_cash NUMERIC(20,4) NOT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'active',
+                        base_currency VARCHAR(10) NOT NULL DEFAULT 'CNY',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(text("INSERT INTO paper_accounts (name, initial_cash) VALUES ('legacy', 12345.67)"))
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_orders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id INTEGER NOT NULL,
+                        symbol VARCHAR(20) NOT NULL,
+                        side VARCHAR(10) NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        limit_price NUMERIC(20,4) NOT NULL,
+                        trade_date DATE NOT NULL,
+                        status VARCHAR(30) NOT NULL,
+                        filled_quantity INTEGER NOT NULL DEFAULT 0,
+                        frozen_cash NUMERIC(20,4) NOT NULL DEFAULT 0,
+                        frozen_quantity INTEGER NOT NULL DEFAULT 0,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_cash_ledger (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id INTEGER NOT NULL,
+                        event_type VARCHAR(20) NOT NULL,
+                        amount NUMERIC(20,4) NOT NULL,
+                        order_id INTEGER,
+                        trade_id INTEGER,
+                        occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        note TEXT
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_account_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        account_id INTEGER NOT NULL,
+                        trade_date DATE NOT NULL,
+                        cash_available NUMERIC(20,4) NOT NULL,
+                        cash_frozen NUMERIC(20,4) NOT NULL,
+                        market_value NUMERIC(20,4) NOT NULL,
+                        total_assets NUMERIC(20,4) NOT NULL,
+                        realized_pnl NUMERIC(20,4) NOT NULL,
+                        unrealized_pnl NUMERIC(20,4) NOT NULL,
+                        position_count INTEGER NOT NULL,
+                        order_count INTEGER NOT NULL,
+                        trade_count INTEGER NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+
+        db = get_storage(mock_config)
+        db.engine = engine
+
+        db.ensure_paper_trading_schema()
+
+        inspector = inspect(engine)
+        account_columns = {col["name"] for col in inspector.get_columns("paper_accounts")}
+        cash_ledger_columns = {col["name"] for col in inspector.get_columns("paper_cash_ledger")}
+        snapshot_columns = {col["name"] for col in inspector.get_columns("paper_account_snapshots")}
+        assert {"share_count", "net_asset_value", "cumulative_deposit", "cumulative_withdrawal"}.issubset(
+            account_columns
+        )
+        assert {"trade_date", "net_asset_value", "share_delta"}.issubset(cash_ledger_columns)
+        assert {
+            "net_asset_value",
+            "share_count",
+            "cumulative_deposit",
+            "cumulative_withdrawal",
+            "net_cash_flow",
+        }.issubset(snapshot_columns)
+
+        with engine.connect() as conn:
+            migrated = (
+                conn.execute(
+                    text(
+                        """
+                    SELECT share_count, net_asset_value, cumulative_deposit, cumulative_withdrawal
+                    FROM paper_accounts WHERE name = 'legacy'
+                    """
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert migrated["share_count"] == 12345.67
+        assert migrated["net_asset_value"] == 1
+        assert migrated["cumulative_deposit"] == 12345.67
+        assert migrated["cumulative_withdrawal"] == 0
+
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE paper_accounts
+                    SET share_count = 0, net_asset_value = 1.25, cumulative_deposit = 12345.67,
+                        cumulative_withdrawal = 12345.67
+                    WHERE name = 'legacy'
+                    """
+                )
+            )
+        db.ensure_paper_trading_schema()
+        with engine.connect() as conn:
+            preserved = (
+                conn.execute(
+                    text(
+                        """
+                    SELECT share_count, net_asset_value, cumulative_deposit, cumulative_withdrawal
+                    FROM paper_accounts WHERE name = 'legacy'
+                    """
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert preserved["share_count"] == 0
+        assert preserved["net_asset_value"] == 1.25
+        assert preserved["cumulative_deposit"] == 12345.67
+        assert preserved["cumulative_withdrawal"] == 12345.67
+        reset_storage()

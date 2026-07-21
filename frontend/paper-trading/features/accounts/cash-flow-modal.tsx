@@ -25,7 +25,8 @@ export function CashFlowModal({ account, cashAvailable, mode, open, onClose, onC
     return null;
   }
 
-  const title = mode === "deposit" ? `Deposit cash for ${account.name}` : `Withdraw cash from ${account.name}`;
+  const currentAccount = account;
+  const title = mode === "deposit" ? `Deposit cash for ${currentAccount.name}` : `Withdraw cash from ${currentAccount.name}`;
   const buttonLabel = mode === "deposit" ? "Deposit" : "Withdraw";
 
   async function onSubmit(event: React.FormEvent) {
@@ -46,7 +47,7 @@ export function CashFlowModal({ account, cashAvailable, mode, open, onClose, onC
     setSubmitting(true);
     try {
       const payload = { amount, trade_date: tradeDate, ...(note.trim() ? { note: note.trim() } : {}) };
-      const result = mode === "deposit" ? await depositCash(account.id, payload) : await withdrawCash(account.id, payload);
+      const result = mode === "deposit" ? await depositCash(currentAccount.id, payload) : await withdrawCash(currentAccount.id, payload);
       await onCompleted(result);
       onClose();
     } catch (err) {
