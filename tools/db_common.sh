@@ -21,6 +21,7 @@ BUSINESS_TABLES=(
   history_data_weekly_etf_hfq
   history_data_daily_fund
   history_data_daily_hk_stock_hfq
+  history_data_daily_hk_stock_none
   history_data_weekly_hk_stock_hfq
   history_data_monthly_hk_stock_hfq
   stk_limit_a_stock

@@ -620,3 +620,213 @@ def _stock_history_df(stock_id="000001"):
             COL_AMOUNT: [10000.0],
         }
     )
+
+
+def _hk_stock_history_df(stock_id="00700"):
+    return pd.DataFrame(
+        {
+            COL_DATE: [pd.Timestamp("2026-01-02")],
+            COL_STOCK_ID: [stock_id],
+            COL_OPEN: [300.0],
+            COL_HIGH: [302.0],
+            COL_LOW: [299.0],
+            COL_CLOSE: [301.0],
+            COL_VOLUME: [1000],
+            COL_AMOUNT: [300000.0],
+        }
+    )
+
+
+class TestDownloadHkGgtHistoryFallback:
+    def test_download_hk_ggt_history_falls_back_to_akshare_on_tushare_exception(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+
+        hk_df = _hk_stock_history_df()
+        manager = DownloadManager()
+        download_mock = MagicMock(side_effect=[RuntimeError("unsupported adjust"), hk_df])
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert (
+            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+            is True
+        )
+
+        assert [call.args[0] for call in download_mock.call_args_list] == ["tushare", "akshare"]
+        storage.save_history_data_hk_stock.assert_called_once()
+
+    def test_download_hk_ggt_history_bfq_falls_back_on_tushare_adjust_rejection(self, monkeypatch):
+        """TuShare's ValueError for BFQ must trigger fallback to AkShare."""
+        from unittest.mock import MagicMock
+
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+
+        hk_df = _hk_stock_history_df()
+        manager = DownloadManager()
+        # TuShare raises ValueError (adjust validation), AkShare returns valid data
+        download_mock = MagicMock(side_effect=[ValueError("Only HFQ adjust is supported"), hk_df])
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert (
+            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+            is True
+        )
+
+        assert [call.args[0] for call in download_mock.call_args_list] == ["tushare", "akshare"]
+        storage.save_history_data_hk_stock.assert_called_once()
+
+    def test_download_hk_ggt_history_falls_back_on_empty_dataframe(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+
+        fallback_df = _hk_stock_history_df()
+        manager = DownloadManager()
+        download_mock = MagicMock(side_effect=[pd.DataFrame(), fallback_df])
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert (
+            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+            is True
+        )
+        storage.save_history_data_hk_stock.assert_called_once()
+
+    def test_download_hk_ggt_history_falls_back_on_missing_column(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+
+        invalid_df = _hk_stock_history_df().drop(columns=[COL_CLOSE])
+        fallback_df = _hk_stock_history_df()
+        manager = DownloadManager()
+        download_mock = MagicMock(side_effect=[invalid_df, fallback_df])
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert (
+            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+            is True
+        )
+        storage.save_history_data_hk_stock.assert_called_once()
+
+    def test_download_hk_ggt_history_falls_back_on_bad_numeric(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+
+        invalid_df = _hk_stock_history_df()
+        invalid_df[COL_CLOSE] = "bad_value"
+        fallback_df = _hk_stock_history_df()
+        manager = DownloadManager()
+        download_mock = MagicMock(side_effect=[invalid_df, fallback_df])
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert (
+            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+            is True
+        )
+        storage.save_history_data_hk_stock.assert_called_once()
+
+    def test_download_hk_ggt_history_short_circuits_after_first_success(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+
+        first_df = _hk_stock_history_df()
+        manager = DownloadManager()
+        download_mock = MagicMock(return_value=first_df)
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert (
+            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+            is True
+        )
+        download_mock.assert_called_once()
+
+    def test_download_hk_ggt_history_all_providers_fail_returns_false(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+
+        manager = DownloadManager()
+        download_mock = MagicMock(side_effect=RuntimeError("provider failed"))
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert (
+            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+            is False
+        )
+        storage.save_history_data_hk_stock.assert_not_called()
+
+    def test_download_hk_ggt_history_save_failure_does_not_try_next_provider(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = False
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+
+        first_df = _hk_stock_history_df()
+        manager = DownloadManager()
+        download_mock = MagicMock(return_value=first_df)
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert (
+            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+            is False
+        )
+        download_mock.assert_called_once()
+        storage.save_history_data_hk_stock.assert_called_once()

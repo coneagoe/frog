@@ -131,6 +131,7 @@ def test_download_history_data_stock_hk_returns_correct_data(tmp_path, downloade
                 "最高": [11.1, 10.8],
                 "最低": [10.4, 10.1],
                 "成交量": [1300, 1150],
+                "成交额": [13780.0, 11960.0],
             }
         )
 
@@ -320,3 +321,55 @@ def test_download_history_data_stock_ak_missing_date_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="Missing required column"):
         da.download_history_data_stock_ak("000001", "20240101", "20240102", PeriodType.DAILY, AdjustType.QFQ)
+
+
+def test_download_history_data_stock_hk_ak_uses_unadjusted_adjust_value(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from common.const import (
+        COL_AMOUNT,
+        COL_CLOSE,
+        COL_DATE,
+        COL_HIGH,
+        COL_LOW,
+        COL_OPEN,
+        COL_STOCK_ID,
+        COL_VOLUME,
+        PeriodType,
+    )
+    from download.dl.downloader_akshare import download_history_data_stock_hk_ak
+
+    mock_df = pd.DataFrame(
+        {
+            "日期": ["2026-01-02"],
+            "开盘": [300.0],
+            "收盘": [301.0],
+            "最高": [302.0],
+            "最低": [299.0],
+            "成交量": [1000],
+            "成交额": [300000.0],
+            "涨跌幅": [1.0],
+            "换手率": [0.5],
+        }
+    )
+    fake_stock_hk_hist = MagicMock(return_value=mock_df)
+    monkeypatch.setattr(da.ak, "stock_hk_hist", fake_stock_hk_hist)
+
+    df = download_history_data_stock_hk_ak("00700", "2026-01-01", "2026-01-03", PeriodType.DAILY, AdjustType.BFQ)
+
+    fake_stock_hk_hist.assert_called_once_with(
+        symbol="00700", period="daily", start_date="20260101", end_date="20260103", adjust=""
+    )
+    assert list(
+        df[[COL_DATE, COL_STOCK_ID, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME, COL_AMOUNT]].columns
+    ) == [
+        COL_DATE,
+        COL_STOCK_ID,
+        COL_OPEN,
+        COL_CLOSE,
+        COL_HIGH,
+        COL_LOW,
+        COL_VOLUME,
+        COL_AMOUNT,
+    ]
+    assert df.loc[0, COL_STOCK_ID] == "00700"

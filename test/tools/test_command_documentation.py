@@ -3,7 +3,7 @@ from pathlib import Path
 FILES_WITHOUT_POETRY = [
     "Dockerfile",
     "README.md",
-    "CLAUDE.md",
+    "AGENTS.md",
     "docs/paper_trading.md",
     "factor/alphapurify_ssf_ratio.py",
     "factor/alphapurify_ssf_ratio_change.py",

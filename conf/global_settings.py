@@ -3,7 +3,12 @@ import os
 from configparser import ConfigParser
 from pathlib import Path
 
-from download.provider_order import DEFAULT_STOCK_HISTORY_PROVIDER_ORDER, STOCK_HISTORY_PROVIDER_ENV
+from download.provider_order import (
+    DEFAULT_HK_STOCK_HISTORY_PROVIDER_ORDER,
+    DEFAULT_STOCK_HISTORY_PROVIDER_ORDER,
+    HK_STOCK_HISTORY_PROVIDER_ENV,
+    STOCK_HISTORY_PROVIDER_ENV,
+)
 
 config_file_name = "config.ini"
 
@@ -154,6 +159,12 @@ def parse_download_config(config: ConfigParser):
             os.environ[STOCK_HISTORY_PROVIDER_ENV] = config["download"]["stock_history_provider_order"]
         except KeyError:
             os.environ[STOCK_HISTORY_PROVIDER_ENV] = ",".join(DEFAULT_STOCK_HISTORY_PROVIDER_ORDER)
+
+    if HK_STOCK_HISTORY_PROVIDER_ENV not in os.environ:
+        try:
+            os.environ[HK_STOCK_HISTORY_PROVIDER_ENV] = config["download"]["hk_stock_history_provider_order"]
+        except KeyError:
+            os.environ[HK_STOCK_HISTORY_PROVIDER_ENV] = ",".join(DEFAULT_HK_STOCK_HISTORY_PROVIDER_ORDER)
 
 
 def parse_config():

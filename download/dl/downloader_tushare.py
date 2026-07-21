@@ -204,6 +204,21 @@ hk_history_numeric_columns = [
     COL_TURNOVER_RATE,
 ]
 
+hk_history_required_numeric = [
+    COL_OPEN,
+    COL_CLOSE,
+    COL_HIGH,
+    COL_LOW,
+    COL_VOLUME,
+    COL_AMOUNT,
+]
+
+hk_history_optional_numeric = [
+    COL_CHANGE,
+    COL_CHANGE_RATE,
+    COL_TURNOVER_RATE,
+]
+
 
 def _empty_hk_history_dataframe() -> pd.DataFrame:
     return pd.DataFrame(
@@ -254,9 +269,15 @@ def _normalize_hk_history_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if "ts_code" in normalized.columns:
         normalized[COL_STOCK_ID] = normalized["ts_code"].astype(str).str.replace(".HK", "", regex=False)
     normalized = normalized.reindex(columns=hk_history_columns)
-    normalized[hk_history_numeric_columns] = (
-        normalized[hk_history_numeric_columns].apply(pd.to_numeric, errors="coerce").fillna(0.0).astype("float64")
-    )
+
+    # Required core OHLCV/amount fields: raise on non-convertible values
+    for column in hk_history_required_numeric:
+        normalized[column] = pd.to_numeric(normalized[column], errors="raise").astype("float64")
+
+    # Optional fields: coerce non-convertible to NaN, then fill with 0
+    for column in hk_history_optional_numeric:
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce").fillna(0.0).astype("float64")
+
     return normalized
 
 

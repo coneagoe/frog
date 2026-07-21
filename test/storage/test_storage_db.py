@@ -117,6 +117,58 @@ class TestStorageDb:
         with pytest.raises(ValueError, match="Unsupported combination"):
             get_table_name(SecurityType.STOCK, PeriodType.WEEKLY, AdjustType.BFQ)
 
+    def test_get_table_name_returns_hk_stock_bfq_daily_table(self):
+        """get_table_name returns BFQ table for HK_GGT_STOCK + DAILY + BFQ."""
+        from storage.model import tb_name_history_data_daily_hk_stock_bfq
+
+        assert (
+            get_table_name(SecurityType.HK_GGT_STOCK, PeriodType.DAILY, AdjustType.BFQ)
+            == tb_name_history_data_daily_hk_stock_bfq
+        )
+
+    def test_save_history_data_hk_stock_uses_requested_bfq_table(self, storage_db):
+        """save_history_data_hk_stock with BFQ writes to BFQ table."""
+        from storage.model import tb_name_history_data_daily_hk_stock_bfq
+
+        df = pd.DataFrame(
+            {
+                COL_DATE: [date(2026, 1, 2)],
+                COL_STOCK_ID: ["00700"],
+                COL_OPEN: [300.0],
+                COL_CLOSE: [301.0],
+                COL_HIGH: [302.0],
+                COL_LOW: [299.0],
+                COL_VOLUME: [1000],
+                COL_AMOUNT: [300000.0],
+            }
+        )
+        get_table = Mock(return_value=tb_name_history_data_daily_hk_stock_bfq)
+        write_dataframe = Mock()
+
+        with (
+            patch.object(storage_db, "_get_history_table_name", get_table),
+            patch.object(storage_db, "_write_dataframe", write_dataframe),
+        ):
+            assert storage_db.save_history_data_hk_stock(df, PeriodType.DAILY, AdjustType.BFQ) is True
+
+        get_table.assert_called_once_with(SecurityType.HK_GGT_STOCK, PeriodType.DAILY, AdjustType.BFQ)
+        write_dataframe.assert_called_once()
+        assert write_dataframe.call_args.args[1] == tb_name_history_data_daily_hk_stock_bfq
+
+    def test_load_history_data_stock_hk_ggt_bfq_daily_routes_correctly(self, storage_db, monkeypatch):
+        """load_history_data_stock_hk_ggt with BFQ routes to the BFQ daily table."""
+        mock_read_sql = Mock(return_value=pd.DataFrame())
+        monkeypatch.setattr("storage.storage_db.pd.read_sql", mock_read_sql)
+
+        result = storage_db.load_history_data_stock_hk_ggt("00700", PeriodType.DAILY, AdjustType.BFQ)
+
+        assert len(result) == 0
+        mock_read_sql.assert_called_once()
+        args, kwargs = mock_read_sql.call_args
+        sql_query = args[0]
+        assert "history_data_daily_hk_stock_none" in sql_query
+        assert kwargs["params"] == ("00700",)
+
     def test_save_history_data_stock_bfq_daily(self, storage_db):
         """save_history_data_stock with BFQ writes to BFQ table."""
         test_df = pd.DataFrame(

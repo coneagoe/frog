@@ -469,6 +469,7 @@ def test_download_history_data_stock_hk_ts_unsupported_period_raises(downloader_
 
 @pytest.mark.parametrize("adjust", [pytest.param(""), pytest.param("qfq")])
 def test_download_history_data_stock_hk_ts_unsupported_adjust_raises(downloader_ts_module, monkeypatch, adjust):
+    """Both QFQ and BFQ must be rejected — TuShare only supports HFQ."""
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
 
@@ -790,6 +791,118 @@ def test_download_history_data_stock_ts_missing_date_raises(monkeypatch):
 
     with pytest.raises(ValueError, match="Missing required column"):
         dt.download_history_data_stock_ts("000001", "2024-01-01", "2024-01-02")
+
+
+# ── _normalize_hk_history_dataframe strict core numeric tests ────────────────
+
+
+def test_normalize_hk_history_dataframe_bad_open_raises():
+    """Bad core numeric value in 'open' must raise ValueError (not silently coerced to 0)."""
+    df = pd.DataFrame(
+        {
+            "trade_date": ["20240101"],
+            "ts_code": ["00700.HK"],
+            "open": ["not_a_number"],
+            "close": [394],
+            "high": [395],
+            "low": [389],
+            "vol": [1020300],
+            "amount": [401020300],
+            "change": [5],
+            "pct_change": [1],
+            "turnover_ratio": [1],
+        }
+    )
+    with pytest.raises((ValueError, TypeError)):
+        dt._normalize_hk_history_dataframe(df)
+
+
+def test_normalize_hk_history_dataframe_bad_close_raises():
+    """Bad core numeric value in 'close' must raise ValueError."""
+    df = pd.DataFrame(
+        {
+            "trade_date": ["20240101"],
+            "ts_code": ["00700.HK"],
+            "open": [391],
+            "close": ["N/A"],
+            "high": [395],
+            "low": [389],
+            "vol": [1020300],
+            "amount": [401020300],
+            "change": [5],
+            "pct_change": [1],
+            "turnover_ratio": [1],
+        }
+    )
+    with pytest.raises((ValueError, TypeError)):
+        dt._normalize_hk_history_dataframe(df)
+
+
+def test_normalize_hk_history_dataframe_bad_volume_raises():
+    """Bad core numeric value in 'vol' must raise ValueError."""
+    df = pd.DataFrame(
+        {
+            "trade_date": ["20240101"],
+            "ts_code": ["00700.HK"],
+            "open": [391],
+            "close": [394],
+            "high": [395],
+            "low": [389],
+            "vol": ["missing"],
+            "amount": [401020300],
+            "change": [5],
+            "pct_change": [1],
+            "turnover_ratio": [1],
+        }
+    )
+    with pytest.raises((ValueError, TypeError)):
+        dt._normalize_hk_history_dataframe(df)
+
+
+def test_normalize_hk_history_dataframe_bad_optional_coerces_to_zero():
+    """Bad optional field (change) is coerced to 0.0, not raised."""
+    df = pd.DataFrame(
+        {
+            "trade_date": ["20240101"],
+            "ts_code": ["00700.HK"],
+            "open": [391],
+            "close": [394],
+            "high": [395],
+            "low": [389],
+            "vol": [1020300],
+            "amount": [401020300],
+            "change": ["invalid"],
+            "pct_change": [1],
+            "turnover_ratio": [1],
+        }
+    )
+    result = dt._normalize_hk_history_dataframe(df)
+    # Optional fields with bad values become 0.0
+    assert result[dt.COL_CHANGE].iloc[0] == 0.0
+    # Core fields remain valid
+    assert result[dt.COL_OPEN].iloc[0] == 391.0
+    assert result[dt.COL_CLOSE].iloc[0] == 394.0
+
+
+def test_normalize_hk_history_dataframe_bad_pct_change_coerces_to_zero():
+    """Bad optional field (pct_change) is coerced to 0.0, not raised."""
+    df = pd.DataFrame(
+        {
+            "trade_date": ["20240101"],
+            "ts_code": ["00700.HK"],
+            "open": [391],
+            "close": [394],
+            "high": [395],
+            "low": [389],
+            "vol": [1020300],
+            "amount": [401020300],
+            "change": [5],
+            "pct_change": ["bad"],
+            "turnover_ratio": [1],
+        }
+    )
+    result = dt._normalize_hk_history_dataframe(df)
+    assert result[dt.COL_CHANGE_RATE].iloc[0] == 0.0
 
 
 if __name__ == "__main__":

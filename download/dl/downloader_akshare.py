@@ -227,15 +227,27 @@ def download_history_data_stock_hk_ak(
     assert isinstance(df, pd.DataFrame), f"Expected DataFrame, got {type(df)}"
     assert not df.empty, f"download history data {stock_id} fail, please check"
 
-    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
     df[COL_STOCK_ID] = stock_id
 
     df = df.rename(columns={"涨跌幅": COL_CHANGE_RATE, "换手率": COL_TURNOVER_RATE})
 
-    numeric_columns = df.select_dtypes(include=["number"]).columns
-    df[numeric_columns] = df[numeric_columns].fillna(0)
+    required_columns = [COL_DATE, COL_STOCK_ID, COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME, COL_AMOUNT]
+    for column in required_columns:
+        if column not in df.columns:
+            raise ValueError(f"Missing required column '{column}' in AkShare stock_hk_hist response")
 
-    return df
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+
+    required_numeric = [COL_OPEN, COL_CLOSE, COL_HIGH, COL_LOW, COL_VOLUME, COL_AMOUNT]
+    for column in required_numeric:
+        df[column] = pd.to_numeric(df[column], errors="raise")
+
+    optional_numeric = [COL_CHANGE_RATE, COL_TURNOVER_RATE, "涨跌额", "振幅"]
+    for column in optional_numeric:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    return df.reset_index(drop=True)
 
 
 @_retry_non_proxy_errors(wait_fixed=1000, stop_max_attempt_number=3)

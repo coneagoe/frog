@@ -25,6 +25,8 @@ from .history_data_a_stock import (
 )
 from .history_data_fund import HistoryDataDailyFund, tb_name_history_data_daily_fund
 from .history_data_hk_stock import (
+    HistoryDataDailyHkStockBFQ,
+    tb_name_history_data_daily_hk_stock_bfq,
     tb_name_history_data_daily_hk_stock_hfq,
     tb_name_history_data_monthly_hk_stock_hfq,
     tb_name_history_data_weekly_hk_stock_hfq,
@@ -104,6 +106,8 @@ __all__ = [
     "tb_name_etf_daily",
     "tb_name_history_data_weekly_a_stock_qfq",
     "tb_name_history_data_weekly_a_stock_hfq",
+    "HistoryDataDailyHkStockBFQ",
+    "tb_name_history_data_daily_hk_stock_bfq",
     "tb_name_history_data_daily_hk_stock_hfq",
     "tb_name_history_data_weekly_hk_stock_hfq",
     "tb_name_history_data_monthly_hk_stock_hfq",

@@ -272,6 +272,14 @@ class TestDownloader:
                 "yahoo", "000001", "20240101", "20240102", PeriodType.DAILY, AdjustType.QFQ
             )
 
+    def test_dl_history_data_stock_hk_by_provider_rejects_unknown_provider(self):
+        downloader = Downloader()
+
+        with pytest.raises(ValueError, match="Unsupported HK stock history provider: yahoo"):
+            downloader.dl_history_data_stock_hk_by_provider(
+                "yahoo", "00700", "20260101", "20260102", PeriodType.DAILY, AdjustType.BFQ
+            )
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
