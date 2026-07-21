@@ -1,4 +1,4 @@
-"""DAG for downloading HK GGT stock history (HFQ) on weekdays."""
+"""DAG for downloading HK GGT stock unadjusted daily history on weekdays."""
 
 import os
 import sys
@@ -35,7 +35,7 @@ from download import DownloadManager  # noqa: E402
 from stock.market import is_hk_market_open_today  # noqa: E402,F401
 from storage import get_storage  # noqa: E402
 
-DEFAULT_START_DATE: Final = "2010-01-01"
+DEFAULT_START_DATE: Final = "2026-01-01"
 # hk_daily_adj API 限制 2次/分钟，跨进程文件锁已将调用串行化，多分片无法提升吞吐，故固定为 1
 PARTITION_COUNT = 1
 
@@ -46,8 +46,8 @@ def get_redis_client() -> redis.Redis:
     return redis.Redis.from_url(redis_url, decode_responses=True)
 
 
-def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, partition_count: int, **context):
-    """Download HK GGT HFQ history data for a specific partition.
+def download_hk_ggt_history_none_partition_task(*, partition_id: int, partition_count: int, **context):
+    """Download HK GGT unadjusted history data for a specific partition.
 
     Args:
         partition_id: The 0-based partition identifier
@@ -86,18 +86,18 @@ def download_hk_ggt_history_hfq_partition_task(*, partition_id: int, partition_c
             period=PeriodType.DAILY,
             start_date=start_date,
             end_date=end_date,
-            adjust=AdjustType.HFQ,
+            adjust=AdjustType.BFQ,
         )
         if not success:
             failed_ids.append(stock_id)
 
         if idx % 50 == 0 or idx == total:
-            print(f"[HK HFQ p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
+            print(f"[HK NONE p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])
         raise Exception(
-            f"HK HFQ 分片下载失败: partition={partition_id}/{partition_count}, "
+            f"HK NONE 分片下载失败: partition={partition_id}/{partition_count}, "
             f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
         )
 
@@ -112,7 +112,7 @@ def aggregate_and_save_result(*, partition_count: int, **context):
     total_count = 0
 
     for pid in range(partition_count):
-        task_id = f"download_hk_ggt_history_hfq_p{pid:02d}"
+        task_id = f"download_hk_ggt_history_none_p{pid:02d}"
         result = ti.xcom_pull(task_ids=task_id)
         if result:
             # Parse count from result string
@@ -145,7 +145,7 @@ def aggregate_and_save_result(*, partition_count: int, **context):
 dag = DAG(
     "download_hk_ggt_history_daily",
     default_args=get_default_args(),
-    description="Weekdays HK GGT stock history HFQ download",
+    description="Weekdays HK GGT stock unadjusted daily history download",
     schedule="30 16 * * 1-5",
     catchup=False,
     max_active_runs=1,
@@ -154,8 +154,8 @@ dag = DAG(
 # Create partition tasks
 partition_tasks = [
     PythonOperator(
-        task_id=f"download_hk_ggt_history_hfq_p{pid:02d}",
-        python_callable=download_hk_ggt_history_hfq_partition_task,
+        task_id=f"download_hk_ggt_history_none_p{pid:02d}",
+        python_callable=download_hk_ggt_history_none_partition_task,
         op_kwargs={"partition_id": pid, "partition_count": PARTITION_COUNT},
         dag=dag,
     )

@@ -36,3 +36,33 @@ def test_parse_download_config_preserves_existing_env_var(monkeypatch):
     parse_download_config(config)
 
     assert os.environ["DOWNLOAD_STOCK_HISTORY_PROVIDER_ORDER"] == "tushare,akshare"
+
+
+def test_parse_download_config_sets_default_hk_stock_history_provider_order(monkeypatch):
+    config = ConfigParser()
+    config["download"] = {}
+    monkeypatch.delenv("DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER", raising=False)
+
+    parse_download_config(config)
+
+    assert os.environ["DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER"] == "tushare,akshare"
+
+
+def test_parse_download_config_sets_configured_hk_stock_history_provider_order(monkeypatch):
+    config = ConfigParser()
+    config["download"] = {"hk_stock_history_provider_order": "akshare,tushare"}
+    monkeypatch.delenv("DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER", raising=False)
+
+    parse_download_config(config)
+
+    assert os.environ["DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER"] == "akshare,tushare"
+
+
+def test_parse_download_config_preserves_existing_hk_stock_history_provider_order(monkeypatch):
+    config = ConfigParser()
+    config["download"] = {"hk_stock_history_provider_order": "akshare,tushare"}
+    monkeypatch.setenv("DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER", "tushare")
+
+    parse_download_config(config)
+
+    assert os.environ["DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER"] == "tushare"

@@ -9,6 +9,7 @@ from .downloader_akshare import (
     download_general_info_hk_ggt_stock_ak,
     download_general_info_stock_ak,
     download_history_data_stock_ak,
+    download_history_data_stock_hk_ak,
     download_history_data_us_index_ak,
 )
 from .downloader_baostock import (
@@ -37,6 +38,11 @@ STOCK_HISTORY_PROVIDER_DOWNLOADERS: dict[str, StockHistoryDownloader] = {
     "baostock": download_history_data_stock_bs,
     "tushare": download_history_data_stock_ts,
     "akshare": download_history_data_stock_ak,
+}
+
+HK_STOCK_HISTORY_PROVIDER_DOWNLOADERS: dict[str, StockHistoryDownloader] = {
+    "tushare": download_history_data_stock_hk_ts,
+    "akshare": download_history_data_stock_hk_ak,
 }
 
 
@@ -75,4 +81,19 @@ class Downloader:
             downloader_func = STOCK_HISTORY_PROVIDER_DOWNLOADERS[provider]
         except KeyError as exc:
             raise ValueError(f"Unsupported stock history provider: {provider}") from exc
+        return downloader_func(stock_id, start_date, end_date, period, adjust)
+
+    def dl_history_data_stock_hk_by_provider(
+        self,
+        provider: str,
+        stock_id: str,
+        start_date: str,
+        end_date: str,
+        period: PeriodType,
+        adjust: AdjustType,
+    ) -> pd.DataFrame:
+        try:
+            downloader_func = HK_STOCK_HISTORY_PROVIDER_DOWNLOADERS[provider]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported HK stock history provider: {provider}") from exc
         return downloader_func(stock_id, start_date, end_date, period, adjust)

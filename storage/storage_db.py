@@ -101,6 +101,7 @@ from .model import (
     tb_name_history_data_daily_etf_hfq,
     tb_name_history_data_daily_etf_qfq,
     tb_name_history_data_daily_fund,
+    tb_name_history_data_daily_hk_stock_bfq,
     tb_name_history_data_daily_hk_stock_hfq,
     tb_name_history_data_monthly_hk_stock_hfq,
     tb_name_history_data_weekly_a_stock_hfq,
@@ -296,6 +297,8 @@ def get_table_name(security_type: SecurityType, period: PeriodType, adjust: Adju
             elif adjust == AdjustType.HFQ:
                 return tb_name_history_data_weekly_etf_hfq
     elif security_type == SecurityType.HK_GGT_STOCK:
+        if period == PeriodType.DAILY and adjust == AdjustType.BFQ:
+            return tb_name_history_data_daily_hk_stock_bfq
         if period == PeriodType.DAILY and adjust == AdjustType.HFQ:
             return tb_name_history_data_daily_hk_stock_hfq
         elif period == PeriodType.WEEKLY and adjust == AdjustType.HFQ:
@@ -565,9 +568,9 @@ class StorageDb:
         """
         try:
             try:
-                table_name = self._get_history_table_name(SecurityType.HK_GGT_STOCK, period, AdjustType.HFQ)
+                table_name = self._get_history_table_name(SecurityType.HK_GGT_STOCK, period, adjust)
             except ValueError:
-                logger.error(f"不支持的港股数据周期: {period}")
+                logger.error(f"不支持的港股数据周期或复权类型: period={period}, adjust={adjust}")
                 return False
 
             self._write_dataframe(
@@ -957,7 +960,7 @@ class StorageDb:
         Args:
             stock_id: 港股通股票代码
             period: 数据周期（日/周/月）
-            adjust: 复权类型（港股通只支持后复权）
+            adjust: 复权类型（日线支持BFQ/HFQ，周/月线仅支持HFQ）
             start_date: 开始日期（可选，格式：YYYY-MM-DD）
             end_date: 结束日期（可选，格式：YYYY-MM-DD）
 
@@ -965,20 +968,10 @@ class StorageDb:
             pd.DataFrame: 港股通成分股历史数据，如果表不存在或加载失败则返回空DataFrame
         """
         try:
-            # 港股通只支持后复权，检查复权类型
-            if adjust != AdjustType.HFQ:
-                logger.error(f"港股通只支持后复权，不支持复权类型: {adjust}")
-                return pd.DataFrame()
-
-            # 根据周期选择对应的港股表名（港股通使用与港股相同的表）
-            if period == PeriodType.DAILY:
-                table_name = tb_name_history_data_daily_hk_stock_hfq
-            elif period == PeriodType.WEEKLY:
-                table_name = tb_name_history_data_weekly_hk_stock_hfq
-            elif period == PeriodType.MONTHLY:
-                table_name = tb_name_history_data_monthly_hk_stock_hfq
-            else:
-                logger.error(f"不支持的港股通数据周期: {period}")
+            try:
+                table_name = self._get_history_table_name(SecurityType.HK_GGT_STOCK, period, adjust)
+            except ValueError:
+                logger.error(f"不支持的港股通数据周期或复权类型: {period}, {adjust}")
                 return pd.DataFrame()
 
             # 构建SQL查询

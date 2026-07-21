@@ -73,8 +73,12 @@ def test_hk_partition_dag_uses_frozen_partition_count_everywhere():
     # PARTITION_COUNT is hardcoded to 1; get_partition_count() must NOT be called
     assert not re.search(r"\bget_partition_count\s*\(\s*\)", source)
     assert re.search(r"^PARTITION_COUNT\s*=\s*1\b", source, re.MULTILINE)
+    assert 'DEFAULT_START_DATE: Final = "2026-01-01"' in source
+    assert "AdjustType.BFQ" in source
+    assert "download_hk_ggt_history_none_p" in source
+    assert "download_hk_ggt_history_hfq_p" not in source
     assert re.search(
-        build_task_signature_pattern("download_hk_ggt_history_hfq_partition_task"),
+        build_task_signature_pattern("download_hk_ggt_history_none_partition_task"),
         source,
     )
     assert re.search(
@@ -92,6 +96,13 @@ def test_hk_partition_dag_uses_frozen_partition_count_everywhere():
         source,
     )
     assert "partition_count = PARTITION_COUNT" not in source
+
+    # DAG invariants called out by the task brief
+    assert re.search(r'schedule\s*=\s*"30\s+16\s+\*\s+\*\s+1-5"', source)
+    assert "catchup=False" in source
+    assert "max_active_runs=1" in source
+    assert "REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY" in source
+    assert re.search(r"for task in partition_tasks:\s+task >> aggregate_task", source)
 
 
 def test_etf_partition_dag_uses_frozen_partition_count_everywhere():
