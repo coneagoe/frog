@@ -110,7 +110,9 @@ from .model import (
     tb_name_history_data_weekly_hk_stock_hfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
+    tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
+    tb_name_paper_cash_ledger,
     tb_name_paper_orders,
     tb_name_paper_position_lots,
     tb_name_paper_positions,
@@ -2348,6 +2350,64 @@ class StorageDb:
                 if column_name not in account_columns:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN {column_name} {ddl}"))
+            account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
+            account_nav_columns = {
+                "share_count": "NUMERIC(20, 6) NOT NULL DEFAULT 0",
+                "net_asset_value": "NUMERIC(20, 6) NOT NULL DEFAULT 1",
+                "cumulative_deposit": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
+                "cumulative_withdrawal": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
+            }
+            missing_account_nav_columns = [
+                column_name for column_name in account_nav_columns if column_name not in account_columns
+            ]
+            for column_name in missing_account_nav_columns:
+                ddl = account_nav_columns[column_name]
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN {column_name} {ddl}"))
+            if missing_account_nav_columns:
+                backfill_values = {
+                    "share_count": "initial_cash",
+                    "net_asset_value": "1",
+                    "cumulative_deposit": "initial_cash",
+                    "cumulative_withdrawal": "0",
+                }
+                assignments = ", ".join(
+                    f"{column_name} = {backfill_values[column_name]}" for column_name in missing_account_nav_columns
+                )
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"UPDATE {tb_name_paper_accounts} SET {assignments}"))
+
+        if inspect(self.engine).has_table(tb_name_paper_cash_ledger):
+            cash_ledger_columns = {
+                column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_cash_ledger)
+            }
+            cash_ledger_nav_columns = {
+                "trade_date": "DATE",
+                "net_asset_value": "NUMERIC(20, 6)",
+                "share_delta": "NUMERIC(20, 6)",
+            }
+            for column_name, ddl in cash_ledger_nav_columns.items():
+                if column_name not in cash_ledger_columns:
+                    with self.engine.begin() as conn:
+                        conn.execute(text(f"ALTER TABLE {tb_name_paper_cash_ledger} ADD COLUMN {column_name} {ddl}"))
+
+        if inspect(self.engine).has_table(tb_name_paper_account_snapshots):
+            snapshot_columns = {
+                column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_account_snapshots)
+            }
+            snapshot_nav_columns = {
+                "net_asset_value": "NUMERIC(20, 6)",
+                "share_count": "NUMERIC(20, 6)",
+                "cumulative_deposit": "NUMERIC(20, 4)",
+                "cumulative_withdrawal": "NUMERIC(20, 4)",
+                "net_cash_flow": "NUMERIC(20, 4)",
+            }
+            for column_name, ddl in snapshot_nav_columns.items():
+                if column_name not in snapshot_columns:
+                    with self.engine.begin() as conn:
+                        conn.execute(
+                            text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}")
+                        )
 
         if "comment" not in columns:
             with self.engine.begin() as conn:
