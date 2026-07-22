@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import (
+    get_hk_metadata_provider,
     get_market_data_provider,
     get_session,
     require_api_token,
@@ -18,6 +19,7 @@ from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
+from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 
@@ -30,11 +32,12 @@ def create_order(
     request: CreateOrderRequest,
     session: Session = Depends(get_session),
     market_data: MarketDataProvider = Depends(get_market_data_provider),
+    hk_metadata: HkConnectMetadataProvider = Depends(get_hk_metadata_provider),
 ):
     repo = PaperTradingRepository(session)
     if repo.get_account(account_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
-    order_service = OrderService(repo, market_data)
+    order_service = OrderService(repo, market_data, hk_metadata=hk_metadata)
     order = order_service.place_order(
         account_id,
         request.symbol,
@@ -44,6 +47,7 @@ def create_order(
         request.trade_date,
         request.idempotency_key,
         request.comment,
+        market=request.market,
     )
     if order.status == OrderStatus.ACCEPTED.value:
         snapshot_service = SnapshotService(repo, market_data)
@@ -76,9 +80,10 @@ def delete_order(
     order_id: int,
     session: Session = Depends(get_session),
     market_data: MarketDataProvider = Depends(get_market_data_provider),
+    hk_metadata: HkConnectMetadataProvider = Depends(get_hk_metadata_provider),
 ):
     repo = PaperTradingRepository(session)
-    deleted = OrderDeleteService(repo, market_data).delete_order(order_id)
+    deleted = OrderDeleteService(repo, market_data, hk_metadata=hk_metadata).delete_order(order_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper order not found: {order_id}")
     session.commit()

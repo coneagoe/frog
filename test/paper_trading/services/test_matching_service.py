@@ -17,7 +17,7 @@ from paper_trading.domain.enums import OrderSide, OrderStatus
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
-from paper_trading.storage.market_data import StorageMarketDataProvider
+from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
@@ -233,3 +233,193 @@ def test_matching_copies_order_comment_to_trade(tmp_path):
     assert repo.get_order(order.id).comment == "突破买入"
     assert repo.list_trades(account.id)[0].comment == "突破买入"
     engine.dispose()
+
+
+# ── HK Connect matching ──────────────────────────────────────────────────────
+
+
+def test_hk_connect_matching_uses_hk_fees_and_persists_market(sqlite_session):
+    """HK Connect matching should use HK fee calculation and persist market on trade."""
+    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
+    from storage.model.general_info_ggt import GeneralInfoGGT
+    from test.paper_trading.fakes import FakeMarketDataProvider
+
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-match", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("50000.00"),
+        market="hk_connect",
+    )
+    bars = {
+        ("00700", date(2026, 7, 21)): DailyBar(
+            symbol="00700",
+            trade_date=date(2026, 7, 21),
+            open=Decimal("400"),
+            high=Decimal("410"),
+            low=Decimal("395"),
+            close=Decimal("405"),
+        )
+    }
+    md = FakeMarketDataProvider(bars)
+    hk_meta = HkConnectMetadataProvider(session)
+    snapshot_service = SnapshotService(repo, md)
+    service = MatchingService(repo, md, snapshot_service)
+    result = service.match_order(order)
+    assert result == "filled", f"Expected filled, got {result}"
+    trades = repo.list_trades(account.id)
+    assert len(trades) == 1
+    # HK fees should differ from A-share fees
+    assert trades[0].fees != Decimal("0.00")
+    assert trades[0].market == "hk_connect"
+    # Position created by HK buy fill must also carry market
+    positions = repo.get_positions(account.id)
+    assert len(positions) == 1
+    assert positions[0].market == "hk_connect"
+
+
+def test_hk_connect_matching_get_daily_bar_receives_market(sqlite_session):
+    """HK Connect matching should pass market=order.market to get_daily_bar."""
+    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
+    from storage.model.general_info_ggt import GeneralInfoGGT
+    from test.paper_trading.fakes import FakeMarketDataProvider
+
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-mkt", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("50000.00"),
+        market="hk_connect",
+    )
+
+    class MarketCaptureProvider(FakeMarketDataProvider):
+        def __init__(self):
+            super().__init__()
+            self.captured: list[str | None] = []
+
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            self.captured.append(market)
+            return DailyBar(
+                symbol=symbol,
+                trade_date=trade_date,
+                open=Decimal("400"),
+                high=Decimal("410"),
+                low=Decimal("395"),
+                close=Decimal("405"),
+            )
+
+    md = MarketCaptureProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    snapshot_service = SnapshotService(repo, md)
+    service = MatchingService(repo, md, snapshot_service)
+    service.match_order(order)
+    assert md.captured == ["hk_connect"]
+
+
+def test_hk_connect_matching_sell_creates_pending_settlement(sqlite_session):
+    """HK Connect sell should create pending settlement (T+2) instead of immediate cash credit."""
+    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
+    from storage.model.general_info_ggt import GeneralInfoGGT
+    from test.paper_trading.fakes import FakeMarketDataProvider
+
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-sell", Decimal("0.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    repo.upsert_position(account.id, "00700", 100, 0, Decimal("30000.00"), market="hk_connect")
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.SELL,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        frozen_quantity=100,
+        market="hk_connect",
+    )
+    bars = {
+        ("00700", date(2026, 7, 21)): DailyBar(
+            symbol="00700",
+            trade_date=date(2026, 7, 21),
+            open=Decimal("400"),
+            high=Decimal("410"),
+            low=Decimal("395"),
+            close=Decimal("405"),
+        )
+    }
+    md = FakeMarketDataProvider(bars)
+    hk_meta = HkConnectMetadataProvider(session)
+    snapshot_service = SnapshotService(repo, md)
+    service = MatchingService(repo, md, snapshot_service)
+    result = service.match_order(order)
+    assert result == "filled", f"Expected filled, got {result}"
+    pending = repo.list_pending_settlements(account.id)
+    assert len(pending) == 1
+    assert pending[0].settled is False
+    # Cash should NOT be immediately available for HK sell
+    assert repo.get_cash_available(account.id) == Decimal("0.0000")
+
+
+def test_hk_connect_matching_buy_does_not_create_pending_settlement(sqlite_session):
+    """HK Connect buy should NOT create pending settlement."""
+    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
+    from storage.model.general_info_ggt import GeneralInfoGGT
+    from test.paper_trading.fakes import FakeMarketDataProvider
+
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-buy-ns", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("50000.00"),
+        market="hk_connect",
+    )
+    bars = {
+        ("00700", date(2026, 7, 21)): DailyBar(
+            symbol="00700",
+            trade_date=date(2026, 7, 21),
+            open=Decimal("400"),
+            high=Decimal("410"),
+            low=Decimal("395"),
+            close=Decimal("405"),
+        )
+    }
+    md = FakeMarketDataProvider(bars)
+    hk_meta = HkConnectMetadataProvider(session)
+    snapshot_service = SnapshotService(repo, md)
+    service = MatchingService(repo, md, snapshot_service)
+    service.match_order(order)
+    pending = repo.list_pending_settlements(account.id)
+    assert len(pending) == 0

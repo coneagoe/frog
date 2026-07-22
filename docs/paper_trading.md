@@ -1,6 +1,6 @@
 # Paper Trading Backend
 
-The paper trading backend provides a FastAPI API for A-share simulated trading. The MVP supports multiple paper accounts, limit orders, daily matching runs, basic A-share fees, position lots, and account snapshots.
+The paper trading backend provides a FastAPI API for simulated trading. It supports multiple paper accounts, A-share and Southbound Hong Kong Stock Connect ordinary-stock limit orders, daily matching runs, market-specific fees, position lots, validity checks, pending HK settlement, and account snapshots.
 
 ## Docker (Recommended)
 
@@ -81,6 +81,7 @@ uv run tools/paper_trading_cli.py account list
 uv run tools/paper_trading_cli.py account create --name demo --initial-cash 100000
 uv run tools/paper_trading_cli.py account create --name custom-fee --initial-cash 100000 --fee-preset a_share --commission-rate 0.00025 --min-commission 5.00 --stamp-duty-rate 0.0005 --transfer-fee-rate 0.00001
 uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-07-18 --comment "突破买入"
+uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 00700 --market hk_connect --side buy --quantity 100 --limit-price 400.00 --trade-date 2026-07-18
 uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment "回踩确认后买入"
 uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment ""
 uv run tools/paper_trading_cli.py order delete --order-id 123
@@ -206,7 +207,20 @@ curl -X PATCH http://localhost:8000/paper/accounts/1 \
   -d '{"commission_rate":"0.0002","min_commission":"3.00"}'
 ```
 
-All fee fields are optional in the request body. Supported fields: `commission_rate`, `min_commission`, `stamp_duty_rate`, `transfer_fee_rate`. Values must be non-negative decimals. An empty request body (no fee fields) is rejected with a 422 error.
+All fee fields are optional in the request body. Supported A-share fields are `commission_rate`, `min_commission`, `stamp_duty_rate`, and `transfer_fee_rate`. Supported HK Connect fields are `hk_commission_rate`, `hk_min_commission`, `hk_stamp_duty_rate`, `hk_trading_fee_rate`, `hk_sfc_levy_rate`, `hk_afrc_levy_rate`, and `hk_settlement_fee_rate`. Values must be non-negative decimals. An empty request body (no fee fields) is rejected with a 422 error.
+
+## Hong Kong Stock Connect Support
+
+Set `market` to `hk_connect` when creating Southbound Hong Kong Stock Connect ordinary-stock orders. If `market` is omitted, the backend treats the order as `a_share` for backward compatibility.
+
+```bash
+curl -X POST http://localhost:8000/paper/accounts/1/orders \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"00700","market":"hk_connect","side":"buy","quantity":100,"limit_price":"400.00","trade_date":"2026-07-18"}'
+```
+
+HK Connect support is scoped to ordinary stocks. The backend uses explicit market routing rather than symbol inference: orders, trades, positions, and validity checks persist `market`. HK orders use HK GGT daily bars, HK-specific fees, board-lot and tick-size validation, and no A-share limit-up/down validity analysis. HK sell proceeds are not immediately available cash; they remain pending until the T+2 settlement service releases them. Account snapshots include pending settlement in total assets and expose `pending_settlement`.
 
 ## Delete Account
 
@@ -289,7 +303,7 @@ Validity statuses:
 - `invalid`: the operation is not valid for the specified trading day, such as a price outside the daily low/high range.
 - `unchecked`: required market data was unavailable, so the original order is preserved without a completed analysis.
 
-The first version uses daily bars for limit-up and limit-down detection. `trade_date` is the operation date, so default analysis and matching are same-day. A-share T+1 remains a sellable-position rule and does not shift matching to the next day.
+The first version uses daily bars for limit-up and limit-down detection. `trade_date` is the operation date, so default analysis and matching are same-day. A-share T+1 remains a sellable-position rule and does not shift matching to the next day. HK Connect validity uses HK metadata, daily low/high, and tick-size alignment only; it does not apply A-share limit-up/down checks.
 
 ## Run Matching
 

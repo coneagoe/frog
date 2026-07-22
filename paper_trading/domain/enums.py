@@ -20,6 +20,11 @@ class OrderStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class Market(StrEnum):
+    A_SHARE = "a_share"
+    HK_CONNECT = "hk_connect"
+
+
 class CashEventType(StrEnum):
     DEPOSIT = "deposit"
     WITHDRAWAL = "withdrawal"

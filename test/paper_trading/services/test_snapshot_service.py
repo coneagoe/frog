@@ -16,11 +16,11 @@ from common.const import (
     PeriodType,
 )
 from paper_trading.services.snapshot_service import SnapshotService
-from paper_trading.storage.market_data import StorageMarketDataProvider
+from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.models import PaperAccountSnapshot
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
-from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
+from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
 
 
 def test_generate_snapshot_values_positions_at_close(tmp_path):
@@ -128,3 +128,61 @@ def test_generate_snapshot_updates_existing_account_date_snapshot(tmp_path):
     assert snapshot.total_assets == Decimal("102000.0000")
     assert snapshot.unrealized_pnl == Decimal("200.0000")
     engine.dispose()
+
+
+def test_snapshot_includes_pending_settlement(sqlite_session):
+    """Snapshot total_assets must include pending settlement amount."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("pending-snap", Decimal("100000.00"))
+    repo.create_pending_settlement(
+        account_id=account.id,
+        amount=Decimal("50000.00"),
+        expected_settle_date=date(2026, 7, 23),
+        trade_id=1,
+        source="hk_sell",
+    )
+    md = FakeMarketDataProvider()
+    snapshot_service = SnapshotService(repo, md)
+    snapshot = snapshot_service.generate_snapshot(account.id, date(2026, 7, 21))
+
+    assert snapshot.pending_settlement == Decimal("50000.0000")
+    # total_assets includes cash_available + cash_frozen + market_value + pending_settlement
+    assert snapshot.total_assets == Decimal("150000.0000")  # 100000 + 50000
+
+
+def test_snapshot_passes_position_market_to_get_daily_bar(sqlite_session):
+    """Snapshot must pass each position's market to get_daily_bar."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("snap-mkt", Decimal("100000.00"))
+    # Create an HK position
+    repo.upsert_position(account.id, "00700", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("40000.00"), market="hk_connect")
+    # Create an A-share position
+    repo.upsert_position(account.id, "000001.SZ", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("1000.00"))
+
+    class MarketCaptureProvider(FakeMarketDataProvider):
+        def __init__(self):
+            super().__init__()
+            self.captured: list[tuple[str, str | None]] = []
+
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            self.captured.append((symbol, market))
+            return DailyBar(
+                symbol=symbol,
+                trade_date=trade_date,
+                open=Decimal("10"),
+                high=Decimal("100"),
+                low=Decimal("1"),
+                close=Decimal("50"),
+            )
+
+    md = MarketCaptureProvider()
+    snapshot_service = SnapshotService(repo, md)
+    snapshot_service.generate_snapshot(account.id, date(2026, 7, 21))
+
+    assert ("00700", "hk_connect") in md.captured, f"HK position should pass market='hk_connect', got {md.captured}"
+    # A-share position — position.market defaults to 'a_share'
+    assert ("000001.SZ", "a_share") in md.captured or ("000001.SZ", None) in md.captured, (
+        f"A-share position market not found, got {md.captured}"
+    )

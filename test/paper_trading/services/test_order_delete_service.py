@@ -3,13 +3,24 @@ from decimal import Decimal
 
 import pytest
 
-from paper_trading.domain.enums import REPLAY_REJECTION_MARKER, CashEventType, MatchingRunStatus, OrderSide, OrderStatus
+from paper_trading.domain.enums import (
+    REPLAY_REJECTION_MARKER,
+    CashEventType,
+    Market,
+    MatchingRunStatus,
+    OrderSide,
+    OrderStatus,
+)
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.services.trade_validity_service import TradeValidityService
+from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
+from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.repository import PaperTradingRepository
+from storage.model.base import Base
+from storage.model.general_info_ggt import GeneralInfoGGT
 from test.paper_trading.fakes import FakeMarketDataProvider
 
 
@@ -928,7 +939,7 @@ def test_match_order_unavailable_data_fails_not_rejects(session):
 
     # Create a provider that raises KeyError.
     class UnavailableMarketData(FakeMarketDataProvider):
-        def get_daily_bar(self, symbol, trade_date):
+        def get_daily_bar(self, symbol, trade_date, market=None):
             raise KeyError(f"No data for {symbol}")
 
     snapshot_service = SnapshotService(repo, market_data)
@@ -1150,3 +1161,93 @@ def test_replay_rejected_order_reconsidered_on_later_delete(session):
     expected_cash = Decimal("39981.4000")
     actual_cash = repo.get_cash_available(account.id)
     assert actual_cash == expected_cash, f"Expected cash={expected_cash}, got {actual_cash}"
+
+
+# ── HK Connect delete+replay wiring ────────────────────────────────────
+
+
+def test_delete_replay_with_hk_order_uses_hk_validity(sqlite_session):
+    """Surviving HK orders must get HK-specific validity checks after delete+
+    replay. This proves OrderDeleteService wires hk_metadata through to
+    TradeValidityService.
+    """
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    session = sqlite_session
+    session.add(
+        GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"),
+    )
+    session.flush()
+    # Custom bars covering both HK and A-share prices.
+    hk_bar = DailyBar(
+        symbol="00700",
+        trade_date=date(2026, 7, 21),
+        open=Decimal("400"),
+        high=Decimal("410"),
+        low=Decimal("395"),
+        close=Decimal("405"),
+    )
+    a_bar = DailyBar(
+        symbol="000001.SZ",
+        trade_date=date(2026, 7, 22),
+        open=Decimal("10"),
+        high=Decimal("11"),
+        low=Decimal("9"),
+        close=Decimal("10.5"),
+        up_limit=Decimal("11.5"),
+        down_limit=Decimal("8.5"),
+    )
+    bars = {
+        ("00700", date(2026, 7, 21)): hk_bar,
+        ("000001.SZ", date(2026, 7, 22)): a_bar,
+    }
+    market_data = FakeMarketDataProvider(bars)
+    hk_meta = HkConnectMetadataProvider(session)
+
+    validity_service = TradeValidityService(repo, market_data, hk_metadata=hk_meta)
+    order_service = OrderService(repo, market_data, validity_service, hk_metadata=hk_meta)
+    snapshot_service = SnapshotService(repo, market_data)
+    matching_service = MatchingService(repo, market_data, snapshot_service)
+
+    account = repo.create_account("hk-del", Decimal("500000.00"))
+
+    # HK order (survives delete).
+    hk_order = order_service.place_order(
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
+    )
+
+    # Unrelated A-share order (will be deleted to trigger replay).
+    delete_me = order_service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 7, 22),
+    )
+
+    # Fill both.
+    matching_service.run(date(2026, 7, 21), account.id)
+    matching_service.run(date(2026, 7, 22), account.id)
+    assert len(repo.list_trades(account.id)) == 2
+
+    # Delete using OrderDeleteService wired with hk_metadata.
+    delete_svc = OrderDeleteService(repo, market_data, hk_metadata=hk_meta)
+    deleted = delete_svc.delete_order(delete_me.id)
+    assert deleted is True
+
+    # Surviving HK order must have a validity check with HK-specific fields.
+    checks = repo.list_trade_validity_checks(hk_order.id)
+    assert len(checks) > 0, "HK order should have regenerated validity checks"
+    last_check = checks[-1]
+    # HK path sets both touched_limit fields to None.
+    assert last_check.touched_limit_up is None, f"Expected None for HK limit-up, got {last_check.touched_limit_up}"
+    assert last_check.touched_limit_down is None, (
+        f"Expected None for HK limit-down, got {last_check.touched_limit_down}"
+    )

@@ -14,6 +14,7 @@ from paper_trading.storage.models import (
     PaperCashLedger,
     PaperMatchingRun,
     PaperOrder,
+    PaperPendingSettlement,
     PaperPosition,
     PaperPositionLot,
     PaperPositionRoundTrip,
@@ -122,6 +123,55 @@ class PaperTradingRepository:
         self.session.flush()
         return account
 
+    def update_account_hk_fees(
+        self,
+        account_id: int,
+        hk_commission_rate: Decimal | None = None,
+        hk_min_commission: Decimal | None = None,
+        hk_stamp_duty_rate: Decimal | None = None,
+        hk_trading_fee_rate: Decimal | None = None,
+        hk_sfc_levy_rate: Decimal | None = None,
+        hk_afrc_levy_rate: Decimal | None = None,
+        hk_settlement_fee_rate: Decimal | None = None,
+    ) -> PaperAccount | None:
+        _require_fee_update(
+            hk_commission_rate=hk_commission_rate,
+            hk_min_commission=hk_min_commission,
+            hk_stamp_duty_rate=hk_stamp_duty_rate,
+            hk_trading_fee_rate=hk_trading_fee_rate,
+            hk_sfc_levy_rate=hk_sfc_levy_rate,
+            hk_afrc_levy_rate=hk_afrc_levy_rate,
+            hk_settlement_fee_rate=hk_settlement_fee_rate,
+        )
+        _validate_fee_values(
+            hk_commission_rate=hk_commission_rate,
+            hk_min_commission=hk_min_commission,
+            hk_stamp_duty_rate=hk_stamp_duty_rate,
+            hk_trading_fee_rate=hk_trading_fee_rate,
+            hk_sfc_levy_rate=hk_sfc_levy_rate,
+            hk_afrc_levy_rate=hk_afrc_levy_rate,
+            hk_settlement_fee_rate=hk_settlement_fee_rate,
+        )
+        account = self.get_account(account_id)
+        if account is None:
+            return None
+        if hk_commission_rate is not None:
+            account.hk_commission_rate = hk_commission_rate
+        if hk_min_commission is not None:
+            account.hk_min_commission = hk_min_commission
+        if hk_stamp_duty_rate is not None:
+            account.hk_stamp_duty_rate = hk_stamp_duty_rate
+        if hk_trading_fee_rate is not None:
+            account.hk_trading_fee_rate = hk_trading_fee_rate
+        if hk_sfc_levy_rate is not None:
+            account.hk_sfc_levy_rate = hk_sfc_levy_rate
+        if hk_afrc_levy_rate is not None:
+            account.hk_afrc_levy_rate = hk_afrc_levy_rate
+        if hk_settlement_fee_rate is not None:
+            account.hk_settlement_fee_rate = hk_settlement_fee_rate
+        self.session.flush()
+        return account
+
     def delete_account(self, account_id: int) -> bool:
         account = self.get_account(account_id)
         if account is None:
@@ -147,6 +197,9 @@ class PaperTradingRepository:
         self.session.query(PaperAccountSnapshot).filter(PaperAccountSnapshot.account_id == account_id).delete(
             synchronize_session=False
         )
+        self.session.query(PaperPendingSettlement).filter(
+            PaperPendingSettlement.account_id == account_id
+        ).delete(synchronize_session=False)
         self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -237,6 +290,7 @@ class PaperTradingRepository:
         rejection_code: str | None = None,
         rejection_reason: str | None = None,
         comment: str | None = None,
+        market: str | None = None,
     ) -> PaperOrder:
         order = PaperOrder(
             account_id=account_id,
@@ -252,6 +306,7 @@ class PaperTradingRepository:
             rejection_code=rejection_code,
             rejection_reason=rejection_reason,
             comment=self._normalize_comment(comment),
+            market=market or "a_share",
         )
         self.session.add(order)
         self.session.flush()
@@ -364,6 +419,7 @@ class PaperTradingRepository:
         cost_amount: Decimal,
         realized_pnl: Decimal = Decimal("0"),
         source: str = "trade",
+        market: str | None = None,
     ) -> PaperPosition:
         position = self.get_position(account_id, symbol)
         if position is None:
@@ -373,6 +429,8 @@ class PaperTradingRepository:
         position.frozen_quantity = frozen_quantity
         position.cost_amount = cost_amount
         position.realized_pnl = realized_pnl
+        if market is not None:
+            position.market = market
         self.session.flush()
         return position
 
@@ -480,6 +538,7 @@ class PaperTradingRepository:
         fees: Decimal,
         trade_date: date,
         comment: str | None = None,
+        market: str | None = None,
     ) -> PaperTrade:
         trade = PaperTrade(
             order_id=order_id,
@@ -492,6 +551,7 @@ class PaperTradingRepository:
             fees=fees,
             trade_date=trade_date,
             comment=self._normalize_comment(comment),
+            market=market or "a_share",
         )
         self.session.add(trade)
         self.session.flush()
@@ -608,6 +668,9 @@ class PaperTradingRepository:
         self.session.query(PaperAccountSnapshot).filter(PaperAccountSnapshot.account_id == account_id).delete(
             synchronize_session=False
         )
+        self.session.query(PaperPendingSettlement).filter(
+            PaperPendingSettlement.account_id == account_id
+        ).delete(synchronize_session=False)
         self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -693,6 +756,70 @@ class PaperTradingRepository:
             synchronize_session=False,
         )
         self.session.flush()
+
+    # ------------------------------------------------------------------
+    # Pending settlement (HK Connect)
+    # ------------------------------------------------------------------
+
+    def create_pending_settlement(
+        self,
+        account_id: int,
+        amount: Decimal,
+        expected_settle_date: date,
+        trade_id: int | None = None,
+        source: str = "hk_sell",
+    ) -> PaperPendingSettlement:
+        pending = PaperPendingSettlement(
+            account_id=account_id,
+            amount=amount,
+            expected_settle_date=expected_settle_date,
+            trade_id=trade_id,
+            source=source,
+            settled=False,
+        )
+        self.session.add(pending)
+        self.session.flush()
+        return pending
+
+    def list_pending_settlements(self, account_id: int) -> list[PaperPendingSettlement]:
+        return list(
+            self.session.query(PaperPendingSettlement)
+            .filter(
+                PaperPendingSettlement.account_id == account_id,
+                PaperPendingSettlement.settled == False,
+            )
+            .order_by(PaperPendingSettlement.expected_settle_date.asc())
+            .all()
+        )
+
+    def settle_pending(self, pending_id: int) -> PaperPendingSettlement:
+        pending = cast(PaperPendingSettlement, self.session.get(PaperPendingSettlement, pending_id))
+        if pending is None:
+            raise KeyError(f"pending settlement not found: {pending_id}")
+        if pending.settled:
+            return pending
+        pending.settled = True
+        # Add cash to ledger as trade event
+        self.add_cash_event(
+            pending.account_id,
+            CashEventType.TRADE,
+            pending.amount,
+            trade_id=pending.trade_id,
+            note="hk_sell_settlement",
+        )
+        self.session.flush()
+        return pending
+
+    def get_pending_settlement_total(self, account_id: int) -> Decimal:
+        total = (
+            self.session.query(func.coalesce(func.sum(PaperPendingSettlement.amount), 0))
+            .filter(
+                PaperPendingSettlement.account_id == account_id,
+                PaperPendingSettlement.settled == False,
+            )
+            .scalar()
+        )
+        return Decimal(total).quantize(Decimal("0.0001"))
 
     def list_order_trade_dates(self, account_id: int) -> list[date]:
         rows = (

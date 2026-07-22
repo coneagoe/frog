@@ -1,18 +1,163 @@
 from decimal import Decimal
 
 from paper_trading.domain.enums import OrderSide, TradeValidityStatus
+from paper_trading.domain.hk_connect_rules import get_hk_tick_size
 from paper_trading.domain.rules import evaluate_daily_trade_validity
+from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperOrder, PaperTradeValidityCheck
 from paper_trading.storage.repository import PaperTradingRepository
 
 
 class TradeValidityService:
-    def __init__(self, repo: PaperTradingRepository, market_data: MarketDataProvider):
+    def __init__(
+        self,
+        repo: PaperTradingRepository,
+        market_data: MarketDataProvider,
+        hk_metadata: HkConnectMetadataProvider | None = None,
+    ):
         self.repo = repo
         self.market_data = market_data
+        self.hk_metadata = hk_metadata
 
     def analyze_order(self, order: PaperOrder) -> PaperTradeValidityCheck:
+        market = getattr(order, "market", None) or "a_share"
+        if market == "hk_connect":
+            return self._analyze_hk_connect(order)
+        return self._analyze_a_share(order)
+
+    # ── HK Connect validity ──────────────────────────────────────────
+
+    def _analyze_hk_connect(self, order: PaperOrder) -> PaperTradeValidityCheck:
+        # Check HK metadata first — unknown symbols get UNCHECKED before
+        # any market-data call, so UNKNOWN_HK_SECURITY takes priority over
+        # MARKET_DATA_UNAVAILABLE.
+        market = getattr(order, "market", None) or "a_share"
+        if self.hk_metadata is None:
+            check = self.repo.create_trade_validity_check(
+                order_id=order.id,
+                account_id=order.account_id,
+                symbol=order.symbol,
+                trade_date=order.trade_date,
+                side=order.side,
+                input_price=Decimal(order.limit_price),
+                data_granularity="daily",
+                daily_low=None,
+                daily_high=None,
+                limit_up_price=None,
+                limit_down_price=None,
+                touched_limit_up=None,
+                touched_limit_down=None,
+                price_in_range=None,
+                status=TradeValidityStatus.UNCHECKED.value,
+                reason_code="UNKNOWN_HK_SECURITY",
+                reason_detail="HK metadata provider not configured",
+                market=market,
+            )
+            self.repo.update_order_validity(order, check.status, check.reason_code)
+            return check
+
+        meta = self.hk_metadata.get_security(order.symbol)
+        if meta is None:
+            check = self.repo.create_trade_validity_check(
+                order_id=order.id,
+                account_id=order.account_id,
+                symbol=order.symbol,
+                trade_date=order.trade_date,
+                side=order.side,
+                input_price=Decimal(order.limit_price),
+                data_granularity="daily",
+                daily_low=None,
+                daily_high=None,
+                limit_up_price=None,
+                limit_down_price=None,
+                touched_limit_up=None,
+                touched_limit_down=None,
+                price_in_range=None,
+                status=TradeValidityStatus.UNCHECKED.value,
+                reason_code="UNKNOWN_HK_SECURITY",
+                reason_detail=f"HK security {order.symbol} not found in metadata",
+                market=market,
+            )
+            self.repo.update_order_validity(order, check.status, check.reason_code)
+            return check
+
+        try:
+            bar = self.market_data.get_daily_bar(order.symbol, order.trade_date, market="hk_connect")
+        except (KeyError, ValueError) as exc:
+            check = self.repo.create_trade_validity_check(
+                order_id=order.id,
+                account_id=order.account_id,
+                symbol=order.symbol,
+                trade_date=order.trade_date,
+                side=order.side,
+                input_price=Decimal(order.limit_price),
+                data_granularity="daily",
+                daily_low=None,
+                daily_high=None,
+                limit_up_price=None,
+                limit_down_price=None,
+                touched_limit_up=None,
+                touched_limit_down=None,
+                price_in_range=None,
+                status=TradeValidityStatus.UNCHECKED.value,
+                reason_code="MARKET_DATA_UNAVAILABLE",
+                reason_detail=str(exc),
+                market=market,
+            )
+            self.repo.update_order_validity(order, check.status, check.reason_code)
+            return check
+
+        price = Decimal(order.limit_price)
+
+        # Price-range check (same as A-share, no limit-up/down concept for HK).
+        price_in_range = bar.low <= price <= bar.high
+
+        # HK tick-alignment check.
+        tick_size = get_hk_tick_size(price)
+        remainder = (price * Decimal("1000")) % (tick_size * Decimal("1000"))
+        tick_aligned = remainder == 0
+
+        if not tick_aligned:
+            status = TradeValidityStatus.INVALID
+            reason_code = "INVALID_TICK_SIZE"
+            reason_detail = f"Price {price} is not aligned to HK tick size {tick_size}"
+        elif not price_in_range:
+            status = TradeValidityStatus.INVALID
+            reason_code = "PRICE_OUT_OF_DAILY_RANGE"
+            reason_detail = "Input price is outside the daily low/high range"
+        else:
+            status = TradeValidityStatus.VALID
+            reason_code = "VALID"
+            reason_detail = "Price is inside daily range and tick-aligned"
+
+        check = self.repo.create_trade_validity_check(
+            order_id=order.id,
+            account_id=order.account_id,
+            symbol=order.symbol,
+            trade_date=order.trade_date,
+            side=order.side,
+            input_price=price,
+            data_granularity="daily",
+            daily_low=bar.low,
+            daily_high=bar.high,
+            limit_up_price=None,
+            limit_down_price=None,
+            touched_limit_up=None,
+            touched_limit_down=None,
+            price_in_range=price_in_range,
+            status=status.value,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            market=market,
+        )
+        self.repo.update_order_validity(order, check.status, check.reason_code)
+        return check
+
+    # ── A-share validity (unchanged) ─────────────────────────────────
+
+    def _analyze_a_share(self, order: PaperOrder) -> PaperTradeValidityCheck:
+        market = getattr(order, "market", None) or "a_share"
         try:
             bar = self.market_data.get_daily_bar(order.symbol, order.trade_date)
         except (KeyError, ValueError) as exc:
@@ -34,6 +179,7 @@ class TradeValidityService:
                 status=TradeValidityStatus.UNCHECKED.value,
                 reason_code="MARKET_DATA_UNAVAILABLE",
                 reason_detail=str(exc),
+                market=market,
             )
             self.repo.update_order_validity(order, check.status, check.reason_code)
             return check
@@ -70,6 +216,7 @@ class TradeValidityService:
                 status=status.value,
                 reason_code=reason_code,
                 reason_detail=reason_detail,
+                market=market,
             )
             self.repo.update_order_validity(order, check.status, check.reason_code)
             return check
@@ -93,6 +240,7 @@ class TradeValidityService:
             status=result.status.value,
             reason_code=result.reason_code,
             reason_detail=result.reason_detail,
+            market=market,
         )
         self.repo.update_order_validity(order, check.status, check.reason_code)
         return check

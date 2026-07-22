@@ -451,3 +451,61 @@ def test_withdraw_endpoint_rejects_excess_cash(monkeypatch, sqlite_session):
 
     assert response.status_code == 422
     assert "exceeds available cash" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# HK Fee API
+# ---------------------------------------------------------------------------
+
+
+def test_update_account_hk_fees(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+    account_id = _create_account(client, headers)
+
+    response = client.patch(
+        f"/paper/accounts/{account_id}",
+        json={
+            "hk_commission_rate": "0.0002",
+            "hk_min_commission": "18.00",
+            "hk_stamp_duty_rate": "0.0013",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hk_commission_rate"] == "0.00020000"
+
+
+def test_update_account_hk_fees_rejects_negative(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+    account_id = _create_account(client, headers)
+
+    response = client.patch(
+        f"/paper/accounts/{account_id}",
+        json={"hk_commission_rate": "-0.01"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+
+def test_update_account_fees_can_mix_a_share_and_hk_fields(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+    account_id = _create_account(client, headers)
+
+    response = client.patch(
+        f"/paper/accounts/{account_id}",
+        json={
+            "commission_rate": "0.0002",
+            "min_commission": "3.00",
+            "hk_commission_rate": "0.0002",
+            "hk_min_commission": "18.00",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["commission_rate"] == "0.00020000"
+    assert body["min_commission"] == "3.0000"
+    assert body["hk_commission_rate"] == "0.00020000"
+    assert body["hk_min_commission"] == "18.0000"

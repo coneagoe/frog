@@ -7,15 +7,22 @@ from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.round_trip_service import RoundTripService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.services.trade_validity_service import TradeValidityService
+from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperOrder, PaperPosition
 from paper_trading.storage.repository import PaperTradingRepository
 
 
 class OrderDeleteService:
-    def __init__(self, repo: PaperTradingRepository, market_data: MarketDataProvider):
+    def __init__(
+        self,
+        repo: PaperTradingRepository,
+        market_data: MarketDataProvider,
+        hk_metadata: HkConnectMetadataProvider | None = None,
+    ):
         self.repo = repo
         self.market_data = market_data
+        self.hk_metadata = hk_metadata
 
     def delete_order(self, order_id: int) -> bool:
         try:
@@ -186,7 +193,7 @@ class OrderDeleteService:
                     )
 
     def _regenerate_validity_checks(self, account_id: int) -> None:
-        validity_service = TradeValidityService(self.repo, self.market_data)
+        validity_service = TradeValidityService(self.repo, self.market_data, hk_metadata=self.hk_metadata)
         for order in self.repo.list_orders(account_id):
             if order.status in (
                 OrderStatus.ACCEPTED.value,

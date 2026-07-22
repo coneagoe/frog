@@ -8,6 +8,10 @@ from paper_trading.domain.enums import (
     OrderStatus,
 )
 from paper_trading.domain.fees import calculate_a_share_fees, fee_config_from_account
+from paper_trading.domain.hk_connect_fees import (
+    calculate_hk_connect_fees,
+    hk_fee_config_from_account,
+)
 from paper_trading.domain.rules import ensure_price_in_daily_range
 from paper_trading.services.round_trip_service import RoundTripService
 from paper_trading.services.snapshot_service import SnapshotService
@@ -35,7 +39,7 @@ class MatchingService:
         for order in self.repo.get_orders_for_matching(trade_date, account_id):
             processed += 1
             try:
-                bar = self.market_data.get_daily_bar(order.symbol, trade_date)
+                bar = self.market_data.get_daily_bar(order.symbol, trade_date, market=order.market)
                 if bar.suspended:
                     self._reject_order(order, "SUSPENDED_SYMBOL", "Symbol is suspended")
                     rejected += 1
@@ -77,7 +81,7 @@ class MatchingService:
           stays ACCEPTED with no side effects (matching *failed* outcome).
         """
         try:
-            bar = self.market_data.get_daily_bar(order.symbol, order.trade_date)
+            bar = self.market_data.get_daily_bar(order.symbol, order.trade_date, market=order.market)
         except Exception:
             return "failed"  # matches run() outer except → failed counter
         if bar.suspended:
@@ -108,6 +112,13 @@ class MatchingService:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
 
+    def _next_trade_date(self, trade_date: date, n: int) -> date:
+        """Return the n-th future trade date after trade_date via market_data."""
+        current = trade_date
+        for _ in range(n):
+            current = self.market_data.next_trade_date(current)
+        return current
+
     def _fill_order(self, order: PaperOrder) -> None:
         side = OrderSide(order.side)
         price = Decimal(order.limit_price)
@@ -116,7 +127,16 @@ class MatchingService:
         if account is None:
             raise ValueError(f"paper account not found: {order.account_id}")
         amount = (Decimal(quantity) * price).quantize(Decimal("0.0001"))
-        fees = calculate_a_share_fees(side, amount, fee_config_from_account(account)).total.quantize(Decimal("0.0001"))
+
+        # Market-aware fee calculation
+        if order.market == "hk_connect":
+            fee_config = hk_fee_config_from_account(account)
+            fees = calculate_hk_connect_fees(side, amount, fee_config).total.quantize(Decimal("0.0001"))
+        else:
+            fees = calculate_a_share_fees(side, amount, fee_config_from_account(account)).total.quantize(
+                Decimal("0.0001")
+            )
+
         trade = self.repo.create_trade(
             order.id,
             order.account_id,
@@ -128,6 +148,7 @@ class MatchingService:
             fees,
             order.trade_date,
             comment=order.comment,
+            market=order.market,
         )
         if side == OrderSide.BUY:
             self._settle_buy(order, trade.id, amount, fees)
@@ -138,6 +159,16 @@ class MatchingService:
             )
         else:
             self._settle_sell(order, trade.id, amount, fees)
+            # HK sells create pending settlement (T+2) instead of immediate cash credit
+            if order.market == "hk_connect":
+                settle_date = self._next_trade_date(order.trade_date, 2)
+                self.repo.create_pending_settlement(
+                    account_id=order.account_id,
+                    amount=amount - fees,
+                    expected_settle_date=settle_date,
+                    trade_id=trade.id,
+                    source="hk_sell",
+                )
             position = self.repo.get_position(order.account_id, order.symbol)
             self.round_trip_service.record_fill(
                 trade,
@@ -166,6 +197,7 @@ class MatchingService:
             total_quantity=current_quantity + int(order.quantity),
             frozen_quantity=(0 if position is None else int(position.frozen_quantity or 0)),
             cost_amount=(current_cost + actual_cost).quantize(Decimal("0.0001")),
+            market=order.market,
         )
         self.repo.create_position_lot(
             order.account_id,
@@ -177,13 +209,15 @@ class MatchingService:
         )
 
     def _settle_sell(self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal) -> None:
-        self.repo.add_cash_event(
-            order.account_id,
-            CashEventType.TRADE,
-            amount - fees,
-            order_id=order.id,
-            trade_id=trade_id,
-        )
+        # HK sells skip immediate cash credit — pending settlement is created in _fill_order
+        if order.market != "hk_connect":
+            self.repo.add_cash_event(
+                order.account_id,
+                CashEventType.TRADE,
+                amount - fees,
+                order_id=order.id,
+                trade_id=trade_id,
+            )
         position = self.repo.get_position(order.account_id, order.symbol)
         if position is None:
             return

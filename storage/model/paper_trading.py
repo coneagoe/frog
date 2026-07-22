@@ -25,6 +25,7 @@ tb_name_paper_position_round_trips = "paper_position_round_trips"
 tb_name_paper_account_snapshots = "paper_account_snapshots"
 tb_name_paper_matching_runs = "paper_matching_runs"
 tb_name_paper_trade_validity_checks = "paper_trade_validity_checks"
+tb_name_paper_pending_settlement = "paper_pending_settlement"
 
 
 class PaperAccount(Base):
@@ -45,6 +46,13 @@ class PaperAccount(Base):
     status = Column(String(20), nullable=False, server_default="active")
     base_currency = Column(String(10), nullable=False, server_default="CNY")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    hk_commission_rate = Column(Numeric(20, 8), nullable=True)
+    hk_min_commission = Column(Numeric(20, 4), nullable=True)
+    hk_stamp_duty_rate = Column(Numeric(20, 8), nullable=True)
+    hk_trading_fee_rate = Column(Numeric(20, 8), nullable=True)
+    hk_sfc_levy_rate = Column(Numeric(20, 8), nullable=True)
+    hk_afrc_levy_rate = Column(Numeric(20, 8), nullable=True)
+    hk_settlement_fee_rate = Column(Numeric(20, 8), nullable=True)
 
 
 class PaperCashLedger(Base):
@@ -75,6 +83,7 @@ class PaperPosition(Base):
     cost_amount = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
     realized_pnl = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
     source = Column(String(20), nullable=False, server_default="trade")
+    market = Column(String(20), nullable=False, server_default="a_share", index=True)
 
 
 class PaperPositionLot(Base):
@@ -113,6 +122,7 @@ class PaperOrder(Base):
     validity_status = Column(String(20), nullable=True, index=True)
     validity_reason = Column(String(50), nullable=True)
     validity_checked_at = Column(DateTime(timezone=True), nullable=True)
+    market = Column(String(20), nullable=False, server_default="a_share", index=True)
 
 
 class PaperTradeValidityCheck(Base):
@@ -137,6 +147,7 @@ class PaperTradeValidityCheck(Base):
     reason_detail = Column(Text, nullable=True)
     data_granularity = Column(String(20), nullable=False, server_default="daily")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    market = Column(String(20), nullable=False, server_default="a_share", index=True)
 
 
 class PaperTrade(Base):
@@ -154,6 +165,7 @@ class PaperTrade(Base):
     trade_date = Column(Date, nullable=False, index=True)
     comment = Column(Text, nullable=True)
     trade_time = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    market = Column(String(20), nullable=False, server_default="a_share", index=True)
 
 
 class PaperPositionRoundTrip(Base):
@@ -198,6 +210,7 @@ class PaperAccountSnapshot(Base):
     cumulative_deposit = Column(Numeric(20, 4), nullable=True)
     cumulative_withdrawal = Column(Numeric(20, 4), nullable=True)
     net_cash_flow = Column(Numeric(20, 4), nullable=True)
+    pending_settlement = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -216,3 +229,16 @@ class PaperMatchingRun(Base):
     error_details = Column(Text, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class PaperPendingSettlement(Base):
+    __tablename__ = tb_name_paper_pending_settlement
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True)
+    amount = Column(Numeric(20, 4), nullable=False)
+    expected_settle_date = Column(Date, nullable=False, index=True)
+    trade_id = Column(Integer, nullable=True)
+    source = Column(String(20), nullable=False)  # "hk_sell"
+    settled = Column(Boolean, nullable=False, server_default=text("0"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

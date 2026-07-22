@@ -24,3 +24,4 @@ class SnapshotResponse(BaseModel):
     cumulative_deposit: Decimal | None = None
     cumulative_withdrawal: Decimal | None = None
     net_cash_flow: Decimal | None = None
+    pending_settlement: Decimal = Decimal("0.0000")

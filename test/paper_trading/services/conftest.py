@@ -22,3 +22,8 @@ def session(tmp_path):
     finally:
         session.close()
         engine.dispose()
+
+
+@pytest.fixture
+def sqlite_session(session):
+    return session

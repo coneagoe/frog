@@ -23,6 +23,13 @@ class UpdateAccountFeeRequest(BaseModel):
     min_commission: Decimal | None = Field(default=None, ge=0)
     stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
     transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
+    hk_commission_rate: Decimal | None = Field(default=None, ge=0)
+    hk_min_commission: Decimal | None = Field(default=None, ge=0)
+    hk_stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
+    hk_trading_fee_rate: Decimal | None = Field(default=None, ge=0)
+    hk_sfc_levy_rate: Decimal | None = Field(default=None, ge=0)
+    hk_afrc_levy_rate: Decimal | None = Field(default=None, ge=0)
+    hk_settlement_fee_rate: Decimal | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def require_fee_field(self) -> Self:
@@ -33,6 +40,13 @@ class UpdateAccountFeeRequest(BaseModel):
                 self.min_commission,
                 self.stamp_duty_rate,
                 self.transfer_fee_rate,
+                self.hk_commission_rate,
+                self.hk_min_commission,
+                self.hk_stamp_duty_rate,
+                self.hk_trading_fee_rate,
+                self.hk_sfc_levy_rate,
+                self.hk_afrc_levy_rate,
+                self.hk_settlement_fee_rate,
             )
         ):
             raise ValueError("at least one fee field is required")
@@ -50,6 +64,13 @@ class AccountResponse(BaseModel):
     min_commission: Decimal
     stamp_duty_rate: Decimal
     transfer_fee_rate: Decimal
+    hk_commission_rate: Decimal | None = None
+    hk_min_commission: Decimal | None = None
+    hk_stamp_duty_rate: Decimal | None = None
+    hk_trading_fee_rate: Decimal | None = None
+    hk_sfc_levy_rate: Decimal | None = None
+    hk_afrc_levy_rate: Decimal | None = None
+    hk_settlement_fee_rate: Decimal | None = None
     status: str
     base_currency: str
     share_count: Decimal
@@ -66,6 +87,7 @@ class PositionResponse(BaseModel):
     frozen_quantity: int
     cost_amount: Decimal
     realized_pnl: Decimal
+    market: str = "a_share"
 
 
 class CashLedgerResponse(BaseModel):
