@@ -499,8 +499,13 @@ def test_hk_connect_buy_rejects_unknown_symbol(sqlite_session):
     hk_meta = HkConnectMetadataProvider(sqlite_session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
     order = service.place_order(
-        account.id, "99999", OrderSide.BUY, 100, Decimal("50.00"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "99999",
+        OrderSide.BUY,
+        100,
+        Decimal("50.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "UNKNOWN_HK_SECURITY"
@@ -517,8 +522,13 @@ def test_hk_connect_buy_rejects_non_board_lot(sqlite_session):
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
     order = service.place_order(
-        account.id, "00700", OrderSide.BUY, 50, Decimal("400.00"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        50,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "INVALID_LOT_SIZE"
@@ -532,7 +542,11 @@ def test_a_share_order_unchanged_with_market_omitted(sqlite_session):
     hk_meta = HkConnectMetadataProvider(sqlite_session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
     order = service.place_order(
-        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"),
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
         date(2026, 7, 21),
     )
     assert order.status == OrderStatus.ACCEPTED.value
@@ -547,8 +561,13 @@ def test_a_share_explicit_market_still_works(sqlite_session):
     hk_meta = HkConnectMetadataProvider(sqlite_session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
     order = service.place_order(
-        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"),
-        date(2026, 7, 21), market=Market.A_SHARE,
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 7, 21),
+        market=Market.A_SHARE,
     )
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.market == "a_share"
@@ -565,8 +584,13 @@ def test_hk_connect_accepts_board_lot_buy(sqlite_session):
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
     order = service.place_order(
-        account.id, "00700", OrderSide.BUY, 100, Decimal("400.00"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.market == "hk_connect"
@@ -584,8 +608,13 @@ def test_hk_connect_rejects_off_tick_price(sqlite_session):
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
     order = service.place_order(
-        account.id, "00700", OrderSide.BUY, 100, Decimal("400.025"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("400.025"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "INVALID_TICK_SIZE"
@@ -599,8 +628,13 @@ def test_place_order_rejects_unknown_market(sqlite_session):
     md = FakeMarketDataProvider()
     service = OrderService(repo, md)
     order = service.place_order(
-        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"),
-        date(2026, 7, 21), market="unknown_market",
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 7, 21),
+        market="unknown_market",
     )
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "INVALID_MARKET"
@@ -623,8 +657,13 @@ def test_hk_connect_sell_board_lot_ok(sqlite_session):
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
     order = service.place_order(
-        account.id, "00700", OrderSide.SELL, 100, Decimal("400.00"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "00700",
+        OrderSide.SELL,
+        100,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.frozen_quantity == 100
@@ -645,8 +684,13 @@ def test_hk_connect_sell_odd_lot_ok(sqlite_session):
     service = OrderService(repo, md, hk_metadata=hk_meta)
     # odd_lot_remainder = 250 % 100 = 50, selling 50 is OK
     order = service.place_order(
-        account.id, "00700", OrderSide.SELL, 50, Decimal("400.00"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "00700",
+        OrderSide.SELL,
+        50,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.frozen_quantity == 50
@@ -667,8 +711,13 @@ def test_hk_connect_sell_rejects_invalid_odd_lot(sqlite_session):
     service = OrderService(repo, md, hk_metadata=hk_meta)
     # odd_lot_remainder = 250 % 100 = 50; selling 60 exceeds remainder and is not a board lot multiple
     order = service.place_order(
-        account.id, "00700", OrderSide.SELL, 60, Decimal("400.00"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "00700",
+        OrderSide.SELL,
+        60,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "INVALID_ODD_LOT_SELL"
@@ -689,8 +738,13 @@ def test_hk_connect_sell_rejects_partial_odd_lot(sqlite_session):
     service = OrderService(repo, md, hk_metadata=hk_meta)
     # odd_lot_remainder = 250 % 100 = 50; selling 40 < remainder must reject
     order = service.place_order(
-        account.id, "00700", OrderSide.SELL, 40, Decimal("400.00"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "00700",
+        OrderSide.SELL,
+        40,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "INVALID_ODD_LOT_SELL"
@@ -707,7 +761,11 @@ def test_a_share_default_rejects_hk_symbol(sqlite_session):
     md = FakeMarketDataProvider()
     service = OrderService(repo, md)
     order = service.place_order(
-        account.id, "00700", OrderSide.BUY, 100, Decimal("10.00"),
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
         date(2026, 7, 21),
     )
     assert order.status == OrderStatus.REJECTED.value
@@ -722,8 +780,13 @@ def test_a_share_explicit_rejects_hk_symbol(sqlite_session):
     md = FakeMarketDataProvider()
     service = OrderService(repo, md)
     order = service.place_order(
-        account.id, "00700", OrderSide.BUY, 100, Decimal("10.00"),
-        date(2026, 7, 21), market=Market.A_SHARE,
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 7, 21),
+        market=Market.A_SHARE,
     )
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "MARKET_SYMBOL_MISMATCH"
@@ -741,8 +804,13 @@ def test_hk_connect_accepts_hk_symbol(sqlite_session):
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
     order = service.place_order(
-        account.id, "00700", OrderSide.BUY, 100, Decimal("400.00"),
-        date(2026, 7, 21), market=Market.HK_CONNECT,
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
     )
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.market == "hk_connect"

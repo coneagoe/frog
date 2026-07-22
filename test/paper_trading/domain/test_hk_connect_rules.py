@@ -6,8 +6,8 @@ from paper_trading.domain.errors import PaperTradingError
 from paper_trading.domain.hk_connect_rules import (
     ensure_hk_lot_size,
     ensure_hk_odd_lot_sell,
-    validate_hk_tick_size,
     get_hk_tick_size,
+    validate_hk_tick_size,
 )
 
 

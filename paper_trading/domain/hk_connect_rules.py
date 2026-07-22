@@ -2,7 +2,6 @@ from decimal import Decimal
 
 from paper_trading.domain.errors import PaperTradingError
 
-
 # Hong Kong minimum spread table (price range -> tick size)
 _HK_TICK_TABLE: list[tuple[Decimal, Decimal]] = [
     (Decimal("0"), Decimal("10")),  # 0.010

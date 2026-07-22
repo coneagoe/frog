@@ -240,7 +240,6 @@ def test_matching_copies_order_comment_to_trade(tmp_path):
 
 def test_hk_connect_matching_uses_hk_fees_and_persists_market(sqlite_session):
     """HK Connect matching should use HK fee calculation and persist market on trade."""
-    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
     from storage.model.general_info_ggt import GeneralInfoGGT
     from test.paper_trading.fakes import FakeMarketDataProvider
 
@@ -272,7 +271,6 @@ def test_hk_connect_matching_uses_hk_fees_and_persists_market(sqlite_session):
         )
     }
     md = FakeMarketDataProvider(bars)
-    hk_meta = HkConnectMetadataProvider(session)
     snapshot_service = SnapshotService(repo, md)
     service = MatchingService(repo, md, snapshot_service)
     result = service.match_order(order)
@@ -290,7 +288,6 @@ def test_hk_connect_matching_uses_hk_fees_and_persists_market(sqlite_session):
 
 def test_hk_connect_matching_get_daily_bar_receives_market(sqlite_session):
     """HK Connect matching should pass market=order.market to get_daily_bar."""
-    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
     from storage.model.general_info_ggt import GeneralInfoGGT
     from test.paper_trading.fakes import FakeMarketDataProvider
 
@@ -329,7 +326,6 @@ def test_hk_connect_matching_get_daily_bar_receives_market(sqlite_session):
             )
 
     md = MarketCaptureProvider()
-    hk_meta = HkConnectMetadataProvider(session)
     snapshot_service = SnapshotService(repo, md)
     service = MatchingService(repo, md, snapshot_service)
     service.match_order(order)
@@ -338,7 +334,6 @@ def test_hk_connect_matching_get_daily_bar_receives_market(sqlite_session):
 
 def test_hk_connect_matching_sell_creates_pending_settlement(sqlite_session):
     """HK Connect sell should create pending settlement (T+2) instead of immediate cash credit."""
-    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
     from storage.model.general_info_ggt import GeneralInfoGGT
     from test.paper_trading.fakes import FakeMarketDataProvider
 
@@ -371,7 +366,6 @@ def test_hk_connect_matching_sell_creates_pending_settlement(sqlite_session):
         )
     }
     md = FakeMarketDataProvider(bars)
-    hk_meta = HkConnectMetadataProvider(session)
     snapshot_service = SnapshotService(repo, md)
     service = MatchingService(repo, md, snapshot_service)
     result = service.match_order(order)
@@ -385,7 +379,6 @@ def test_hk_connect_matching_sell_creates_pending_settlement(sqlite_session):
 
 def test_hk_connect_matching_buy_does_not_create_pending_settlement(sqlite_session):
     """HK Connect buy should NOT create pending settlement."""
-    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
     from storage.model.general_info_ggt import GeneralInfoGGT
     from test.paper_trading.fakes import FakeMarketDataProvider
 
@@ -417,7 +410,6 @@ def test_hk_connect_matching_buy_does_not_create_pending_settlement(sqlite_sessi
         )
     }
     md = FakeMarketDataProvider(bars)
-    hk_meta = HkConnectMetadataProvider(session)
     snapshot_service = SnapshotService(repo, md)
     service = MatchingService(repo, md, snapshot_service)
     service.match_order(order)

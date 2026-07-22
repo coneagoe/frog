@@ -197,9 +197,9 @@ class PaperTradingRepository:
         self.session.query(PaperAccountSnapshot).filter(PaperAccountSnapshot.account_id == account_id).delete(
             synchronize_session=False
         )
-        self.session.query(PaperPendingSettlement).filter(
-            PaperPendingSettlement.account_id == account_id
-        ).delete(synchronize_session=False)
+        self.session.query(PaperPendingSettlement).filter(PaperPendingSettlement.account_id == account_id).delete(
+            synchronize_session=False
+        )
         self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -668,9 +668,9 @@ class PaperTradingRepository:
         self.session.query(PaperAccountSnapshot).filter(PaperAccountSnapshot.account_id == account_id).delete(
             synchronize_session=False
         )
-        self.session.query(PaperPendingSettlement).filter(
-            PaperPendingSettlement.account_id == account_id
-        ).delete(synchronize_session=False)
+        self.session.query(PaperPendingSettlement).filter(PaperPendingSettlement.account_id == account_id).delete(
+            synchronize_session=False
+        )
         self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -786,7 +786,7 @@ class PaperTradingRepository:
             self.session.query(PaperPendingSettlement)
             .filter(
                 PaperPendingSettlement.account_id == account_id,
-                PaperPendingSettlement.settled == False,
+                PaperPendingSettlement.settled.is_(False),
             )
             .order_by(PaperPendingSettlement.expected_settle_date.asc())
             .all()
@@ -815,7 +815,7 @@ class PaperTradingRepository:
             self.session.query(func.coalesce(func.sum(PaperPendingSettlement.amount), 0))
             .filter(
                 PaperPendingSettlement.account_id == account_id,
-                PaperPendingSettlement.settled == False,
+                PaperPendingSettlement.settled.is_(False),
             )
             .scalar()
         )

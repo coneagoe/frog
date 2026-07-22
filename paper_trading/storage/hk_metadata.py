@@ -28,11 +28,7 @@ class HkConnectMetadataProvider:
     def get_security(self, symbol: str) -> Optional["HkSecurityMetadata"]:
         if not symbol:
             raise ValueError("symbol is required")
-        row = (
-            self._session.query(GeneralInfoGGT)
-            .filter(GeneralInfoGGT.股票代码 == symbol)
-            .one_or_none()
-        )
+        row = self._session.query(GeneralInfoGGT).filter(GeneralInfoGGT.股票代码 == symbol).one_or_none()
         if row is None:
             return None
         return HkSecurityMetadata(
