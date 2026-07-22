@@ -811,3 +811,139 @@ def test_list_order_trade_dates_returns_sorted_distinct_dates(sqlite_session):
     result = repo.list_order_trade_dates(account.id)
 
     assert result == [date(2026, 7, 19), date(2026, 7, 20), date(2026, 7, 21), date(2026, 7, 22)]
+
+
+def test_create_order_persists_market_default_a_share(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("market-demo", Decimal("100000.00"))
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+    )
+    assert order.market == "a_share"
+
+
+def test_create_order_persists_market_hk_connect(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("market-hk", Decimal("100000.00"))
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        market="hk_connect",
+    )
+    assert order.market == "hk_connect"
+
+
+def test_create_trade_persists_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("trade-mkt", Decimal("100000.00"))
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        market="hk_connect",
+    )
+    trade = repo.create_trade(
+        order_id=order.id,
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        price=Decimal("400.00"),
+        amount=Decimal("40000.00"),
+        fees=Decimal("100.00"),
+        trade_date=date(2026, 7, 21),
+        market="hk_connect",
+    )
+    assert trade.market == "hk_connect"
+
+
+def test_position_persists_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("pos-mkt", Decimal("100000.00"))
+    pos = repo.upsert_position(
+        account_id=account.id,
+        symbol="00700",
+        total_quantity=100,
+        frozen_quantity=0,
+        cost_amount=Decimal("40000.00"),
+        market="hk_connect",
+    )
+    assert pos.market == "hk_connect"
+
+
+def test_account_hk_fee_fields_default_to_none(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-fees", Decimal("100000.00"))
+    assert account.hk_commission_rate is None
+    assert account.hk_min_commission is None
+
+
+def test_update_account_hk_fees_persists(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-fees-upd", Decimal("100000.00"))
+    updated = repo.update_account_hk_fees(
+        account.id,
+        hk_commission_rate=Decimal("0.0002"),
+        hk_min_commission=Decimal("18.00"),
+        hk_stamp_duty_rate=Decimal("0.0013"),
+        hk_trading_fee_rate=Decimal("0.0000565"),
+        hk_sfc_levy_rate=Decimal("0.0000027"),
+        hk_afrc_levy_rate=Decimal("0.0000015"),
+        hk_settlement_fee_rate=Decimal("0.00002"),
+    )
+    assert updated is not None
+    reloaded = repo.get_account(account.id)
+    assert reloaded is not None
+    assert reloaded.hk_commission_rate == Decimal("0.0002")
+    assert reloaded.hk_stamp_duty_rate == Decimal("0.0013")
+
+
+def test_create_pending_settlement(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("settle-demo", Decimal("100000.00"))
+    pending = repo.create_pending_settlement(
+        account_id=account.id,
+        amount=Decimal("50000.00"),
+        expected_settle_date=date(2026, 7, 23),
+        trade_id=1,
+        source="hk_sell",
+    )
+    assert pending.account_id == account.id
+    assert pending.settled is False
+
+
+def test_settle_pending_releases_cash(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("settle-rel", Decimal("100000.00"))
+    pending = repo.create_pending_settlement(
+        account_id=account.id,
+        amount=Decimal("50000.00"),
+        expected_settle_date=date(2026, 7, 23),
+        trade_id=1,
+        source="hk_sell",
+    )
+    repo.settle_pending(pending.id)
+    assert pending.settled is True

@@ -844,17 +844,28 @@ class TestOrderCreate:
         client = _mock_client()
         client.create_order.return_value = {"id": 1, "symbol": "00700", "market": "hk_connect"}
         with patch("tools.paper_trading_cli.PaperTradingApiClient", return_value=client):
-            code = main([
-                "--token", "secret",
-                "order", "create",
-                "--account-id", "1",
-                "--symbol", "00700",
-                "--side", "buy",
-                "--quantity", "100",
-                "--limit-price", "400.00",
-                "--trade-date", "2026-07-21",
-                "--market", "hk_connect",
-            ])
+            code = main(
+                [
+                    "--token",
+                    "secret",
+                    "order",
+                    "create",
+                    "--account-id",
+                    "1",
+                    "--symbol",
+                    "00700",
+                    "--side",
+                    "buy",
+                    "--quantity",
+                    "100",
+                    "--limit-price",
+                    "400.00",
+                    "--trade-date",
+                    "2026-07-21",
+                    "--market",
+                    "hk_connect",
+                ]
+            )
         assert code == EXIT_CODES["OK"]
         call_kwargs = client.create_order.call_args[1]
         assert call_kwargs.get("market") == "hk_connect"

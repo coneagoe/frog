@@ -379,6 +379,8 @@ def test_analytics_uses_nav_return_not_total_assets_after_deposit(tmp_path):
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
     assert analytics.overview.total_return.value == Decimal("0.000000")
-    assert analytics.overview.simple_asset_return.value == Decimal("0.500000")
+    simple_asset_return = analytics.overview.simple_asset_return
+    assert simple_asset_return is not None
+    assert simple_asset_return.value == Decimal("0.500000")
     assert analytics.risk.max_drawdown.value == Decimal("0.000000")
     engine.dispose()
