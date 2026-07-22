@@ -160,3 +160,63 @@ def test_get_daily_bar_returns_none_limits_when_stk_limit_table_empty(tmp_path):
     assert bar.up_limit is None
     assert bar.down_limit is None
     engine.dispose()
+
+
+def test_get_daily_bar_with_hk_market_routes_to_hk_ggt_storage():
+    """When market='hk_connect', get_daily_bar must use load_history_data_stock_hk_ggt
+    and return no up/down limits."""
+    storage = FakeHistoryStorage(
+        {
+            "00700": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["00700"],
+                    COL_DATE: ["2026-07-21"],
+                    COL_OPEN: [400.0],
+                    COL_HIGH: [410.0],
+                    COL_LOW: [395.0],
+                    COL_CLOSE: [405.0],
+                }
+            ),
+        }
+    )
+    provider = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 7, 21)]))
+
+    bar = provider.get_daily_bar("00700", date(2026, 7, 21), market="hk_connect")
+
+    assert bar.symbol == "00700"
+    assert bar.open == Decimal("400")
+    assert bar.high == Decimal("410")
+    assert bar.low == Decimal("395")
+    assert bar.close == Decimal("405")
+    # HK bars have no price limits
+    assert bar.up_limit is None
+    assert bar.down_limit is None
+    # Must have called the HK GGT storage method, not the A-share one
+    assert len(storage.hk_calls) == 1
+    assert len(storage.calls) == 0  # A-share load_history_data_stock NOT called
+
+
+def test_get_daily_bar_with_a_share_market_uses_a_share_storage():
+    """When market='a_share' (or omitted), get_daily_bar must use load_history_data_stock."""
+    storage = FakeHistoryStorage(
+        {
+            "000001": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["000001"],
+                    COL_DATE: ["2026-06-16"],
+                    COL_OPEN: [9.5],
+                    COL_HIGH: [10.5],
+                    COL_LOW: [9.0],
+                    COL_CLOSE: [10.0],
+                }
+            ),
+        }
+    )
+    provider = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16)]))
+
+    # Without explicit market (defaults to A-share)
+    bar = provider.get_daily_bar("000001.SZ", date(2026, 6, 16))
+
+    assert bar.symbol == "000001.SZ"
+    assert len(storage.calls) == 1
+    assert len(storage.hk_calls) == 0

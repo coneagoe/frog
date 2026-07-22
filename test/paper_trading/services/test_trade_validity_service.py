@@ -7,9 +7,12 @@ from sqlalchemy.orm import sessionmaker
 
 from paper_trading.domain.enums import OrderSide, OrderStatus
 from paper_trading.services.trade_validity_service import TradeValidityService
+from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from storage.model.general_info_ggt import GeneralInfoGGT
+from test.paper_trading.fakes import FakeMarketDataProvider
 
 
 class StaticMarketData:
@@ -22,7 +25,7 @@ class StaticMarketData:
     def next_trade_date(self, trade_date: date) -> date:
         return trade_date
 
-    def get_daily_bar(self, symbol: str, trade_date: date) -> DailyBar:
+    def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
         if self.bar is None:
             raise KeyError(f"No daily bar for {symbol} on {trade_date.isoformat()}")
         return self.bar
@@ -37,7 +40,7 @@ class FailingMarketData:
     def next_trade_date(self, trade_date: date) -> date:
         return trade_date
 
-    def get_daily_bar(self, symbol: str, trade_date: date) -> DailyBar:
+    def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
         raise RuntimeError("Unexpected infrastructure failure")
 
 
@@ -177,6 +180,188 @@ def test_analyze_order_still_rejects_out_of_range_when_limit_prices_missing(tmp_
     engine.dispose()
 
 
+# ── HK Connect validity tests ──────────────────────────────────────────
+
+
+def test_hk_connect_validity_checks_tick_alignment(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-val", Decimal("100000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    hk_meta = HkConnectMetadataProvider(session)
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.025"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        market="hk_connect",
+    )
+    bar = DailyBar(
+        symbol="00700",
+        trade_date=date(2026, 7, 21),
+        open=Decimal("400"),
+        high=Decimal("410"),
+        low=Decimal("395"),
+        close=Decimal("405"),
+    )
+    bars = {("00700", date(2026, 7, 21)): bar}
+    md = FakeMarketDataProvider(bars)
+    service = TradeValidityService(repo, md, hk_metadata=hk_meta)
+    check = service.analyze_order(order)
+    assert check.status == "invalid"
+    assert "tick" in check.reason_code.lower()
+
+
+def test_hk_connect_validity_no_limit_up_down(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-nolimit", Decimal("100000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    hk_meta = HkConnectMetadataProvider(session)
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        market="hk_connect",
+    )
+    bar = DailyBar(
+        symbol="00700",
+        trade_date=date(2026, 7, 21),
+        open=Decimal("400"),
+        high=Decimal("410"),
+        low=Decimal("395"),
+        close=Decimal("405"),
+    )
+    bars = {("00700", date(2026, 7, 21)): bar}
+    md = FakeMarketDataProvider(bars)
+    service = TradeValidityService(repo, md, hk_metadata=hk_meta)
+    check = service.analyze_order(order)
+    assert check.touched_limit_up is None
+    assert check.touched_limit_down is None
+    assert check.price_in_range is True
+
+
+def test_a_share_validity_unchanged(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("a-val", Decimal("100000.00"))
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+    )
+    bar = DailyBar(
+        symbol="000001.SZ",
+        trade_date=date(2026, 7, 21),
+        open=Decimal("10"),
+        high=Decimal("11"),
+        low=Decimal("9"),
+        close=Decimal("10.5"),
+        up_limit=Decimal("11.5"),
+        down_limit=Decimal("8.5"),
+    )
+    bars = {("000001.SZ", date(2026, 7, 21)): bar}
+    md = FakeMarketDataProvider(bars)
+    service = TradeValidityService(repo, md)
+    check = service.analyze_order(order)
+    assert check.touched_limit_up is not None  # A-share sets these
+
+
+def test_hk_connect_passes_market_to_provider(sqlite_session):
+    """Verify that the HK validity path passes market='hk_connect' to get_daily_bar."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-mkt", Decimal("100000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    hk_meta = HkConnectMetadataProvider(session)
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        market="hk_connect",
+    )
+
+    class MarketAwareProvider(FakeMarketDataProvider):
+        def __init__(self):
+            super().__init__()
+            self.captured_markets: list[str | None] = []
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            self.captured_markets.append(market)
+            return DailyBar(
+                symbol=symbol,
+                trade_date=trade_date,
+                open=Decimal("400"),
+                high=Decimal("410"),
+                low=Decimal("395"),
+                close=Decimal("405"),
+            )
+
+    md = MarketAwareProvider()
+    service = TradeValidityService(repo, md, hk_metadata=hk_meta)
+    service.analyze_order(order)
+    assert md.captured_markets == ["hk_connect"]
+
+
+def test_hk_connect_unknown_symbol_returns_unknown_security_before_market_data(sqlite_session):
+    """Metadata check happens before market-data fetch; an unknown HK symbol
+    must get UNKNOWN_HK_SECURITY even when the provider can return a bar."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-unk", Decimal("100000.00"))
+    session = sqlite_session
+    # Do NOT register the symbol in GeneralInfoGGT.
+    hk_meta = HkConnectMetadataProvider(session)
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="99999",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("100.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        market="hk_connect",
+    )
+
+    # This provider would return a bar for any symbol, but the metadata
+    # check should short-circuit before get_daily_bar is ever called.
+    class CatchCallsProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            raise AssertionError("get_daily_bar should not be called for unknown HK symbol")
+
+    md = CatchCallsProvider()
+    service = TradeValidityService(repo, md, hk_metadata=hk_meta)
+    check = service.analyze_order(order)
+    assert check.status == "unchecked"
+    assert check.reason_code == "UNKNOWN_HK_SECURITY"
+    assert check.daily_low is None
+    assert check.daily_high is None
+
+
+# ── Existing tests ─────────────────────────────────────────────────────
+
+
 def test_analyze_order_lets_unexpected_errors_propagate(tmp_path):
     """Non-market-data exceptions must propagate, not be swallowed."""
     engine, session, repo = _repo(tmp_path)
@@ -197,3 +382,71 @@ def test_analyze_order_lets_unexpected_errors_propagate(tmp_path):
 
     session.rollback()
     engine.dispose()
+
+
+# ── Validity check market persistence ────────────────────────────────────────
+
+
+def test_hk_connect_validity_check_persists_market(sqlite_session):
+    """HK validity check rows must persist market == 'hk_connect'."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-vcm", Decimal("100000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    hk_meta = HkConnectMetadataProvider(session)
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        market="hk_connect",
+    )
+    bar = DailyBar(
+        symbol="00700",
+        trade_date=date(2026, 7, 21),
+        open=Decimal("400"),
+        high=Decimal("410"),
+        low=Decimal("395"),
+        close=Decimal("405"),
+    )
+    bars = {("00700", date(2026, 7, 21)): bar}
+    md = FakeMarketDataProvider(bars)
+    service = TradeValidityService(repo, md, hk_metadata=hk_meta)
+    check = service.analyze_order(order)
+    assert check.market == "hk_connect"
+
+
+def test_a_share_validity_check_persists_market_a_share(sqlite_session):
+    """A-share validity check rows must persist market == 'a_share'."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("a-vcm", Decimal("100000.00"))
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+    )
+    bar = DailyBar(
+        symbol="000001.SZ",
+        trade_date=date(2026, 7, 21),
+        open=Decimal("10"),
+        high=Decimal("11"),
+        low=Decimal("9"),
+        close=Decimal("10.5"),
+        up_limit=Decimal("11.5"),
+        down_limit=Decimal("8.5"),
+    )
+    bars = {("000001.SZ", date(2026, 7, 21)): bar}
+    md = FakeMarketDataProvider(bars)
+    service = TradeValidityService(repo, md)
+    check = service.analyze_order(order)
+    assert check.market == "a_share"

@@ -158,6 +158,7 @@ class PaperTradingApiClient:
         trade_date: str,
         idempotency_key: str | None = None,
         comment: str | None = None,
+        market: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "symbol": symbol,
@@ -170,6 +171,8 @@ class PaperTradingApiClient:
             body["idempotency_key"] = idempotency_key
         if comment is not None:
             body["comment"] = comment
+        if market is not None:
+            body["market"] = market
         return self._request("POST", f"/paper/accounts/{account_id}/orders", json=body)
 
     def list_orders(self, account_id: int) -> list[dict[str, Any]]:
@@ -302,6 +305,7 @@ def _add_order_subparsers(subparsers: Any) -> None:
     p_create.add_argument("--trade-date", required=True)
     p_create.add_argument("--idempotency-key", default=None)
     p_create.add_argument("--comment", default=None)
+    p_create.add_argument("--market", default=None, choices=["a_share", "hk_connect"], help="Market (default: a_share)")
     p_list = order_sub.add_parser("list", help="List orders for an account")
     p_list.add_argument("--account-id", type=int, required=True)
     p_get = order_sub.add_parser("get", help="Get order details")
@@ -541,6 +545,7 @@ def _handle_order(client: PaperTradingApiClient, args: argparse.Namespace) -> An
             trade_date=_validate_trade_date(args.trade_date),
             idempotency_key=args.idempotency_key,
             comment=args.comment,
+            market=args.market,
         )
     if cmd == "list":
         return client.list_orders(account_id=args.account_id)

@@ -14,6 +14,7 @@ class CreateOrderRequest(BaseModel):
     trade_date: date
     idempotency_key: str | None = None
     comment: str | None = None
+    market: str | None = None  # defaults to a_share via None
 
 
 class OrderResponse(BaseModel):
@@ -36,6 +37,7 @@ class OrderResponse(BaseModel):
     validity_status: str | None = None
     validity_reason: str | None = None
     validity_checked_at: datetime | None = None
+    market: str = "a_share"
 
 
 class UpdateOrderCommentRequest(BaseModel):
@@ -64,6 +66,7 @@ class TradeValidityCheckResponse(BaseModel):
     reason_detail: str | None = None
     data_granularity: str
     created_at: datetime
+    market: str = "a_share"
 
 
 class TradeResponse(BaseModel):
@@ -80,3 +83,4 @@ class TradeResponse(BaseModel):
     fees: Decimal
     trade_date: date
     comment: str | None = None
+    market: str = "a_share"

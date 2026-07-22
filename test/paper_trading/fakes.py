@@ -12,9 +12,21 @@ class FakeHistoryStorage:
     def __init__(self, data: dict[str, pd.DataFrame]):
         self._data = data
         self.calls: list[tuple[Any, ...]] = []
+        self.hk_calls: list[tuple[Any, ...]] = []
 
     def load_history_data_stock(self, stock_id, period, adjust, start_date=None, end_date=None):
         self.calls.append((stock_id, period, adjust, start_date, end_date))
+        df = self._data.get(stock_id, pd.DataFrame()).copy()
+        if df.empty:
+            return df
+        if start_date:
+            df = df[df[COL_DATE] >= start_date]
+        if end_date:
+            df = df[df[COL_DATE] <= end_date]
+        return df
+
+    def load_history_data_stock_hk_ggt(self, stock_id, period, adjust, start_date=None, end_date=None):
+        self.hk_calls.append((stock_id, period, adjust, start_date, end_date))
         df = self._data.get(stock_id, pd.DataFrame()).copy()
         if df.empty:
             return df
@@ -55,7 +67,7 @@ class FakeMarketDataProvider:
     def next_trade_date(self, trade_date: date) -> date:
         return trade_date
 
-    def get_daily_bar(self, symbol: str, trade_date: date) -> DailyBar:
+    def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
         key = (symbol, trade_date)
         if key in self._bars:
             return self._bars[key]

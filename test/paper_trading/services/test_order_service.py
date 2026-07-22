@@ -18,12 +18,14 @@ from common.const import (
     COL_STOCK_ID,
     COL_UP_LIMIT,
 )
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.services.order_service import OrderService
+from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
-from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
+from storage.model.general_info_ggt import GeneralInfoGGT
+from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
 
 
 class FakeHistoryStorageWithEngine:
@@ -484,3 +486,263 @@ def test_place_buy_order_uses_account_fee_config(tmp_path):
     assert order.frozen_cash == Decimal("1001.0000")
     assert repo.get_cash_available(account.id) == Decimal("98999.0000")
     engine.dispose()
+
+
+# ── HK Connect tests ──────────────────────────────────────────────────
+
+
+def test_hk_connect_buy_rejects_unknown_symbol(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-buy", Decimal("100000.00"))
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(sqlite_session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    order = service.place_order(
+        account.id, "99999", OrderSide.BUY, 100, Decimal("50.00"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "UNKNOWN_HK_SECURITY"
+
+
+def test_hk_connect_buy_rejects_non_board_lot(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-lot", Decimal("100000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    order = service.place_order(
+        account.id, "00700", OrderSide.BUY, 50, Decimal("400.00"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INVALID_LOT_SIZE"
+
+
+def test_a_share_order_unchanged_with_market_omitted(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("a-demo", Decimal("100000.00"))
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(sqlite_session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    order = service.place_order(
+        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"),
+        date(2026, 7, 21),
+    )
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == "a_share"
+
+
+def test_a_share_explicit_market_still_works(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("a-explicit", Decimal("100000.00"))
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(sqlite_session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    order = service.place_order(
+        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"),
+        date(2026, 7, 21), market=Market.A_SHARE,
+    )
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == "a_share"
+
+
+def test_hk_connect_accepts_board_lot_buy(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-ok", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    order = service.place_order(
+        account.id, "00700", OrderSide.BUY, 100, Decimal("400.00"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == "hk_connect"
+    assert Decimal(order.frozen_cash or 0) > 0
+
+
+def test_hk_connect_rejects_off_tick_price(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-tick", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    order = service.place_order(
+        account.id, "00700", OrderSide.BUY, 100, Decimal("400.025"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INVALID_TICK_SIZE"
+
+
+def test_place_order_rejects_unknown_market(sqlite_session):
+    """An unsupported market string should produce a controlled rejection, not a ValueError."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("bad-mkt", Decimal("100000.00"))
+    md = FakeMarketDataProvider()
+    service = OrderService(repo, md)
+    order = service.place_order(
+        account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"),
+        date(2026, 7, 21), market="unknown_market",
+    )
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INVALID_MARKET"
+
+
+# ── HK Connect sell tests ─────────────────────────────────────────────
+
+
+def test_hk_connect_sell_board_lot_ok(sqlite_session):
+    """Sell a board-lot multiple of an HK position."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-sell", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    repo.upsert_position(account.id, "00700", total_quantity=200, frozen_quantity=0, cost_amount=Decimal("80000.00"))
+    repo.create_position_lot(account.id, "00700", date(2026, 7, 20), 200, 200, Decimal("400.00"))
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    order = service.place_order(
+        account.id, "00700", OrderSide.SELL, 100, Decimal("400.00"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.frozen_quantity == 100
+
+
+def test_hk_connect_sell_odd_lot_ok(sqlite_session):
+    """Sell an odd lot that exactly matches the odd-lot remainder."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-odd-sell", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    repo.upsert_position(account.id, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00"))
+    repo.create_position_lot(account.id, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    # odd_lot_remainder = 250 % 100 = 50, selling 50 is OK
+    order = service.place_order(
+        account.id, "00700", OrderSide.SELL, 50, Decimal("400.00"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.frozen_quantity == 50
+
+
+def test_hk_connect_sell_rejects_invalid_odd_lot(sqlite_session):
+    """Sell an odd lot that doesn't match the odd-lot remainder or a board-lot multiple."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-bad-odd", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    repo.upsert_position(account.id, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00"))
+    repo.create_position_lot(account.id, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    # odd_lot_remainder = 250 % 100 = 50; selling 60 exceeds remainder and is not a board lot multiple
+    order = service.place_order(
+        account.id, "00700", OrderSide.SELL, 60, Decimal("400.00"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INVALID_ODD_LOT_SELL"
+
+
+def test_hk_connect_sell_rejects_partial_odd_lot(sqlite_session):
+    """Partial odd-lot sell (less than full remainder) must be rejected."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-partial", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    repo.upsert_position(account.id, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00"))
+    repo.create_position_lot(account.id, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    # odd_lot_remainder = 250 % 100 = 50; selling 40 < remainder must reject
+    order = service.place_order(
+        account.id, "00700", OrderSide.SELL, 40, Decimal("400.00"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INVALID_ODD_LOT_SELL"
+
+
+# ── Market/symbol mismatch tests ──────────────────────────────────────
+
+
+def test_a_share_default_rejects_hk_symbol(sqlite_session):
+    """Default (A-share) market should reject a 5-digit HK-style symbol."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("a-hk-sym", Decimal("100000.00"))
+    md = FakeMarketDataProvider()
+    service = OrderService(repo, md)
+    order = service.place_order(
+        account.id, "00700", OrderSide.BUY, 100, Decimal("10.00"),
+        date(2026, 7, 21),
+    )
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "MARKET_SYMBOL_MISMATCH"
+
+
+def test_a_share_explicit_rejects_hk_symbol(sqlite_session):
+    """Explicit A_SHARE market should reject a 5-digit HK-style symbol."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("a-hk-sym2", Decimal("100000.00"))
+    md = FakeMarketDataProvider()
+    service = OrderService(repo, md)
+    order = service.place_order(
+        account.id, "00700", OrderSide.BUY, 100, Decimal("10.00"),
+        date(2026, 7, 21), market=Market.A_SHARE,
+    )
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "MARKET_SYMBOL_MISMATCH"
+
+
+def test_hk_connect_accepts_hk_symbol(sqlite_session):
+    """HK_CONNECT market should accept a 5-digit HK symbol that exists in metadata."""
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-hk-sym", Decimal("500000.00"))
+    session = sqlite_session
+    session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    session.flush()
+    md = FakeMarketDataProvider()
+    hk_meta = HkConnectMetadataProvider(session)
+    service = OrderService(repo, md, hk_metadata=hk_meta)
+    order = service.place_order(
+        account.id, "00700", OrderSide.BUY, 100, Decimal("400.00"),
+        date(2026, 7, 21), market=Market.HK_CONNECT,
+    )
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == "hk_connect"

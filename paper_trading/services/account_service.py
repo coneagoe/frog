@@ -42,7 +42,44 @@ class AccountService:
         min_commission: Decimal | None = None,
         stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
+        hk_commission_rate: Decimal | None = None,
+        hk_min_commission: Decimal | None = None,
+        hk_stamp_duty_rate: Decimal | None = None,
+        hk_trading_fee_rate: Decimal | None = None,
+        hk_sfc_levy_rate: Decimal | None = None,
+        hk_afrc_levy_rate: Decimal | None = None,
+        hk_settlement_fee_rate: Decimal | None = None,
     ) -> PaperAccount | None:
+        a_share_fields = {
+            "commission_rate": commission_rate,
+            "min_commission": min_commission,
+            "stamp_duty_rate": stamp_duty_rate,
+            "transfer_fee_rate": transfer_fee_rate,
+        }
+        hk_fields = {
+            "hk_commission_rate": hk_commission_rate,
+            "hk_min_commission": hk_min_commission,
+            "hk_stamp_duty_rate": hk_stamp_duty_rate,
+            "hk_trading_fee_rate": hk_trading_fee_rate,
+            "hk_sfc_levy_rate": hk_sfc_levy_rate,
+            "hk_afrc_levy_rate": hk_afrc_levy_rate,
+            "hk_settlement_fee_rate": hk_settlement_fee_rate,
+        }
+        has_a_share = any(v is not None for v in a_share_fields.values())
+        has_hk = any(v is not None for v in hk_fields.values())
+
+        if has_a_share:
+            account = self.repo.update_account_fees(account_id=account_id, **a_share_fields)
+            if account is None:
+                return None
+            if has_hk:
+                return self.repo.update_account_hk_fees(account_id, **hk_fields)
+            return account
+
+        if has_hk:
+            return self.repo.update_account_hk_fees(account_id, **hk_fields)
+
+        # Existing A-share fee update path
         return self.repo.update_account_fees(
             account_id=account_id,
             commission_rate=commission_rate,

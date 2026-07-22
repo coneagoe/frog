@@ -39,7 +39,7 @@ class MarketDataProvider(Protocol):
 
     def next_trade_date(self, trade_date: date) -> date: ...
 
-    def get_daily_bar(self, symbol: str, trade_date: date) -> DailyBar: ...
+    def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar: ...
 
 
 class TradeCalendar(Protocol):
@@ -61,8 +61,14 @@ class StorageMarketDataProvider:
     def next_trade_date(self, trade_date: date) -> date:
         return self._trade_calendar.next_trade_date(trade_date)
 
-    def get_daily_bar(self, symbol: str, trade_date: date) -> DailyBar:
+    def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+        """Load a daily bar, routing to HK GGT storage when market is 'hk_connect'."""
         stock_id = self._to_storage_stock_id(symbol)
+        if market == "hk_connect":
+            return self._get_hk_daily_bar(stock_id, symbol, trade_date)
+        return self._get_a_share_daily_bar(stock_id, symbol, trade_date)
+
+    def _get_a_share_daily_bar(self, stock_id: str, symbol: str, trade_date: date) -> DailyBar:
         df = self._storage.load_history_data_stock(
             stock_id,
             PeriodType.DAILY,
@@ -70,14 +76,10 @@ class StorageMarketDataProvider:
             start_date=trade_date.isoformat(),
             end_date=trade_date.isoformat(),
         )
-
         if df.empty:
             raise KeyError(f"No daily bar for {symbol} on {trade_date.isoformat()}")
-
         row = df.iloc[-1]
-
         up_limit, down_limit = self._load_limit_prices(symbol, trade_date)
-
         return DailyBar(
             symbol=symbol,
             trade_date=trade_date,
@@ -87,6 +89,29 @@ class StorageMarketDataProvider:
             close=self._decimal_field(row, COL_CLOSE, symbol, trade_date),
             up_limit=up_limit,
             down_limit=down_limit,
+        )
+
+    def _get_hk_daily_bar(self, stock_id: str, symbol: str, trade_date: date) -> DailyBar:
+        df = self._storage.load_history_data_stock_hk_ggt(
+            stock_id,
+            PeriodType.DAILY,
+            AdjustType.BFQ,
+            start_date=trade_date.isoformat(),
+            end_date=trade_date.isoformat(),
+        )
+        if df.empty:
+            raise KeyError(f"No HK daily bar for {symbol} on {trade_date.isoformat()}")
+        row = df.iloc[-1]
+        # HK stocks have no A-share price limits
+        return DailyBar(
+            symbol=symbol,
+            trade_date=trade_date,
+            open=self._decimal_field(row, COL_OPEN, symbol, trade_date),
+            high=self._decimal_field(row, COL_HIGH, symbol, trade_date),
+            low=self._decimal_field(row, COL_LOW, symbol, trade_date),
+            close=self._decimal_field(row, COL_CLOSE, symbol, trade_date),
+            up_limit=None,
+            down_limit=None,
         )
 
     def _load_limit_prices(self, symbol: str, trade_date: date) -> tuple[Decimal | None, Decimal | None]:

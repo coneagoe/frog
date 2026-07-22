@@ -86,5 +86,11 @@ def get_market_data_provider() -> MarketDataProvider:
     return StorageMarketDataProvider(storage, _DataAvailableCalendar())
 
 
+def get_hk_metadata_provider(session: Session = Depends(get_session)):
+    from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
+
+    return HkConnectMetadataProvider(session)
+
+
 SessionDep = Depends(get_session)
 AuthDep = Depends(require_api_token)
