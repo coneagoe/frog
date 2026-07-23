@@ -663,33 +663,6 @@ class TestDownloadHkGgtHistoryFallback:
         assert [call.args[0] for call in download_mock.call_args_list] == ["tushare", "akshare"]
         storage.save_history_data_hk_stock.assert_called_once()
 
-    def test_download_hk_ggt_history_bfq_falls_back_on_tushare_adjust_rejection(self, monkeypatch):
-        """TuShare's ValueError for BFQ must trigger fallback to AkShare."""
-        from unittest.mock import MagicMock
-
-        import download.download_manager as dm
-        from download.download_manager import DownloadManager
-
-        storage = MagicMock()
-        storage.get_last_record.return_value = None
-        storage.save_history_data_hk_stock.return_value = True
-        monkeypatch.setattr(dm, "get_storage", lambda: storage)
-        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
-
-        hk_df = _hk_stock_history_df()
-        manager = DownloadManager()
-        # TuShare raises ValueError (adjust validation), AkShare returns valid data
-        download_mock = MagicMock(side_effect=[ValueError("Only HFQ adjust is supported"), hk_df])
-        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
-
-        assert (
-            manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
-            is True
-        )
-
-        assert [call.args[0] for call in download_mock.call_args_list] == ["tushare", "akshare"]
-        storage.save_history_data_hk_stock.assert_called_once()
-
     def test_download_hk_ggt_history_falls_back_on_empty_dataframe(self, monkeypatch):
         from unittest.mock import MagicMock
 
