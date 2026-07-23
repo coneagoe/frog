@@ -202,7 +202,6 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
                       value={row.buy_trade_date}
                       onChange={(e) => updateRow(index, "buy_trade_date", e.target.value)}
                     />
-                    <small>YYYY-MM-DD</small>
                   </label>
 
                   <div className="import-grid__action">
