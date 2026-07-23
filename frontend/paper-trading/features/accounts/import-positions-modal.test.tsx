@@ -42,11 +42,11 @@ describe("ImportPositionsModal", () => {
     expect(screen.getAllByLabelText("Symbol")).toHaveLength(1);
   });
 
-  it("shows visible YYYY-MM-DD guidance on the buy date input", () => {
+  it("uses the YYYY-MM-DD placeholder without a visible date helper", () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
     expect(screen.getByLabelText("Buy trade date")).toHaveAttribute("placeholder", "YYYY-MM-DD");
-    expect(screen.getByText("YYYY-MM-DD", { selector: "small" })).toBeInTheDocument();
+    expect(screen.queryByText("YYYY-MM-DD", { selector: "small" })).not.toBeInTheDocument();
   });
 
   it("renders one aligned import grid header and row", () => {
