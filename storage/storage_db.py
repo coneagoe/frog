@@ -117,6 +117,7 @@ from .model import (
     tb_name_paper_orders,
     tb_name_paper_position_lots,
     tb_name_paper_positions,
+    tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
     tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
@@ -2339,6 +2340,16 @@ class StorageDb:
                 "stamp_duty_rate": "NUMERIC(20, 8) NOT NULL DEFAULT 0.0005",
                 "transfer_fee_rate": "NUMERIC(20, 8) NOT NULL DEFAULT 0.00001",
             }
+            hk_account_fee_columns = {
+                "hk_commission_rate": "NUMERIC(20, 8)",
+                "hk_min_commission": "NUMERIC(20, 4)",
+                "hk_stamp_duty_rate": "NUMERIC(20, 8)",
+                "hk_trading_fee_rate": "NUMERIC(20, 8)",
+                "hk_sfc_levy_rate": "NUMERIC(20, 8)",
+                "hk_afrc_levy_rate": "NUMERIC(20, 8)",
+                "hk_settlement_fee_rate": "NUMERIC(20, 8)",
+            }
+            account_fee_columns.update(hk_account_fee_columns)
             for column_name, ddl in account_fee_columns.items():
                 if column_name not in account_columns:
                     with self.engine.begin() as conn:
@@ -2394,6 +2405,7 @@ class StorageDb:
                 "cumulative_deposit": "NUMERIC(20, 4)",
                 "cumulative_withdrawal": "NUMERIC(20, 4)",
                 "net_cash_flow": "NUMERIC(20, 4)",
+                "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
             }
             for column_name, ddl in snapshot_nav_columns.items():
                 if column_name not in snapshot_columns:
@@ -2420,6 +2432,19 @@ class StorageDb:
                 if "source" not in cols:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name} ADD COLUMN source {source_ddl}"))
+
+        market_ddl = "VARCHAR(20) NOT NULL DEFAULT 'a_share'"
+        for tb_name in (
+            tb_name_paper_positions,
+            tb_name_paper_orders,
+            tb_name_paper_trades,
+            tb_name_paper_trade_validity_checks,
+        ):
+            if inspect(self.engine).has_table(tb_name):
+                market_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name)}
+                if "market" not in market_columns:
+                    with self.engine.begin() as conn:
+                        conn.execute(text(f"ALTER TABLE {tb_name} ADD COLUMN market {market_ddl}"))
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:

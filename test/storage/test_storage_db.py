@@ -6,7 +6,8 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import inspect, text
+from sqlalchemy.orm import Session, sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 from common.const import (  # noqa: E402
@@ -37,6 +38,8 @@ from common.const import (  # noqa: E402
 )
 from storage.config import StorageConfig  # noqa: E402
 from storage.model import (  # noqa: E402
+    Base,
+    PaperAccount,
     tb_name_etf_daily,
     tb_name_history_data_daily_a_stock_bfq,
     tb_name_history_data_daily_a_stock_qfq,
@@ -45,6 +48,12 @@ from storage.model import (  # noqa: E402
     tb_name_history_data_weekly_a_stock_qfq,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
+    tb_name_paper_account_snapshots,
+    tb_name_paper_accounts,
+    tb_name_paper_orders,
+    tb_name_paper_positions,
+    tb_name_paper_trade_validity_checks,
+    tb_name_paper_trades,
     tb_name_stk_holdernumber,
     tb_name_top10_floatholders,
 )
@@ -59,9 +68,278 @@ from storage.storage_db import (  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def mock_blackroom_table_migration(monkeypatch):
+def mock_blackroom_table_migration(monkeypatch, request):
     monkeypatch.setattr(StorageDb, "ensure_blackroom_records_table", Mock())
-    monkeypatch.setattr(StorageDb, "ensure_paper_trading_schema", Mock())
+    if "paper_trading_schema_upgrade" not in request.fixturenames:
+        monkeypatch.setattr(StorageDb, "ensure_paper_trading_schema", Mock())
+
+
+@pytest.fixture
+def paper_trading_schema_upgrade():
+    """Opt in to exercising the real paper-trading schema migration."""
+
+
+@pytest.fixture
+def storage(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine as real_create_engine
+
+    engine = real_create_engine(f"sqlite:///{tmp_path}/legacy_paper_trading.db")
+    with engine.begin() as connection:
+        for ddl in (
+            """
+            CREATE TABLE paper_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(100) NOT NULL UNIQUE,
+                initial_cash NUMERIC(20, 4) NOT NULL,
+                share_count NUMERIC(20, 6) NOT NULL DEFAULT 0,
+                net_asset_value NUMERIC(20, 6) NOT NULL DEFAULT 1,
+                cumulative_deposit NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                cumulative_withdrawal NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                fee_preset VARCHAR(30) NOT NULL DEFAULT 'a_share',
+                commission_rate NUMERIC(20, 8) NOT NULL DEFAULT 0.0003,
+                min_commission NUMERIC(20, 4) NOT NULL DEFAULT 5.00,
+                stamp_duty_rate NUMERIC(20, 8) NOT NULL DEFAULT 0.0005,
+                transfer_fee_rate NUMERIC(20, 8) NOT NULL DEFAULT 0.00001,
+                status VARCHAR(20) NOT NULL DEFAULT 'active',
+                base_currency VARCHAR(10) NOT NULL DEFAULT 'CNY',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE paper_positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                symbol VARCHAR(20) NOT NULL,
+                total_quantity INTEGER NOT NULL DEFAULT 0,
+                frozen_quantity INTEGER NOT NULL DEFAULT 0,
+                cost_amount NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                realized_pnl NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                source VARCHAR(20) NOT NULL DEFAULT 'trade',
+                UNIQUE (account_id, symbol),
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id)
+            )
+            """,
+            """
+            CREATE TABLE paper_position_lots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                symbol VARCHAR(20) NOT NULL,
+                buy_trade_date DATE NOT NULL,
+                original_quantity INTEGER NOT NULL,
+                remaining_quantity INTEGER NOT NULL,
+                cost_price NUMERIC(20, 4) NOT NULL,
+                source VARCHAR(20) NOT NULL DEFAULT 'trade',
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id)
+            )
+            """,
+            """
+            CREATE TABLE paper_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                symbol VARCHAR(20) NOT NULL,
+                side VARCHAR(10) NOT NULL,
+                quantity INTEGER NOT NULL,
+                limit_price NUMERIC(20, 4) NOT NULL,
+                trade_date DATE NOT NULL,
+                status VARCHAR(30) NOT NULL,
+                filled_quantity INTEGER NOT NULL DEFAULT 0,
+                frozen_cash NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                frozen_quantity INTEGER NOT NULL DEFAULT 0,
+                idempotency_key VARCHAR(100) UNIQUE,
+                rejection_code VARCHAR(50),
+                rejection_reason TEXT,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id)
+            )
+            """,
+            """
+            CREATE TABLE paper_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                account_id INTEGER NOT NULL,
+                symbol VARCHAR(20) NOT NULL,
+                side VARCHAR(10) NOT NULL,
+                quantity INTEGER NOT NULL,
+                price NUMERIC(20, 4) NOT NULL,
+                amount NUMERIC(20, 4) NOT NULL,
+                fees NUMERIC(20, 4) NOT NULL,
+                trade_date DATE NOT NULL,
+                trade_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (order_id) REFERENCES paper_orders (id),
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id)
+            )
+            """,
+            """
+            CREATE TABLE paper_trade_validity_checks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                account_id INTEGER NOT NULL,
+                symbol VARCHAR(20) NOT NULL,
+                trade_date DATE NOT NULL,
+                side VARCHAR(10) NOT NULL,
+                input_price NUMERIC(20, 4) NOT NULL,
+                daily_low NUMERIC(20, 4),
+                daily_high NUMERIC(20, 4),
+                limit_up_price NUMERIC(20, 4),
+                limit_down_price NUMERIC(20, 4),
+                touched_limit_up BOOLEAN,
+                touched_limit_down BOOLEAN,
+                price_in_range BOOLEAN,
+                status VARCHAR(20) NOT NULL,
+                reason_code VARCHAR(50) NOT NULL,
+                reason_detail TEXT,
+                data_granularity VARCHAR(20) NOT NULL DEFAULT 'daily',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (order_id) REFERENCES paper_orders (id),
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id)
+            )
+            """,
+            """
+            CREATE TABLE paper_account_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                trade_date DATE NOT NULL,
+                cash_available NUMERIC(20, 4) NOT NULL,
+                cash_frozen NUMERIC(20, 4) NOT NULL,
+                market_value NUMERIC(20, 4) NOT NULL,
+                total_assets NUMERIC(20, 4) NOT NULL,
+                realized_pnl NUMERIC(20, 4) NOT NULL,
+                unrealized_pnl NUMERIC(20, 4) NOT NULL,
+                position_count INTEGER NOT NULL,
+                order_count INTEGER NOT NULL,
+                trade_count INTEGER NOT NULL,
+                net_asset_value NUMERIC(20, 6),
+                share_count NUMERIC(20, 6),
+                cumulative_deposit NUMERIC(20, 4),
+                cumulative_withdrawal NUMERIC(20, 4),
+                net_cash_flow NUMERIC(20, 4),
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (account_id, trade_date),
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id)
+            )
+            """,
+            """
+            CREATE TABLE paper_cash_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                event_type VARCHAR(20) NOT NULL,
+                amount NUMERIC(20, 4) NOT NULL,
+                order_id INTEGER,
+                trade_id INTEGER,
+                occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                note TEXT,
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id)
+            )
+            """,
+            """
+            CREATE TABLE paper_position_round_trips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                symbol VARCHAR(20) NOT NULL,
+                open_trade_id INTEGER NOT NULL,
+                close_trade_id INTEGER,
+                open_trade_date DATE NOT NULL,
+                close_trade_date DATE,
+                entry_amount NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                exit_amount NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                fees NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                realized_pnl NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                return_pct NUMERIC(20, 6),
+                holding_days INTEGER,
+                status VARCHAR(20) NOT NULL DEFAULT 'open',
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id),
+                FOREIGN KEY (open_trade_id) REFERENCES paper_trades (id),
+                FOREIGN KEY (close_trade_id) REFERENCES paper_trades (id)
+            )
+            """,
+            """
+            CREATE TABLE paper_matching_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_date DATE NOT NULL,
+                account_id INTEGER,
+                status VARCHAR(20) NOT NULL,
+                processed_count INTEGER NOT NULL DEFAULT 0,
+                filled_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                rejected_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                error_details TEXT,
+                started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                finished_at TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE paper_pending_settlement (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                amount NUMERIC(20, 4) NOT NULL,
+                expected_settle_date DATE NOT NULL,
+                trade_id INTEGER,
+                source VARCHAR(20) NOT NULL,
+                settled BOOLEAN NOT NULL DEFAULT 0,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (account_id) REFERENCES paper_accounts (id)
+            )
+            """,
+        ):
+            connection.execute(text(ddl))
+        connection.execute(text("INSERT INTO paper_accounts (name, initial_cash) VALUES ('legacy', 10000)"))
+        assert (
+            connection.execute(text("SELECT name FROM paper_accounts WHERE name = 'legacy'")).scalar_one() == "legacy"
+        )
+
+    reset_storage()
+    mock_config = Mock(spec=StorageConfig)
+    mock_config.get_db_host.return_value = "localhost"
+    mock_config.get_db_port.return_value = 5432
+    mock_config.get_db_name.return_value = "test_db"
+    mock_config.get_db_username.return_value = "test_user"
+    mock_config.get_db_password.return_value = "test_pass"
+    monkeypatch.setattr("storage.storage_db.create_engine", lambda *args, **kwargs: engine)
+    monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
+
+    import storage.storage_db as storage_db_module
+
+    storage_db_module._metadata_initialized_pids.add(os.getpid())
+    db = get_storage(mock_config)
+    db.engine = engine
+    db.Session = sessionmaker(bind=engine)
+    yield db
+    reset_storage()
+
+
+def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_trading_schema_upgrade):
+    storage.ensure_paper_trading_schema()
+
+    inspector = inspect(storage.engine)
+    account_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_accounts)}
+    assert {
+        "hk_commission_rate",
+        "hk_min_commission",
+        "hk_stamp_duty_rate",
+        "hk_trading_fee_rate",
+        "hk_sfc_levy_rate",
+        "hk_afrc_levy_rate",
+        "hk_settlement_fee_rate",
+    } <= account_columns
+
+    for table_name in (
+        tb_name_paper_positions,
+        tb_name_paper_orders,
+        tb_name_paper_trades,
+        tb_name_paper_trade_validity_checks,
+    ):
+        columns = {column["name"] for column in inspector.get_columns(table_name)}
+        assert "market" in columns
+
+    snapshot_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_account_snapshots)}
+    assert "pending_settlement" in snapshot_columns
+
+    with Session(storage.engine) as session:
+        assert session.query(PaperAccount).order_by(PaperAccount.id).one().hk_commission_rate is None
 
 
 class TestStorageDb:
@@ -2574,8 +2852,6 @@ class TestSaveAndGetStkHoldernumber:
         """SQLite 引擎支持的 StorageDb，用于验证实际写入内容"""
         from sqlalchemy import create_engine as real_create_engine
 
-        from storage.model import Base
-
         sqlite_url = f"sqlite:///{tmp_path}/test.db"
         engine = real_create_engine(sqlite_url)
         Base.metadata.create_all(engine)
@@ -2723,8 +2999,6 @@ class TestSaveAndGetTop10Floatholders:
     @pytest.fixture
     def sqlite_storage(self, tmp_path, monkeypatch):
         from sqlalchemy import create_engine as real_create_engine
-
-        from storage.model import Base
 
         sqlite_url = f"sqlite:///{tmp_path}/test.db"
         engine = real_create_engine(sqlite_url)
@@ -2929,8 +3203,6 @@ class TestSSFChangeSignalStorage:
     @pytest.fixture
     def sqlite_storage(self, tmp_path, monkeypatch):
         from sqlalchemy import create_engine as real_create_engine
-
-        from storage.model import Base
 
         sqlite_url = f"sqlite:///{tmp_path}/test.db"
         engine = real_create_engine(sqlite_url)
