@@ -177,6 +177,20 @@ hk_daily_adj_fields = [
 ]
 
 
+hk_daily_fields = [
+    "ts_code",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "change",
+    "pct_chg",
+    "vol",
+    "amount",
+]
+
+
 hk_history_columns = [
     COL_DATE,
     COL_STOCK_ID,
@@ -261,6 +275,7 @@ def _normalize_hk_history_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             "vol": COL_VOLUME,
             "amount": COL_AMOUNT,
             "change": COL_CHANGE,
+            "pct_chg": COL_CHANGE_RATE,
             "pct_change": COL_CHANGE_RATE,
             "turnover_ratio": COL_TURNOVER_RATE,
         }
@@ -751,29 +766,25 @@ def download_history_data_stock_hk_ts(
     start_date: str,
     end_date: str,
     period: PeriodType = PeriodType.DAILY,
-    adjust: AdjustType = AdjustType.HFQ,
+    adjust: AdjustType = AdjustType.BFQ,
     pro: Any | None = None,
 ) -> pd.DataFrame | Any:
     if period != PeriodType.DAILY:
         raise ValueError("Only daily period is supported for HK Tushare history downloads.")
-    if adjust != AdjustType.HFQ:
-        raise ValueError("Only HFQ adjust is supported for HK Tushare history downloads.")
+    if adjust != AdjustType.BFQ:
+        raise ValueError("Only BFQ adjust is supported for HK Tushare history downloads.")
     ts_code = _to_hk_ts_code(stock_id)
     normalized_start_date = convert_date(start_date) if start_date else ""
     normalized_end_date = convert_date(end_date) if end_date else ""
 
-    if normalized_start_date and normalized_end_date and normalized_start_date == normalized_end_date:
-        return _load_hk_history_by_trade_date(normalized_end_date, stock_id, pro)
-
     client = require_pro_client(pro) if pro is not None else _create_pro_client()
 
-    df = _call_hk_daily_adj_throttled(
-        client,
+    df = client.hk_daily(
         ts_code=ts_code,
         trade_date="",
         start_date=normalized_start_date,
         end_date=normalized_end_date,
-        fields=hk_daily_adj_fields,
+        fields=hk_daily_fields,
     )
 
     if df.empty:
