@@ -55,13 +55,14 @@ def download_history_data_stock_hk_yf(
         prepost=False,
         raise_errors=True,
     )
-    if raw.empty:
+    if raw is None or raw.empty:
         return _empty_hk_history_dataframe()
 
-    required = ["Open", "High", "Low", "Close", "Volume"]
-    missing = [column for column in required if column not in raw.columns]
+    missing = {"Open", "High", "Low", "Close", "Volume"}.difference(raw.columns)
     if missing:
-        raise ValueError(f"Missing required yfinance columns: {', '.join(missing)}")
+        raise ValueError(
+            f"Missing required column '{sorted(missing)[0]}' in yfinance history response"
+        )
 
     normalized = raw.rename(
         columns={
