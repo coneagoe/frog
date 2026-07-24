@@ -38,7 +38,11 @@ from download.provider_order import parse_hk_stock_history_provider_order  # noq
 def test_parse_hk_stock_history_provider_order_defaults(monkeypatch):
     monkeypatch.delenv("DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER", raising=False)
 
-    assert parse_hk_stock_history_provider_order() == ["tushare", "akshare"]
+    assert parse_hk_stock_history_provider_order() == ["yfinance", "tushare", "akshare"]
+
+
+def test_parse_hk_stock_history_provider_order_accepts_yfinance():
+    assert parse_hk_stock_history_provider_order(" yfinance, akshare, yfinance ") == ["yfinance", "akshare"]
 
 
 def test_parse_hk_stock_history_provider_order_normalizes_and_dedupes():

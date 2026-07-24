@@ -30,6 +30,7 @@ from .downloader_tushare import (
     download_suspend_d,
     download_top10_floatholders,
 )
+from .downloader_yfinance import download_history_data_stock_hk_yf
 
 StockHistoryDownloader = Callable[[str, str, str, PeriodType, AdjustType], pd.DataFrame]
 
@@ -41,6 +42,7 @@ STOCK_HISTORY_PROVIDER_DOWNLOADERS: dict[str, StockHistoryDownloader] = {
 }
 
 HK_STOCK_HISTORY_PROVIDER_DOWNLOADERS: dict[str, StockHistoryDownloader] = {
+    "yfinance": download_history_data_stock_hk_yf,
     "tushare": download_history_data_stock_hk_ts,
     "akshare": download_history_data_stock_hk_ak,
 }
