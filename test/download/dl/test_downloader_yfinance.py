@@ -88,3 +88,60 @@ def test_download_history_data_stock_hk_yf_normalizes_raw_daily_history(download
         prepost=False,
         raise_errors=True,
     )
+
+
+@pytest.mark.parametrize("stock_id", ["700", "0700", "03738.HK", "ABCDE"])
+def test_download_history_data_stock_hk_yf_rejects_invalid_ids_without_client_call(
+    downloader_yf_module, stock_id
+):
+    module, ticker = downloader_yf_module
+
+    with pytest.raises(ValueError, match="Stock ID must be 5 digits"):
+        module.download_history_data_stock_hk_yf(stock_id, "20260101", "20260102")
+
+    ticker.assert_not_called()
+
+
+@pytest.mark.parametrize("period, adjust", [("weekly", None), (None, "qfq")])
+def test_download_history_data_stock_hk_yf_rejects_unsupported_options_without_client_call(
+    downloader_yf_module, period, adjust
+):
+    module, ticker = downloader_yf_module
+    kwargs = {}
+    if period is not None:
+        kwargs["period"] = module.PeriodType.WEEKLY
+    if adjust is not None:
+        kwargs["adjust"] = module.AdjustType.QFQ
+
+    with pytest.raises(ValueError):
+        module.download_history_data_stock_hk_yf("00700", "20260101", "20260102", **kwargs)
+
+    ticker.assert_not_called()
+
+
+def test_download_history_data_stock_hk_yf_empty_result_uses_canonical_schema(downloader_yf_module):
+    module, ticker = downloader_yf_module
+    ticker.return_value.history.return_value = pd.DataFrame()
+
+    result = module.download_history_data_stock_hk_yf("00700", "20260101", "20260102")
+
+    assert result.empty
+    assert list(result.columns) == module.hk_history_columns
+
+
+def test_download_history_data_stock_hk_yf_missing_required_column_raises(downloader_yf_module):
+    module, ticker = downloader_yf_module
+    ticker.return_value.history.return_value = pd.DataFrame(
+        {"Open": [1.0], "High": [2.0], "Low": [1.0], "Close": [2.0]}
+    )
+
+    with pytest.raises(ValueError, match="Missing required column 'Volume'"):
+        module.download_history_data_stock_hk_yf("00700", "20260101", "20260102")
+
+
+def test_download_history_data_stock_hk_yf_propagates_history_exception(downloader_yf_module):
+    module, ticker = downloader_yf_module
+    ticker.return_value.history.side_effect = RuntimeError("Yahoo unavailable")
+
+    with pytest.raises(RuntimeError, match="Yahoo unavailable"):
+        module.download_history_data_stock_hk_yf("00700", "20260101", "20260102")
