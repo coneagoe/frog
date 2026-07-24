@@ -48,6 +48,10 @@ x-db-common-env: &db-common-env
   db_password: quant
   TUSHARE_TOKEN: ${TUSHARE_TOKEN:?TUSHARE_TOKEN is required in .env}
 
+x-qg-proxy-env: &qg-proxy-env
+  QG_PROXY_KEY: ${QG_PROXY_KEY:-}
+  QG_PROXY_PWD: ${QG_PROXY_PWD:-}
+
 x-airflow-common: &airflow-common
   image: frog-airflow:2.9.2-python3.12
   build:
@@ -102,7 +106,7 @@ x-airflow-common: &airflow-common
     DOWNLOAD_PROCESS_COUNT: ${DOWNLOAD_PROCESS_COUNT:-4}
     PAPER_TRADING_API_BASE_URL: http://paper-trading:8000
     PAPER_TRADING_API_TOKEN: ${PAPER_TRADING_API_TOKEN:?PAPER_TRADING_API_TOKEN is required in .env}
-    <<: [*db-common-env, *airflow-email-env, *airflow-admin-env]
+    <<: [*db-common-env, *qg-proxy-env, *airflow-email-env, *airflow-admin-env]
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -112,7 +116,7 @@ x-airflow-common: &airflow-common
 
 # Common environment variables for app and celery-worker services
 x-app-common-env: &app-common-env
-  <<: *db-common-env
+  <<: [*db-common-env, *qg-proxy-env]
   DATABASE_URL: postgresql://quant:quant@db:5432/quant
   REDIS_URL: redis://redis:6379/0
 

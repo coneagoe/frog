@@ -1,5 +1,7 @@
 import re
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
@@ -27,6 +29,14 @@ from download.dl.downloader_tushare import (
 )
 
 
+def _configure_yfinance_cache() -> None:
+    set_tz_cache_location = getattr(yf, "set_tz_cache_location", None)
+    if set_tz_cache_location is None:
+        return
+
+    set_tz_cache_location(str(Path(tempfile.gettempdir()) / "frog_yfinance_cache"))
+
+
 def download_history_data_stock_hk_yf(
     stock_id: str,
     start_date: str,
@@ -41,6 +51,7 @@ def download_history_data_stock_hk_yf(
     if adjust != AdjustType.BFQ:
         raise ValueError("yfinance HK history only supports BFQ adjustment.")
 
+    _configure_yfinance_cache()
     symbol = f"{int(stock_id):04d}.HK"
     start = datetime.strptime(convert_date(start_date), "%Y%m%d").strftime("%Y-%m-%d")
     end = (datetime.strptime(convert_date(end_date), "%Y%m%d") + timedelta(days=1)).strftime("%Y-%m-%d")

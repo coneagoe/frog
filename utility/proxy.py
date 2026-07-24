@@ -7,14 +7,23 @@ import requests
 from requests.exceptions import ConnectionError, ProxyError, RequestException
 
 proxy_api_url = "https://share.proxy.qg.net/get"
-default_proxy_params: dict[str, str | int | float | bytes | None] = {
-    "key": "XRA39BMP",
-    "num": 1,
-    "area": "",
-    "isp": 0,
-    "format": "json",
-    "distinct": "true",
-}
+
+
+def _build_proxy_params() -> dict[str, str | int | float | bytes | None]:
+    key = os.getenv("QG_PROXY_KEY")
+    pwd = os.getenv("QG_PROXY_PWD")
+    if not key or not pwd:
+        raise ProxyError("QG_PROXY_KEY and QG_PROXY_PWD must be configured")
+
+    return {
+        "key": key,
+        "pwd": pwd,
+        "num": 1,
+        "area": "",
+        "isp": 0,
+        "format": "json",
+        "distinct": "true",
+    }
 
 
 def _build_proxy_from_response(proxy_json: object) -> dict[str, str]:
@@ -41,12 +50,14 @@ def get_proxy(max_attempts: int = 3) -> dict[str, str]:
     if max_attempts < 1:
         raise ValueError("max_attempts must be >= 1")
 
+    proxy_params = _build_proxy_params()
+
     for attempt in range(1, max_attempts + 1):
         try:
             os.environ.pop("http_proxy", None)
             os.environ.pop("https_proxy", None)
 
-            resp = requests.get(proxy_api_url, params=default_proxy_params, timeout=5)
+            resp = requests.get(proxy_api_url, params=proxy_params, timeout=5)
             proxy = _build_proxy_from_response(resp.json())
 
             test_url = "http://www.baidu.com"

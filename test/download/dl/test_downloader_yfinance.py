@@ -90,6 +90,19 @@ def test_download_history_data_stock_hk_yf_normalizes_raw_daily_history(download
     )
 
 
+def test_download_history_data_stock_hk_yf_configures_writable_cache_before_client_call(
+    downloader_yf_module, monkeypatch
+):
+    module, ticker = downloader_yf_module
+    module.yf.set_tz_cache_location = Mock()
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: "/tmp/frog-test")
+    ticker.return_value.history.return_value = pd.DataFrame()
+
+    module.download_history_data_stock_hk_yf("00700", "20260101", "20260102")
+
+    module.yf.set_tz_cache_location.assert_called_once_with("/tmp/frog-test/frog_yfinance_cache")
+
+
 @pytest.mark.parametrize("stock_id", ["700", "0700", "03738.HK", "ABCDE"])
 def test_download_history_data_stock_hk_yf_rejects_invalid_ids_without_client_call(downloader_yf_module, stock_id):
     module, ticker = downloader_yf_module
