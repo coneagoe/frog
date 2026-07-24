@@ -280,6 +280,21 @@ class TestDownloader:
                 "yahoo", "00700", "20260101", "20260102", PeriodType.DAILY, AdjustType.BFQ
             )
 
+    def test_dl_history_data_stock_hk_by_provider_dispatches_to_yfinance(self, monkeypatch):
+        calls = []
+
+        def fake_yfinance(stock_id, start_date, end_date, period, adjust):
+            calls.append((stock_id, start_date, end_date, period, adjust))
+            return "ok"
+
+        monkeypatch.setitem(downloader_module.HK_STOCK_HISTORY_PROVIDER_DOWNLOADERS, "yfinance", fake_yfinance)
+        result = Downloader().dl_history_data_stock_hk_by_provider(
+            "yfinance", "00700", "20260101", "20260102", PeriodType.DAILY, AdjustType.BFQ
+        )
+
+        assert result == "ok"
+        assert calls == [("00700", "20260101", "20260102", PeriodType.DAILY, AdjustType.BFQ)]
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
