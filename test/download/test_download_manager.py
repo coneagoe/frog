@@ -642,6 +642,7 @@ class TestDownloadHkGgtHistoryFallback:
         import download.download_manager as dm
         from download.download_manager import DownloadManager
 
+        monkeypatch.delenv("DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER", raising=False)
         storage = MagicMock()
         storage.get_last_record.return_value = None
         storage.save_history_data_hk_stock.return_value = True

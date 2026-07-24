@@ -60,9 +60,7 @@ def download_history_data_stock_hk_yf(
 
     missing = {"Open", "High", "Low", "Close", "Volume"}.difference(raw.columns)
     if missing:
-        raise ValueError(
-            f"Missing required column '{sorted(missing)[0]}' in yfinance history response"
-        )
+        raise ValueError(f"Missing required column '{sorted(missing)[0]}' in yfinance history response")
 
     normalized = raw.rename(
         columns={
