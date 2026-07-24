@@ -60,8 +60,8 @@ def download_hk_ggt_history_none_partition_task(*, partition_id: int, partition_
         Exception: If download fails
     """
 
-    #     if not is_hk_market_open_today():
-    #         raise AirflowSkipException("港股市场今日休市，跳过下载任务")
+    if not is_hk_market_open_today():
+        raise AirflowSkipException("港股市场今日休市，跳过下载任务")
 
     if partition_id >= partition_count:
         raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")

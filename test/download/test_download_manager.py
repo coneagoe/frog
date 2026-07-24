@@ -654,7 +654,7 @@ class TestDownloadHkGgtHistoryFallback:
         monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
 
         assert manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
-        assert [call.args[0] for call in download_mock.call_args_list] == ["yfinance", "tushare", "akshare"]
+        assert [call.args[0] for call in download_mock.call_args_list] == ["akshare", "yfinance", "tushare"]
         storage.save_history_data_hk_stock.assert_called_once()
 
     def test_download_hk_ggt_history_falls_back_to_akshare_on_tushare_exception(self, monkeypatch):

@@ -45,7 +45,7 @@ def test_parse_download_config_sets_default_hk_stock_history_provider_order(monk
 
     parse_download_config(config)
 
-    assert os.environ["DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER"] == "yfinance,tushare,akshare"
+    assert os.environ["DOWNLOAD_HK_STOCK_HISTORY_PROVIDER_ORDER"] == "akshare,yfinance,tushare"
 
 
 def test_parse_download_config_sets_configured_hk_stock_history_provider_order(monkeypatch):
