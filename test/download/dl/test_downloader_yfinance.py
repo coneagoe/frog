@@ -91,9 +91,7 @@ def test_download_history_data_stock_hk_yf_normalizes_raw_daily_history(download
 
 
 @pytest.mark.parametrize("stock_id", ["700", "0700", "03738.HK", "ABCDE"])
-def test_download_history_data_stock_hk_yf_rejects_invalid_ids_without_client_call(
-    downloader_yf_module, stock_id
-):
+def test_download_history_data_stock_hk_yf_rejects_invalid_ids_without_client_call(downloader_yf_module, stock_id):
     module, ticker = downloader_yf_module
 
     with pytest.raises(ValueError, match="Stock ID must be 5 digits"):
