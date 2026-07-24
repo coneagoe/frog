@@ -24,6 +24,26 @@ This repo enforces LF via `.gitattributes`. If you need a one-time normalization
 
 - `git add --renormalize .`
 
+## Configuration
+
+Create a `.env` file in the project root with the following required variables:
+
+| Variable | Description |
+|---|---|
+| `TUSHARE_TOKEN` | TuShare API token |
+| `PAPER_TRADING_API_TOKEN` | Paper trading API auth token |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_MAIL_FROM` | Email alerts SMTP config |
+| `ALERT_EMAILS` | Comma-separated alert recipients |
+
+Optional variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `QG_PROXY_KEY` / `QG_PROXY_PWD` | (empty) | Qingguo proxy credentials for HTTP proxy rotation |
+| `DOWNLOAD_PROCESS_COUNT` | `4` | DAG partition fan-out count |
+
+See `config.ini` for additional download provider ordering and backtest settings.
+
 ## Factor Research
 
 Local factor-analysis workflows use the research dependency group:
