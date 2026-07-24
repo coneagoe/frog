@@ -23,6 +23,7 @@ from download.dl.downloader_tushare import (
     _empty_hk_history_dataframe,
     convert_date,
     hk_history_columns,
+    hk_history_numeric_columns,
 )
 
 
@@ -81,6 +82,5 @@ def download_history_data_stock_hk_yf(
     normalized[COL_CHANGE_RATE] = 0.0
     normalized[COL_TURNOVER_RATE] = 0.0
     normalized = normalized.reindex(columns=hk_history_columns)
-    numeric_columns = [column for column in hk_history_columns if column not in {COL_DATE, COL_STOCK_ID}]
-    normalized[numeric_columns] = normalized[numeric_columns].astype("float64")
+    normalized[hk_history_numeric_columns] = normalized[hk_history_numeric_columns].astype("float64")
     return normalized.reset_index(drop=True)
