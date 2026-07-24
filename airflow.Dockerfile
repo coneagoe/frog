@@ -7,4 +7,5 @@ RUN pip install --no-cache-dir \
       retrying \
       baostock \
       pandas_market_calendars \
-      tushare
+      tushare \
+      yfinance==0.2.55

@@ -14,3 +14,9 @@ def test_business_runtime_services_do_not_bind_mount_repo_root():
     content = Path("docker-compose.yml").read_text(encoding="utf-8")
 
     assert 'volumes: [".:/app"]' not in content
+
+
+def test_airflow_runtime_image_installs_pinned_yfinance():
+    content = Path("airflow.Dockerfile").read_text(encoding="utf-8")
+
+    assert "yfinance==0.2.55" in content
