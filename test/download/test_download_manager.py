@@ -638,6 +638,24 @@ def _hk_stock_history_df(stock_id="00700"):
 
 
 class TestDownloadHkGgtHistoryFallback:
+    def test_download_hk_ggt_history_uses_yfinance_then_falls_back(self, monkeypatch):
+        import download.download_manager as dm
+        from download.download_manager import DownloadManager
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        manager = DownloadManager()
+        download_mock = MagicMock(
+            side_effect=[RuntimeError("Yahoo unavailable"), RuntimeError("rate limited"), _hk_stock_history_df()]
+        )
+        monkeypatch.setattr(manager.downloader, "dl_history_data_stock_hk_by_provider", download_mock)
+
+        assert manager.download_hk_ggt_history("00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ)
+        assert [call.args[0] for call in download_mock.call_args_list] == ["yfinance", "tushare", "akshare"]
+        storage.save_history_data_hk_stock.assert_called_once()
+
     def test_download_hk_ggt_history_falls_back_to_akshare_on_tushare_exception(self, monkeypatch):
         from unittest.mock import MagicMock
 
