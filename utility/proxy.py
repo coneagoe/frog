@@ -2,6 +2,7 @@ import functools
 import logging
 import os
 import time
+from urllib.parse import quote
 
 import requests
 from requests.exceptions import ConnectionError, ProxyError, RequestException
@@ -17,18 +18,17 @@ def _build_proxy_params() -> dict[str, str | int | float | bytes | None]:
 
     return {
         "key": key,
-        "pwd": pwd,
         "num": 1,
-        "area": "",
-        "isp": 0,
-        "format": "json",
-        "distinct": "true",
+        "distinct": True,
     }
 
 
 def _build_proxy_from_response(proxy_json: object) -> dict[str, str]:
     if not isinstance(proxy_json, dict):
         raise ValueError(f"Expected dict response, got {type(proxy_json).__name__}")
+
+    if proxy_json.get("code") != "SUCCESS":
+        raise ValueError(f"Proxy provider returned non-success response: {proxy_json}")
 
     proxy_data = proxy_json.get("data")
     if not isinstance(proxy_data, list) or not proxy_data:
@@ -42,8 +42,13 @@ def _build_proxy_from_response(proxy_json: object) -> dict[str, str]:
     if not isinstance(server, str) or ":" not in server:
         raise ValueError(f"Missing usable 'server' field: {first_proxy}")
 
-    ip, port = server.split(":", 1)
-    return {"http": f"http://{ip}:{port}", "https": f"http://{ip}:{port}"}
+    key = os.getenv("QG_PROXY_KEY")
+    pwd = os.getenv("QG_PROXY_PWD")
+    if not key or not pwd:
+        raise ProxyError("QG_PROXY_KEY and QG_PROXY_PWD must be configured")
+
+    proxy_url = f"http://{quote(key, safe='')}:{quote(pwd, safe='')}@{server}"
+    return {"http": proxy_url, "https": proxy_url}
 
 
 def get_proxy(max_attempts: int = 3) -> dict[str, str]:

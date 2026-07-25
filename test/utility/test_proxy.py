@@ -77,6 +77,20 @@ def test_get_proxy_raises_after_bounded_malformed_provider_responses(monkeypatch
     assert "Malformed proxy response" in caplog.text
 
 
+def test_get_proxy_raises_after_bounded_non_success_provider_responses(monkeypatch):
+    _set_proxy_credentials(monkeypatch)
+
+    class FakeResponse:
+        def json(self):
+            return {"code": "ERROR", "data": [{"server": "127.0.0.1:8080"}]}
+
+    monkeypatch.setattr(proxy_module.requests, "get", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(ProxyError, match="Failed to get working proxy after 2 attempts"):
+        proxy_module.get_proxy(max_attempts=2)
+
+
 def test_get_proxy_raises_after_bounded_request_failures(monkeypatch):
     _set_proxy_credentials(monkeypatch)
     monkeypatch.setattr(
@@ -90,9 +104,10 @@ def test_get_proxy_raises_after_bounded_request_failures(monkeypatch):
         proxy_module.get_proxy(max_attempts=2)
 
 
-def test_get_proxy_requires_qingguo_credentials_before_request(monkeypatch):
-    monkeypatch.delenv("QG_PROXY_KEY", raising=False)
-    monkeypatch.delenv("QG_PROXY_PWD", raising=False)
+@pytest.mark.parametrize("missing_variable", ["QG_PROXY_KEY", "QG_PROXY_PWD"])
+def test_get_proxy_requires_qingguo_credentials_before_request(monkeypatch, missing_variable):
+    _set_proxy_credentials(monkeypatch)
+    monkeypatch.delenv(missing_variable)
 
     def fail_if_called(*args, **kwargs):
         raise AssertionError("proxy API should not be called without credentials")
@@ -105,11 +120,13 @@ def test_get_proxy_requires_qingguo_credentials_before_request(monkeypatch):
 
 def test_get_proxy_sends_qingguo_key_and_password_from_env(monkeypatch):
     _set_proxy_credentials(monkeypatch)
+    monkeypatch.setenv("QG_PROXY_KEY", "key:user")
+    monkeypatch.setenv("QG_PROXY_PWD", "p@ss/word")
     calls = []
 
     class ProxyApiResponse:
         def json(self):
-            return {"data": [{"server": "127.0.0.1:8080"}]}
+            return {"code": "SUCCESS", "data": [{"server": "127.0.0.1:8080"}]}
 
     class ProxyTestResponse:
         status_code = proxy_module.requests.codes.ok
@@ -122,23 +139,18 @@ def test_get_proxy_sends_qingguo_key_and_password_from_env(monkeypatch):
 
     monkeypatch.setattr(proxy_module.requests, "get", fake_get)
 
-    assert proxy_module.get_proxy() == {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"}
+    expected_proxy = "http://key%3Auser:p%40ss%2Fword@127.0.0.1:8080"
+    assert proxy_module.get_proxy() == {"http": expected_proxy, "https": expected_proxy}
+    assert calls[1][0] == "https://api.ipify.org?format=json"
+    assert calls[1][1]["proxies"] == {"http": expected_proxy, "https": expected_proxy}
+    assert calls[1][1]["timeout"] == 10
+    assert proxy_module.os.environ["http_proxy"] == expected_proxy
+    assert proxy_module.os.environ["https_proxy"] == expected_proxy
 
     proxy_api_call = calls[0]
     assert proxy_api_call[0] == proxy_module.proxy_api_url
     assert proxy_api_call[1]["params"] == {
-        "key": "test-key",
-        "pwd": "test-pwd",
+        "key": "key:user",
         "num": 1,
-        "area": "",
-        "isp": 0,
-        "format": "json",
-        "distinct": "true",
+        "distinct": True,
     }
-
-    assert calls[1][0] == "https://api.ipify.org?format=json"
-    assert calls[1][1]["proxies"] == {
-        "http": "http://127.0.0.1:8080",
-        "https": "http://127.0.0.1:8080",
-    }
-    assert calls[1][1]["timeout"] == 10
