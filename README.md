@@ -44,6 +44,13 @@ Optional variables:
 
 See `config.ini` for additional download provider ordering and backtest settings.
 
+To verify the Qingguo proxy allocation and HTTPS connectivity with the configured
+credentials, run:
+
+- `uv run tools/test_proxy.py`
+
+The command prints a sanitized proxy server address, egress IP, and elapsed time.
+
 ## Factor Research
 
 Local factor-analysis workflows use the research dependency group:

@@ -60,7 +60,7 @@ def get_proxy(max_attempts: int = 3) -> dict[str, str]:
             resp = requests.get(proxy_api_url, params=proxy_params, timeout=5)
             proxy = _build_proxy_from_response(resp.json())
 
-            test_url = "http://www.baidu.com"
+            test_url = "https://api.ipify.org?format=json"
             test = requests.get(test_url, proxies=proxy, timeout=10)
             if test.status_code == requests.codes.ok:
                 os.environ["http_proxy"] = proxy["http"]
