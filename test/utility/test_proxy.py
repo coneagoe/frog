@@ -135,3 +135,10 @@ def test_get_proxy_sends_qingguo_key_and_password_from_env(monkeypatch):
         "format": "json",
         "distinct": "true",
     }
+
+    assert calls[1][0] == "https://api.ipify.org?format=json"
+    assert calls[1][1]["proxies"] == {
+        "http": "http://127.0.0.1:8080",
+        "https": "http://127.0.0.1:8080",
+    }
+    assert calls[1][1]["timeout"] == 10
