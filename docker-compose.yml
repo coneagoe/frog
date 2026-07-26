@@ -183,12 +183,38 @@ services:
       - proxy_redis_data:/data
 
   proxy_pool:
-    image: jhao104/proxy_pool:latest
+    image: jhao104/proxy_pool@sha256:2a1511ef3f34388478acdd79eedd7f64d664e0efd9ce1af3c501a1a534d72aa3
     depends_on: [proxy_redis]
     environment:
       DB_CONN: redis://proxy_redis:6379/0
     entrypoint: ["tini", "--", "sh", "-c"]
-    command: ["python proxyPool.py server & python proxyPool.py schedule & wait"]
+    command:
+      - |
+        status_fifo=/tmp/proxy_pool_status
+        mkfifo "$$status_fifo" || exit 1
+        cleanup() {
+          exit_status=$$?
+          trap - EXIT INT TERM
+          kill "$$server_pid" "$$schedule_pid" 2>/dev/null || true
+          wait "$$server_pid" "$$schedule_pid" 2>/dev/null || true
+          rm -f "$$status_fifo"
+          exit "$$exit_status"
+        }
+        trap cleanup EXIT INT TERM
+        (
+          python proxyPool.py server
+          status=$$?
+          printf 'server %s\n' "$$status" >"$$status_fifo"
+        ) &
+        server_pid=$$!
+        (
+          python proxyPool.py schedule
+          status=$$?
+          printf 'schedule %s\n' "$$status" >"$$status_fifo"
+        ) &
+        schedule_pid=$$!
+        IFS=' ' read -r process_name process_status <"$$status_fifo"
+        exit "$$process_status"
     restart: unless-stopped
 
   app:
