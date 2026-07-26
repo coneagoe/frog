@@ -52,6 +52,10 @@ x-qg-proxy-env: &qg-proxy-env
   QG_PROXY_KEY: ${QG_PROXY_KEY:-}
   QG_PROXY_PWD: ${QG_PROXY_PWD:-}
 
+x-proxy-pool-env: &proxy-pool-env
+  PROXY_POOL_URL: http://proxy_pool:5010
+  PROXY_PROVIDER: ${PROXY_PROVIDER:-auto}
+
 x-airflow-common: &airflow-common
   image: frog-airflow:2.9.2-python3.12
   build:
@@ -106,7 +110,7 @@ x-airflow-common: &airflow-common
     DOWNLOAD_PROCESS_COUNT: ${DOWNLOAD_PROCESS_COUNT:-4}
     PAPER_TRADING_API_BASE_URL: http://paper-trading:8000
     PAPER_TRADING_API_TOKEN: ${PAPER_TRADING_API_TOKEN:?PAPER_TRADING_API_TOKEN is required in .env}
-    <<: [*db-common-env, *qg-proxy-env, *airflow-email-env, *airflow-admin-env]
+    <<: [*db-common-env, *qg-proxy-env, *proxy-pool-env, *airflow-email-env, *airflow-admin-env]
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -116,7 +120,7 @@ x-airflow-common: &airflow-common
 
 # Common environment variables for app and celery-worker services
 x-app-common-env: &app-common-env
-  <<: [*db-common-env, *qg-proxy-env]
+  <<: [*db-common-env, *qg-proxy-env, *proxy-pool-env]
   DATABASE_URL: postgresql://quant:quant@db:5432/quant
   REDIS_URL: redis://redis:6379/0
 
@@ -173,10 +177,24 @@ services:
     # that can break Celery/Airflow. Containers can still reach Redis via the
     # internal Docker network name "redis".
 
+  proxy_redis:
+    image: redis:7-alpine
+    volumes:
+      - proxy_redis_data:/data
+
+  proxy_pool:
+    image: jhao104/proxy_pool:latest
+    depends_on: [proxy_redis]
+    environment:
+      DB_CONN: redis://proxy_redis:6379/0
+    entrypoint: ["tini", "--", "sh", "-c"]
+    command: ["python proxyPool.py server & python proxyPool.py schedule & wait"]
+    restart: unless-stopped
+
   app:
     build:
       context: .
-    depends_on: [db, redis]
+    depends_on: [db, redis, proxy_pool]
     environment:
       <<: [*app-common-env, *airflow-email-env]
 
@@ -208,7 +226,7 @@ services:
     build:
       context: .
     command: ["celery", "-A", "celery_app", "worker", "--loglevel=info"]
-    depends_on: [db, redis]
+    depends_on: [db, redis, proxy_pool]
     environment:
       <<: *app-common-env
     profiles: ["worker"]
@@ -229,6 +247,10 @@ services:
     # Includes init + admin user creation (idempotent) before starting the webserver.
     command:
       ["bash", "-c", "airflow db init && airflow webserver"]
+    depends_on:
+      <<: *airflow-common-depends-on
+      proxy_pool:
+        condition: service_started
 
   airflow-scheduler:
     <<: *airflow-common
@@ -237,6 +259,8 @@ services:
     depends_on:
       <<: *airflow-common-depends-on
       airflow-webserver:
+        condition: service_started
+      proxy_pool:
         condition: service_started
 
   airflow-worker:
@@ -250,9 +274,14 @@ services:
         condition: service_started
       paper-trading:
         condition: service_started
+      proxy_pool:
+        condition: service_started
 
   airflow-init:
     <<: *airflow-common
     command:
       ["bash", "-c", "set -euo pipefail; if [ -z \"$$AIRFLOW_ADMIN_PASSWORD\" ]; then echo 'AIRFLOW_ADMIN_PASSWORD is required (set it in .env)'; exit 1; fi; airflow db init; airflow users create --username \"$$AIRFLOW_ADMIN_USERNAME\" --password \"$$AIRFLOW_ADMIN_PASSWORD\" --firstname \"$$AIRFLOW_ADMIN_FIRSTNAME\" --lastname \"$$AIRFLOW_ADMIN_LASTNAME\" --role Admin --email \"$$AIRFLOW_ADMIN_EMAIL\" || echo 'User already exists' "]
     restart: "no"
+
+volumes:
+  proxy_redis_data:
