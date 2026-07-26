@@ -236,6 +236,15 @@ def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
         module = importlib.import_module(module_name)
         module = importlib.reload(module)
 
+        ak_stub.stock_info_a_code_name = lambda: pd.DataFrame(
+            {"code": ["000001"], "name": ["Ping An Bank"]}
+        )
+        assert module.download_general_info_stock_ak()[module.COL_STOCK_ID].tolist() == [
+            "000001"
+        ]
+        assert get_proxy_calls == 0
+
+        ak_stub.stock_info_a_code_name = fail_with_proxy_error
         with pytest.raises(ProxyError, match="Maximum proxy retry attempts exceeded"):
             module.download_general_info_stock_ak()
 

@@ -37,10 +37,16 @@ def _proxy_server(proxy_url: str) -> str:
     return f"{parsed.hostname}:{parsed.port}"
 
 
+def _requires_qingguo_credentials() -> bool:
+    return os.getenv("PROXY_PROVIDER", "auto").lower() == "qingguo"
+
+
 def main() -> int:
     try:
         _load_dotenv(ROOT / ".env")
-        if not os.getenv("QG_PROXY_KEY") or not os.getenv("QG_PROXY_PWD"):
+        if _requires_qingguo_credentials() and (
+            not os.getenv("QG_PROXY_KEY") or not os.getenv("QG_PROXY_PWD")
+        ):
             raise RuntimeError("QG_PROXY_KEY and QG_PROXY_PWD must be configured in .env")
         started = time.monotonic()
         proxies = proxy_module.get_proxy()

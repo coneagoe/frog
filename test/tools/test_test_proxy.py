@@ -52,9 +52,38 @@ def test_main_reports_sanitized_proxy_server(module, monkeypatch, tmp_path, caps
     assert "@" not in captured.out + captured.err
 
 
+def test_main_allows_proxy_pool_mode_without_qingguo_credentials(
+    module, monkeypatch, capsys
+):
+    monkeypatch.setenv("PROXY_PROVIDER", "proxy_pool")
+    monkeypatch.delenv("QG_PROXY_KEY", raising=False)
+    monkeypatch.delenv("QG_PROXY_PWD", raising=False)
+    monkeypatch.setattr(module, "_load_dotenv", lambda _: None)
+    monkeypatch.setattr(
+        module.proxy_module,
+        "get_proxy",
+        lambda: {"http": "http://127.0.0.1:8080", "https": "http://127.0.0.1:8080"},
+    )
+    monkeypatch.setattr(module.requests, "get", lambda *args, **kwargs: BaiduResponse())
+
+    assert module.main() == 0
+    assert "proxy server: 127.0.0.1:8080" in capsys.readouterr().out
+
+
+def test_main_requires_qingguo_credentials_only_in_qingguo_mode(module, monkeypatch, capsys):
+    monkeypatch.setenv("PROXY_PROVIDER", "qingguo")
+    monkeypatch.delenv("QG_PROXY_KEY", raising=False)
+    monkeypatch.delenv("QG_PROXY_PWD", raising=False)
+    monkeypatch.setattr(module, "_load_dotenv", lambda _: None)
+
+    assert module.main() == 1
+    assert "QG_PROXY_KEY and QG_PROXY_PWD" in capsys.readouterr().err
+
+
 def test_main_rejects_missing_proxy_password(module, monkeypatch, tmp_path, capsys):
     (tmp_path / ".env").write_text("QG_PROXY_KEY=secret-key\n")
     monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setenv("PROXY_PROVIDER", "qingguo")
     monkeypatch.delenv("QG_PROXY_PWD", raising=False)
     monkeypatch.setattr(module.proxy_module, "get_proxy", lambda: pytest.fail("must not allocate"))
 
