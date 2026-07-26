@@ -39,17 +39,26 @@ Optional variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `QG_PROXY_KEY` / `QG_PROXY_PWD` | (empty) | Qingguo proxy credentials for HTTP proxy rotation |
+| `PROXY_PROVIDER` | `auto` | `auto` tries local ProxyPool then Qingguo; `proxy_pool` disables fallback; `qingguo` bypasses the local pool. |
+| `PROXY_POOL_URL` | `http://proxy_pool:5010` | Internal ProxyPool API address; do not expose it publicly. |
+| `QG_PROXY_KEY` / `QG_PROXY_PWD` | (empty) | Qingguo fallback credentials required for `auto` fallback and `qingguo` mode. |
 | `DOWNLOAD_PROCESS_COUNT` | `4` | DAG partition fan-out count |
 
 See `config.ini` for additional download provider ordering and backtest settings.
 
-To verify the Qingguo proxy allocation and HTTPS connectivity with the configured
-credentials, run:
+ProxyPool is optional. Start it and verify its availability with:
 
-- `uv run tools/test_proxy.py`
+```bash
+docker compose up -d proxy_redis proxy_pool
+docker compose ps proxy_redis proxy_pool
+docker compose exec proxy_pool sh -c 'wget -qO- http://127.0.0.1:5010/count/'
+uv run tools/test_proxy.py
+```
 
-The command prints a sanitized proxy server address and elapsed time.
+Neither ProxyPool port is host-published; keep `proxy_pool` and `proxy_redis` on
+the private Compose network. Public proxies are untrusted and are used only for
+AkShare retry recovery. To roll back to Qingguo, set `PROXY_PROVIDER=qingguo` and
+restart the downloading worker/scheduler.
 
 ## Factor Research
 
