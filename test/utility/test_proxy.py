@@ -56,6 +56,57 @@ def test_proxy_pool_rejects_empty_or_malformed_payload(monkeypatch, payload):
         proxy_module.get_proxy(max_attempts=1)
 
 
+def test_get_proxy_auto_falls_back_to_qingguo_after_proxy_pool_failure(monkeypatch):
+    _set_proxy_credentials(monkeypatch)
+    monkeypatch.delenv("PROXY_PROVIDER", raising=False)
+    calls = []
+
+    class QingguoResponse:
+        def json(self):
+            return {"code": "SUCCESS", "data": [{"server": "127.0.0.1:8080"}]}
+
+    def fake_get(url, **kwargs):
+        calls.append(url)
+        if url.endswith("/get/"):
+            raise RequestException("ProxyPool unavailable")
+        return QingguoResponse()
+
+    monkeypatch.setattr(proxy_module.requests, "get", fake_get)
+
+    expected_proxy = "http://test-key:test-pwd@127.0.0.1:8080"
+    assert proxy_module.get_proxy(max_attempts=1) == {
+        "http": expected_proxy,
+        "https": expected_proxy,
+    }
+    assert calls == ["http://proxy_pool:5010/get/", proxy_module.proxy_api_url]
+
+
+def test_get_proxy_auto_surfaces_sanitized_proxy_pool_failure(monkeypatch, caplog):
+    _set_proxy_credentials(monkeypatch)
+    monkeypatch.delenv("PROXY_PROVIDER", raising=False)
+    monkeypatch.setattr(
+        proxy_module,
+        "_get_proxy_from_proxy_pool",
+        lambda: (_ for _ in ()).throw(ValueError("ProxyPool returned http://pool-user:pool-pass@pool:5010")),
+    )
+    monkeypatch.setattr(
+        proxy_module,
+        "_get_proxy_from_qingguo",
+        lambda: (_ for _ in ()).throw(RequestException("Qingguo unavailable")),
+    )
+    monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
+
+    with (
+        caplog.at_level(logging.WARNING),
+        pytest.raises(ProxyError, match="Failed to get working proxy after 1 attempts"),
+    ):
+        proxy_module.get_proxy(max_attempts=1)
+
+    assert "after ProxyPool error: ProxyPool returned http://[REDACTED]@pool:5010" in caplog.text
+    assert "pool-user" not in caplog.text
+    assert "pool-pass" not in caplog.text
+
+
 def test_change_proxy_does_not_refresh_proxy_before_first_attempt(monkeypatch):
     get_proxy_calls = 0
 

@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import re
 import time
 from urllib.parse import quote
 
@@ -11,6 +12,7 @@ proxy_api_url = "https://share.proxy.qg.net/get"
 PROXY_POOL_URL = "http://proxy_pool:5010"
 PROXY_POOL_GET_PATH = "/get/"
 PROXY_POOL_DELETE_PATH = "/delete/"
+_PROXY_USERINFO_PATTERN = re.compile(r"(https?://)([^/@]+)@")
 
 
 def _proxy_provider() -> str:
@@ -98,6 +100,10 @@ def _get_proxy_from_qingguo() -> dict[str, str]:
     return _build_proxy_from_response(resp.json())
 
 
+def _exception_diagnostic(exc: Exception) -> str:
+    return _PROXY_USERINFO_PATTERN.sub(r"\1[REDACTED]@", str(exc))
+
+
 def get_proxy(max_attempts: int = 3) -> dict[str, str]:
     if max_attempts < 1:
         raise ValueError("max_attempts must be >= 1")
@@ -128,25 +134,27 @@ def get_proxy(max_attempts: int = 3) -> dict[str, str]:
             return proxy
         except RequestException as exc:
             logging.warning(
-                "Proxy fetch/test failed on attempt %d/%d: %s",
+                "Proxy fetch/test failed on attempt %d/%d%s: %s",
                 attempt,
                 max_attempts,
-                exc,
+                (f" after ProxyPool error: {_exception_diagnostic(pool_error)}" if pool_error else ""),
+                _exception_diagnostic(exc),
             )
         except ValueError as exc:
             logging.warning(
-                "Malformed proxy response on attempt %d/%d: %s",
+                "Malformed proxy response on attempt %d/%d%s: %s",
                 attempt,
                 max_attempts,
-                exc,
+                (f" after ProxyPool error: {_exception_diagnostic(pool_error)}" if pool_error else ""),
+                _exception_diagnostic(exc),
             )
         except Exception as exc:
             logging.warning(
                 "Proxy provider failed on attempt %d/%d%s: %s",
                 attempt,
                 max_attempts,
-                f" after ProxyPool error: {pool_error}" if pool_error else "",
-                exc,
+                (f" after ProxyPool error: {_exception_diagnostic(pool_error)}" if pool_error else ""),
+                _exception_diagnostic(exc),
             )
 
         if attempt < max_attempts:
