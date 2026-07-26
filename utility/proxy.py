@@ -13,6 +13,7 @@ PROXY_POOL_URL = "http://proxy_pool:5010"
 PROXY_POOL_GET_PATH = "/get/"
 PROXY_POOL_DELETE_PATH = "/delete/"
 _PROXY_USERINFO_PATTERN = re.compile(r"(https?://)([^/@]+)@")
+PROXY_HEALTHCHECK_URL = "https://www.baidu.com"
 
 
 def _proxy_provider() -> str:
@@ -46,11 +47,23 @@ def _get_proxy_from_proxy_pool() -> tuple[str, dict[str, str]]:
 
 
 def _delete_proxy_from_pool(proxy_server: str) -> None:
-    requests.get(
-        _proxy_pool_url(PROXY_POOL_DELETE_PATH),
-        params={"proxy": proxy_server},
-        timeout=5,
-    )
+    try:
+        requests.get(
+            _proxy_pool_url(PROXY_POOL_DELETE_PATH),
+            params={"proxy": proxy_server},
+            timeout=5,
+        ).raise_for_status()
+    except RequestException as exc:
+        logging.warning(
+            "Could not evict failed ProxyPool endpoint %s: %s",
+            proxy_server,
+            _exception_diagnostic(exc),
+        )
+
+
+def _validate_proxy(proxies: dict[str, str]) -> None:
+    response = requests.get(PROXY_HEALTHCHECK_URL, proxies=proxies, timeout=10)
+    response.raise_for_status()
 
 
 def _build_proxy_params() -> dict[str, str | int | float | bytes | None]:
@@ -114,21 +127,35 @@ def get_proxy(max_attempts: int = 3) -> dict[str, str]:
 
     for attempt in range(1, max_attempts + 1):
         pool_error: Exception | None = None
+        proxy_server: str | None = None
         try:
             os.environ.pop("http_proxy", None)
             os.environ.pop("https_proxy", None)
 
             if provider in {"auto", "proxy_pool"}:
                 try:
-                    _, proxy = _get_proxy_from_proxy_pool()
-                except (RequestException, ValueError) as exc:
+                    proxy_server, proxy = _get_proxy_from_proxy_pool()
+                    _validate_proxy(proxy)
+                except (RequestException, ProxyError, ValueError) as exc:
                     pool_error = exc
+                    if proxy_server is not None:
+                        try:
+                            _delete_proxy_from_pool(proxy_server)
+                        except RequestException as eviction_exc:
+                            logging.warning(
+                                "Could not evict failed ProxyPool endpoint %s: %s",
+                                proxy_server,
+                                _exception_diagnostic(eviction_exc),
+                            )
                     if provider == "proxy_pool":
                         raise
+                    proxy_server = None
                     proxy = _get_proxy_from_qingguo()
             else:
                 proxy = _get_proxy_from_qingguo()
 
+            if proxy_server is None:
+                _validate_proxy(proxy)
             os.environ["http_proxy"] = proxy["http"]
             os.environ["https_proxy"] = proxy["https"]
             return proxy
