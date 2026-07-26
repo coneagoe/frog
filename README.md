@@ -49,7 +49,7 @@ credentials, run:
 
 - `uv run tools/test_proxy.py`
 
-The command prints a sanitized proxy server address, egress IP, and elapsed time.
+The command prints a sanitized proxy server address and elapsed time.
 
 ## Factor Research
 
