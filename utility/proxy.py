@@ -51,6 +51,23 @@ def _build_proxy_from_response(proxy_json: object) -> dict[str, str]:
     return {"http": proxy_url, "https": proxy_url}
 
 
+def _proxy_diagnostics(proxy_json: object) -> tuple[str | None, str]:
+    if not isinstance(proxy_json, dict):
+        raise ValueError("Expected proxy response object")
+
+    proxy_data = proxy_json.get("data")
+    if not isinstance(proxy_data, list) or not proxy_data or not isinstance(proxy_data[0], dict):
+        raise ValueError("Missing usable proxy data")
+
+    first_proxy = proxy_data[0]
+    server = first_proxy.get("server")
+    if not isinstance(server, str) or ":" not in server:
+        raise ValueError("Missing usable proxy server")
+
+    proxy_ip = first_proxy.get("proxy_ip")
+    return (proxy_ip if isinstance(proxy_ip, str) else None, server)
+
+
 def get_proxy(max_attempts: int = 3) -> dict[str, str]:
     if max_attempts < 1:
         raise ValueError("max_attempts must be >= 1")
@@ -63,7 +80,9 @@ def get_proxy(max_attempts: int = 3) -> dict[str, str]:
             os.environ.pop("https_proxy", None)
 
             resp = requests.get(proxy_api_url, params=proxy_params, timeout=5)
-            proxy = _build_proxy_from_response(resp.json())
+            proxy_response = resp.json()
+            proxy = _build_proxy_from_response(proxy_response)
+            proxy_ip, server = _proxy_diagnostics(proxy_response)
 
             test_url = "https://api.ipify.org?format=json"
             test = requests.get(test_url, proxies=proxy, timeout=10)
@@ -71,12 +90,23 @@ def get_proxy(max_attempts: int = 3) -> dict[str, str]:
                 os.environ["http_proxy"] = proxy["http"]
                 os.environ["https_proxy"] = proxy["https"]
                 return proxy
-            logging.warning(
-                "Proxy test failed with status %s on attempt %d/%d",
-                test.status_code,
-                attempt,
-                max_attempts,
-            )
+            if proxy_ip is None:
+                logging.warning(
+                    "Proxy test failed for server=%s with status %s on attempt %d/%d",
+                    server,
+                    test.status_code,
+                    attempt,
+                    max_attempts,
+                )
+            else:
+                logging.warning(
+                    "Proxy test failed for proxy_ip=%s, server=%s with status %s on attempt %d/%d",
+                    proxy_ip,
+                    server,
+                    test.status_code,
+                    attempt,
+                    max_attempts,
+                )
         except RequestException as exc:
             logging.warning(
                 "Proxy fetch/test failed on attempt %d/%d: %s",
