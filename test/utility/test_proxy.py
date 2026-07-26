@@ -104,6 +104,63 @@ def test_get_proxy_raises_after_bounded_request_failures(monkeypatch):
         proxy_module.get_proxy(max_attempts=2)
 
 
+def test_get_proxy_logs_safe_address_when_health_check_fails(monkeypatch, caplog):
+    _set_proxy_credentials(monkeypatch)
+
+    class ProviderResponse:
+        def json(self):
+            return {
+                "code": "SUCCESS",
+                "data": [{"proxy_ip": "203.0.113.9", "server": "203.0.113.9:8080"}],
+            }
+
+    class HealthCheckResponse:
+        status_code = 408
+
+    def fake_get(url, **kwargs):
+        return ProviderResponse() if url == proxy_module.proxy_api_url else HealthCheckResponse()
+
+    monkeypatch.setattr(proxy_module.requests, "get", fake_get)
+    monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ProxyError, match="Failed to get working proxy after 1 attempts"):
+            proxy_module.get_proxy(max_attempts=1)
+
+    assert "proxy_ip=203.0.113.9" in caplog.text
+    assert "server=203.0.113.9:8080" in caplog.text
+    assert "test-key" not in caplog.text
+    assert "test-pwd" not in caplog.text
+    assert "@" not in caplog.text
+
+
+def test_get_proxy_omits_missing_proxy_ip_when_health_check_fails(monkeypatch, caplog):
+    _set_proxy_credentials(monkeypatch)
+
+    class ProviderResponse:
+        def json(self):
+            return {"code": "SUCCESS", "data": [{"server": "203.0.113.9:8080"}]}
+
+    class HealthCheckResponse:
+        status_code = 408
+
+    def fake_get(url, **kwargs):
+        return ProviderResponse() if url == proxy_module.proxy_api_url else HealthCheckResponse()
+
+    monkeypatch.setattr(proxy_module.requests, "get", fake_get)
+    monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ProxyError, match="Failed to get working proxy after 1 attempts"):
+            proxy_module.get_proxy(max_attempts=1)
+
+    assert "server=203.0.113.9:8080" in caplog.text
+    assert "status 408" in caplog.text
+    assert "attempt 1/1" in caplog.text
+    assert "proxy_ip=" not in caplog.text
+    assert "test-key" not in caplog.text
+    assert "test-pwd" not in caplog.text
+    assert "@" not in caplog.text
+
+
 @pytest.mark.parametrize("missing_variable", ["QG_PROXY_KEY", "QG_PROXY_PWD"])
 def test_get_proxy_requires_qingguo_credentials_before_request(monkeypatch, missing_variable):
     _set_proxy_credentials(monkeypatch)
