@@ -75,14 +75,24 @@ def test_main_handles_non_success_baidu_response(module, monkeypatch, tmp_path, 
         "http": "http://secret-key:secret-password@203.0.113.2:8080",
         "https": "http://secret-key:secret-password@203.0.113.2:8080",
     }
-    monkeypatch.setattr(module.proxy_module, "get_proxy", lambda: proxy)
+    get_proxy_calls = 0
+
+    def fake_get_proxy():
+        nonlocal get_proxy_calls
+        get_proxy_calls += 1
+        return proxy
+
+    monkeypatch.setattr(module.proxy_module, "get_proxy", fake_get_proxy)
+    calls = []
     monkeypatch.setattr(
         module.requests,
         "get",
-        lambda *args, **kwargs: FailedBaiduResponse(),
+        lambda url, **kwargs: calls.append((url, kwargs)) or FailedBaiduResponse(),
     )
 
     assert module.main() == 1
+    assert get_proxy_calls == 1
+    assert calls == [(module.BAIDU_URL, {"proxies": proxy, "timeout": module.REQUEST_TIMEOUT})]
     captured = capsys.readouterr()
     assert "proxy test failed: 503 Service Unavailable" in captured.err
     assert "secret-key" not in captured.out + captured.err
