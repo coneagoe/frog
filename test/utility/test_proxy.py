@@ -17,6 +17,45 @@ def _set_proxy_credentials(monkeypatch):
     monkeypatch.setenv("QG_PROXY_PWD", "test-pwd")
 
 
+def test_get_proxy_uses_proxy_pool_without_qingguo_credentials(monkeypatch):
+    monkeypatch.setenv("PROXY_PROVIDER", "proxy_pool")
+    monkeypatch.setenv("PROXY_POOL_URL", "http://pool:5010/")
+    monkeypatch.delenv("QG_PROXY_KEY", raising=False)
+    monkeypatch.delenv("QG_PROXY_PWD", raising=False)
+    calls = []
+
+    class PoolResponse:
+        def json(self):
+            return {"proxy": "127.0.0.1:8080", "https": True}
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return PoolResponse()
+
+    monkeypatch.setattr(proxy_module.requests, "get", fake_get)
+
+    assert proxy_module.get_proxy() == {
+        "http": "http://127.0.0.1:8080",
+        "https": "http://127.0.0.1:8080",
+    }
+    assert calls == [("http://pool:5010/get/", {"params": {"type": "https"}, "timeout": 5})]
+
+
+@pytest.mark.parametrize("payload", [{"code": 0, "src": "no proxy"}, {}, {"proxy": 42}])
+def test_proxy_pool_rejects_empty_or_malformed_payload(monkeypatch, payload):
+    monkeypatch.setenv("PROXY_PROVIDER", "proxy_pool")
+
+    class PoolResponse:
+        def json(self):
+            return payload
+
+    monkeypatch.setattr(proxy_module.requests, "get", lambda *args, **kwargs: PoolResponse())
+    monkeypatch.setattr(proxy_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(ProxyError, match="Failed to get working proxy after 1 attempts"):
+        proxy_module.get_proxy(max_attempts=1)
+
+
 def test_change_proxy_does_not_refresh_proxy_before_first_attempt(monkeypatch):
     get_proxy_calls = 0
 
@@ -107,6 +146,7 @@ def test_get_proxy_raises_after_bounded_request_failures(monkeypatch):
 @pytest.mark.parametrize("missing_variable", ["QG_PROXY_KEY", "QG_PROXY_PWD"])
 def test_get_proxy_requires_qingguo_credentials_before_request(monkeypatch, missing_variable):
     _set_proxy_credentials(monkeypatch)
+    monkeypatch.setenv("PROXY_PROVIDER", "qingguo")
     monkeypatch.delenv(missing_variable)
 
     def fail_if_called(*args, **kwargs):
@@ -120,6 +160,7 @@ def test_get_proxy_requires_qingguo_credentials_before_request(monkeypatch, miss
 
 def test_get_proxy_sends_qingguo_key_and_password_from_env(monkeypatch):
     _set_proxy_credentials(monkeypatch)
+    monkeypatch.setenv("PROXY_PROVIDER", "qingguo")
     monkeypatch.setenv("QG_PROXY_KEY", "key:user")
     monkeypatch.setenv("QG_PROXY_PWD", "p@ss/word")
     calls = []

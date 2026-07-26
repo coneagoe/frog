@@ -8,6 +8,47 @@ import requests
 from requests.exceptions import ConnectionError, ProxyError, RequestException
 
 proxy_api_url = "https://share.proxy.qg.net/get"
+PROXY_POOL_URL = "http://proxy_pool:5010"
+PROXY_POOL_GET_PATH = "/get/"
+PROXY_POOL_DELETE_PATH = "/delete/"
+
+
+def _proxy_provider() -> str:
+    provider = os.getenv("PROXY_PROVIDER", "auto").lower()
+    if provider not in {"auto", "proxy_pool", "qingguo"}:
+        raise ProxyError("PROXY_PROVIDER must be auto, proxy_pool, or qingguo")
+    return provider
+
+
+def _proxy_pool_url(path: str) -> str:
+    return f"{os.getenv('PROXY_POOL_URL', PROXY_POOL_URL).rstrip('/')}{path}"
+
+
+def _is_proxy_server(server: str) -> bool:
+    host, separator, port = server.rpartition(":")
+    return bool(separator and host and port.isdigit() and 0 < int(port) < 65536)
+
+
+def _get_proxy_from_proxy_pool() -> tuple[str, dict[str, str]]:
+    response = requests.get(
+        _proxy_pool_url(PROXY_POOL_GET_PATH),
+        params={"type": "https"},
+        timeout=5,
+    )
+    payload = response.json()
+    server = payload.get("proxy") if isinstance(payload, dict) else None
+    if not isinstance(server, str) or not _is_proxy_server(server):
+        raise ValueError(f"ProxyPool returned no usable proxy: {payload}")
+    proxy_url = f"http://{server}"
+    return server, {"http": proxy_url, "https": proxy_url}
+
+
+def _delete_proxy_from_pool(proxy_server: str) -> None:
+    requests.get(
+        _proxy_pool_url(PROXY_POOL_DELETE_PATH),
+        params={"proxy": proxy_server},
+        timeout=5,
+    )
 
 
 def _build_proxy_params() -> dict[str, str | int | float | bytes | None]:
@@ -51,19 +92,37 @@ def _build_proxy_from_response(proxy_json: object) -> dict[str, str]:
     return {"http": proxy_url, "https": proxy_url}
 
 
+def _get_proxy_from_qingguo() -> dict[str, str]:
+    proxy_params = _build_proxy_params()
+    resp = requests.get(proxy_api_url, params=proxy_params, timeout=5)
+    return _build_proxy_from_response(resp.json())
+
+
 def get_proxy(max_attempts: int = 3) -> dict[str, str]:
     if max_attempts < 1:
         raise ValueError("max_attempts must be >= 1")
 
-    proxy_params = _build_proxy_params()
+    provider = _proxy_provider()
+    if provider == "qingguo":
+        _build_proxy_params()
 
     for attempt in range(1, max_attempts + 1):
+        pool_error: Exception | None = None
         try:
             os.environ.pop("http_proxy", None)
             os.environ.pop("https_proxy", None)
 
-            resp = requests.get(proxy_api_url, params=proxy_params, timeout=5)
-            proxy = _build_proxy_from_response(resp.json())
+            if provider in {"auto", "proxy_pool"}:
+                try:
+                    _, proxy = _get_proxy_from_proxy_pool()
+                except (RequestException, ValueError) as exc:
+                    pool_error = exc
+                    if provider == "proxy_pool":
+                        raise
+                    proxy = _get_proxy_from_qingguo()
+            else:
+                proxy = _get_proxy_from_qingguo()
+
             os.environ["http_proxy"] = proxy["http"]
             os.environ["https_proxy"] = proxy["https"]
             return proxy
@@ -79,6 +138,14 @@ def get_proxy(max_attempts: int = 3) -> dict[str, str]:
                 "Malformed proxy response on attempt %d/%d: %s",
                 attempt,
                 max_attempts,
+                exc,
+            )
+        except Exception as exc:
+            logging.warning(
+                "Proxy provider failed on attempt %d/%d%s: %s",
+                attempt,
+                max_attempts,
+                f" after ProxyPool error: {pool_error}" if pool_error else "",
                 exc,
             )
 
