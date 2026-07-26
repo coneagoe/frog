@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 
 from utility import proxy as proxy_module  # noqa: E402
 
-IPIFY_URL = "https://api.ipify.org?format=json"
+BAIDU_URL = "https://www.baidu.com"
 REQUEST_TIMEOUT = 10
 
 
@@ -44,14 +44,9 @@ def main() -> int:
             raise RuntimeError("QG_PROXY_KEY and QG_PROXY_PWD must be configured in .env")
         started = time.monotonic()
         proxies = proxy_module.get_proxy()
-        response = requests.get(IPIFY_URL, proxies=proxies, timeout=REQUEST_TIMEOUT)
+        response = requests.get(BAIDU_URL, proxies=proxies, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
-        payload = response.json()
-        ip = payload.get("ip") if isinstance(payload, dict) else None
-        if not isinstance(ip, str) or not ip:
-            raise ValueError("ipify response does not contain a usable ip")
         print(f"proxy server: {_proxy_server(proxies['https'])}")
-        print(f"egress ip: {ip}")
         print(f"elapsed ms: {round((time.monotonic() - started) * 1000)}")
         return 0
     except (FileNotFoundError, ProxyError, requests.RequestException, ValueError, RuntimeError) as exc:

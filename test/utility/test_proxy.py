@@ -198,7 +198,7 @@ def test_get_proxy_sends_qingguo_key_and_password_from_env(monkeypatch):
 
     expected_proxy = "http://key%3Auser:p%40ss%2Fword@127.0.0.1:8080"
     assert proxy_module.get_proxy() == {"http": expected_proxy, "https": expected_proxy}
-    assert calls[1][0] == "https://api.ipify.org?format=json"
+    assert calls[1][0] == "https://www.baidu.com"
     assert calls[1][1]["proxies"] == {"http": expected_proxy, "https": expected_proxy}
     assert calls[1][1]["timeout"] == 10
     assert proxy_module.os.environ["http_proxy"] == expected_proxy
