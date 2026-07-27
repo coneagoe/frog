@@ -182,6 +182,7 @@ export type MatchingRun = {
   skipped_count: number;
   rejected_count: number;
   failed_count: number;
+  error_details: string | null;
 };
 
 export type CreateAccountInput = {

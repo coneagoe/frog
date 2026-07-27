@@ -20,3 +20,4 @@ class MatchingRunResponse(BaseModel):
     skipped_count: int
     rejected_count: int
     failed_count: int
+    error_details: str | None = None

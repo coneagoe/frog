@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 import pandas as pd
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -13,7 +14,7 @@ from common.const import (
     COL_OPEN,
     COL_STOCK_ID,
 )
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import MatchingRunStatus, OrderSide, OrderStatus
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
@@ -232,6 +233,75 @@ def test_matching_copies_order_comment_to_trade(tmp_path):
 
     assert repo.get_order(order.id).comment == "突破买入"
     assert repo.list_trades(account.id)[0].comment == "突破买入"
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "snapshot_exception",
+    [
+        KeyError("No daily bar for 00700 on 2026-06-16"),
+        ValueError("Invalid OHLC for 00700 on 2026-06-16"),
+    ],
+)
+def test_snapshot_market_data_failure_marks_run_failed_and_preserves_fill(tmp_path, snapshot_exception):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("market-data-failure", Decimal("100000.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    class FailingSnapshotService:
+        def generate_snapshot(self, account_id, snapshot_date):
+            assert account_id == account.id
+            assert snapshot_date == trade_date
+            raise snapshot_exception
+
+    matching_service.snapshot_service = FailingSnapshotService()
+    run = matching_service.run(trade_date, account.id)
+    session.commit()
+
+    assert run.status == MatchingRunStatus.FAILED.value
+    assert f"account={account.id}, trade_date={trade_date}" in run.error_details
+    assert str(snapshot_exception) in run.error_details
+    assert repo.list_snapshots(account.id) == []
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    assert len(repo.list_trades(account.id)) == 1
+    engine.dispose()
+
+
+def test_snapshot_failure_does_not_attempt_another_market(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("market-data-failure", Decimal("100000.00"))
+    order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    calls = []
+
+    class FailingSnapshotService:
+        def generate_snapshot(self, account_id, snapshot_date):
+            raise KeyError("No daily bar for 00700")
+
+    class CapturingMarketData:
+        def get_daily_bar(self, symbol, snapshot_date, market=None):
+            calls.append((symbol, snapshot_date, market))
+            return DailyBar(symbol, snapshot_date, Decimal("10"), Decimal("100"), Decimal("1"), Decimal("50"))
+
+    matching_service.snapshot_service = FailingSnapshotService()
+    matching_service.market_data = CapturingMarketData()
+    matching_service.run(trade_date, account.id)
+
+    assert calls == [("000001.SZ", trade_date, "a_share")]
+    engine.dispose()
+
+
+def test_non_market_data_snapshot_exception_still_raises(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("unexpected-failure", Decimal("100000.00"))
+    order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    class FailingSnapshotService:
+        def generate_snapshot(self, account_id, snapshot_date):
+            raise RuntimeError("database failure")
+
+    matching_service.snapshot_service = FailingSnapshotService()
+    with pytest.raises(RuntimeError, match="database failure"):
+        matching_service.run(trade_date, account.id)
     engine.dispose()
 
 

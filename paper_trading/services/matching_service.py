@@ -54,8 +54,13 @@ class MatchingService:
                 affected_accounts.add(order.account_id)
             except Exception:
                 failed += 1
+        snapshot_errors: list[str] = []
         for current_account_id in affected_accounts:
-            self.snapshot_service.generate_snapshot(current_account_id, trade_date)
+            try:
+                self.snapshot_service.generate_snapshot(current_account_id, trade_date)
+            except (KeyError, ValueError) as exc:
+                snapshot_errors.append(f"account={current_account_id}, trade_date={trade_date}: {exc}")
+        status = MatchingRunStatus.FAILED.value if snapshot_errors else MatchingRunStatus.COMPLETED.value
         return self.repo.update_matching_run_counts(
             run,
             processed,
@@ -63,7 +68,8 @@ class MatchingService:
             skipped,
             rejected,
             failed,
-            MatchingRunStatus.COMPLETED.value,
+            status,
+            error_details="; ".join(snapshot_errors) if snapshot_errors else None,
         )
 
     def match_order(self, order: PaperOrder) -> str:

@@ -502,6 +502,7 @@ class PaperTradingRepository:
         rejected: int,
         failed: int,
         status: str,
+        error_details: str | None = None,
     ) -> PaperMatchingRun:
         run.processed_count = processed
         run.filled_count = filled
@@ -509,6 +510,7 @@ class PaperTradingRepository:
         run.rejected_count = rejected
         run.failed_count = failed
         run.status = status
+        run.error_details = error_details
         run.finished_at = datetime.now(timezone.utc)
         self.session.flush()
         return run
