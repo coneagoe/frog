@@ -728,7 +728,9 @@ def test_rebuild_preserves_imported_hk_market(sqlite_session):
 
     repo.clear_account_rebuild_state(account.id)
 
-    assert repo.get_position(account.id, "00700").market == "hk_connect"
+    position = repo.get_position(account.id, "00700")
+    assert position is not None
+    assert position.market == "hk_connect"
 
 
 def test_rebuild_rejects_persisted_mixed_markets_before_clearing(sqlite_session):
