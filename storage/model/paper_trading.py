@@ -97,6 +97,7 @@ class PaperPositionLot(Base):
     remaining_quantity = Column(Integer, nullable=False)
     cost_price = Column(Numeric(20, 4), nullable=False)
     source = Column(String(20), nullable=False, server_default="trade")
+    market = Column(String(20), nullable=False, server_default="a_share", index=True)
 
 
 class PaperOrder(Base):

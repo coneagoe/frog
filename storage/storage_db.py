@@ -2436,6 +2436,7 @@ class StorageDb:
         market_ddl = "VARCHAR(20) NOT NULL DEFAULT 'a_share'"
         for tb_name in (
             tb_name_paper_positions,
+            tb_name_paper_position_lots,
             tb_name_paper_orders,
             tb_name_paper_trades,
             tb_name_paper_trade_validity_checks,

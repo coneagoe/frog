@@ -40,6 +40,7 @@ from storage.config import StorageConfig  # noqa: E402
 from storage.model import (  # noqa: E402
     Base,
     PaperAccount,
+    PaperPositionLot,
     tb_name_etf_daily,
     tb_name_history_data_daily_a_stock_bfq,
     tb_name_history_data_daily_a_stock_qfq,
@@ -287,6 +288,16 @@ def storage(tmp_path, monkeypatch):
         ):
             connection.execute(text(ddl))
         connection.execute(text("INSERT INTO paper_accounts (name, initial_cash) VALUES ('legacy', 10000)"))
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_position_lots (
+                    account_id, symbol, buy_trade_date, original_quantity,
+                    remaining_quantity, cost_price
+                ) VALUES (1, '000001', '2026-07-27', 100, 100, 10.00)
+                """
+            )
+        )
         assert (
             connection.execute(text("SELECT name FROM paper_accounts WHERE name = 'legacy'")).scalar_one() == "legacy"
         )
@@ -328,12 +339,20 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
 
     for table_name in (
         tb_name_paper_positions,
+        "paper_position_lots",
         tb_name_paper_orders,
         tb_name_paper_trades,
         tb_name_paper_trade_validity_checks,
     ):
         columns = {column["name"] for column in inspector.get_columns(table_name)}
         assert "market" in columns
+
+    with Session(storage.engine) as session:
+        lot = session.get(PaperPositionLot, 1)
+        assert lot is not None
+        assert lot.market == "a_share"
+
+    storage.ensure_paper_trading_schema()
 
     snapshot_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_account_snapshots)}
     assert "pending_settlement" in snapshot_columns
