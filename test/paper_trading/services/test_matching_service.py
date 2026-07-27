@@ -284,6 +284,9 @@ def test_hk_connect_matching_uses_hk_fees_and_persists_market(sqlite_session):
     positions = repo.get_positions(account.id)
     assert len(positions) == 1
     assert positions[0].market == "hk_connect"
+    lots = repo.get_lots(account.id, "00700")
+    assert len(lots) == 1
+    assert lots[0].market == "hk_connect"
 
 
 def test_hk_connect_matching_get_daily_bar_receives_market(sqlite_session):

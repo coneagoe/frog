@@ -701,6 +701,68 @@ def test_clear_account_rebuild_state_resets_same_symbol_imported_after_trade(sql
     assert positions[0].cost_amount == Decimal("1800.0000")
 
 
+def test_rebuild_preserves_imported_hk_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("hk-import", Decimal("100000"))
+    repo.create_position_lot(
+        account.id,
+        "00700",
+        date(2026, 7, 1),
+        original_quantity=100,
+        remaining_quantity=100,
+        cost_price=Decimal("400.00"),
+        source="imported",
+        market="hk_connect",
+    )
+    repo.upsert_position(
+        account.id,
+        "00700",
+        total_quantity=100,
+        frozen_quantity=0,
+        cost_amount=Decimal("40000.0000"),
+        source="imported",
+        market="hk_connect",
+    )
+    sqlite_session.commit()
+
+    repo.clear_account_rebuild_state(account.id)
+
+    assert repo.get_position(account.id, "00700").market == "hk_connect"
+
+
+def test_rebuild_rejects_persisted_mixed_markets_before_clearing(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("mixed-import", Decimal("100000"))
+    for market in ("a_share", "hk_connect"):
+        repo.create_position_lot(
+            account.id,
+            "00700",
+            date(2026, 7, 1),
+            original_quantity=100,
+            remaining_quantity=100,
+            cost_price=Decimal("400.00"),
+            source="imported",
+            market=market,
+        )
+    repo.upsert_position(
+        account.id,
+        "00700",
+        total_quantity=200,
+        frozen_quantity=0,
+        cost_amount=Decimal("80000.0000"),
+        source="imported",
+        market="a_share",
+    )
+    sqlite_session.commit()
+
+    with pytest.raises(ValueError, match="conflicting markets for imported symbol: 00700"):
+        repo.clear_account_rebuild_state(account.id)
+
+    assert repo.get_position(account.id, "00700") is not None
+
+
 def test_reset_orders_for_replay_resets_replayable_statuses(sqlite_session):
     """Orders with ACCEPTED, FILLED, PARTIALLY_FILLED, NEW statuses get reset."""
     Base.metadata.create_all(sqlite_session.get_bind())

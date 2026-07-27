@@ -656,6 +656,20 @@ class PaperTradingRepository:
         return order
 
     def clear_account_rebuild_state(self, account_id: int) -> None:
+        imported_lots = (
+            self.session.query(PaperPositionLot)
+            .filter(
+                PaperPositionLot.account_id == account_id,
+                PaperPositionLot.source == "imported",
+            )
+            .all()
+        )
+        market_by_symbol: dict[str, str] = {}
+        for lot in imported_lots:
+            market = market_by_symbol.setdefault(lot.symbol, lot.market)
+            if market != lot.market:
+                raise ValueError(f"conflicting markets for imported symbol: {lot.symbol}")
+
         self.session.query(PaperTradeValidityCheck).filter(PaperTradeValidityCheck.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -687,14 +701,9 @@ class PaperTradingRepository:
             PaperPositionLot.source == "imported",
         ).update(
             {PaperPositionLot.remaining_quantity: PaperPositionLot.original_quantity},
-            synchronize_session=False,
+            synchronize_session="fetch",
         )
-        # Delete all positions (aggregate state must be rebuilt from imported lots).
-        self.session.query(PaperPosition).filter(PaperPosition.account_id == account_id).delete(
-            synchronize_session="fetch"
-        )
-        # Rebuild aggregate positions from surviving imported lots.
-        lots = (
+        imported_lots = (
             self.session.query(PaperPositionLot)
             .filter(
                 PaperPositionLot.account_id == account_id,
@@ -702,9 +711,14 @@ class PaperTradingRepository:
             )
             .all()
         )
+        # Delete all positions (aggregate state must be rebuilt from imported lots).
+        self.session.query(PaperPosition).filter(PaperPosition.account_id == account_id).delete(
+            synchronize_session="fetch"
+        )
+        # Rebuild aggregate positions from surviving imported lots.
         total_qty: dict[str, int] = defaultdict(int)
         total_cost: dict[str, Decimal] = defaultdict(Decimal)
-        for lot in lots:
+        for lot in imported_lots:
             total_qty[lot.symbol] += int(lot.remaining_quantity)
             total_cost[lot.symbol] += Decimal(lot.cost_price) * int(lot.remaining_quantity)
         for symbol in total_qty:
@@ -716,6 +730,7 @@ class PaperTradingRepository:
                 cost_amount=total_cost[symbol].quantize(Decimal("0.0001")),
                 realized_pnl=Decimal("0"),
                 source="imported",
+                market=market_by_symbol[symbol],
             )
             self.session.add(position)
         self.session.flush()

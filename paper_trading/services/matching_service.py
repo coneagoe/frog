@@ -206,6 +206,7 @@ class MatchingService:
             int(order.quantity),
             int(order.quantity),
             Decimal(order.limit_price),
+            market=order.market,
         )
 
     def _settle_sell(self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal) -> None:

@@ -156,10 +156,27 @@ def test_snapshot_passes_position_market_to_get_daily_bar(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("snap-mkt", Decimal("100000.00"))
-    # Create an HK position
-    repo.upsert_position(
-        account.id, "00700", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("40000.00"), market="hk_connect"
+    # Create an imported HK position and rebuild it from its lot.
+    repo.create_position_lot(
+        account.id,
+        "00700",
+        date(2026, 7, 1),
+        original_quantity=100,
+        remaining_quantity=100,
+        cost_price=Decimal("400.00"),
+        source="imported",
+        market="hk_connect",
     )
+    repo.upsert_position(
+        account.id,
+        "00700",
+        total_quantity=100,
+        frozen_quantity=0,
+        cost_amount=Decimal("40000.00"),
+        source="imported",
+        market="hk_connect",
+    )
+    repo.clear_account_rebuild_state(account.id)
     # Create an A-share position
     repo.upsert_position(account.id, "000001.SZ", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("1000.00"))
 
