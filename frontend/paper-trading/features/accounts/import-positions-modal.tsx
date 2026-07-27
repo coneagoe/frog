@@ -40,11 +40,20 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
     return null;
   }
 
-  function updateRow(index: number, field: keyof ImportRow, value: string) {
+  function updateRow(index: number, field: Exclude<keyof ImportRow, "market">, value: string) {
     setError(null);
     setRows((current) => {
       const next = current.map((r) => ({ ...r }));
       next[index][field] = value;
+      return next;
+    });
+  }
+
+  function updateMarket(index: number, market: Market) {
+    setError(null);
+    setRows((current) => {
+      const next = current.map((r) => ({ ...r }));
+      next[index].market = market;
       return next;
     });
   }
@@ -212,7 +221,9 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
                     <select
                       aria-label="Market"
                       value={row.market}
-                      onChange={(e) => updateRow(index, "market", e.target.value as Market)}
+                      onChange={(e) =>
+                        updateMarket(index, e.target.value === "hk_connect" ? "hk_connect" : "a_share")
+                      }
                     >
                       <option value="a_share">A-share</option>
                       <option value="hk_connect">Hong Kong Connect</option>
