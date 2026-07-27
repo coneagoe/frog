@@ -273,7 +273,7 @@ def _add_account_subparsers(subparsers: Any) -> None:
     p_import = acct_sub.add_parser("import-positions", help="Import existing holdings from CSV")
     p_import.add_argument("--account-id", type=int, required=True, help="Account ID")
     p_import.add_argument(
-        "--file", required=True, help="Path to CSV (columns: symbol,quantity,cost_price,buy_trade_date)"
+        "--file", required=True, help="Path to CSV (columns: symbol,quantity,cost_price,buy_trade_date[,market])"
     )
     p_deposit = acct_sub.add_parser("deposit", help="Deposit cash into an account")
     p_deposit.add_argument("--account-id", type=int, required=True, help="Account ID")
@@ -504,6 +504,7 @@ def _handle_import_positions(client: PaperTradingApiClient, args: argparse.Names
         raise _ParserError(f"CSV missing required columns: {', '.join(sorted(missing))}")
 
     positions: list[dict[str, Any]] = []
+    valid_markets = {"a_share", "hk_connect"}
     for i, row in enumerate(rows, start=2):
         symbol = row.get("symbol", "").strip()
         if not symbol:
@@ -521,12 +522,16 @@ def _handle_import_positions(client: PaperTradingApiClient, args: argparse.Names
         if Decimal(row["cost_price"]) < 0:
             raise _ParserError(f"row {i}: cost_price must be non-negative")
         buy_trade_date = _validate_buy_trade_date(row.get("buy_trade_date", ""))
+        market = row.get("market", "").strip() or "a_share"
+        if market not in valid_markets:
+            raise _ParserError(f"row {i}: market must be one of: a_share, hk_connect")
         positions.append(
             {
                 "symbol": symbol,
                 "quantity": quantity,
                 "cost_price": cost_price,
                 "buy_trade_date": buy_trade_date,
+                "market": market,
             }
         )
 

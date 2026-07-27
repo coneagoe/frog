@@ -2,17 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { importPositions } from "@/lib/api-client";
-import type { Account, ImportPositionsResult } from "@/lib/types";
+import type { Account, ImportPositionsResult, Market } from "@/lib/types";
 
 type ImportRow = {
   symbol: string;
   quantity: string;
   cost_price: string;
   buy_trade_date: string;
+  market: Market;
 };
 
 function emptyRow(): ImportRow {
-  return { symbol: "", quantity: "", cost_price: "", buy_trade_date: "" };
+  return { symbol: "", quantity: "", cost_price: "", buy_trade_date: "", market: "a_share" };
 }
 
 type ImportPositionsModalProps = {
@@ -100,7 +101,8 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
           symbol: r.symbol.trim(),
           quantity: Number(r.quantity),
           cost_price: r.cost_price,
-          buy_trade_date: r.buy_trade_date
+          buy_trade_date: r.buy_trade_date,
+          market: r.market
         }))
       });
       await onImported(result);
@@ -156,6 +158,7 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
                 <span>Quantity</span>
                 <span>Cost price</span>
                 <span>Buy date</span>
+                <span>Market</span>
                 <span>Action</span>
               </div>
 
@@ -202,6 +205,18 @@ export function ImportPositionsModal({ account, open, onClose, onImported }: Imp
                       value={row.buy_trade_date}
                       onChange={(e) => updateRow(index, "buy_trade_date", e.target.value)}
                     />
+                  </label>
+
+                  <label className="import-grid__field">
+                    <span>Market</span>
+                    <select
+                      aria-label="Market"
+                      value={row.market}
+                      onChange={(e) => updateRow(index, "market", e.target.value as Market)}
+                    >
+                      <option value="a_share">A-share</option>
+                      <option value="hk_connect">Hong Kong Connect</option>
+                    </select>
                   </label>
 
                   <div className="import-grid__action">

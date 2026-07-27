@@ -42,6 +42,14 @@ describe("ImportPositionsModal", () => {
     expect(screen.getAllByLabelText("Symbol")).toHaveLength(1);
   });
 
+  it("defaults every new row to A-share", async () => {
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+    expect(screen.getByLabelText("Market")).toHaveValue("a_share");
+    await userEvent.click(screen.getByRole("button", { name: "Add row" }));
+    expect(screen.getAllByLabelText("Market")).toHaveLength(2);
+    expect(screen.getAllByLabelText("Market")[1]).toHaveValue("a_share");
+  });
+
   it("uses the YYYY-MM-DD placeholder without a visible date helper", () => {
     render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
 
@@ -154,7 +162,22 @@ describe("ImportPositionsModal", () => {
     await userEvent.click(screen.getByRole("button", { name: "Import positions" }));
 
     expect(importPositionsMock).toHaveBeenCalledWith(1, {
-      positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15" }]
+      positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15", market: "a_share" }]
+    });
+  });
+
+  it("submits the selected Hong Kong Connect market", async () => {
+    importPositionsMock.mockResolvedValue({ imported_count: 1, lots_count: 1 });
+    render(<ImportPositionsModal account={demoAccount} open onClose={vi.fn()} onImported={vi.fn()} />);
+    const dialog = screen.getByRole("dialog", { name: "Import initial positions for demo" });
+    await userEvent.type(within(dialog).getByLabelText("Symbol"), "00700");
+    await userEvent.type(within(dialog).getByLabelText("Quantity"), "100");
+    await userEvent.type(within(dialog).getByLabelText("Cost price"), "300.00");
+    await userEvent.type(within(dialog).getByLabelText("Buy trade date"), "2026-01-15");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Market"), "hk_connect");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Import positions" }));
+    expect(importPositionsMock).toHaveBeenCalledWith(1, {
+      positions: [expect.objectContaining({ symbol: "00700", market: "hk_connect" })]
     });
   });
 

@@ -658,7 +658,7 @@ describe("AccountsPage", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Import positions" }));
 
     expect(importPositionsMock).toHaveBeenCalledWith(1, {
-      positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15" }]
+      positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15", market: "a_share" }]
     });
     await waitFor(() => expect(listPositionsMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(listCashLedgerMock).toHaveBeenCalledTimes(2));

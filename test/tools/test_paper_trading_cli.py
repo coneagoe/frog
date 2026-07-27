@@ -467,8 +467,20 @@ class TestAccountImportPositions:
         client.import_positions.assert_called_once_with(
             account_id=1,
             positions=[
-                {"symbol": "000001", "quantity": 100, "cost_price": "10.50", "buy_trade_date": "2026-01-15"},
-                {"symbol": "000002", "quantity": 200, "cost_price": "20.00", "buy_trade_date": "2026-02-01"},
+                {
+                    "symbol": "000001",
+                    "quantity": 100,
+                    "cost_price": "10.50",
+                    "buy_trade_date": "2026-01-15",
+                    "market": "a_share",
+                },
+                {
+                    "symbol": "000002",
+                    "quantity": 200,
+                    "cost_price": "20.00",
+                    "buy_trade_date": "2026-02-01",
+                    "market": "a_share",
+                },
             ],
         )
 
@@ -486,6 +498,35 @@ class TestAccountImportPositions:
         assert exit_code == EXIT_CODES["OK"]
         payload = json.loads(capsys.readouterr().out)
         assert payload["imported_count"] == 1
+
+    def test_import_positions_forwards_hk_connect_market(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date,market\n00700,100,300.00,2026-01-15,hk_connect\n")
+        client = _mock_client()
+        client.import_positions.return_value = {"imported_count": 1, "positions": []}
+        assert main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client
+        ) == EXIT_CODES["OK"]
+        assert client.import_positions.call_args.kwargs["positions"][0]["market"] == "hk_connect"
+
+    def test_import_positions_blank_market_defaults_to_a_share(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date,market\n000001,100,10.50,2026-01-15,  \n")
+        client = _mock_client()
+        client.import_positions.return_value = {"imported_count": 1, "positions": []}
+        assert main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client
+        ) == EXIT_CODES["OK"]
+        assert client.import_positions.call_args.kwargs["positions"][0]["market"] == "a_share"
+
+    def test_import_positions_unsupported_market_is_local_validation_error(self, tmp_path):
+        csv_path = tmp_path / "holdings.csv"
+        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date,market\n000001,100,10.50,2026-01-15,us_stock\n")
+        client = _mock_client()
+        assert main(
+            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client
+        ) == EXIT_CODES["VALIDATION_ERROR"]
+        client.import_positions.assert_not_called()
 
     def test_import_positions_missing_file_is_validation_error(self):
         exit_code = main(
@@ -536,7 +577,13 @@ class TestAccountImportPositions:
         client.import_positions.assert_called_once_with(
             account_id=1,
             positions=[
-                {"symbol": "000001", "quantity": 100, "cost_price": "10.50", "buy_trade_date": "2026-01-15"},
+                {
+                    "symbol": "000001",
+                    "quantity": 100,
+                    "cost_price": "10.50",
+                    "buy_trade_date": "2026-01-15",
+                    "market": "a_share",
+                },
             ],
         )
 

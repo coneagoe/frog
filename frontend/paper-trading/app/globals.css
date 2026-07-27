@@ -426,8 +426,8 @@ button {
 .import-grid__row {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(120px, 1fr) minmax(100px, 0.8fr) minmax(120px, 0.9fr) minmax(150px, 1fr) minmax(88px, auto);
-  min-width: 660px;
+  grid-template-columns: minmax(120px, 1fr) minmax(100px, 0.8fr) minmax(120px, 0.9fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(88px, auto);
+  min-width: 820px;
 }
 
 .import-grid__header {
@@ -473,6 +473,16 @@ button {
 
 .import-grid__field input::placeholder {
   color: #64748b;
+}
+
+.import-grid__field select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  min-width: 0;
+  padding: 10px 12px;
+  width: 100%;
 }
 
 .import-grid__action {

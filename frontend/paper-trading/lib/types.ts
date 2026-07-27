@@ -119,6 +119,7 @@ export type CashLedgerEntry = {
 };
 
 export type OrderSide = "buy" | "sell";
+export type Market = "a_share" | "hk_connect";
 
 export type Order = {
   id: number;
@@ -220,6 +221,7 @@ export type ImportPositionInput = {
   quantity: number;
   cost_price: string;
   buy_trade_date: string;
+  market: Market;
 };
 
 export type ImportPositionsInput = {
