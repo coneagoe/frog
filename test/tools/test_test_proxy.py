@@ -35,15 +35,12 @@ def test_main_reports_sanitized_proxy_server(module, monkeypatch, tmp_path, caps
     monkeypatch.setattr(
         module.requests,
         "get",
-        lambda url, **kwargs: calls.append((url, kwargs))
-        or BaiduResponse(),
+        lambda url, **kwargs: calls.append((url, kwargs)) or BaiduResponse(),
     )
 
     assert module.main() == 0
     captured = capsys.readouterr()
-    assert calls == [
-        (module.BAIDU_URL, {"proxies": proxy, "timeout": module.REQUEST_TIMEOUT})
-    ]
+    assert calls == [(module.BAIDU_URL, {"proxies": proxy, "timeout": module.REQUEST_TIMEOUT})]
     assert "proxy server: 203.0.113.2:8080" in captured.out
     assert "elapsed ms:" in captured.out
     assert "egress ip:" not in captured.out
@@ -96,9 +93,7 @@ def test_main_handles_non_success_baidu_response(module, monkeypatch, tmp_path, 
         def raise_for_status(self) -> None:
             raise module.requests.HTTPError("503 Service Unavailable")
 
-    (tmp_path / ".env").write_text(
-        "QG_PROXY_KEY=secret-key\nQG_PROXY_PWD=secret-password\n"
-    )
+    (tmp_path / ".env").write_text("QG_PROXY_KEY=secret-key\nQG_PROXY_PWD=secret-password\n")
     monkeypatch.setattr(module, "ROOT", tmp_path)
     proxy = {
         "http": "http://secret-key:secret-password@203.0.113.2:8080",
@@ -130,9 +125,7 @@ def test_main_handles_non_success_baidu_response(module, monkeypatch, tmp_path, 
 
 
 def test_main_handles_proxy_allocation_failure(module, monkeypatch, tmp_path, capsys):
-    (tmp_path / ".env").write_text(
-        "QG_PROXY_KEY=secret-key\nQG_PROXY_PWD=secret-password\n"
-    )
+    (tmp_path / ".env").write_text("QG_PROXY_KEY=secret-key\nQG_PROXY_PWD=secret-password\n")
     monkeypatch.setattr(module, "ROOT", tmp_path)
     monkeypatch.setattr(
         module.proxy_module,

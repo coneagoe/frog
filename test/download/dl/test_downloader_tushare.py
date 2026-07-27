@@ -466,9 +466,7 @@ def test_download_history_data_stock_hk_ts_unsupported_period_raises(downloader_
 
 
 @pytest.mark.parametrize("adjust", ["hfq", "qfq"])
-def test_download_history_data_stock_hk_ts_rejects_non_bfq_adjust(
-    downloader_ts_module, monkeypatch, adjust
-):
+def test_download_history_data_stock_hk_ts_rejects_non_bfq_adjust(downloader_ts_module, monkeypatch, adjust):
     module, ts_stub, pro_stub = downloader_ts_module
     monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
 
