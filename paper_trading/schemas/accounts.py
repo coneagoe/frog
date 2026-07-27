@@ -5,6 +5,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from paper_trading.domain.enums import Market
+
 
 class CreateAccountRequest(BaseModel):
     name: str
@@ -108,6 +110,7 @@ class ImportPositionItem(BaseModel):
     quantity: int = Field(gt=0)
     cost_price: Decimal = Field(ge=0)
     buy_trade_date: date
+    market: Market = Market.A_SHARE
 
     @model_validator(mode="before")
     @classmethod

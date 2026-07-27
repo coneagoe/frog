@@ -443,6 +443,7 @@ class PaperTradingRepository:
         remaining_quantity: int,
         cost_price: Decimal,
         source: str = "trade",
+        market: str = "a_share",
     ) -> PaperPositionLot:
         lot = PaperPositionLot(
             account_id=account_id,
@@ -452,6 +453,7 @@ class PaperTradingRepository:
             remaining_quantity=remaining_quantity,
             cost_price=cost_price,
             source=source,
+            market=market,
         )
         self.session.add(lot)
         self.session.flush()

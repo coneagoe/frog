@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from paper_trading.domain.enums import Market
 from paper_trading.schemas.accounts import ImportPositionItem, ImportPositionsRequest, UpdateAccountFeeRequest
 
 # ---------------------------------------------------------------------------
@@ -34,6 +35,11 @@ def test_update_account_fee_request_rejects_fee_preset():
 
 
 class TestImportPositionItem:
+    def test_import_item_defaults_market_to_a_share(self):
+        item = ImportPositionItem(symbol="000001", quantity=100, cost_price="10.00", buy_trade_date="2026-07-27")
+
+        assert item.market is Market.A_SHARE
+
     def test_valid_item(self):
         item = ImportPositionItem(
             symbol="000001",

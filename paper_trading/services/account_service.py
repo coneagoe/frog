@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from paper_trading.domain.enums import Market
 from paper_trading.schemas.accounts import ImportPositionItem
 from paper_trading.storage.models import PaperAccount
 from paper_trading.storage.repository import PaperTradingRepository
@@ -96,6 +97,11 @@ class AccountService:
             raise ValueError(f"paper account not found: {account_id}")
         if self.repo.get_positions(account_id) or self.repo.count_position_lots(account_id) > 0:
             raise ValueError("account already has positions")
+        market_by_symbol: dict[str, Market] = {}
+        for item in positions:
+            previous = market_by_symbol.setdefault(item.symbol, item.market)
+            if previous != item.market:
+                raise ValueError(f"conflicting markets for imported symbol: {item.symbol}")
         # Create lots first (one per item, even for duplicate symbols)
         for item in positions:
             self.repo.create_position_lot(
@@ -106,6 +112,7 @@ class AccountService:
                 remaining_quantity=item.quantity,
                 cost_price=item.cost_price,
                 source="imported",
+                market=item.market.value,
             )
         # Aggregate positions per symbol (one position per symbol)
         from collections import defaultdict
@@ -124,4 +131,5 @@ class AccountService:
                 cost_amount=total_cost[symbol],
                 realized_pnl=Decimal("0"),
                 source="imported",
+                market=market_by_symbol[symbol].value,
             )

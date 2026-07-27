@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.schemas.accounts import ImportPositionItem
 from paper_trading.services.account_service import AccountService
 from paper_trading.storage.models import (
@@ -151,6 +151,46 @@ def test_delete_account_removes_account_owned_rows(tmp_path):
 
 
 class TestImportPositions:
+    def test_import_hk_position_persists_market_on_position_and_lot(self, tmp_path):
+        engine, session, repo, service = _repo_and_service(tmp_path)
+        account = service.create_account("demo", Decimal("100000.00"))
+        session.commit()
+
+        service.import_positions(
+            account.id,
+            [
+                ImportPositionItem(
+                    symbol="00700",
+                    quantity=100,
+                    cost_price=Decimal("400"),
+                    buy_trade_date=date(2026, 7, 27),
+                    market=Market.HK_CONNECT,
+                )
+            ],
+        )
+
+        assert repo.get_position(account.id, "00700").market == "hk_connect"
+        assert repo.get_lots(account.id, "00700")[0].market == "hk_connect"
+
+    def test_import_rejects_duplicate_symbol_with_conflicting_markets_before_writes(self, tmp_path):
+        engine, session, repo, service = _repo_and_service(tmp_path)
+        account = service.create_account("demo", Decimal("100000.00"))
+        session.commit()
+
+        a_share_00700 = ImportPositionItem(
+            symbol="00700",
+            quantity=100,
+            cost_price=Decimal("400"),
+            buy_trade_date=date(2026, 7, 27),
+        )
+        hk_connect_00700 = a_share_00700.model_copy(update={"market": Market.HK_CONNECT})
+
+        with pytest.raises(ValueError, match="conflicting markets for imported symbol: 00700"):
+            service.import_positions(account.id, [a_share_00700, hk_connect_00700])
+
+        assert repo.get_positions(account.id) == []
+        assert repo.count_position_lots(account.id) == 0
+
     def test_import_creates_positions_and_lots(self, tmp_path):
         """Import seeds both a PaperPosition and PaperPositionLot per item."""
         engine, session, repo, service = _repo_and_service(tmp_path)

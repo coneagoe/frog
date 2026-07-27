@@ -209,6 +209,63 @@ class TestImportPositionsAPI:
         positions = PaperTradingRepository(session).get_positions(account_id)
         assert len(positions) == 1
         assert positions[0].symbol == "000001"
+        assert positions[0].market == "a_share"
+
+    def test_import_positions_preserves_hk_market(self, monkeypatch, sqlite_session):
+        client, headers, session = _client(monkeypatch, sqlite_session)
+        account_id = _create_account(client, headers)
+
+        response = client.post(
+            f"/paper/accounts/{account_id}/positions/import",
+            json={
+                "positions": [
+                    {
+                        "symbol": "00700",
+                        "quantity": 100,
+                        "cost_price": "400",
+                        "buy_trade_date": "2026-07-27",
+                        "market": "hk_connect",
+                    }
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        positions = PaperTradingRepository(session).get_positions(account_id)
+        assert positions[0].market == "hk_connect"
+
+    def test_import_positions_rejects_conflicting_markets_without_writes(self, monkeypatch, sqlite_session):
+        client, headers, session = _client(monkeypatch, sqlite_session)
+        account_id = _create_account(client, headers)
+
+        response = client.post(
+            f"/paper/accounts/{account_id}/positions/import",
+            json={
+                "positions": [
+                    {
+                        "symbol": "00700",
+                        "quantity": 100,
+                        "cost_price": "400",
+                        "buy_trade_date": "2026-07-27",
+                    },
+                    {
+                        "symbol": "00700",
+                        "quantity": 100,
+                        "cost_price": "401",
+                        "buy_trade_date": "2026-07-27",
+                        "market": "hk_connect",
+                    },
+                ]
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == "conflicting markets for imported symbol: 00700"
+        repo = PaperTradingRepository(session)
+        assert repo.get_positions(account_id) == []
+        assert repo.count_position_lots(account_id) == 0
 
     def test_import_positions_missing_account_returns_404(self, monkeypatch, sqlite_session):
         client, headers, _ = _client(monkeypatch, sqlite_session)
