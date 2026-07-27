@@ -131,6 +131,32 @@ Validation rules:
 - Duplicate symbols create separate lots and aggregate into one position per symbol.
 - Import is rejected if the account does not exist (404) or already has positions (422).
 
+### Repair Imported Position Markets
+
+Imports may optionally specify `market` as `a_share` or `hk_connect`. The aggregate
+position and each imported lot for the same account and symbol must use the same
+market value. If historical imported holdings were stored with the wrong market,
+run the standalone administrative repair command with an explicit mapping for every
+target. Do not use this command as a general market migration: it never discovers or
+changes unspecified account/symbol pairs, and it never changes trade-sourced lots.
+
+```bash
+uv run tools/repair_paper_position_markets.py \
+  --mapping ACCOUNT_ID:00700:hk_connect
+```
+
+Replace `ACCOUNT_ID` with the account ID supplied for the deployment; no production
+account ID is embedded in this procedure. Repeat `--mapping` for additional explicit
+targets. Every requested aggregate position is checked before any update is issued,
+and all updates run in one transaction, so a missing target leaves all targets
+unchanged. A successful repeat is safe and reports zero changed rows (idempotent).
+Use `--json` for machine-readable results:
+
+```bash
+uv run tools/repair_paper_position_markets.py --json \
+  --mapping ACCOUNT_ID:00700:hk_connect
+```
+
 ## OpenClaw Conversation Order Entry
 
 OpenClaw can be used for conversation-based paper trading order entry. Conversation channels are outside this repository; this repository does not provide channel-specific webhook services or interactive card payloads.
