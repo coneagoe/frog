@@ -342,6 +342,8 @@ curl -X POST http://localhost:8000/paper/matching/runs \
 
 Matching processes accepted orders for the trade date. Tradable orders fill at limit price, untouched orders remain accepted, and suspended symbols are rejected.
 
+If matching encounters a snapshot `KeyError` or `ValueError`, it commits the matching run with `status="failed"` and records the cause in `error_details`. Filled orders and trades are preserved, but no snapshot is written for the failed account. Inspect `error_details`, correct the market-data or holding issue, then use the documented order deletion and replay/rebuild workflow to reconstruct account state from the remaining order history. Do not retry the same matching request: matching only selects `ACCEPTED` orders, so reposting it cannot regenerate the missing snapshot.
+
 ## Query Account State
 
 ```bash
