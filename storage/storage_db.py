@@ -406,9 +406,29 @@ class StorageDb:
         pid = os.getpid()
         if pid not in _metadata_initialized_pids:
             Base.metadata.create_all(self.engine)
+            self.ensure_a_stock_basic_schema()
             self.ensure_blackroom_records_table()
             self.ensure_paper_trading_schema()
             _metadata_initialized_pids.add(pid)
+
+    def ensure_a_stock_basic_schema(self) -> None:
+        inspector = inspect(self.engine)
+        if not inspector.has_table(tb_name_a_stock_basic):
+            return
+
+        columns = inspector.get_columns(tb_name_a_stock_basic)
+        target_column = next((column for column in columns if column["name"] == COL_ACT_NAME), None)
+        if target_column is None:
+            return
+
+        length = getattr(target_column["type"], "length", None)
+        if length is None or length >= 100:
+            return
+
+        with self.engine.begin() as connection:
+            connection.execute(
+                text(f'ALTER TABLE "{tb_name_a_stock_basic}" ALTER COLUMN "{COL_ACT_NAME}" TYPE VARCHAR(100)')
+            )
 
     def connect(self) -> bool:
         try:
@@ -1480,17 +1500,48 @@ class StorageDb:
         """
 
         try:
-            df.rename(columns=COL_MAP_STOCK_BASIC, inplace=True)
-            df[COL_STOCK_ID] = df[COL_STOCK_ID].str.split(".").str[0]
-            df = df[list(COL_MAP_STOCK_BASIC.values())]
-            # 转换上市日期和退市日期为 date 类型
-            df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d", errors="coerce").dt.date
-            df[COL_DELISTING_DATE] = pd.to_datetime(df[COL_DELISTING_DATE], format="%Y%m%d", errors="coerce").dt.date
-            df.to_sql(
+            prepared = self._prepare_dataframe_for_save(
+                df,
+                column_map=COL_MAP_STOCK_BASIC,
+                code_column=COL_STOCK_ID,
+                date_columns={COL_IPO_DATE: "date", COL_DELISTING_DATE: "date"},
+                output_columns=list(COL_MAP_STOCK_BASIC.values()),
+            )
+            max_lengths = {
+                COL_STOCK_ID: 6,
+                COL_STOCK_NAME: 40,
+                COL_AREA: 20,
+                COL_INDUSTRY: 40,
+                COL_FULLNAME: 100,
+                COL_ENNAME: 100,
+                COL_CN_SPELL: 20,
+                COL_MARKET: 20,
+                COL_EXCHANGE: 10,
+                COL_CURR_TYPE: 10,
+                COL_LIST_STATUS: 2,
+                COL_IS_HS: 2,
+                COL_ACT_NAME: 100,
+                COL_ACT_ENT_TYPE: 20,
+            }
+            for column, limit in max_lengths.items():
+                lengths = prepared[column].astype("string").str.len()
+                violations = prepared[lengths > limit]
+                if not violations.empty:
+                    actual_length = int(lengths.loc[violations.index].iloc[0])
+                    stock_code = violations[COL_STOCK_ID].iloc[0]
+                    logger.error(
+                        "A股基础信息字段长度超限: 股票代码=%s, 字段=%s, 实际长度=%s, 限制=%s",
+                        stock_code,
+                        column,
+                        actual_length,
+                        limit,
+                    )
+                    return False
+
+            self._write_dataframe(
+                prepared,
                 tb_name_a_stock_basic,
-                self.engine,
                 if_exists="append",
-                index=False,
                 method="multi",
             )
 

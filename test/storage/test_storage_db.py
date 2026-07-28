@@ -2,11 +2,11 @@ import os
 import sys
 from datetime import date
 from typing import cast
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import String, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
@@ -73,11 +73,18 @@ def mock_blackroom_table_migration(monkeypatch, request):
     monkeypatch.setattr(StorageDb, "ensure_blackroom_records_table", Mock())
     if "paper_trading_schema_upgrade" not in request.fixturenames:
         monkeypatch.setattr(StorageDb, "ensure_paper_trading_schema", Mock())
+    if "a_stock_basic_schema_upgrade" not in request.fixturenames:
+        monkeypatch.setattr(StorageDb, "ensure_a_stock_basic_schema", Mock())
 
 
 @pytest.fixture
 def paper_trading_schema_upgrade():
     """Opt in to exercising the real paper-trading schema migration."""
+
+
+@pytest.fixture
+def a_stock_basic_schema_upgrade():
+    """Opt in to exercising the real A-stock basic schema migration."""
 
 
 @pytest.fixture
@@ -359,6 +366,104 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
 
     with Session(storage.engine) as session:
         assert session.query(PaperAccount).order_by(PaperAccount.id).one().hk_commission_rate is None
+
+
+def test_ensure_a_stock_basic_schema_widens_legacy_controller_name(storage, monkeypatch, a_stock_basic_schema_upgrade):
+    inspector = Mock()
+    inspector.has_table.return_value = True
+    inspector.get_columns.side_effect = [
+        [{"name": "实控人姓名", "type": String(40)}],
+        [{"name": "实控人姓名", "type": String(100)}],
+    ]
+    monkeypatch.setattr("storage.storage_db.inspect", Mock(return_value=inspector))
+
+    connection = Mock()
+    transaction = MagicMock()
+    transaction.__enter__.return_value = connection
+    monkeypatch.setattr(storage.engine, "begin", Mock(return_value=transaction))
+
+    storage.ensure_a_stock_basic_schema()
+
+    connection.execute.assert_called_once()
+    assert str(connection.execute.call_args.args[0]) == (
+        'ALTER TABLE "a_stock_basic" ALTER COLUMN "实控人姓名" TYPE VARCHAR(100)'
+    )
+
+    connection.reset_mock()
+    storage.ensure_a_stock_basic_schema()
+
+    connection.execute.assert_not_called()
+
+
+def test_save_a_stock_basic_normalizes_provider_row_and_appends_multi(storage):
+    frame = pd.DataFrame(
+        [
+            {
+                "ts_code": "000001.SZ",
+                "name": "平安银行",
+                "area": "深圳",
+                "industry": "银行",
+                "fullname": "平安银行股份有限公司",
+                "enname": "Ping An Bank",
+                "cnspell": "PAYH",
+                "market": "主板",
+                "exchange": "SZSE",
+                "curr_type": "CNY",
+                "list_status": "L",
+                "list_date": "19910403",
+                "delist_date": None,
+                "is_hs": "S",
+                "act_name": "马明哲",
+                "act_ent_type": "民营企业",
+            }
+        ]
+    )
+    write = Mock()
+    storage._write_dataframe = write
+
+    assert storage.save_a_stock_basic(frame) is True
+
+    prepared = write.call_args.args[0]
+    assert prepared.loc[0, "股票代码"] == "000001"
+    assert prepared.loc[0, "上市日期"] == date(1991, 4, 3)
+    assert pd.isna(prepared.loc[0, "退市日期"])
+    assert write.call_args.kwargs == {"if_exists": "append", "method": "multi"}
+
+
+def test_save_a_stock_basic_rejects_bounded_field_overflow(storage, caplog):
+    frame = pd.DataFrame(
+        [
+            {
+                "ts_code": "000001.SZ",
+                "name": "平安银行",
+                "area": "深圳",
+                "industry": "银行",
+                "fullname": "平安银行股份有限公司",
+                "enname": "Ping An Bank",
+                "cnspell": "PAYH",
+                "market": "主板",
+                "exchange": "SZSE",
+                "curr_type": "CNY",
+                "list_status": "L",
+                "list_date": "19910403",
+                "delist_date": None,
+                "is_hs": "S",
+                "act_name": "x" * 101,
+                "act_ent_type": "民营企业",
+            }
+        ]
+    )
+    write = Mock()
+    storage._write_dataframe = write
+
+    with caplog.at_level("ERROR"):
+        assert storage.save_a_stock_basic(frame) is False
+
+    write.assert_not_called()
+    assert "000001" in caplog.text
+    assert "实控人姓名" in caplog.text
+    assert "101" in caplog.text
+    assert "100" in caplog.text
 
 
 class TestStorageDb:
