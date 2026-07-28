@@ -4,9 +4,11 @@ from sqlalchemy.orm import Session
 from paper_trading.api.deps import (
     get_hk_metadata_provider,
     get_market_data_provider,
+    get_security_name_provider,
     get_session,
     require_api_token,
 )
+from paper_trading.api.response_enrichment import enrich_security_names
 from paper_trading.domain.enums import OrderStatus
 from paper_trading.schemas.orders import (
     CreateOrderRequest,
@@ -22,6 +24,7 @@ from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
+from paper_trading.storage.security_metadata import SecurityNameProvider
 
 router = APIRouter(prefix="/paper", dependencies=[Depends(require_api_token)])
 
@@ -58,8 +61,13 @@ def create_order(
 
 
 @router.get("/accounts/{account_id}/orders", response_model=list[OrderResponse])
-def list_orders(account_id: int, session: Session = Depends(get_session)):
-    return PaperTradingRepository(session).list_orders(account_id)
+def list_orders(
+    account_id: int,
+    session: Session = Depends(get_session),
+    provider: SecurityNameProvider = Depends(get_security_name_provider),
+):
+    rows = PaperTradingRepository(session).list_orders(account_id)
+    return enrich_security_names(rows, OrderResponse, provider)
 
 
 @router.get("/orders/{order_id}", response_model=OrderResponse)
@@ -114,5 +122,10 @@ def list_order_validity_checks(account_id: int, order_id: int, session: Session 
 
 
 @router.get("/accounts/{account_id}/trades", response_model=list[TradeResponse])
-def list_trades(account_id: int, session: Session = Depends(get_session)):
-    return PaperTradingRepository(session).list_trades(account_id)
+def list_trades(
+    account_id: int,
+    session: Session = Depends(get_session),
+    provider: SecurityNameProvider = Depends(get_security_name_provider),
+):
+    rows = PaperTradingRepository(session).list_trades(account_id)
+    return enrich_security_names(rows, TradeResponse, provider)

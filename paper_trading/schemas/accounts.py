@@ -90,6 +90,7 @@ class PositionResponse(BaseModel):
     cost_amount: Decimal
     realized_pnl: Decimal
     market: str = "a_share"
+    stock_name: str | None = None
 
 
 class CashLedgerResponse(BaseModel):

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from paper_trading.api.deps import get_session, require_api_token
+from paper_trading.api.deps import get_security_name_provider, get_session, require_api_token
+from paper_trading.api.response_enrichment import enrich_security_names
 from paper_trading.schemas.accounts import (
     AccountResponse,
     CashFlowRequest,
@@ -16,6 +17,7 @@ from paper_trading.schemas.accounts import (
 from paper_trading.services.account_service import AccountService
 from paper_trading.services.cash_service import CashService
 from paper_trading.storage.repository import PaperTradingRepository
+from paper_trading.storage.security_metadata import SecurityNameProvider
 
 router = APIRouter(prefix="/paper/accounts", dependencies=[Depends(require_api_token)])
 
@@ -88,8 +90,13 @@ def update_account_fees(
 
 
 @router.get("/{account_id}/positions", response_model=list[PositionResponse])
-def list_positions(account_id: int, session: Session = Depends(get_session)):
-    return PaperTradingRepository(session).get_positions(account_id)
+def list_positions(
+    account_id: int,
+    session: Session = Depends(get_session),
+    provider: SecurityNameProvider = Depends(get_security_name_provider),
+):
+    rows = PaperTradingRepository(session).get_positions(account_id)
+    return enrich_security_names(rows, PositionResponse, provider)
 
 
 @router.get("/{account_id}/cash-ledger", response_model=list[CashLedgerResponse])

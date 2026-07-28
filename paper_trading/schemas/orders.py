@@ -38,6 +38,7 @@ class OrderResponse(BaseModel):
     validity_reason: str | None = None
     validity_checked_at: datetime | None = None
     market: str = "a_share"
+    stock_name: str | None = None
 
 
 class UpdateOrderCommentRequest(BaseModel):
@@ -84,3 +85,4 @@ class TradeResponse(BaseModel):
     trade_date: date
     comment: str | None = None
     market: str = "a_share"
+    stock_name: str | None = None
