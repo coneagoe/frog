@@ -208,6 +208,18 @@ button {
   text-align: right;
 }
 
+.stock-name {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-name--compact {
+  max-width: 140px;
+}
+
 .form {
   display: grid;
   gap: 12px;

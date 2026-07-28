@@ -4,9 +4,15 @@ import { StatusBadge } from "@/components/status-badge";
 import { formatDate, formatQuantity } from "@/lib/format";
 import type { CashLedgerEntry, Order, Position, Trade } from "@/lib/types";
 
+function StockNameCell({ name, compact }: { name: string | null; compact?: boolean }) {
+  const stockName = name || "-";
+  return <span className={compact ? "stock-name stock-name--compact" : "stock-name"} title={name || undefined}>{stockName}</span>;
+}
+
 export function PositionTable({ density, positions }: { density?: "default" | "compact"; positions: Position[] }) {
   const columns: Column<Position>[] = [
     { key: "symbol", header: "Symbol", render: (row) => row.symbol },
+    { key: "stock", header: "Stock", render: (row) => <StockNameCell compact={density === "compact"} name={row.stock_name} /> },
     { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity) },
     { key: "frozen", header: "Frozen", align: "right", render: (row) => formatQuantity(row.frozen_quantity) },
     { key: "cost", header: "Cost", align: "right", render: (row) => <MoneyText value={row.cost_amount} /> },
@@ -43,6 +49,7 @@ export function OrderTable({
   const columns: Column<Order>[] = [
     { key: "id", header: "ID", render: (row) => row.id },
     { key: "symbol", header: "Symbol", render: (row) => row.symbol },
+    { key: "stock", header: "Stock", render: (row) => <StockNameCell name={row.stock_name} /> },
     { key: "side", header: "Side", render: (row) => row.side.toUpperCase() },
     { key: "quantity", header: "Qty", align: "right", render: (row) => formatQuantity(row.quantity) },
     { key: "price", header: "Limit", align: "right", render: (row) => <MoneyText value={row.limit_price} /> },
@@ -104,6 +111,7 @@ export function TradeTable({ trades }: { trades: Trade[] }) {
   const columns: Column<Trade>[] = [
     { key: "id", header: "ID", render: (row) => row.id },
     { key: "symbol", header: "Symbol", render: (row) => row.symbol },
+    { key: "stock", header: "Stock", render: (row) => <StockNameCell name={row.stock_name} /> },
     { key: "side", header: "Side", render: (row) => row.side.toUpperCase() },
     { key: "quantity", header: "Qty", align: "right", render: (row) => formatQuantity(row.quantity) },
     { key: "price", header: "Price", align: "right", render: (row) => <MoneyText value={row.price} /> },

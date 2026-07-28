@@ -101,6 +101,7 @@ export type AnalyticsResponse = {
 
 export type Position = {
   symbol: string;
+  stock_name: string | null;
   total_quantity: number;
   frozen_quantity: number;
   cost_amount: string;
@@ -125,6 +126,7 @@ export type Order = {
   id: number;
   account_id: number;
   symbol: string;
+  stock_name: string | null;
   side: OrderSide;
   quantity: number;
   limit_price: string;
@@ -143,6 +145,7 @@ export type Trade = {
   order_id: number;
   account_id: number;
   symbol: string;
+  stock_name: string | null;
   side: OrderSide;
   quantity: number;
   price: string;

@@ -23,6 +23,7 @@ const mockTrade = {
   order_id: 1,
   account_id: 1,
   symbol: "AAPL",
+  stock_name: "Apple",
   side: "buy" as const,
   quantity: 100,
   price: "150.00",

@@ -28,6 +28,7 @@ const mockOrder = {
   id: 42,
   account_id: 1,
   symbol: "AAPL",
+  stock_name: "Apple",
   side: "buy" as const,
   quantity: 100,
   limit_price: "150.00",
