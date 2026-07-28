@@ -7,6 +7,7 @@ from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_security_name_provider, get_session
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from test.paper_trading.fakes import _FakeSecurityNameProvider
 
 
 def _client(monkeypatch, sqlite_session):
@@ -25,14 +26,6 @@ def _create_account(client, headers):
         headers=headers,
     )
     return resp.json()["id"]
-
-
-class _FakeSecurityNameProvider:
-    def __init__(self, names):
-        self.names = names
-
-    def resolve_names(self, securities):
-        return {security: self.names[security] for security in securities if security in self.names}
 
 
 def test_api_startup_bootstraps_storage_schema(monkeypatch):

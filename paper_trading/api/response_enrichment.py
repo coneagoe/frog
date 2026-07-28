@@ -1,11 +1,20 @@
 from collections.abc import Collection
-from typing import TypeVar
-
-from pydantic import BaseModel
+from typing import Any, Protocol, Self, TypeVar
 
 from paper_trading.storage.security_metadata import SecurityNameProvider
 
-ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
+
+class EnrichableResponse(Protocol):
+    market: str
+    symbol: str
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs: Any) -> Self: ...
+
+    def model_copy(self, *, update: dict[str, Any] | None = None, deep: bool = False) -> Self: ...
+
+
+ResponseModel = TypeVar("ResponseModel", bound=EnrichableResponse)
 
 
 def enrich_security_names(

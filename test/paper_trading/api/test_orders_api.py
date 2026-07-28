@@ -11,15 +11,7 @@ from paper_trading.domain.enums import OrderSide, OrderStatus
 from paper_trading.storage.market_data import StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
-from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
-
-
-class _FakeSecurityNameProvider:
-    def __init__(self, names):
-        self.names = names
-
-    def resolve_names(self, securities):
-        return {security: self.names[security] for security in securities if security in self.names}
+from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar, _FakeSecurityNameProvider
 
 
 def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):

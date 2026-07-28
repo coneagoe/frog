@@ -51,6 +51,14 @@ class FakeTradeCalendar:
         return trade_date
 
 
+class _FakeSecurityNameProvider:
+    def __init__(self, names):
+        self.names = names
+
+    def resolve_names(self, securities):
+        return {security: self.names[security] for security in securities if security in self.names}
+
+
 class FakeMarketDataProvider:
     """Market data provider that makes all orders match by default.
 
