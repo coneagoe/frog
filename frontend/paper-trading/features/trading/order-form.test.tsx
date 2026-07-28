@@ -52,6 +52,7 @@ describe("OrderForm", () => {
     expect(createOrderMock).toHaveBeenCalledWith(1, {
       symbol: "000001.SZ",
       side: "buy",
+      market: "a_share",
       quantity: 100,
       limit_price: "10.00",
       trade_date: "2026-06-16"
@@ -92,6 +93,7 @@ describe("OrderForm", () => {
     expect(createOrderMock).toHaveBeenCalledWith(1, {
       symbol: "000001.SZ",
       side: "buy",
+      market: "a_share",
       quantity: 100,
       limit_price: "10.00",
       trade_date: "2026-06-16",
@@ -132,6 +134,7 @@ describe("OrderForm", () => {
     expect(createOrderMock).toHaveBeenCalledWith(1, {
       symbol: "000001.SZ",
       side: "buy",
+      market: "a_share",
       quantity: 100,
       limit_price: "10.00",
       trade_date: "2026-06-16"
@@ -173,13 +176,36 @@ describe("OrderForm", () => {
     expect(createOrderMock).toHaveBeenCalledWith(1, expect.objectContaining({ trade_date: "2026-06-16" }));
   });
 
+  it("submits the selected Hong Kong Connect market", async () => {
+    render(<OrderForm accounts={accounts} selectedAccountId={1} onSubmitted={vi.fn()} />);
+
+    await userEvent.type(screen.getByLabelText("Symbol"), "00700");
+    await userEvent.selectOptions(screen.getByLabelText("Market"), "hk_connect");
+    await userEvent.clear(screen.getByLabelText("Quantity"));
+    await userEvent.type(screen.getByLabelText("Quantity"), "100");
+    await userEvent.type(screen.getByLabelText("Limit price"), "400.00");
+    await userEvent.type(screen.getByLabelText("Trade date"), "2026-07-28");
+    await userEvent.click(screen.getByRole("button", { name: "Submit order" }));
+
+    expect(createOrderMock).toHaveBeenCalledWith(1, expect.objectContaining({
+      symbol: "00700",
+      market: "hk_connect"
+    }));
+  });
+
   it("warns for non-lot quantities", async () => {
     render(<OrderForm accounts={accounts} selectedAccountId={1} onSubmitted={vi.fn()} />);
+
+    expect(screen.getByLabelText("Market")).toHaveValue("a_share");
 
     await userEvent.clear(screen.getByLabelText("Quantity"));
     await userEvent.type(screen.getByLabelText("Quantity"), "101");
 
     expect(screen.getByText("A-share orders should use 100-share lots.")).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("Market"), "hk_connect");
+
+    expect(screen.queryByText("A-share orders should use 100-share lots.")).not.toBeInTheDocument();
   });
 
   it("does not submit invalid required fields", async () => {

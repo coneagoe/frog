@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createOrder } from "@/lib/api-client";
-import type { Account, OrderSide } from "@/lib/types";
+import type { Account, Market, OrderSide } from "@/lib/types";
 
 export function OrderForm({
   accounts,
@@ -16,6 +16,7 @@ export function OrderForm({
   const [accountId, setAccountId] = useState(selectedAccountId ?? accounts[0]?.id ?? 0);
   const [symbol, setSymbol] = useState("");
   const [side, setSide] = useState<OrderSide>("buy");
+  const [market, setMarket] = useState<Market>("a_share");
   const [quantity, setQuantity] = useState("100");
   const [limitPrice, setLimitPrice] = useState("");
   const [tradeDate, setTradeDate] = useState("");
@@ -23,7 +24,7 @@ export function OrderForm({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const numericQuantity = Number(quantity);
-  const lotWarning = Number.isFinite(numericQuantity) && numericQuantity > 0 && numericQuantity % 100 !== 0;
+  const lotWarning = market === "a_share" && Number.isFinite(numericQuantity) && numericQuantity > 0 && numericQuantity % 100 !== 0;
 
   useEffect(() => {
     setAccountId(selectedAccountId ?? accounts[0]?.id ?? 0);
@@ -38,6 +39,7 @@ export function OrderForm({
       await createOrder(accountId, {
         symbol: symbol.trim().toUpperCase(),
         side,
+        market,
         quantity: Number(quantity),
         limit_price: limitPrice,
         trade_date: tradeDate,
@@ -75,6 +77,17 @@ export function OrderForm({
         <select aria-label="Side" value={side} onChange={(event) => setSide(event.target.value as OrderSide)}>
           <option value="buy">Buy</option>
           <option value="sell">Sell</option>
+        </select>
+      </label>
+      <label>
+        Market
+        <select
+          aria-label="Market"
+          value={market}
+          onChange={(event) => setMarket(event.target.value === "hk_connect" ? "hk_connect" : "a_share")}
+        >
+          <option value="a_share">A-share</option>
+          <option value="hk_connect">Hong Kong Connect</option>
         </select>
       </label>
       <label>

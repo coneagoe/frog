@@ -205,6 +205,7 @@ export type UpdateAccountFeesInput = {
 export type CreateOrderInput = {
   symbol: string;
   side: OrderSide;
+  market: Market;
   quantity: number;
   limit_price: string;
   trade_date: string;
