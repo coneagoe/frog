@@ -4,9 +4,10 @@ from decimal import Decimal
 from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
-from paper_trading.api.deps import get_session
+from paper_trading.api.deps import get_security_name_provider, get_session
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from test.paper_trading.fakes import _FakeSecurityNameProvider
 
 
 def _client(monkeypatch, sqlite_session):
@@ -210,6 +211,31 @@ class TestImportPositionsAPI:
         assert len(positions) == 1
         assert positions[0].symbol == "000001"
         assert positions[0].market == "a_share"
+
+    def test_list_positions_includes_stock_name(self, monkeypatch, sqlite_session):
+        client, headers, session = _client(monkeypatch, sqlite_session)
+        account_id = _create_account(client, headers)
+        PaperTradingRepository(session).upsert_position(account_id, "000001", 100, 0, Decimal("1000"))
+        session.commit()
+        provider = _FakeSecurityNameProvider({("a_share", "000001"): "Ping An Bank"})
+        client.app.dependency_overrides[get_security_name_provider] = lambda: provider
+
+        response = client.get(f"/paper/accounts/{account_id}/positions", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()[0]["stock_name"] == "Ping An Bank"
+
+    def test_list_positions_returns_null_for_missing_stock_name(self, monkeypatch, sqlite_session):
+        client, headers, session = _client(monkeypatch, sqlite_session)
+        account_id = _create_account(client, headers)
+        PaperTradingRepository(session).upsert_position(account_id, "UNKNOWN", 100, 0, Decimal("1000"))
+        session.commit()
+        client.app.dependency_overrides[get_security_name_provider] = lambda: _FakeSecurityNameProvider({})
+
+        response = client.get(f"/paper/accounts/{account_id}/positions", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()[0]["stock_name"] is None
 
     def test_import_positions_preserves_hk_market(self, monkeypatch, sqlite_session):
         client, headers, session = _client(monkeypatch, sqlite_session)

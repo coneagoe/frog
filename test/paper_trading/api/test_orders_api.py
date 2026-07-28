@@ -1,14 +1,17 @@
 from datetime import date
+from decimal import Decimal
 
 import pandas as pd
 from fastapi.testclient import TestClient
 
 from common.const import COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN
 from paper_trading.api.app import create_app
-from paper_trading.api.deps import get_market_data_provider, get_session
+from paper_trading.api.deps import get_market_data_provider, get_security_name_provider, get_session
+from paper_trading.domain.enums import OrderSide, OrderStatus
 from paper_trading.storage.market_data import StorageMarketDataProvider
+from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
-from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
+from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar, _FakeSecurityNameProvider
 
 
 def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
@@ -103,6 +106,52 @@ def test_create_order_auto_matches_when_limit_is_touched(monkeypatch, sqlite_ses
     trades = trades_response.json()
     assert len(trades) == 1
     assert trades[0]["order_id"] == payload["id"]
+
+
+def test_list_orders_and_trades_include_stock_name(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_security_name_provider] = lambda: _FakeSecurityNameProvider(
+        {("hk_connect", "00700"): "Tencent Holdings"}
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    account_id = client.post(
+        "/paper/accounts", json={"name": "demo", "initial_cash": "100000.00"}, headers=headers
+    ).json()["id"]
+    repo = PaperTradingRepository(session)
+    order = repo.create_order(
+        account_id=account_id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("400"),
+        trade_date=date(2026, 6, 16),
+        status=OrderStatus.FILLED,
+        market="hk_connect",
+    )
+    repo.create_trade(
+        order_id=order.id,
+        account_id=account_id,
+        symbol="00700",
+        side=OrderSide.BUY,
+        quantity=100,
+        price=Decimal("400"),
+        amount=Decimal("40000"),
+        fees=Decimal("0"),
+        trade_date=date(2026, 6, 16),
+        market="hk_connect",
+    )
+    session.commit()
+    orders = client.get(f"/paper/accounts/{account_id}/orders", headers=headers)
+    trades = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
+    assert orders.status_code == 200
+    assert trades.status_code == 200
+    assert orders.json()[0]["stock_name"] == "Tencent Holdings"
+    assert trades.json()[0]["stock_name"] == "Tencent Holdings"
 
 
 def test_create_order_returns_validity_summary(monkeypatch, sqlite_session):

@@ -92,5 +92,11 @@ def get_hk_metadata_provider(session: Session = Depends(get_session)):
     return HkConnectMetadataProvider(session)
 
 
+def get_security_name_provider(session: Session = Depends(get_session)):
+    from paper_trading.storage.security_metadata import SecurityNameProvider
+
+    return SecurityNameProvider(session)
+
+
 SessionDep = Depends(get_session)
 AuthDep = Depends(require_api_token)

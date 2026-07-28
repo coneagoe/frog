@@ -316,7 +316,7 @@ describe("AccountsPage", () => {
   it("loads positions and cash ledger for the first account on initial load", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([
-      { symbol: "000001", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00" }
+      { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00" }
     ]);
     listCashLedgerMock.mockResolvedValue([
       { id: 1, account_id: 1, event_type: "deposit", amount: "100000.00", note: "Initial deposit" }
@@ -334,7 +334,7 @@ describe("AccountsPage", () => {
   it("uses compact tables for account positions and cash ledger", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([
-      { symbol: "000001", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00" }
+      { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00" }
     ]);
     listCashLedgerMock.mockResolvedValue([
       { id: 1, account_id: 1, event_type: "deposit", amount: "100000.00", note: "Initial deposit" }
@@ -384,7 +384,7 @@ describe("AccountsPage", () => {
   it("renders fulfilled tables and shows error banner when detail loading partially fails", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([
-      { symbol: "000001", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00" }
+      { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00" }
     ]);
     listCashLedgerMock.mockRejectedValue(new Error("Ledger unavailable"));
 

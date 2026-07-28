@@ -355,6 +355,11 @@ curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1
 
 Trade responses include the `comment` field:
 
+Position, order, and trade list responses also include the nullable `stock_name`
+field. It is a display-only name resolved from the security metadata tables; it
+is `null` when metadata is unavailable and is not persisted in paper-trading
+records.
+
 ```json
 [
   {
