@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Callable, Literal
 
@@ -49,17 +49,7 @@ class PositionValuationService:
             return None
 
     def _db_close(self, symbol: str, market: str) -> Decimal | None:
-        # The provider routes BFQ history by market. Walk backwards so the
-        # fallback remains usable on weekends and market holidays.
-        for days_ago in range(366):
-            try:
-                bar = self.market_data.get_daily_bar(symbol, self.today - timedelta(days=days_ago), market)
-            except Exception:
-                continue
-            price = self._valid_price(bar.close)
-            if price is not None:
-                return price
-        return None
+        return self._valid_price(self.market_data.get_latest_daily_close(symbol, self.today, market))
 
     @staticmethod
     def _valid_price(value: object) -> Decimal | None:
@@ -73,6 +63,5 @@ class PositionValuationService:
 
     @staticmethod
     def _result(position, price: Decimal, source: PriceSource) -> PositionValuation:
-        cost_per_share = position.cost_amount / Decimal(position.total_quantity)
-        pnl = (price - cost_per_share) * Decimal(position.total_quantity)
+        pnl = Decimal(position.total_quantity) * price - Decimal(position.cost_amount)
         return PositionValuation(price, source, pnl)

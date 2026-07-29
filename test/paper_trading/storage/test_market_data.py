@@ -39,6 +39,19 @@ class FakeStorageWithEngine:
         return self._inner.calls
 
 
+class _LatestCloseStorage:
+    def __init__(self):
+        self.calls = []
+
+    def load_latest_history_data_stock(self, stock_id, adjust, end_date):
+        self.calls.append(("a_share", stock_id, adjust, end_date))
+        return {COL_CLOSE: 10}
+
+    def load_latest_history_data_stock_hk_ggt(self, stock_id, adjust, end_date):
+        self.calls.append(("hk_connect", stock_id, adjust, end_date))
+        return {COL_CLOSE: 405}
+
+
 def test_storage_market_data_provider_loads_daily_bfq_bar_by_unadjusted_db_code():
     storage = FakeHistoryStorage(
         {
@@ -65,6 +78,21 @@ def test_storage_market_data_provider_loads_daily_bfq_bar_by_unadjusted_db_code(
     assert bar.low == Decimal("9.0")
     assert bar.close == Decimal("10.0")
     assert storage.calls == [("000001", PeriodType.DAILY, AdjustType.BFQ, "2026-06-16", "2026-06-16")]
+
+
+def test_storage_market_data_provider_gets_latest_bfq_close_once_with_market_routing():
+    storage = _LatestCloseStorage()
+    provider = StorageMarketDataProvider(storage, FakeTradeCalendar([]))
+
+    a_close = provider.get_latest_daily_close("000001.SZ", date(2026, 7, 29), "a_share")
+    hk_close = provider.get_latest_daily_close("00700.HK", date(2026, 7, 29), "hk_connect")
+
+    assert a_close == Decimal("10")
+    assert hk_close == Decimal("405")
+    assert storage.calls == [
+        ("a_share", "000001", AdjustType.BFQ, "2026-07-29"),
+        ("hk_connect", "00700", AdjustType.BFQ, "2026-07-29"),
+    ]
 
 
 def test_storage_market_data_provider_raises_for_missing_ohlc_value():

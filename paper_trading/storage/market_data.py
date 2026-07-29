@@ -41,6 +41,8 @@ class MarketDataProvider(Protocol):
 
     def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar: ...
 
+    def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None: ...
+
 
 class TradeCalendar(Protocol):
     def is_trade_date(self, trade_date: date) -> bool: ...
@@ -67,6 +69,16 @@ class StorageMarketDataProvider:
         if market == "hk_connect":
             return self._get_hk_daily_bar(stock_id, symbol, trade_date)
         return self._get_a_share_daily_bar(stock_id, symbol, trade_date)
+
+    def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+        stock_id = self._to_storage_stock_id(symbol)
+        if market == "hk_connect":
+            row = self._storage.load_latest_history_data_stock_hk_ggt(stock_id, AdjustType.BFQ, trade_date.isoformat())
+        else:
+            row = self._storage.load_latest_history_data_stock(stock_id, AdjustType.BFQ, trade_date.isoformat())
+        if row is None:
+            return None
+        return self._decimal_field(row, COL_CLOSE, symbol, trade_date)
 
     def _get_a_share_daily_bar(self, stock_id: str, symbol: str, trade_date: date) -> DailyBar:
         df = self._storage.load_history_data_stock(

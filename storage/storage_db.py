@@ -967,6 +967,17 @@ class StorageDb:
             logger.error(f"加载股票历史数据失败: {stock_id}, 周期: {period}, 复权: {adjust}, 错误: {str(e)}")
             return pd.DataFrame()
 
+    def load_latest_history_data_stock(self, stock_id: str, adjust: AdjustType, end_date: Optional[str] = None):
+        table_name = self._get_history_table_name(SecurityType.STOCK, PeriodType.DAILY, adjust)
+        sql = f'SELECT * FROM {table_name} WHERE "{COL_STOCK_ID}" = %s'
+        params: List[Any] = [stock_id]
+        if end_date:
+            sql += f' AND "{COL_DATE}" <= %s'
+            params.append(end_date)
+        sql += f' ORDER BY "{COL_DATE}" DESC LIMIT 1'
+        df = pd.read_sql(sql, self.engine, params=tuple(params))
+        return None if df.empty else df.iloc[0]
+
     def load_history_data_stock_hk_ggt(
         self,
         stock_id: str,
@@ -1024,6 +1035,17 @@ class StorageDb:
         except Exception as e:
             logger.error(f"加载港股通成分股历史数据失败: {stock_id}, 周期: {period}, 复权: {adjust}, 错误: {str(e)}")
             return pd.DataFrame()
+
+    def load_latest_history_data_stock_hk_ggt(self, stock_id: str, adjust: AdjustType, end_date: Optional[str] = None):
+        table_name = self._get_history_table_name(SecurityType.HK_GGT_STOCK, PeriodType.DAILY, adjust)
+        sql = f'SELECT * FROM {table_name} WHERE "{COL_STOCK_ID}" = %s'
+        params: List[Any] = [stock_id]
+        if end_date:
+            sql += f' AND "{COL_DATE}" <= %s'
+            params.append(end_date)
+        sql += f' ORDER BY "{COL_DATE}" DESC LIMIT 1'
+        df = pd.read_sql(sql, self.engine, params=tuple(params))
+        return None if df.empty else df.iloc[0]
 
     def load_history_data_etf(
         self,
