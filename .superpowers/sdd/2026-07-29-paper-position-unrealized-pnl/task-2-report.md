@@ -47,3 +47,28 @@ Commit subject: `feat: show unrealized pnl for positions`
 
 - The focused test output includes the existing Vite CJS API deprecation notice; it does not affect test results.
 - Other account-page fixtures in the repository still use the pre-Ticket #2 Position shape and were not changed because this task is scoped to the focused Positions table tests and the requested frontend files.
+
+## Ticket #3 Correction
+
+### RED
+
+Command:
+
+```text
+npx tsc --noEmit
+```
+
+Summary: RED. The compiler reported the three requested Position fixtures at approximately lines 319, 337, and 387 missing `mark_price`, `price_source`, and `unrealized_pnl`, alongside unrelated pre-existing type errors elsewhere in the frontend test suite.
+
+### GREEN
+
+Command:
+
+```text
+npx tsc --noEmit
+npm test -- features/accounts/accounts-page.test.tsx features/trading/trading-tables.test.tsx
+```
+
+Summary: The three Position-specific TypeScript errors are resolved. The full TypeScript command still reports unrelated pre-existing fixture/type errors in other tests. The requested focused test command passed 47/47 tests across 2 files.
+
+Correction commit SHA: `0b17240`
