@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
+import paper_trading.services.position_valuation_service as valuation_module
 from paper_trading.services.position_valuation_service import PositionValuationService
 
 
@@ -39,7 +40,7 @@ def test_valid_live_price_has_priority_and_uses_total_cost_formula():
     market_data = _FakeMarketData({("000001", "a_share"): Decimal("99")})
     service = PositionValuationService(
         market_data,
-        fetch_price=lambda symbol, market: "4.00",
+        fetch_prices=lambda items: {("000001", "A"): "4.00"},
         today=date(2026, 7, 29),
     )
 
@@ -55,7 +56,7 @@ def test_invalid_live_prices_fall_back_to_latest_bfq_close_with_market_routing()
     market_data = _FakeMarketData({("00700", "hk_connect"): Decimal("410")})
     service = PositionValuationService(
         market_data,
-        fetch_price=lambda symbol, market: None,
+        fetch_prices=lambda items: {("00700", "HK"): None},
         today=date(2026, 7, 29),
     )
 
@@ -69,7 +70,7 @@ def test_invalid_live_prices_fall_back_to_latest_bfq_close_with_market_routing()
 
 def test_missing_or_nonpositive_prices_leave_position_unvalued():
     market_data = _FakeMarketData()
-    service = PositionValuationService(market_data, fetch_price=lambda symbol, market: "0")
+    service = PositionValuationService(market_data, fetch_prices=lambda items: {("000001", "A"): "0"})
 
     result = service.value(_position())
 
@@ -81,12 +82,15 @@ def test_missing_or_nonpositive_prices_leave_position_unvalued():
 def test_price_failure_is_isolated_to_one_symbol():
     market_data = _FakeMarketData({("000002", "a_share"): Decimal("12")})
 
-    def fetch_price(symbol, market):
-        if symbol == "000001":
-            raise RuntimeError("provider failure")
-        return "bad"
+    def fetch_prices(items):
+        prices = {}
+        for symbol, market in items:
+            if symbol == "000001":
+                raise RuntimeError("provider failure")
+            prices[(symbol, market)] = "bad"
+        return prices
 
-    service = PositionValuationService(market_data, fetch_price=fetch_price)
+    service = PositionValuationService(market_data, fetch_prices=fetch_prices)
 
     failed = service.value(_position(symbol="000001"))
     valued = service.value(_position(symbol="000002"))
@@ -108,6 +112,48 @@ def test_value_many_fetches_real_time_prices_once_and_preserves_order():
 
     assert calls == [[("000001", "A"), ("00700", "HK")]]
     assert [item.mark_price for item in result] == [Decimal("4"), Decimal("8")]
+
+
+def test_value_many_uses_default_batch_adapter_and_falls_back_per_row(monkeypatch):
+    market_data = _FakeMarketData(
+        {
+            ("000001", "a_share"): Decimal("11"),
+            ("00700", "hk_connect"): Decimal("410"),
+        }
+    )
+    calls = []
+
+    def fetch_prices(items):
+        calls.append(list(items))
+        return {("000001", "A"): "bad", ("00700", "HK"): None}
+
+    monkeypatch.setattr(valuation_module, "fetch_price_map", fetch_prices)
+    service = PositionValuationService(market_data, today=date(2026, 7, 29))
+
+    result = service.value_many([_position(), _position(symbol="00700", market="hk_connect")])
+
+    assert calls == [[("000001", "A"), ("00700", "HK")]]
+    assert [item.mark_price for item in result] == [Decimal("11"), Decimal("410")]
+    assert [item.price_source for item in result] == ["db_close", "db_close"]
+
+
+def test_value_many_always_honors_injected_batch_adapter():
+    market_data = _FakeMarketData()
+    batch_calls = []
+
+    def fetch_prices(items):
+        batch_calls.append(list(items))
+        return {("000001", "A"): "4"}
+
+    service = PositionValuationService(
+        market_data,
+        fetch_prices=fetch_prices,
+    )
+
+    result = service.value_many([_position()])
+
+    assert batch_calls == [[("000001", "A")]]
+    assert result[0].mark_price == Decimal("4")
 
 
 def test_value_many_falls_back_per_position_when_batch_quote_is_missing():

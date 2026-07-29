@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Callable, Iterable, Literal, Mapping
 
-from monitor.price_fetcher import fetch_current_price, fetch_price_map
+from monitor.price_fetcher import fetch_price_map
 from paper_trading.storage.market_data import MarketDataProvider
 
 PriceSource = Literal["real_time", "db_close"]
@@ -21,12 +21,10 @@ class PositionValuationService:
         self,
         market_data: MarketDataProvider,
         *,
-        fetch_price: Callable[[str, str], object] | None = None,
         fetch_prices: Callable[[Iterable[tuple[str, str]]], Mapping[tuple[str, str], object]] | None = None,
         today: date | None = None,
     ):
         self.market_data = market_data
-        self.fetch_price = fetch_current_price if fetch_price is None else fetch_price
         self.fetch_prices = fetch_price_map if fetch_prices is None else fetch_prices
         self.today = today or date.today()
 
@@ -38,16 +36,8 @@ class PositionValuationService:
         prices: dict[tuple[str, str], object] = {}
         if rows:
             try:
-                if self.fetch_price is fetch_current_price:
-                    items = [(row.symbol, self._source_market(row.market)) for row in rows]
-                    prices = dict(self.fetch_prices(items))
-                else:
-                    for row in rows:
-                        key = (row.symbol, self._source_market(row.market))
-                        try:
-                            prices[key] = self.fetch_price(*key)
-                        except Exception:
-                            continue
+                items = [(row.symbol, self._source_market(row.market)) for row in rows]
+                prices = dict(self.fetch_prices(items))
             except Exception:
                 prices = {}
         return [self._value_with_price(row, prices) for row in rows]
@@ -65,13 +55,6 @@ class PositionValuationService:
         except Exception:
             pass
         return PositionValuation(None, None, None)
-
-    def _real_time_price(self, symbol: str, market: str) -> Decimal | None:
-        source_market = self._source_market(market)
-        try:
-            return self._valid_price(self.fetch_price(symbol, source_market))
-        except Exception:
-            return None
 
     @staticmethod
     def _source_market(market: str) -> str:

@@ -34,10 +34,13 @@ class _FakePositionValuationService:
         self.values = values
         self.markets = []
 
+    def value_many(self, positions):
+        rows = list(positions)
+        self.markets.extend((position.symbol, position.market) for position in rows)
+        return [PositionValuation(*self.values.get(position.symbol, (None, None, None))) for position in rows]
+
     def value(self, position):
-        self.markets.append((position.symbol, position.market))
-        values = self.values.get(position.symbol, (None, None, None))
-        return PositionValuation(*values)
+        return self.value_many([position])[0]
 
 
 def test_api_startup_bootstraps_storage_schema(monkeypatch):
@@ -196,9 +199,7 @@ def test_update_account_fees_returns_404_for_missing_account(monkeypatch, sqlite
 
 
 class TestImportPositionsAPI:
-    def test_list_positions_uses_real_time_price_and_calculates_unrealized_pnl(
-        self, monkeypatch, sqlite_session
-    ):
+    def test_list_positions_uses_real_time_price_and_calculates_unrealized_pnl(self, monkeypatch, sqlite_session):
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)
         PaperTradingRepository(session).upsert_position(
