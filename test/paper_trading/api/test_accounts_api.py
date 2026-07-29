@@ -4,7 +4,8 @@ from decimal import Decimal
 from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
-from paper_trading.api.deps import get_security_name_provider, get_session
+from paper_trading.api.deps import get_position_valuation_service, get_security_name_provider, get_session
+from paper_trading.services.position_valuation_service import PositionValuation
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import _FakeSecurityNameProvider
@@ -26,6 +27,17 @@ def _create_account(client, headers):
         headers=headers,
     )
     return resp.json()["id"]
+
+
+class _FakePositionValuationService:
+    def __init__(self, values):
+        self.values = values
+        self.markets = []
+
+    def value(self, position):
+        self.markets.append((position.symbol, position.market))
+        values = self.values.get(position.symbol, (None, None, None))
+        return PositionValuation(*values)
 
 
 def test_api_startup_bootstraps_storage_schema(monkeypatch):
@@ -184,6 +196,70 @@ def test_update_account_fees_returns_404_for_missing_account(monkeypatch, sqlite
 
 
 class TestImportPositionsAPI:
+    def test_list_positions_uses_real_time_price_and_calculates_unrealized_pnl(
+        self, monkeypatch, sqlite_session
+    ):
+        client, headers, session = _client(monkeypatch, sqlite_session)
+        account_id = _create_account(client, headers)
+        PaperTradingRepository(session).upsert_position(
+            account_id, "000001", 100, 0, Decimal("1000.00"), realized_pnl=Decimal("75.00")
+        )
+        session.commit()
+        client.app.dependency_overrides[get_position_valuation_service] = lambda: _FakePositionValuationService(
+            {"000001": (Decimal("12.50"), "real_time", Decimal("250.00"))}
+        )
+
+        response = client.get(f"/paper/accounts/{account_id}/positions", headers=headers)
+
+        assert response.status_code == 200
+        position = response.json()[0]
+        assert position["mark_price"] == "12.50"
+        assert position["price_source"] == "real_time"
+        assert position["unrealized_pnl"] == "250.00"
+
+    def test_list_positions_falls_back_to_db_close_with_market_routing(self, monkeypatch, sqlite_session):
+        client, headers, session = _client(monkeypatch, sqlite_session)
+        account_id = _create_account(client, headers)
+        repo = PaperTradingRepository(session)
+        repo.upsert_position(account_id, "000001", 100, 0, Decimal("1000.00"))
+        repo.upsert_position(account_id, "00700", 10, 0, Decimal("4000.00"), market="hk_connect")
+        session.commit()
+        valuation = _FakePositionValuationService(
+            {
+                "000001": (Decimal("11.00"), "db_close", Decimal("100.00")),
+                "00700": (Decimal("410.00"), "db_close", Decimal("100.00")),
+            }
+        )
+        client.app.dependency_overrides[get_position_valuation_service] = lambda: valuation
+
+        response = client.get(f"/paper/accounts/{account_id}/positions", headers=headers)
+
+        assert response.status_code == 200
+        positions = {item["symbol"]: item for item in response.json()}
+        assert positions["000001"]["price_source"] == "db_close"
+        assert positions["00700"]["mark_price"] == "410.00"
+        assert valuation.markets == [("000001", "a_share"), ("00700", "hk_connect")]
+
+    def test_list_positions_keeps_unavailable_symbols_nullable(self, monkeypatch, sqlite_session):
+        client, headers, session = _client(monkeypatch, sqlite_session)
+        account_id = _create_account(client, headers)
+        repo = PaperTradingRepository(session)
+        repo.upsert_position(account_id, "000001", 100, 0, Decimal("1000.00"))
+        repo.upsert_position(account_id, "UNKNOWN", 100, 0, Decimal("1000.00"))
+        session.commit()
+        client.app.dependency_overrides[get_position_valuation_service] = lambda: _FakePositionValuationService(
+            {"000001": (Decimal("11.00"), "real_time", Decimal("100.00"))}
+        )
+
+        response = client.get(f"/paper/accounts/{account_id}/positions", headers=headers)
+
+        assert response.status_code == 200
+        positions = {item["symbol"]: item for item in response.json()}
+        assert positions["000001"]["unrealized_pnl"] == "100.00"
+        assert positions["UNKNOWN"]["mark_price"] is None
+        assert positions["UNKNOWN"]["price_source"] is None
+        assert positions["UNKNOWN"]["unrealized_pnl"] is None
+
     def test_import_positions_returns_200(self, monkeypatch, sqlite_session):
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)

@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from paper_trading.api.deps import get_security_name_provider, get_session, require_api_token
+from paper_trading.api.deps import (
+    get_position_valuation_service,
+    get_security_name_provider,
+    get_session,
+    require_api_token,
+)
 from paper_trading.api.response_enrichment import enrich_security_names
 from paper_trading.schemas.accounts import (
     AccountResponse,
@@ -16,6 +21,7 @@ from paper_trading.schemas.accounts import (
 )
 from paper_trading.services.account_service import AccountService
 from paper_trading.services.cash_service import CashService
+from paper_trading.services.position_valuation_service import PositionValuationService
 from paper_trading.storage.repository import PaperTradingRepository
 from paper_trading.storage.security_metadata import SecurityNameProvider
 
@@ -94,9 +100,11 @@ def list_positions(
     account_id: int,
     session: Session = Depends(get_session),
     provider: SecurityNameProvider = Depends(get_security_name_provider),
+    valuation: PositionValuationService = Depends(get_position_valuation_service),
 ):
     rows = PaperTradingRepository(session).get_positions(account_id)
-    return enrich_security_names(rows, PositionResponse, provider)
+    responses = enrich_security_names(rows, PositionResponse, provider)
+    return [response.model_copy(update=valuation.value(row).__dict__) for row, response in zip(rows, responses)]
 
 
 @router.get("/{account_id}/cash-ledger", response_model=list[CashLedgerResponse])

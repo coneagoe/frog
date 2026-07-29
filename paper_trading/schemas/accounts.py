@@ -1,7 +1,7 @@
 import re
 from datetime import date
 from decimal import Decimal
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -91,6 +91,9 @@ class PositionResponse(BaseModel):
     realized_pnl: Decimal
     market: str = "a_share"
     stock_name: str | None = None
+    mark_price: Decimal | None = None
+    price_source: Literal["real_time", "db_close"] | None = None
+    unrealized_pnl: Decimal | None = None
 
 
 class CashLedgerResponse(BaseModel):

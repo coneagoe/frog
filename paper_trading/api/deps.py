@@ -8,6 +8,7 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from paper_trading.services.position_valuation_service import PositionValuationService
 from paper_trading.storage.market_data import (
     MarketDataProvider,
     StorageMarketDataProvider,
@@ -96,6 +97,12 @@ def get_security_name_provider(session: Session = Depends(get_session)):
     from paper_trading.storage.security_metadata import SecurityNameProvider
 
     return SecurityNameProvider(session)
+
+
+def get_position_valuation_service(
+    market_data: MarketDataProvider = Depends(get_market_data_provider),
+) -> PositionValuationService:
+    return PositionValuationService(market_data)
 
 
 SessionDep = Depends(get_session)
