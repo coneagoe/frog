@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Callable, Literal
+from typing import Callable, Iterable, Literal, Mapping
 
-from monitor.price_fetcher import fetch_current_price
+from monitor.price_fetcher import fetch_current_price, fetch_price_map
 from paper_trading.storage.market_data import MarketDataProvider
 
 PriceSource = Literal["real_time", "db_close"]
@@ -21,16 +21,41 @@ class PositionValuationService:
         self,
         market_data: MarketDataProvider,
         *,
-        fetch_price: Callable[[str, str], object] = fetch_current_price,
+        fetch_price: Callable[[str, str], object] | None = None,
+        fetch_prices: Callable[[Iterable[tuple[str, str]]], Mapping[tuple[str, str], object]] | None = None,
         today: date | None = None,
     ):
         self.market_data = market_data
-        self.fetch_price = fetch_price
+        self.fetch_price = fetch_current_price if fetch_price is None else fetch_price
+        self.fetch_prices = fetch_price_map if fetch_prices is None else fetch_prices
         self.today = today or date.today()
 
     def value(self, position) -> PositionValuation:
+        return self.value_many([position])[0]
+
+    def value_many(self, positions: Iterable) -> list[PositionValuation]:
+        rows = list(positions)
+        prices: dict[tuple[str, str], object] = {}
+        if rows:
+            try:
+                if self.fetch_price is fetch_current_price:
+                    items = [(row.symbol, self._source_market(row.market)) for row in rows]
+                    prices = dict(self.fetch_prices(items))
+                else:
+                    for row in rows:
+                        key = (row.symbol, self._source_market(row.market))
+                        try:
+                            prices[key] = self.fetch_price(*key)
+                        except Exception:
+                            continue
+            except Exception:
+                prices = {}
+        return [self._value_with_price(row, prices) for row in rows]
+
+    def _value_with_price(self, position, prices: dict[tuple[str, str], object]) -> PositionValuation:
         try:
-            price = self._real_time_price(position.symbol, position.market)
+            key = (position.symbol, self._source_market(position.market))
+            price = self._valid_price(prices.get(key))
             source: PriceSource = "real_time"
             if price is None:
                 price = self._db_close(position.symbol, position.market)
@@ -42,11 +67,15 @@ class PositionValuationService:
         return PositionValuation(None, None, None)
 
     def _real_time_price(self, symbol: str, market: str) -> Decimal | None:
-        source_market = "HK" if market == "hk_connect" else "A"
+        source_market = self._source_market(market)
         try:
             return self._valid_price(self.fetch_price(symbol, source_market))
         except Exception:
             return None
+
+    @staticmethod
+    def _source_market(market: str) -> str:
+        return "HK" if market == "hk_connect" else "A"
 
     def _db_close(self, symbol: str, market: str) -> Decimal | None:
         return self._valid_price(self.market_data.get_latest_daily_close(symbol, self.today, market))

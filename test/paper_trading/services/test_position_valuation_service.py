@@ -93,3 +93,33 @@ def test_price_failure_is_isolated_to_one_symbol():
 
     assert failed.mark_price is None
     assert valued.mark_price == Decimal("12")
+
+
+def test_value_many_fetches_real_time_prices_once_and_preserves_order():
+    market_data = _FakeMarketData()
+    calls = []
+
+    def fetch_prices(items):
+        calls.append(list(items))
+        return {("000001", "A"): "4", ("00700", "HK"): "8"}
+
+    service = PositionValuationService(market_data, fetch_prices=fetch_prices)
+    result = service.value_many([_position(), _position(symbol="00700", market="hk_connect")])
+
+    assert calls == [[("000001", "A"), ("00700", "HK")]]
+    assert [item.mark_price for item in result] == [Decimal("4"), Decimal("8")]
+
+
+def test_value_many_falls_back_per_position_when_batch_quote_is_missing():
+    market_data = _FakeMarketData({("00700", "hk_connect"): Decimal("410")})
+
+    service = PositionValuationService(
+        market_data,
+        fetch_prices=lambda items: {("000001", "A"): "12"},
+        today=date(2026, 7, 29),
+    )
+    result = service.value_many([_position(), _position(symbol="00700", market="hk_connect", total_quantity=2)])
+
+    assert result[0].mark_price == Decimal("12")
+    assert result[1].mark_price == Decimal("410")
+    assert result[1].price_source == "db_close"

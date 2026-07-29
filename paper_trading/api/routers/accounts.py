@@ -104,7 +104,11 @@ def list_positions(
 ):
     rows = PaperTradingRepository(session).get_positions(account_id)
     responses = enrich_security_names(rows, PositionResponse, provider)
-    return [response.model_copy(update=valuation.value(row).__dict__) for row, response in zip(rows, responses)]
+    if hasattr(valuation, "value_many"):
+        valuations = valuation.value_many(rows)
+    else:
+        valuations = [valuation.value(row) for row in rows]
+    return [response.model_copy(update=result.__dict__) for response, result in zip(responses, valuations)]
 
 
 @router.get("/{account_id}/cash-ledger", response_model=list[CashLedgerResponse])
