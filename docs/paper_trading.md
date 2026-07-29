@@ -360,6 +360,21 @@ field. It is a display-only name resolved from the security metadata tables; it
 is `null` when metadata is unavailable and is not persisted in paper-trading
 records.
 
+Position responses additionally include request-time valuation fields for the
+Accounts Positions card:
+
+- `mark_price`: the price used to value the open position, or `null` when no
+  usable price is available.
+- `price_source`: `real_time` when a valid real-time quote is available, or
+  `db_close` when valuation falls back to the latest stored BFQ daily close.
+- `unrealized_pnl`: `total_quantity * mark_price - cost_amount`, or `null`
+  when neither price source is available.
+
+The positions endpoint batches real-time quote retrieval for the account. A
+missing or invalid quote falls back per position to the latest stored BFQ close
+using its A-share or HK Connect market route. This request-time valuation does
+not change persisted realized PnL or snapshot/NAV calculations.
+
 ```json
 [
   {
