@@ -8,7 +8,10 @@ const position = {
   total_quantity: 100,
   frozen_quantity: 0,
   cost_amount: "1000.00",
-  realized_pnl: "20.00"
+  realized_pnl: "20.00",
+  mark_price: "12.50",
+  price_source: "real_time" as const,
+  unrealized_pnl: "250.00"
 };
 
 const order = {
@@ -73,5 +76,24 @@ describe("shared trading tables", () => {
     const nameElement = within(cell).getByText(name);
     expect(nameElement).toHaveClass("stock-name", "stock-name--compact");
     expect(nameElement).toHaveAttribute("title", name);
+  });
+
+  it("labels the position PnL column Unrealized PnL", () => {
+    render(<PositionTable positions={[position]} />);
+
+    expect(screen.getByRole("columnheader", { name: "Unrealized PnL" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Realized PnL" })).not.toBeInTheDocument();
+  });
+
+  it("renders the API-supplied unrealized PnL value", () => {
+    render(<PositionTable positions={[position]} />);
+
+    expect(screen.getByRole("cell", { name: "¥250.00" })).toBeInTheDocument();
+  });
+
+  it("renders Unavailable when unrealized PnL is null", () => {
+    render(<PositionTable positions={[{ ...position, unrealized_pnl: null }]} />);
+
+    expect(screen.getByRole("cell", { name: "Unavailable" })).toBeInTheDocument();
   });
 });

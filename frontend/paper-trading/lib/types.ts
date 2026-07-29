@@ -106,6 +106,9 @@ export type Position = {
   frozen_quantity: number;
   cost_amount: string;
   realized_pnl: string;
+  mark_price: string | null;
+  price_source: "real_time" | "db_close" | null;
+  unrealized_pnl: string | null;
 };
 
 export type CashLedgerEntry = {

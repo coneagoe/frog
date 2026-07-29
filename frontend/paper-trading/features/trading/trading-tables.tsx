@@ -16,7 +16,12 @@ export function PositionTable({ density, positions }: { density?: "default" | "c
     { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity) },
     { key: "frozen", header: "Frozen", align: "right", render: (row) => formatQuantity(row.frozen_quantity) },
     { key: "cost", header: "Cost", align: "right", render: (row) => <MoneyText value={row.cost_amount} /> },
-    { key: "pnl", header: "Realized PnL", align: "right", render: (row) => <MoneyText value={row.realized_pnl} /> }
+    {
+      key: "pnl",
+      header: "Unrealized PnL",
+      align: "right",
+      render: (row) => row.unrealized_pnl === null ? "Unavailable" : <MoneyText value={row.unrealized_pnl} />
+    }
   ];
   return <DataTable columns={columns} density={density} emptyTitle="No positions" getRowKey={(row) => row.symbol} rows={positions} />;
 }
