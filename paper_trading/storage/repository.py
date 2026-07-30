@@ -4,11 +4,16 @@ from decimal import Decimal
 from typing import Any, cast
 
 from sqlalchemy import func, or_
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from paper_trading.domain.enums import REPLAY_REJECTION_MARKER, CashEventType, OrderSide, OrderStatus
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
+from paper_trading.domain.market_data_diagnostics import canonical_adjust_label, canonical_stock_id
 from paper_trading.storage.models import (
+    DailyBarDiagnostic,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -20,6 +25,7 @@ from paper_trading.storage.models import (
     PaperPositionRoundTrip,
     PaperTrade,
     PaperTradeValidityCheck,
+    PaperValuationGap,
 )
 
 
@@ -37,6 +43,90 @@ def _require_fee_update(**values: Decimal | None) -> None:
 class PaperTradingRepository:
     def __init__(self, session: Session):
         self.session = session
+
+    def upsert_daily_bar_diagnostic(
+        self,
+        business_date: date,
+        stock_id: str,
+        adjust: str,
+        classification: str,
+        provider_outcomes: list[dict[str, Any]],
+        resolved: bool,
+    ) -> DailyBarDiagnostic:
+        normalized_stock_id = canonical_stock_id(stock_id)
+        adjust = canonical_adjust_label(adjust)
+        now = datetime.now(timezone.utc)
+        values = {
+            "business_date": business_date,
+            "stock_id": normalized_stock_id,
+            "adjust": adjust,
+            "classification": classification,
+            "provider_outcomes": provider_outcomes,
+            "first_observed_at": now,
+            "last_observed_at": now,
+            "resolved": resolved,
+        }
+        dialect_name = self.session.get_bind().dialect.name
+        if dialect_name == "postgresql":
+            statement: Any = postgresql_insert(DailyBarDiagnostic).values(**values)
+        elif dialect_name == "sqlite":
+            statement = sqlite_insert(DailyBarDiagnostic).values(**values)
+        else:
+            statement = None
+
+        if statement is not None:
+            statement = statement.on_conflict_do_update(
+                index_elements=[
+                    DailyBarDiagnostic.business_date,
+                    DailyBarDiagnostic.stock_id,
+                    DailyBarDiagnostic.adjust,
+                ],
+                set_={
+                    "classification": statement.excluded.classification,
+                    "provider_outcomes": statement.excluded.provider_outcomes,
+                    "last_observed_at": statement.excluded.last_observed_at,
+                    "resolved": statement.excluded.resolved,
+                },
+            ).returning(DailyBarDiagnostic)
+            result = self.session.execute(statement.execution_options(populate_existing=True)).scalar_one()
+            return cast(DailyBarDiagnostic, result)
+
+        diagnostic = (
+            self.session.query(DailyBarDiagnostic)
+            .filter_by(business_date=business_date, stock_id=normalized_stock_id, adjust=adjust)
+            .one_or_none()
+        )
+        if diagnostic is None:
+            diagnostic = DailyBarDiagnostic(**values)
+            self.session.add(diagnostic)
+        else:
+            setattr(diagnostic, "classification", classification)
+            setattr(diagnostic, "provider_outcomes", provider_outcomes)
+            setattr(diagnostic, "last_observed_at", now)
+            setattr(diagnostic, "resolved", resolved)
+        self.session.flush()
+        return diagnostic
+
+    def list_daily_bar_diagnostics(self) -> list[DailyBarDiagnostic]:
+        return list(
+            self.session.query(DailyBarDiagnostic)
+            .order_by(DailyBarDiagnostic.business_date.asc(), DailyBarDiagnostic.stock_id.asc())
+            .all()
+        )
+
+    def has_unresolved_daily_bar_diagnostic(self, business_date: date, stock_id: str, adjust: str = "bfq") -> bool:
+        adjust = canonical_adjust_label(adjust)
+        return (
+            self.session.query(DailyBarDiagnostic.id)
+            .filter(
+                DailyBarDiagnostic.business_date == business_date,
+                DailyBarDiagnostic.stock_id == canonical_stock_id(stock_id),
+                DailyBarDiagnostic.adjust == adjust,
+                DailyBarDiagnostic.resolved.is_(False),
+            )
+            .first()
+            is not None
+        )
 
     def create_account(
         self,
@@ -203,6 +293,9 @@ class PaperTradingRepository:
         self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
             synchronize_session=False
         )
+        self.session.query(PaperValuationGap).filter(PaperValuationGap.account_id == account_id).delete(
+            synchronize_session=False
+        )
         self.session.delete(account)
         self.session.flush()
         return True
@@ -292,6 +385,7 @@ class PaperTradingRepository:
         comment: str | None = None,
         market: str | None = None,
     ) -> PaperOrder:
+        normalized_idempotency_key = idempotency_key.strip() if idempotency_key and idempotency_key.strip() else None
         order = PaperOrder(
             account_id=account_id,
             symbol=symbol,
@@ -302,7 +396,7 @@ class PaperTradingRepository:
             status=status.value,
             frozen_cash=frozen_cash,
             frozen_quantity=frozen_quantity,
-            idempotency_key=idempotency_key,
+            idempotency_key=normalized_idempotency_key,
             rejection_code=rejection_code,
             rejection_reason=rejection_reason,
             comment=self._normalize_comment(comment),
@@ -311,6 +405,13 @@ class PaperTradingRepository:
         self.session.add(order)
         self.session.flush()
         return order
+
+    def get_order_by_idempotency_key(self, account_id: int, idempotency_key: str) -> PaperOrder | None:
+        return (
+            self.session.query(PaperOrder)
+            .filter(PaperOrder.account_id == account_id, PaperOrder.idempotency_key == idempotency_key)
+            .one_or_none()
+        )
 
     def get_order(self, order_id: int) -> PaperOrder:
         order = cast(PaperOrder | None, self.session.get(PaperOrder, order_id))
@@ -350,6 +451,53 @@ class PaperTradingRepository:
             .all()
         )
 
+    def upsert_valuation_gap(
+        self,
+        account_id: int,
+        trade_date: date,
+        missing_symbols: list[str],
+        details: list[dict[str, Any]],
+        resolved: bool = False,
+    ) -> PaperValuationGap:
+        now = datetime.now(timezone.utc)
+        gap = (
+            self.session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=trade_date).one_or_none()
+        )
+        if gap is None:
+            gap = PaperValuationGap(
+                account_id=account_id,
+                trade_date=trade_date,
+                missing_symbols=missing_symbols,
+                details=details,
+                first_observed_at=now,
+                last_observed_at=now,
+                resolved=resolved,
+            )
+            self.session.add(gap)
+        else:
+            gap.last_observed_at = now
+            gap.resolved = resolved
+            if not resolved:
+                gap.missing_symbols = missing_symbols
+                gap.details = details
+        self.session.flush()
+        return gap
+
+    def get_valuation_gap(self, account_id: int, trade_date: date) -> PaperValuationGap | None:
+        return (
+            self.session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=trade_date).one_or_none()
+        )
+
+    def get_accounts_for_snapshot(self, trade_date: date, account_id: int | None = None) -> list[int]:
+        position_query = self.session.query(PaperPosition.account_id).filter(PaperPosition.total_quantity > 0)
+        order_query = self.session.query(PaperOrder.account_id).filter(PaperOrder.trade_date == trade_date)
+        if account_id is not None:
+            position_query = position_query.filter(PaperPosition.account_id == account_id)
+            order_query = order_query.filter(PaperOrder.account_id == account_id)
+        ids = {int(value) for (value,) in position_query.all()}
+        ids.update(int(value) for (value,) in order_query.all())
+        return sorted(ids)
+
     def get_orders_for_matching(self, trade_date: date, account_id: int | None = None) -> list[PaperOrder]:
         query = self.session.query(PaperOrder).filter(
             PaperOrder.trade_date == trade_date,
@@ -358,6 +506,16 @@ class PaperTradingRepository:
         if account_id is not None:
             query = query.filter(PaperOrder.account_id == account_id)
         return list(query.order_by(PaperOrder.id.asc()).all())
+
+    def get_orders_for_matching_locked(self, trade_date: date, account_id: int | None = None) -> list[PaperOrder]:
+        """Return accepted orders while locking them for this transaction."""
+        query = self.session.query(PaperOrder).filter(
+            PaperOrder.trade_date == trade_date,
+            PaperOrder.status == OrderStatus.ACCEPTED.value,
+        )
+        if account_id is not None:
+            query = query.filter(PaperOrder.account_id == account_id)
+        return list(query.with_for_update(skip_locked=True).order_by(PaperOrder.id.asc()).all())
 
     def update_order_status(
         self,
@@ -502,6 +660,7 @@ class PaperTradingRepository:
         rejected: int,
         failed: int,
         status: str,
+        warning_count: int = 0,
         error_details: str | None = None,
     ) -> PaperMatchingRun:
         run.processed_count = processed
@@ -509,6 +668,7 @@ class PaperTradingRepository:
         run.skipped_count = skipped
         run.rejected_count = rejected
         run.failed_count = failed
+        run.warning_count = warning_count
         run.status = status
         run.error_details = error_details
         run.finished_at = datetime.now(timezone.utc)
@@ -520,6 +680,50 @@ class PaperTradingRepository:
         self.session.add(run)
         self.session.flush()
         return run
+
+    def acquire_matching_run(self, trade_date: date, account_id: int | None) -> tuple[PaperMatchingRun, bool]:
+        """Acquire the sole active run for a date/account scope.
+
+        The unique active-scope index installed by the schema migration closes
+        the race between the lookup and insert on databases supporting it.
+        """
+        active = (
+            self.session.query(PaperMatchingRun)
+            .filter(
+                PaperMatchingRun.trade_date == trade_date,
+                PaperMatchingRun.account_id == account_id,
+                PaperMatchingRun.scope_key == (str(account_id) if account_id is not None else "all"),
+                PaperMatchingRun.status == "running",
+            )
+            .with_for_update()
+            .first()
+        )
+        if active is not None:
+            return active, False
+        run = PaperMatchingRun(
+            trade_date=trade_date,
+            account_id=account_id,
+            scope_key=str(account_id) if account_id is not None else "all",
+            status="running",
+        )
+        self.session.add(run)
+        try:
+            self.session.flush()
+        except IntegrityError:
+            self.session.rollback()
+            active = (
+                self.session.query(PaperMatchingRun)
+                .filter(
+                    PaperMatchingRun.trade_date == trade_date,
+                    PaperMatchingRun.scope_key == (str(account_id) if account_id is not None else "all"),
+                    PaperMatchingRun.status == "running",
+                )
+                .first()
+            )
+            if active is None:
+                raise
+            return active, False
+        return run, True
 
     def list_matching_runs(self) -> list[PaperMatchingRun]:
         return list(self.session.query(PaperMatchingRun).order_by(PaperMatchingRun.id.asc()).all())

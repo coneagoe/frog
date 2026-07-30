@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -10,6 +10,7 @@ from stock.market import (  # noqa: E402
     get_a_stock_trading_window,
     is_a_market_open,
     is_a_market_open_today,
+    is_a_share_trade_date,
     is_hk_market_open,
     is_market_open_now,
 )
@@ -26,6 +27,11 @@ class TestIsAMarketOpen(unittest.TestCase):
 
     def test_is_a_market_open_requires_date(self):
         self.assertRaises(TypeError, is_a_market_open)
+
+    def test_is_a_share_trade_date_uses_date_parameter(self):
+        with patch("stock.market.is_a_market_open", return_value=True) as mock_is_a_market_open:
+            self.assertTrue(is_a_share_trade_date(date(2025, 4, 10)))
+            mock_is_a_market_open.assert_called_once_with("2025-04-10")
 
     def test_is_a_market_open_today_uses_is_a_market_open(self):
         with (

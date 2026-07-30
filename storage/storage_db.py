@@ -114,6 +114,7 @@ from .model import (
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
+    tb_name_paper_matching_runs,
     tb_name_paper_orders,
     tb_name_paper_position_lots,
     tb_name_paper_positions,
@@ -2382,16 +2383,97 @@ class StorageDb:
 
         Called once per process from ``__init__``.
         """
-        from .model.paper_trading import PaperTradeValidityCheck  # noqa: F401
+        from .model.paper_trading import DailyBarDiagnostic, PaperTradeValidityCheck, PaperValuationGap  # noqa: F401
 
         PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
+        DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
+        PaperValuationGap.__table__.create(self.engine, checkfirst=True)
 
         # Bail out if the paper_orders table does not exist yet --- fresh
         # installs rely on Base.metadata.create_all in __init__.
         if not inspect(self.engine).has_table(tb_name_paper_orders):
             return
 
+        if self.engine.dialect.name == "postgresql":
+            with self.engine.begin() as conn:
+                legacy_constraint = conn.execute(
+                    text(
+                        """
+                        SELECT con.conname
+                        FROM pg_constraint con
+                        JOIN pg_class rel ON rel.oid = con.conrelid
+                        WHERE rel.relname = :table_name
+                          AND con.contype = 'u'
+                          AND pg_get_constraintdef(con.oid) LIKE '%UNIQUE (idempotency_key)%'
+                        """
+                    ),
+                    {"table_name": tb_name_paper_orders},
+                ).scalar_one_or_none()
+                if legacy_constraint:
+                    conn.execute(text(f"ALTER TABLE {tb_name_paper_orders} DROP CONSTRAINT {legacy_constraint}"))
+                if not legacy_constraint:
+                    legacy_index = conn.execute(
+                        text(
+                            """
+                            SELECT indexname
+                            FROM pg_indexes
+                            WHERE tablename = :table_name
+                              AND indexdef LIKE '%(idempotency_key)%'
+                              AND indexdef NOT LIKE '%(account_id, idempotency_key)%'
+                            """
+                        ),
+                        {"table_name": tb_name_paper_orders},
+                    ).scalar_one_or_none()
+                    if legacy_index:
+                        conn.execute(text(f"DROP INDEX IF EXISTS {legacy_index}"))
+                conn.execute(
+                    text(
+                        f"CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_orders_account_idempotency_key "
+                        f"ON {tb_name_paper_orders} (account_id, idempotency_key) "
+                        "WHERE idempotency_key IS NOT NULL"
+                    )
+                )
+
         columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_orders)}
+        if inspect(self.engine).has_table(tb_name_paper_matching_runs):
+            run_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_matching_runs)}
+            if "warning_count" not in run_columns:
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {tb_name_paper_matching_runs} "
+                            "ADD COLUMN warning_count INTEGER NOT NULL DEFAULT 0"
+                        )
+                    )
+            if "scope_key" not in run_columns:
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {tb_name_paper_matching_runs} ADD COLUMN scope_key VARCHAR(40)"))
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        f"UPDATE {tb_name_paper_matching_runs} "
+                        "SET scope_key = COALESCE(CAST(account_id AS VARCHAR(40)), 'all') "
+                        "WHERE scope_key IS NULL"
+                    )
+                )
+                if self.engine.dialect.name == "postgresql":
+                    conn.execute(text(f"ALTER TABLE {tb_name_paper_matching_runs} ALTER COLUMN scope_key SET NOT NULL"))
+            if self.engine.dialect.name == "sqlite":
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            f"CREATE UNIQUE INDEX IF NOT EXISTS uq_matching_active_scope "
+                            f"ON {tb_name_paper_matching_runs} (trade_date, scope_key) WHERE status = 'running'"
+                        )
+                    )
+            elif self.engine.dialect.name == "postgresql":
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            f"CREATE UNIQUE INDEX IF NOT EXISTS uq_matching_active_scope "
+                            f"ON {tb_name_paper_matching_runs} (trade_date, scope_key) WHERE status = 'running'"
+                        )
+                    )
         if "validity_status" not in columns:
             with self.engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN validity_status VARCHAR(20)"))

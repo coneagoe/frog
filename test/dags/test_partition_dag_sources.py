@@ -1,6 +1,10 @@
+import json
 import re
+from datetime import date
 from pathlib import Path
+from unittest.mock import MagicMock, Mock
 
+import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +35,156 @@ PARTITION_DAG_SPECS = [
 
 def read_source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def test_business_date_uses_data_interval_end_in_local_timezone():
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    context = {
+        "data_interval_end": pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
+        "logical_date": pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
+    }
+    assert dag_module.get_business_date(context) == date(2026, 7, 28)
+
+
+def test_partition_uses_business_date_not_wall_clock():
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+
+    assert "end_date=business_date.isoformat()" in source
+    assert "datetime.now" not in source
+
+
+def test_closed_business_date_is_skipped(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    monkeypatch.setattr(dag_module, "is_a_share_trade_date", lambda business_date: False)
+    context = {"data_interval_end": pendulum.datetime(2026, 7, 28, 8, tz="UTC")}
+    with pytest.raises(dag_module.AirflowSkipException):
+        dag_module.ensure_a_share_trade_date(context)
+
+
+def test_warning_aggregate_writes_structured_bounded_payload(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    business_date = date(2026, 7, 28)
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: business_date)
+    redis_client = MagicMock()
+    monkeypatch.setattr(dag_module, "get_redis_client", lambda: redis_client)
+    outcomes = [
+        {
+            "stock_id": f"300{i:03d}",
+            "business_date": business_date.isoformat(),
+            "adjust": "bfq",
+            "classification": "missing_market_data",
+            "provider_outcomes": [{"provider": "tushare", "status": "empty", "detail": None}],
+            "resolved": False,
+        }
+        for i in range(21)
+    ]
+    ti = MagicMock()
+    ti.xcom_pull.side_effect = [
+        {"adjust": "hfq", "outcomes": []},
+        {"adjust": "bfq", "outcomes": outcomes},
+    ]
+
+    dag_module.save_download_result_to_redis(
+        partition_count=1,
+        ti=ti,
+        data_interval_end=pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
+    )
+
+    payload = json.loads(redis_client.set.call_args.args[1])
+    assert payload["date"] == "2026-07-28"
+    assert payload["result"] == "success"
+    assert payload["status"] == "warning"
+    assert payload["missing_symbols"] == sorted(item["stock_id"] for item in outcomes)
+    assert len(payload["provider_evidence"]) == 20
+
+
+def test_warning_summary_runs_matching_with_same_business_date(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    monkeypatch.setattr(dag_module, "get_business_date", lambda context: date(2026, 7, 28))
+    monkeypatch.setattr(dag_module, "is_a_share_trade_date", lambda business_date: True)
+    run_matching = Mock(return_value={"id": 7, "warning_count": 1})
+    monkeypatch.setattr(dag_module, "run_paper_trading_matching", run_matching)
+    result = dag_module.run_paper_trading_matching_for_active_accounts(
+        data_interval_end=pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
+        ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"})),
+    )
+    assert run_matching.call_args.kwargs["trade_date"] == "2026-07-28"
+    assert "run_id=7" in result
+    assert "warning_count=1" in result
+
+
+def test_closed_date_does_not_run_matching(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    monkeypatch.setattr(dag_module, "is_a_share_trade_date", lambda business_date: False)
+    run_matching = Mock()
+    monkeypatch.setattr(dag_module, "run_paper_trading_matching", run_matching)
+    with pytest.raises(dag_module.AirflowSkipException):
+        dag_module.run_paper_trading_matching_for_active_accounts(
+            data_interval_end=pendulum.datetime(2026, 7, 28, 8, tz="UTC")
+        )
+    run_matching.assert_not_called()
+
+
+def test_fatal_aggregate_does_not_run_matching(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: date(2026, 7, 28))
+    run_matching = Mock()
+    monkeypatch.setattr(dag_module, "run_paper_trading_matching", run_matching)
+    context = {
+        "data_interval_end": pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
+        "ti": MagicMock(xcom_pull=Mock(return_value={"result": "fail", "status": "fatal"})),
+    }
+    with pytest.raises(dag_module.AirflowSkipException):
+        dag_module.run_paper_trading_matching_for_active_accounts(**context)
+    run_matching.assert_not_called()
+
+
+def test_partition_diagnostic_failure_rolls_back_and_fails(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+    from paper_trading.domain.market_data_diagnostics import StockHistoryOutcome
+
+    session = MagicMock()
+    storage = MagicMock(Session=MagicMock(return_value=session))
+    storage.load_general_info_stock.return_value = pd.DataFrame({"股票代码": ["300996"]})
+    manager = MagicMock()
+    manager.download_stock_history_outcome.return_value = StockHistoryOutcome(
+        "300996", "2026-07-28", "bfq", "missing_market_data", (), False
+    )
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: date(2026, 7, 28))
+    monkeypatch.setattr(dag_module, "get_partitioned_ids", lambda ids, partition_id, partition_count: ids)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "DownloadManager", lambda: manager)
+    monkeypatch.setattr(dag_module, "_persist_diagnostic", MagicMock(side_effect=RuntimeError("db down")))
+
+    with pytest.raises(RuntimeError, match="db down"):
+        dag_module.download_stock_history_bfq_partition_task(
+            partition_id=0,
+            partition_count=1,
+            data_interval_end=pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
+        )
+
+    session.rollback.assert_called_once_with()
+    session.close.assert_called_once_with()
 
 
 def build_task_signature_pattern(task_name: str) -> str:
@@ -150,8 +304,9 @@ def test_daily_dag_runs_paper_trading_matching_after_successful_aggregate():
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
 
     assert re.search(r"def run_paper_trading_matching_for_active_accounts\s*\(", source)
-    assert "from paper_trading" not in source
-    assert "import paper_trading" not in source
+    matching_source = source[source.index("def run_paper_trading_matching_for_active_accounts") :]
+    assert "from paper_trading" not in matching_source
+    assert "import paper_trading" not in matching_source
     assert "from tools.paper_trading_cli import run_paper_trading_matching" in source
     assert "requests.post" not in source
     assert '"/paper/matching/runs"' not in source
@@ -170,10 +325,11 @@ def test_daily_dag_paper_trading_matching_uses_local_trade_date_and_commits_once
     """Paper-trading matching should use the DAG local date for matching."""
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
 
-    assert "trade_date = datetime.now(tz=LOCAL_TZ).date()" in source
+    assert "trade_date = ensure_a_share_trade_date(context)" in source
     assert "trade_date=trade_date.isoformat()" in source
-    assert "session.commit()" not in source
-    assert "session.close()" not in source
+    matching_source = source[source.index("def run_paper_trading_matching_for_active_accounts") :]
+    assert "session.commit()" not in matching_source
+    assert "session.close()" not in matching_source
 
 
 def test_compose_passes_paper_trading_api_config_to_airflow():

@@ -1,11 +1,15 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import Boolean, create_engine, inspect
+from sqlalchemy.dialects.postgresql import dialect
 from sqlalchemy.orm import Session
+from sqlalchemy.schema import CreateTable
 
 from paper_trading.storage.models import (
+    DailyBarDiagnostic,
     PaperPositionLot,
+    tb_name_daily_bar_diagnostics,
     tb_name_paper_accounts,
     tb_name_paper_orders,
     tb_name_paper_trade_validity_checks,
@@ -46,6 +50,7 @@ def test_paper_trading_tables_are_registered(tmp_path):
     assert tb_name_paper_orders in inspector.get_table_names()
     assert tb_name_paper_trades in inspector.get_table_names()
     assert tb_name_paper_trade_validity_checks in inspector.get_table_names()
+    assert tb_name_daily_bar_diagnostics in inspector.get_table_names()
 
     order_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_orders)}
     assert {"validity_status", "validity_reason", "validity_checked_at", "comment"} <= order_columns
@@ -76,3 +81,30 @@ def test_paper_trading_tables_are_registered(tmp_path):
         "created_at",
     } <= check_columns
     engine.dispose()
+
+
+def test_daily_bar_diagnostic_has_business_key_and_json_outcomes():
+    assert DailyBarDiagnostic.__table__.primary_key.columns.keys() == ["id"]
+    assert {column.name for column in DailyBarDiagnostic.__table__.columns} >= {
+        "business_date",
+        "stock_id",
+        "adjust",
+        "classification",
+        "provider_outcomes",
+        "first_observed_at",
+        "last_observed_at",
+        "resolved",
+    }
+    assert any(
+        constraint.name == "uq_daily_bar_diagnostics_business_key"
+        and {column.name for column in constraint.columns} == {"business_date", "stock_id", "adjust"}
+        for constraint in DailyBarDiagnostic.__table__.constraints
+    )
+
+
+def test_daily_bar_diagnostic_resolved_has_postgresql_boolean_default():
+    resolved = DailyBarDiagnostic.__table__.c.resolved
+    assert isinstance(resolved.type, Boolean)
+    assert str(resolved.server_default.arg) == "false"
+    ddl = str(CreateTable(DailyBarDiagnostic.__table__).compile(dialect=dialect()))
+    assert "resolved BOOLEAN DEFAULT false NOT NULL" in ddl

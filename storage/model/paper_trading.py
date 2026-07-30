@@ -1,9 +1,11 @@
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -26,6 +28,8 @@ tb_name_paper_account_snapshots = "paper_account_snapshots"
 tb_name_paper_matching_runs = "paper_matching_runs"
 tb_name_paper_trade_validity_checks = "paper_trade_validity_checks"
 tb_name_paper_pending_settlement = "paper_pending_settlement"
+tb_name_daily_bar_diagnostics = "daily_bar_diagnostics"
+tb_name_paper_valuation_gaps = "paper_valuation_gaps"
 
 
 class PaperAccount(Base):
@@ -102,6 +106,16 @@ class PaperPositionLot(Base):
 
 class PaperOrder(Base):
     __tablename__ = tb_name_paper_orders
+    __table_args__ = (
+        Index(
+            "uq_paper_orders_account_idempotency_key",
+            "account_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+            sqlite_where=text("idempotency_key IS NOT NULL"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True)
@@ -114,7 +128,7 @@ class PaperOrder(Base):
     filled_quantity = Column(Integer, nullable=False, server_default=text("0"))
     frozen_cash = Column(Numeric(20, 4), nullable=False, server_default=text("0"))
     frozen_quantity = Column(Integer, nullable=False, server_default=text("0"))
-    idempotency_key = Column(String(100), nullable=True, unique=True)
+    idempotency_key = Column(String(100), nullable=True)
     rejection_code = Column(String(50), nullable=True)
     rejection_reason = Column(Text, nullable=True)
     comment = Column(Text, nullable=True)
@@ -215,18 +229,44 @@ class PaperAccountSnapshot(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class PaperValuationGap(Base):
+    __tablename__ = tb_name_paper_valuation_gaps
+    __table_args__ = (UniqueConstraint("account_id", "trade_date", name="uq_paper_valuation_gaps_account_date"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    missing_symbols = Column(JSON, nullable=False)
+    details = Column(JSON, nullable=False)
+    first_observed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_observed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    resolved = Column(Boolean, nullable=False, server_default=text("false"), index=True)
+
+
 class PaperMatchingRun(Base):
     __tablename__ = tb_name_paper_matching_runs
+    __table_args__ = (
+        Index(
+            "uq_matching_active_scope",
+            "trade_date",
+            "scope_key",
+            unique=True,
+            sqlite_where=text("status = 'running'"),
+            postgresql_where=text("status = 'running'"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     trade_date = Column(Date, nullable=False, index=True)
     account_id = Column(Integer, nullable=True, index=True)
+    scope_key = Column(String(40), nullable=False, default="all")
     status = Column(String(20), nullable=False)
     processed_count = Column(Integer, nullable=False, server_default=text("0"))
     filled_count = Column(Integer, nullable=False, server_default=text("0"))
     skipped_count = Column(Integer, nullable=False, server_default=text("0"))
     rejected_count = Column(Integer, nullable=False, server_default=text("0"))
     failed_count = Column(Integer, nullable=False, server_default=text("0"))
+    warning_count = Column(Integer, nullable=False, server_default=text("0"))
     error_details = Column(Text, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -243,3 +283,20 @@ class PaperPendingSettlement(Base):
     source = Column(String(20), nullable=False)  # "hk_sell"
     settled = Column(Boolean, nullable=False, server_default=text("0"))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class DailyBarDiagnostic(Base):
+    __tablename__ = tb_name_daily_bar_diagnostics
+    __table_args__ = (
+        UniqueConstraint("business_date", "stock_id", "adjust", name="uq_daily_bar_diagnostics_business_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    business_date = Column(Date, nullable=False, index=True)
+    stock_id = Column(String(20), nullable=False, index=True)
+    adjust = Column(String(10), nullable=False)
+    classification = Column(String(50), nullable=False)
+    provider_outcomes = Column(JSON, nullable=False)
+    first_observed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_observed_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    resolved = Column(Boolean, nullable=False, server_default=text("false"), index=True)

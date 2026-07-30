@@ -1,9 +1,18 @@
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from paper_trading.storage.market_data import MarketDataProvider
-from paper_trading.storage.models import PaperAccountSnapshot
+from paper_trading.storage.models import PaperAccountSnapshot, PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
+
+
+@dataclass(frozen=True)
+class SnapshotOutcome:
+    status: str
+    snapshot: PaperAccountSnapshot | None = None
+    valuation_gap: PaperValuationGap | None = None
 
 
 class SnapshotService:
@@ -65,3 +74,27 @@ class SnapshotService:
             ).quantize(Decimal("0.0001")),
             pending_settlement=pending_settlement,
         )
+
+    def generate_snapshot_or_gap(self, account_id: int, trade_date: date) -> SnapshotOutcome:
+        missing_symbols: list[str] = []
+        details: list[dict[str, Any]] = []
+        for position in self.repo.get_positions(account_id):
+            if int(position.total_quantity or 0) <= 0:
+                continue
+            try:
+                self.market_data.get_daily_bar(position.symbol, trade_date, market=getattr(position, "market", None))
+            except KeyError as exc:
+                missing_symbols.append(position.symbol)
+                details.append(
+                    {"symbol": position.symbol, "market": getattr(position, "market", None), "error": str(exc)}
+                )
+        if missing_symbols:
+            gap = self.repo.upsert_valuation_gap(account_id, trade_date, sorted(missing_symbols), details)
+            return SnapshotOutcome(status="valuation_gap", valuation_gap=gap)
+
+        snapshot = self.generate_snapshot(account_id, trade_date)
+        existing_gap = self.repo.get_valuation_gap(account_id, trade_date)
+        resolved_gap = existing_gap
+        if existing_gap is not None and not existing_gap.resolved:
+            resolved_gap = self.repo.upsert_valuation_gap(account_id, trade_date, [], [], resolved=True)
+        return SnapshotOutcome(status="complete", snapshot=snapshot, valuation_gap=resolved_gap)

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import List
 
 import pandas as pd
@@ -79,6 +79,11 @@ def is_a_market_open(date_str: str) -> bool:
     cal = mcal.get_calendar("XSHG")
     schedule = cal.schedule(start_date=date_str, end_date=date_str)
     return not schedule.empty
+
+
+def is_a_share_trade_date(trade_date: date) -> bool:
+    """Return whether the given date is an XSHG trading day."""
+    return is_a_market_open(trade_date.isoformat())
 
 
 def is_a_market_open_today() -> bool:

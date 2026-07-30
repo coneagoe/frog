@@ -9,6 +9,7 @@ from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_security_name_provider, get_session
 from paper_trading.domain.enums import OrderSide, OrderStatus
 from paper_trading.storage.market_data import StorageMarketDataProvider
+from paper_trading.storage.models import PaperCashLedger, PaperMatchingRun, PaperTrade
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar, _FakeSecurityNameProvider
@@ -33,6 +34,9 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
         headers=headers,
     )
     account_id = account_response.json()["id"]
+    PaperTradingRepository(session).upsert_daily_bar_diagnostic(
+        date(2026, 6, 16), "000001", "bfq", "missing_market_data", [], resolved=False
+    )
 
     response = client.post(
         f"/paper/accounts/{account_id}/orders",
@@ -54,7 +58,7 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
     assert payload["limit_price"] == "10.0000"
 
 
-def test_create_order_auto_matches_when_limit_is_touched(monkeypatch, sqlite_session):
+def test_create_order_queues_without_matching(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
     session = sqlite_session
     Base.metadata.create_all(session.get_bind())
@@ -85,6 +89,9 @@ def test_create_order_auto_matches_when_limit_is_touched(monkeypatch, sqlite_ses
         "/paper/accounts", json={"name": "demo", "initial_cash": "100000.00"}, headers=headers
     )
     account_id = account_response.json()["id"]
+    PaperTradingRepository(session).upsert_daily_bar_diagnostic(
+        date(2026, 6, 16), "000001", "bfq", "missing_market_data", [], resolved=False
+    )
 
     response = client.post(
         f"/paper/accounts/{account_id}/orders",
@@ -100,12 +107,48 @@ def test_create_order_auto_matches_when_limit_is_touched(monkeypatch, sqlite_ses
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "filled"
-    assert payload["filled_quantity"] == 100
+    assert payload["status"] == "accepted"
+    assert payload["filled_quantity"] == 0
     trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
     trades = trades_response.json()
-    assert len(trades) == 1
-    assert trades[0]["order_id"] == payload["id"]
+    assert trades == []
+
+
+def test_create_order_idempotency_replays_original_order(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_market_data_provider] = lambda: StorageMarketDataProvider(
+        FakeHistoryStorage({}), FakeTradeCalendar([date(2026, 7, 28)])
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    account_id = client.post(
+        "/paper/accounts", json={"name": "demo", "initial_cash": "100000.00"}, headers=headers
+    ).json()["id"]
+    PaperTradingRepository(session).upsert_daily_bar_diagnostic(
+        date(2026, 7, 28), "000001", "bfq", "missing_market_data", [], resolved=False
+    )
+    payload = {
+        "symbol": "000001",
+        "side": "buy",
+        "quantity": 100,
+        "limit_price": "10.00",
+        "trade_date": "2026-07-28",
+        "idempotency_key": "order-20260728-1",
+    }
+
+    first = client.post(f"/paper/accounts/{account_id}/orders", json=payload, headers=headers)
+    second = client.post(f"/paper/accounts/{account_id}/orders", json=payload, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
+    assert session.query(PaperCashLedger).filter_by(account_id=account_id, event_type="freeze").count() == 1
+    assert session.query(PaperTrade).filter_by(account_id=account_id).count() == 0
+    assert session.query(PaperMatchingRun).filter_by(account_id=account_id).count() == 0
 
 
 def test_list_orders_and_trades_include_stock_name(monkeypatch, sqlite_session):
@@ -306,13 +349,12 @@ def test_order_comment_is_created_copied_to_trade_and_updated(monkeypatch, sqlit
     payload = response.json()
     assert payload["comment"] == "突破买入"
 
-    # Trade list has the same comment
+    # Queued orders do not have trades until the matching workflow runs.
     trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
     trades = trades_response.json()
-    assert len(trades) == 1
-    assert trades[0]["comment"] == "突破买入"
+    assert trades == []
 
-    # PATCH with new comment updates both order and trade
+    # PATCH updates the queued order comment.
     order_id = payload["id"]
     patch_response = client.patch(
         f"/paper/orders/{order_id}/comment",
@@ -323,10 +365,7 @@ def test_order_comment_is_created_copied_to_trade_and_updated(monkeypatch, sqlit
     updated = patch_response.json()
     assert updated["comment"] == "回踩确认后买入"
 
-    trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
-    assert trades_response.json()[0]["comment"] == "回踩确认后买入"
-
-    # PATCH with empty string returns comment is None and trade comment is None
+    # PATCH with empty string clears the order comment.
     patch_response = client.patch(
         f"/paper/orders/{order_id}/comment",
         json={"comment": ""},
@@ -335,9 +374,6 @@ def test_order_comment_is_created_copied_to_trade_and_updated(monkeypatch, sqlit
     assert patch_response.status_code == 200
     updated = patch_response.json()
     assert updated["comment"] is None
-
-    trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
-    assert trades_response.json()[0]["comment"] is None
 
 
 def test_update_order_comment_missing_order_returns_404(monkeypatch, sqlite_session):

@@ -30,6 +30,16 @@ def _services(tmp_path):
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
     trade_date = date(2026, 6, 16)
+    for business_date in (trade_date, date(2026, 6, 17)):
+        for symbol in ("000001.SZ", "000001"):
+            repo.upsert_daily_bar_diagnostic(
+                business_date,
+                symbol,
+                "bfq",
+                "missing_market_data",
+                [],
+                resolved=False,
+            )
     storage = FakeHistoryStorage(
         {
             "000001": pd.DataFrame(
@@ -69,6 +79,83 @@ def test_matching_fills_buy_order_and_creates_lot(tmp_path):
     assert filled.filled_quantity == 100
     assert repo.get_cash_available(account.id) == Decimal("98994.9900")
     assert lots[0].remaining_quantity == 100
+    engine.dispose()
+
+
+def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("retry-gap", Decimal("100000.00"))
+    repo.upsert_position(account.id, "300996", 100, 0, Decimal("900.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    class MutableMarketData:
+        available = False
+
+        def get_daily_bar(self, symbol, requested_date, market=None):
+            if symbol == "300996" and not self.available:
+                raise KeyError(f"No daily bar for {symbol} on {requested_date}")
+            return DailyBar(symbol, requested_date, Decimal("10"), Decimal("100"), Decimal("1"), Decimal("10"))
+
+        def next_trade_date(self, requested_date):
+            return requested_date
+
+    market_data = MutableMarketData()
+    matching_service.market_data = market_data
+    matching_service.snapshot_service.market_data = market_data
+
+    first_run = matching_service.run(trade_date)
+    assert first_run.warning_count == 1
+    assert repo.get_valuation_gap(account.id, trade_date).resolved is False
+    assert repo.list_snapshots(account.id) == []
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    cash_after_fill = repo.get_cash_available(account.id)
+    position_after_fill = repo.get_position(account.id, "000001.SZ").total_quantity
+
+    market_data.available = True
+    second_run = matching_service.run(trade_date)
+    session.commit()
+
+    assert second_run.filled_count == 0
+    assert len(repo.list_trades(account.id)) == 1
+    assert repo.get_cash_available(account.id) == cash_after_fill
+    assert repo.get_position(account.id, "000001.SZ").total_quantity == position_after_fill
+    assert len(repo.list_snapshots(account.id)) == 1
+    gap = repo.get_valuation_gap(account.id, trade_date)
+    assert gap is not None
+    assert gap.resolved is True
+    assert gap.missing_symbols == ["300996"]
+    assert gap.details == [
+        {"symbol": "300996", "market": "a_share", "error": "'No daily bar for 300996 on 2026-06-16'"}
+    ]
+    assert repo.list_snapshots(account.id)[0].market_value == Decimal("2000.0000")
+    engine.dispose()
+
+
+def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
+    engine, session, repo, _, _, trade_date = _services(tmp_path)
+    complete = repo.create_account("complete", Decimal("100000.00"))
+    incomplete = repo.create_account("incomplete", Decimal("100000.00"))
+    repo.upsert_position(complete.id, "000001.SZ", 100, 0, Decimal("900.00"))
+    repo.upsert_position(incomplete.id, "300996", 100, 0, Decimal("900.00"))
+
+    class MixedMarketData:
+        def get_daily_bar(self, symbol, requested_date, market=None):
+            if symbol == "300996":
+                raise KeyError(f"No daily bar for {symbol} on {requested_date}")
+            return DailyBar(symbol, requested_date, Decimal("10"), Decimal("100"), Decimal("1"), Decimal("10"))
+
+    market_data = MixedMarketData()
+    service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+    run = service.run(trade_date)
+    session.commit()
+
+    assert run.warning_count == 1
+    assert len(repo.list_snapshots(complete.id)) == 1
+    assert repo.get_valuation_gap(complete.id, trade_date) is None
+    gap = repo.get_valuation_gap(incomplete.id, trade_date)
+    assert gap is not None
+    assert gap.resolved is False
+    assert gap.missing_symbols == ["300996"]
     engine.dispose()
 
 
@@ -249,7 +336,7 @@ def test_snapshot_market_data_failure_marks_run_failed_and_preserves_fill(tmp_pa
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
     class FailingSnapshotService:
-        def generate_snapshot(self, account_id, snapshot_date):
+        def generate_snapshot_or_gap(self, account_id, snapshot_date):
             assert account_id == account.id
             assert snapshot_date == trade_date
             raise snapshot_exception
@@ -274,7 +361,7 @@ def test_snapshot_failure_does_not_attempt_another_market(tmp_path):
     calls = []
 
     class FailingSnapshotService:
-        def generate_snapshot(self, account_id, snapshot_date):
+        def generate_snapshot_or_gap(self, account_id, snapshot_date):
             raise KeyError("No daily bar for 00700")
 
     class CapturingMarketData:
@@ -296,12 +383,127 @@ def test_non_market_data_snapshot_exception_still_raises(tmp_path):
     order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
     class FailingSnapshotService:
-        def generate_snapshot(self, account_id, snapshot_date):
+        def generate_snapshot_or_gap(self, account_id, snapshot_date):
             raise RuntimeError("database failure")
 
     matching_service.snapshot_service = FailingSnapshotService()
     with pytest.raises(RuntimeError, match="database failure"):
         matching_service.run(trade_date, account.id)
+    engine.dispose()
+
+
+def test_matching_mixed_exact_date_data_keeps_missing_order_accepted(tmp_path):
+    engine, session, repo, order_service, _, trade_date = _services(tmp_path)
+    account = repo.create_account("mixed-data", Decimal("100000.00"))
+    repo.upsert_daily_bar_diagnostic(trade_date, "000002.SZ", "bfq", "missing_market_data", [], resolved=False)
+    available = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    missing = order_service.place_order(account.id, "000002.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    bars = {
+        ("000001.SZ", trade_date): DailyBar(
+            "000001.SZ", trade_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10")
+        )
+    }
+
+    class MixedMarketData:
+        def get_daily_bar(self, symbol, requested_date, market=None):
+            if (symbol, requested_date) not in bars:
+                raise KeyError(f"No daily bar for {symbol} on {requested_date}")
+            return bars[(symbol, requested_date)]
+
+    matching_service = MatchingService(repo, MixedMarketData(), SnapshotService(repo, MixedMarketData()))
+    run = matching_service.run(trade_date, account.id)
+    session.commit()
+
+    assert run.filled_count == 1
+    assert run.warning_count == 1
+    assert repo.get_order(available.id).status == OrderStatus.FILLED.value
+    assert repo.get_order(missing.id).status == OrderStatus.ACCEPTED.value
+    diagnostic = repo.list_daily_bar_diagnostics()
+    assert any(item.stock_id == "000002" and item.resolved is False for item in diagnostic)
+    engine.dispose()
+
+
+def test_matching_same_date_retry_fills_only_previously_accepted_order(tmp_path):
+    engine, session, repo, order_service, _, trade_date = _services(tmp_path)
+    account = repo.create_account("retry-data", Decimal("100000.00"))
+    repo.upsert_daily_bar_diagnostic(trade_date, "000002.SZ", "bfq", "missing_market_data", [], resolved=False)
+    available = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    missing = order_service.place_order(account.id, "000002.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    missing_bar = {}
+
+    class RetryMarketData:
+        def get_daily_bar(self, symbol, requested_date, market=None):
+            if symbol == "000001.SZ":
+                return DailyBar(symbol, requested_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
+            if not missing_bar:
+                raise KeyError(f"No daily bar for {symbol} on {requested_date}")
+            return missing_bar[(symbol, requested_date)]
+
+    market_data = RetryMarketData()
+    matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+    matching_service.run(trade_date, account.id)
+    session.commit()
+    missing_bar[("000002.SZ", trade_date)] = DailyBar(
+        "000002.SZ", trade_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10")
+    )
+    retry = matching_service.run(trade_date, account.id)
+    session.commit()
+
+    assert retry.filled_count == 1
+    assert repo.get_order(available.id).status == OrderStatus.FILLED.value
+    assert repo.get_order(missing.id).status == OrderStatus.FILLED.value
+    assert len(repo.list_trades(account.id)) == 2
+    engine.dispose()
+
+
+def test_matching_fill_resolves_historical_retry_diagnostic(tmp_path):
+    engine, session, repo, order_service, _, trade_date = _services(tmp_path)
+    account = repo.create_account("historical-retry", Decimal("100000.00"))
+    repo.upsert_daily_bar_diagnostic(trade_date, "000001.SZ", "bfq", "missing_exact_date", [], resolved=False)
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    class ExactDateMarketData:
+        def get_daily_bar(self, symbol, requested_date, market=None):
+            return DailyBar(symbol, requested_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
+
+    market_data = ExactDateMarketData()
+    matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+    result = matching_service.match_order(order)
+    session.commit()
+
+    assert result == "filled"
+    diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "000001")
+    assert diagnostic.resolved is True
+
+    retry = order_service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+    )
+    assert retry.status == OrderStatus.REJECTED.value
+    assert retry.rejection_code == "HISTORICAL_TRADE_DATE_NOT_ELIGIBLE"
+    engine.dispose()
+
+
+def test_matching_duplicate_active_run_returns_non_owner_without_double_fill(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("duplicate-run", Decimal("100000.00"))
+    order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    first, owner = repo.acquire_matching_run(trade_date, account.id)
+    second, second_owner = repo.acquire_matching_run(trade_date, account.id)
+
+    assert owner is True
+    assert second_owner is False
+    assert second.id == first.id
+
+    run = matching_service.run(trade_date, account.id)
+    session.commit()
+    assert run.id == first.id
+    assert len(repo.list_trades(account.id)) == 0
     engine.dispose()
 
 

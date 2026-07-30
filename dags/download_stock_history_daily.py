@@ -3,12 +3,15 @@
 import json
 import os
 import sys
-from datetime import datetime
+from dataclasses import asdict
+from datetime import date
+from typing import Any
 
 import redis
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator
+from airflow.utils.trigger_rule import TriggerRule
 
 # Ensure project root is on sys.path
 project_root = os.environ.get("FROG_PROJECT_ROOT") or "/opt/airflow/frog"
@@ -31,7 +34,21 @@ from common.const import (  # noqa: E402
     AdjustType,
     PeriodType,
 )
+from paper_trading.domain.market_data_diagnostics import canonical_adjust_label  # noqa: E402
+from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
+from stock.market import is_a_share_trade_date  # noqa: E402
 from tools.paper_trading_cli import run_paper_trading_matching  # noqa: E402
+
+
+def _persist_diagnostic(session, business_date, stock_id, adjust, outcome):
+    PaperTradingRepository(session).upsert_daily_bar_diagnostic(
+        business_date,
+        stock_id,
+        canonical_adjust_label(adjust),
+        outcome.classification,
+        [asdict(item) for item in outcome.provider_outcomes],
+        outcome.resolved,
+    )
 
 
 def get_redis_client() -> redis.Redis:
@@ -41,6 +58,19 @@ def get_redis_client() -> redis.Redis:
 
 
 PARTITION_COUNT = get_partition_count()
+
+
+def get_business_date(context: dict[str, Any]) -> date:
+    """Get the scheduled business date in the configured local timezone."""
+    return context["data_interval_end"].in_timezone(LOCAL_TZ).date()
+
+
+def ensure_a_share_trade_date(context: dict[str, Any]) -> date:
+    """Skip daily-history work when the scheduled date is not a trade date."""
+    business_date = get_business_date(context)
+    if not is_a_share_trade_date(business_date):
+        raise AirflowSkipException(f"A股{business_date.isoformat()}休市，跳过任务")
+    return business_date
 
 
 def download_stock_history_hfq_partition_task(*, partition_id: int, partition_count: int, **context):
@@ -60,14 +90,12 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
     from download import DownloadManager  # noqa: E402
     from storage import get_storage  # noqa: E402
 
-    #     if not is_a_market_open_today():
-    #         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
+    business_date = ensure_a_share_trade_date(context)
 
     if partition_id >= partition_count:
         raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
     start_date = "2010-01-01"
-    end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
 
     df_stocks = get_storage().load_general_info_stock()
     if df_stocks is None or df_stocks.empty:
@@ -78,30 +106,33 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
 
     manager = DownloadManager()
 
-    failed_ids: list[str] = []
+    outcomes = []
+    storage = get_storage()
+    assert storage.Session is not None
+    session = storage.Session()
     total = len(my_ids)
-    for idx, stock_id in enumerate(my_ids, start=1):
-        ok = manager.download_stock_history(
-            stock_id=stock_id,
-            period=PeriodType.DAILY,
-            start_date=start_date,
-            end_date=end_date,
-            adjust=AdjustType.HFQ,
-        )
-        if not ok:
-            failed_ids.append(stock_id)
+    try:
+        for idx, stock_id in enumerate(my_ids, start=1):
+            outcome = manager.download_stock_history_outcome(
+                stock_id=stock_id,
+                period=PeriodType.DAILY,
+                start_date=start_date,
+                end_date=business_date.isoformat(),
+                adjust=AdjustType.HFQ,
+            )
+            outcomes.append(asdict(outcome))
+            if outcome.classification != "downloaded":
+                _persist_diagnostic(session, business_date, stock_id, AdjustType.HFQ, outcome)
+            if idx % 50 == 0 or idx == total:
+                print(f"[HFQ p{partition_id:02d}] 进度: {idx}/{total}")
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-        if idx % 50 == 0 or idx == total:
-            print(f"[HFQ p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
-
-    if failed_ids:
-        preview = ",".join(failed_ids[:10])
-        raise Exception(
-            f"HFQ 分片下载失败: partition={partition_id}/{partition_count}, "
-            f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
-        )
-
-    return f"A股HFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, count={total}"
+    return {"adjust": "hfq", "partition_id": partition_id, "count": total, "outcomes": outcomes}
 
 
 def download_stock_history_bfq_partition_task(*, partition_id: int, partition_count: int, **context):
@@ -121,14 +152,12 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
     from download import DownloadManager  # noqa: E402
     from storage import get_storage  # noqa: E402
 
-    #     if not is_a_market_open_today():
-    #         raise AirflowSkipException("A股市场今日休市，跳过下载任务")
+    business_date = ensure_a_share_trade_date(context)
 
     if partition_id >= partition_count:
         raise AirflowSkipException(f"partition_id={partition_id} >= partition_count={partition_count}, skip")
 
     start_date = "2020-01-01"
-    end_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
 
     df_stocks = get_storage().load_general_info_stock()
     if df_stocks is None or df_stocks.empty:
@@ -139,49 +168,62 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
 
     manager = DownloadManager()
 
-    failed_ids: list[str] = []
+    outcomes = []
+    storage = get_storage()
+    assert storage.Session is not None
+    session = storage.Session()
     total = len(my_ids)
-    for idx, stock_id in enumerate(my_ids, start=1):
-        ok = manager.download_stock_history(
-            stock_id=stock_id,
-            period=PeriodType.DAILY,
-            start_date=start_date,
-            end_date=end_date,
-            adjust=AdjustType.BFQ,
-        )
-        if not ok:
-            failed_ids.append(stock_id)
+    try:
+        for idx, stock_id in enumerate(my_ids, start=1):
+            outcome = manager.download_stock_history_outcome(
+                stock_id=stock_id,
+                period=PeriodType.DAILY,
+                start_date=start_date,
+                end_date=business_date.isoformat(),
+                adjust=AdjustType.BFQ,
+            )
+            outcomes.append(asdict(outcome))
+            if outcome.classification != "downloaded":
+                _persist_diagnostic(session, business_date, stock_id, AdjustType.BFQ, outcome)
+            if idx % 50 == 0 or idx == total:
+                print(f"[BFQ p{partition_id:02d}] 进度: {idx}/{total}")
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
-        if idx % 50 == 0 or idx == total:
-            print(f"[BFQ p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
-
-    if failed_ids:
-        preview = ",".join(failed_ids[:10])
-        raise Exception(
-            f"BFQ 分片下载失败: partition={partition_id}/{partition_count}, "
-            f"failed={len(failed_ids)}/{total}, ids(sample)={preview}"
-        )
-
-    return f"A股BFQ历史数据下载成功完成: partition={partition_id}/{partition_count}, count={total}"
+    return {"adjust": "bfq", "partition_id": partition_id, "count": total, "outcomes": outcomes}
 
 
 def save_download_result_to_redis(*, partition_count: int, **context):
     """Aggregate partition results (HFQ + BFQ) and write success/fail to Redis."""
+    business_date = ensure_a_share_trade_date(context)
     ti = context["ti"]
-    total_count = 0
+    warning_symbols: set[str] = set()
+    evidence: list[dict[str, Any]] = []
 
     for adjust_prefix in ("hfq", "bfq"):
         for pid in range(partition_count):
             task_id = f"download_stock_history_{adjust_prefix}_p{pid:02d}"
             result = ti.xcom_pull(task_ids=task_id)
-            if result and "count=" in result:
-                count = int(result.split("count=")[1].split(",")[0])
-                total_count += count
+            if not isinstance(result, dict):
+                raise ValueError(f"invalid partition outcome for {task_id}")
+            for outcome in result.get("outcomes", []):
+                if outcome.get("classification") != "downloaded":
+                    warning_symbols.add(outcome["stock_id"])
+                    evidence.append({"adjust": result["adjust"], **outcome})
 
     r = get_redis_client()
-    execution_date = datetime.now(tz=LOCAL_TZ).date().isoformat()
-    result_str = "success" if total_count > 0 else "fail"
-    summary = {"date": execution_date, "result": result_str}
+    evidence.sort(key=lambda item: (item["stock_id"], item["adjust"]))
+    summary = {
+        "date": business_date.isoformat(),
+        "result": "success",
+        "status": "warning" if warning_symbols else "success",
+        "missing_symbols": sorted(warning_symbols),
+        "provider_evidence": evidence[:20],
+    }
 
     r.set(
         REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY,
@@ -189,18 +231,32 @@ def save_download_result_to_redis(*, partition_count: int, **context):
         ex=86400,
     )
 
-    return f"Results saved to Redis: {REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY}, result={result_str}"
+    return f"Results saved to Redis: {REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY}, result=success"
 
 
 def run_paper_trading_matching_for_active_accounts(**context):
     """Run paper-trading matching for all active accounts after successful download."""
-    trade_date = datetime.now(tz=LOCAL_TZ).date()
+    aggregate_summary = (
+        context.get("ti").xcom_pull(task_ids="save_download_result_to_redis") if context.get("ti") else None
+    )
+    aggregate_is_fatal = isinstance(aggregate_summary, dict) and aggregate_summary.get("result") != "success"
+    aggregate_is_fatal = aggregate_is_fatal or (
+        isinstance(aggregate_summary, str) and "result=fail" in aggregate_summary
+    )
+    if aggregate_is_fatal:
+        raise AirflowSkipException("daily-history aggregate was fatal; skip paper trading matching")
+    trade_date = ensure_a_share_trade_date(context)
     result = run_paper_trading_matching(
         trade_date=trade_date.isoformat(),
         base_url=os.environ.get("PAPER_TRADING_API_BASE_URL", "http://paper-trading:8000"),
         token=os.environ["PAPER_TRADING_API_TOKEN"],
     )
-    return f"Paper trading matching completed: trade_date={trade_date.isoformat()}, run_id={result.get('id')}"
+    warning_count = result.get("warning_count")
+    warning_suffix = f", warning_count={warning_count}" if warning_count is not None else ""
+    return (
+        f"Paper trading matching completed: trade_date={trade_date.isoformat()}, "
+        f"run_id={result.get('id')}{warning_suffix}"
+    )
 
 
 # Create DAG
@@ -240,12 +296,14 @@ aggregate_task = PythonOperator(
     task_id="save_download_result_to_redis",
     python_callable=save_download_result_to_redis,
     op_kwargs={"partition_count": PARTITION_COUNT},
+    trigger_rule=TriggerRule.ALL_SUCCESS,
     dag=dag,
 )
 
 paper_trading_matching_task = PythonOperator(
     task_id="run_paper_trading_matching",
     python_callable=run_paper_trading_matching_for_active_accounts,
+    trigger_rule=TriggerRule.ALL_SUCCESS,
     dag=dag,
 )
 

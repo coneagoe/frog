@@ -1,4 +1,5 @@
 from storage.model.paper_trading import (
+    DailyBarDiagnostic,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -10,6 +11,8 @@ from storage.model.paper_trading import (
     PaperPositionRoundTrip,
     PaperTrade,
     PaperTradeValidityCheck,
+    PaperValuationGap,
+    tb_name_daily_bar_diagnostics,
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
@@ -21,9 +24,11 @@ from storage.model.paper_trading import (
     tb_name_paper_positions,
     tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
+    tb_name_paper_valuation_gaps,
 )
 
 __all__ = [
+    "DailyBarDiagnostic",
     "PaperAccount",
     "PaperCashLedger",
     "PaperPendingSettlement",
@@ -33,8 +38,10 @@ __all__ = [
     "PaperOrder",
     "PaperTrade",
     "PaperTradeValidityCheck",
+    "PaperValuationGap",
     "PaperAccountSnapshot",
     "PaperMatchingRun",
+    "tb_name_daily_bar_diagnostics",
     "tb_name_paper_accounts",
     "tb_name_paper_cash_ledger",
     "tb_name_paper_pending_settlement",
@@ -46,4 +53,5 @@ __all__ = [
     "tb_name_paper_trade_validity_checks",
     "tb_name_paper_account_snapshots",
     "tb_name_paper_matching_runs",
+    "tb_name_paper_valuation_gaps",
 ]

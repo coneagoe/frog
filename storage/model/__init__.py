@@ -38,6 +38,7 @@ from .ingredient import (
     tb_name_ingredient_500,
 )
 from .paper_trading import (
+    DailyBarDiagnostic,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -48,6 +49,8 @@ from .paper_trading import (
     PaperPositionRoundTrip,
     PaperTrade,
     PaperTradeValidityCheck,
+    PaperValuationGap,
+    tb_name_daily_bar_diagnostics,
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
@@ -59,6 +62,7 @@ from .paper_trading import (
     tb_name_paper_positions,
     tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
+    tb_name_paper_valuation_gaps,
 )
 from .ssf_change_signal import SSFChangeSignal, tb_name_ssf_change_signal
 from .stk_holdernumber import StkHoldernumber, tb_name_stk_holdernumber
@@ -132,6 +136,9 @@ __all__ = [
     "PaperAccountSnapshot",
     "PaperMatchingRun",
     "PaperTradeValidityCheck",
+    "PaperValuationGap",
+    "DailyBarDiagnostic",
+    "tb_name_daily_bar_diagnostics",
     "tb_name_paper_trade_validity_checks",
     "tb_name_paper_accounts",
     "tb_name_paper_cash_ledger",
@@ -143,4 +150,5 @@ __all__ = [
     "tb_name_paper_trades",
     "tb_name_paper_account_snapshots",
     "tb_name_paper_matching_runs",
+    "tb_name_paper_valuation_gaps",
 ]

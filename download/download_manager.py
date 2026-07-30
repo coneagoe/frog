@@ -22,6 +22,11 @@ from download.provider_order import (
     parse_hk_stock_history_provider_order,
     parse_stock_history_provider_order,
 )
+from paper_trading.domain.market_data_diagnostics import (
+    ProviderOutcome,
+    StockHistoryOutcome,
+    canonical_adjust_label,
+)
 from stock.market import get_a_stock_trading_window
 from storage import (
     get_storage,
@@ -255,6 +260,32 @@ class DownloadManager:
         logging.error("All stock history providers failed for %s: %s", stock_id, provider_errors)
         return None
 
+    def _download_stock_history_with_provider_outcomes(
+        self,
+        stock_id: str,
+        start_date: str,
+        end_date: str,
+        period: PeriodType,
+        adjust: AdjustType,
+    ) -> tuple[pd.DataFrame | None, tuple[ProviderOutcome, ...]]:
+        outcomes: list[ProviderOutcome] = []
+        for provider in parse_stock_history_provider_order():
+            df: Any = None
+            try:
+                df = self.downloader.dl_history_data_stock_by_provider(
+                    provider, stock_id, start_date, end_date, period, adjust
+                )
+                validated = _validate_stock_history_data(df)
+                outcomes.append(ProviderOutcome(provider, "downloaded", f"rows={len(validated)}"))
+                return validated, tuple(outcomes)
+            except Exception as exc:  # noqa: BLE001
+                status = "empty" if isinstance(df, pd.DataFrame) and df.empty else "error"
+                outcomes.append(ProviderOutcome(provider, status, str(exc)))
+                logging.warning(
+                    "Stock history provider failed: provider=%s, stock_id=%s, error=%s", provider, stock_id, exc
+                )
+        return None, tuple(outcomes)
+
     def _download_hk_stock_history_with_fallback(
         self,
         stock_id: str,
@@ -363,6 +394,47 @@ class DownloadManager:
         except Exception as e:  # noqa: BLE001
             logging.error(f"Error processing history for {stock_id}: {e}")
             return False
+
+    def download_stock_history_outcome(
+        self,
+        stock_id: str,
+        period: PeriodType,
+        start_date: str,
+        end_date: str,
+        adjust: AdjustType = AdjustType.QFQ,
+    ) -> StockHistoryOutcome:
+        table_name = get_table_name(SecurityType.STOCK, period, adjust)
+        last_record = get_storage().get_last_record(table_name, stock_id)
+        actual_start_date = start_date
+        if last_record is not None:
+            actual_start_ts = pd.Timestamp(last_record[COL_DATE]) + pd.Timedelta(days=1)
+            actual_start_date = actual_start_ts.strftime("%Y%m%d")
+            if actual_start_ts > pd.to_datetime(end_date):
+                return StockHistoryOutcome(stock_id, end_date, canonical_adjust_label(adjust), "downloaded", (), True)
+
+        if period == PeriodType.DAILY:
+            trading_window = get_a_stock_trading_window(actual_start_date, end_date)
+            if trading_window is None:
+                return StockHistoryOutcome(stock_id, end_date, canonical_adjust_label(adjust), "downloaded", (), True)
+            window_start_date, window_end_date = trading_window
+        else:
+            window_start_date, window_end_date = actual_start_date, end_date
+
+        df, provider_outcomes = self._download_stock_history_with_provider_outcomes(
+            stock_id, window_start_date, window_end_date, period, adjust
+        )
+        if df is None:
+            classification = (
+                "provider_error" if any(item.status == "error" for item in provider_outcomes) else "missing_market_data"
+            )
+            return StockHistoryOutcome(
+                stock_id, end_date, canonical_adjust_label(adjust), classification, provider_outcomes, False
+            )
+        if not get_storage().save_history_data_stock(df, period, adjust):
+            raise RuntimeError(f"failed to save stock history for {stock_id}")
+        return StockHistoryOutcome(
+            stock_id, end_date, canonical_adjust_label(adjust), "downloaded", provider_outcomes, True
+        )
 
     def download_all_stock_history(
         self,

@@ -27,6 +27,76 @@ def test_create_account_initializes_nav_share_state(sqlite_session):
     assert ledger[0].share_delta == Decimal("100000.000000")
 
 
+def test_upsert_daily_bar_diagnostic_reuses_business_date_symbol_adjustment(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    first = repo.upsert_daily_bar_diagnostic(
+        business_date=date(2026, 7, 28),
+        stock_id="300996",
+        adjust="bfq",
+        classification="missing_market_data",
+        provider_outcomes=[{"provider": "tushare", "status": "empty", "detail": None}],
+        resolved=False,
+    )
+    second = repo.upsert_daily_bar_diagnostic(
+        business_date=date(2026, 7, 28),
+        stock_id="300996",
+        adjust="bfq",
+        classification="downloaded",
+        provider_outcomes=[{"provider": "tushare", "status": "downloaded", "detail": None}],
+        resolved=True,
+    )
+
+    assert second.id == first.id
+    assert second.resolved is True
+    assert second.classification == "downloaded"
+    assert second.provider_outcomes == [{"provider": "tushare", "status": "downloaded", "detail": None}]
+    assert repo.list_daily_bar_diagnostics() == [second]
+
+
+def test_bfq_diagnostic_label_is_found_by_default_lookup(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    repo.upsert_daily_bar_diagnostic(
+        business_date=date(2026, 7, 28),
+        stock_id="300996",
+        adjust="",
+        classification="missing_market_data",
+        provider_outcomes=[],
+        resolved=False,
+    )
+
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "300996") is True
+
+
+def test_diagnostic_lookup_normalizes_exchange_suffixed_and_bare_stock_ids(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    diagnostic = repo.upsert_daily_bar_diagnostic(
+        business_date=date(2026, 7, 28),
+        stock_id="000002.SZ",
+        adjust="bfq",
+        classification="missing_market_data",
+        provider_outcomes=[],
+        resolved=False,
+    )
+
+    assert diagnostic.stock_id == "000002"
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "000002") is True
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "000002.SZ") is True
+
+
+def test_provider_outcome_rejects_unknown_status_and_normalizes_detail():
+    from paper_trading.domain.market_data_diagnostics import ProviderOutcome
+
+    assert ProviderOutcome(provider="tushare", status="empty").detail is None
+    with pytest.raises(ValueError, match="status"):
+        ProviderOutcome(provider="tushare", status="partial")
+
+
 def test_add_cash_event_persists_nav_share_fields(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
@@ -84,6 +154,27 @@ def test_create_order_persists_accepted_order(tmp_path):
 
     assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
     engine.dispose()
+
+
+def test_get_order_by_idempotency_key_returns_existing_order(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    order = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        OrderStatus.ACCEPTED,
+        idempotency_key="order-1",
+    )
+
+    found = repo.get_order_by_idempotency_key(account.id, "order-1")
+    assert found is not None
+    assert found.id == order.id
+    assert repo.get_order_by_idempotency_key(account.id, "missing") is None
 
 
 def test_order_validity_summary_and_detail_are_persisted(tmp_path):

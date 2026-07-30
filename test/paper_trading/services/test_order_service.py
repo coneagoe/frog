@@ -1,10 +1,12 @@
 from datetime import date
 from decimal import Decimal
 from typing import Any
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from common.const import (
@@ -42,6 +44,17 @@ def _repo_and_service(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
+    repo.upsert_daily_bar_diagnostic(date(2026, 6, 16), "000001.SZ", "bfq", "missing_market_data", [], resolved=False)
+    session.commit()
+    for business_date in (date(2026, 6, 16), date(2026, 6, 17), date(2026, 7, 21)):
+        repo.upsert_daily_bar_diagnostic(
+            business_date,
+            "000001.SZ",
+            "bfq",
+            "missing_market_data",
+            [],
+            resolved=False,
+        )
     storage = FakeHistoryStorage({})
     market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16), date(2026, 6, 17)]))
     return engine, session, repo, OrderService(repo, market_data)
@@ -105,6 +118,252 @@ def test_place_order_rejects_closed_trade_date(tmp_path):
     assert order.rejection_code == "INVALID_TRADE_DATE"
     assert order.rejection_reason == "Trade date is not open"
     assert repo.get_cash_available(account.id) == Decimal("100000.0000")
+    engine.dispose()
+
+
+def test_place_order_replays_idempotency_key_without_second_reservation(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("demo", Decimal("100000.00"))
+
+    first = service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="same-order",
+    )
+    second = service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="same-order",
+    )
+
+    assert second.id == first.id
+    assert len(repo.list_cash_ledger(account.id)) == 2
+    engine.dispose()
+
+
+def test_place_order_normalizes_whitespace_idempotency_to_none_without_collision(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("whitespace-key", Decimal("100000.00"))
+
+    first = service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="   ",
+    )
+    second = service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="\t \n",
+    )
+    session.commit()
+
+    assert first.id != second.id
+    assert first.idempotency_key is None
+    assert second.idempotency_key is None
+    assert len(repo.list_cash_ledger(account.id)) == 3  # initial deposit + two freezes
+    engine.dispose()
+
+
+def test_place_order_allows_same_idempotency_key_for_different_accounts(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    first_account = repo.create_account("first-account", Decimal("100000.00"))
+    second_account = repo.create_account("second-account", Decimal("100000.00"))
+
+    first = service.place_order(
+        first_account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="shared-key",
+    )
+    second = service.place_order(
+        second_account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="shared-key",
+    )
+    session.commit()
+
+    assert first.id != second.id
+    assert first.account_id == first_account.id
+    assert second.account_id == second_account.id
+    engine.dispose()
+
+
+def test_place_order_integrity_collision_rolls_back_and_re_fetches_existing_order(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("collision-account", Decimal("100000.00"))
+    existing = service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="racing-key",
+    )
+    session.commit()
+
+    original_create_order = repo.create_order
+    create_order_calls = 0
+
+    def collide_once(*args, **kwargs):
+        nonlocal create_order_calls
+        create_order_calls += 1
+        if create_order_calls == 1:
+            raise IntegrityError("simulated concurrent idempotency insert", {}, Exception())
+        return original_create_order(*args, **kwargs)
+
+    repo.get_order_by_idempotency_key = Mock(side_effect=[None, existing])
+    repo.create_order = Mock(side_effect=collide_once)
+
+    replayed = service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="racing-key",
+    )
+
+    assert replayed.id == existing.id
+    assert create_order_calls == 1
+    assert len(repo.list_cash_ledger(account.id)) == 2  # initial deposit + original freeze
+    engine.dispose()
+
+
+def test_place_order_rejects_open_historical_date_without_unresolved_bfq_diagnostic(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("historical-date", Decimal("100000.00"))
+
+    order = service.place_order(
+        account.id,
+        "000002.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "HISTORICAL_TRADE_DATE_NOT_ELIGIBLE"
+    assert repo.get_cash_available(account.id) == Decimal("100000.0000")
+    engine.dispose()
+
+
+def test_past_a_share_order_requires_unresolved_canonical_bfq_diagnostic(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("historical-canonical", Decimal("100000.00"))
+    trade_date = date(2026, 6, 17)
+    repo.upsert_daily_bar_diagnostic(trade_date, "000002.SZ", "bfq", "missing_market_data", [], resolved=False)
+
+    order = service.place_order(
+        account.id,
+        "000002",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+    )
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == Market.A_SHARE.value
+    engine.dispose()
+
+
+def test_historical_diagnostic_gate_is_only_for_a_share_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("historical-market-guard", Decimal("100000.00"))
+    service = OrderService(repo, FakeMarketDataProvider())
+
+    order = service._place_a_share_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 7, 21),
+        Market.HK_CONNECT,
+        None,
+        None,
+    )
+
+    assert order.status == OrderStatus.ACCEPTED.value
+
+
+def test_past_hk_connect_order_uses_hk_validation_without_bfq_diagnostic(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("historical-hk", Decimal("100000.00"))
+    sqlite_session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
+    sqlite_session.flush()
+    service = OrderService(
+        repo,
+        FakeMarketDataProvider(),
+        hk_metadata=HkConnectMetadataProvider(sqlite_session),
+    )
+
+    order = service.place_order(
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("400.00"),
+        date(2026, 7, 21),
+        market=Market.HK_CONNECT,
+    )
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == Market.HK_CONNECT.value
+
+
+def test_place_order_rejects_idempotency_key_for_different_request(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("demo", Decimal("100000.00"))
+    service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        idempotency_key="same-order",
+    )
+
+    with pytest.raises(Exception, match="idempotency key already belongs"):
+        service.place_order(
+            account.id,
+            "000001.SZ",
+            OrderSide.BUY,
+            200,
+            Decimal("10.00"),
+            date(2026, 6, 16),
+            idempotency_key="same-order",
+        )
     engine.dispose()
 
 
@@ -207,6 +466,8 @@ def test_place_buy_order_sets_validity_valid_with_daily_bar(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
+    repo.upsert_daily_bar_diagnostic(date(2026, 6, 16), "000001.SZ", "bfq", "missing_market_data", [], resolved=False)
+    session.commit()
 
     bar = pd.DataFrame(
         [
@@ -538,6 +799,7 @@ def test_a_share_order_unchanged_with_market_omitted(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("a-demo", Decimal("100000.00"))
+    repo.upsert_daily_bar_diagnostic(date(2026, 7, 21), "000001.SZ", "bfq", "missing_market_data", [], resolved=False)
     md = FakeMarketDataProvider()
     hk_meta = HkConnectMetadataProvider(sqlite_session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
@@ -557,6 +819,7 @@ def test_a_share_explicit_market_still_works(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("a-explicit", Decimal("100000.00"))
+    repo.upsert_daily_bar_diagnostic(date(2026, 7, 21), "000001.SZ", "bfq", "missing_market_data", [], resolved=False)
     md = FakeMarketDataProvider()
     hk_meta = HkConnectMetadataProvider(sqlite_session)
     service = OrderService(repo, md, hk_metadata=hk_meta)

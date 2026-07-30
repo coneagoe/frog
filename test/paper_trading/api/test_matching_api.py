@@ -16,6 +16,14 @@ def test_matching_api_records_snapshot_market_data_failure(monkeypatch, sqlite_s
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("api-failure", Decimal("100000.00"))
+    repo.upsert_daily_bar_diagnostic(
+        date(2026, 7, 27),
+        "00700",
+        "bfq",
+        "missing_market_data",
+        [],
+        resolved=False,
+    )
     order = repo.create_order(
         account_id=account.id,
         symbol="00700",
@@ -49,7 +57,12 @@ def test_matching_api_records_snapshot_market_data_failure(monkeypatch, sqlite_s
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "failed"
-    assert f"account={account.id}, trade_date=2026-07-27" in body["error_details"]
+    assert body["status"] == "completed_with_warnings"
+    assert body["warning_count"] == 1
+    gap = repo.get_valuation_gap(account.id, date(2026, 7, 27))
+    assert gap is not None
+    assert gap.resolved is False
+    assert gap.missing_symbols == ["00700"]
     assert repo.list_snapshots(account.id) == []
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    assert len(repo.list_trades(account.id)) == 1

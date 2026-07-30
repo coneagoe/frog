@@ -237,6 +237,22 @@ def _mock_client(**kwargs) -> MagicMock:
     return client
 
 
+def test_matching_response_preserves_warning_fields():
+    client = _mock_client()
+    client.run_matching.return_value = {
+        "id": 7,
+        "trade_date": "2026-07-28",
+        "status": "completed",
+        "filled_count": 1,
+        "accepted_count": 1,
+        "warning_count": 1,
+    }
+    with patch("tools.paper_trading_cli.PaperTradingApiClient", return_value=client):
+        result = run_paper_trading_matching("2026-07-28", base_url="http://localhost:8000", token="token")
+    assert result["accepted_count"] == 1
+    assert result["warning_count"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Account commands
 # ---------------------------------------------------------------------------
@@ -501,12 +517,15 @@ class TestAccountImportPositions:
 
     def test_import_positions_forwards_hk_connect_market(self, tmp_path):
         csv_path = tmp_path / "holdings.csv"
-        csv_path.write_text("symbol,quantity,cost_price,buy_trade_date,market\n00700,100,300.00,2026-01-15,hk_connect\n")
+        csv_path.write_text(
+            "symbol,quantity,cost_price,buy_trade_date,market\n00700,100,300.00,2026-01-15,hk_connect\n"
+        )
         client = _mock_client()
         client.import_positions.return_value = {"imported_count": 1, "positions": []}
-        assert main(
-            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client
-        ) == EXIT_CODES["OK"]
+        assert (
+            main(["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client)
+            == EXIT_CODES["OK"]
+        )
         assert client.import_positions.call_args.kwargs["positions"][0]["market"] == "hk_connect"
 
     def test_import_positions_blank_market_defaults_to_a_share(self, tmp_path):
@@ -514,18 +533,20 @@ class TestAccountImportPositions:
         csv_path.write_text("symbol,quantity,cost_price,buy_trade_date,market\n000001,100,10.50,2026-01-15,  \n")
         client = _mock_client()
         client.import_positions.return_value = {"imported_count": 1, "positions": []}
-        assert main(
-            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client
-        ) == EXIT_CODES["OK"]
+        assert (
+            main(["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client)
+            == EXIT_CODES["OK"]
+        )
         assert client.import_positions.call_args.kwargs["positions"][0]["market"] == "a_share"
 
     def test_import_positions_unsupported_market_is_local_validation_error(self, tmp_path):
         csv_path = tmp_path / "holdings.csv"
         csv_path.write_text("symbol,quantity,cost_price,buy_trade_date,market\n000001,100,10.50,2026-01-15,us_stock\n")
         client = _mock_client()
-        assert main(
-            ["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client
-        ) == EXIT_CODES["VALIDATION_ERROR"]
+        assert (
+            main(["account", "import-positions", "--account-id", "1", "--file", str(csv_path)], client=client)
+            == EXIT_CODES["VALIDATION_ERROR"]
+        )
         client.import_positions.assert_not_called()
 
     def test_import_positions_missing_file_is_validation_error(self):

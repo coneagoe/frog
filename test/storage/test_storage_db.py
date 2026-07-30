@@ -1,12 +1,14 @@
 import os
 import sys
+import uuid
 from datetime import date
 from typing import cast
 from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import pytest
-from sqlalchemy import String, inspect, text
+from sqlalchemy import String, create_engine, event, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
@@ -41,6 +43,7 @@ from storage.model import (  # noqa: E402
     Base,
     PaperAccount,
     PaperPositionLot,
+    tb_name_daily_bar_diagnostics,
     tb_name_etf_daily,
     tb_name_history_data_daily_a_stock_bfq,
     tb_name_history_data_daily_a_stock_qfq,
@@ -333,6 +336,7 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
     storage.ensure_paper_trading_schema()
 
     inspector = inspect(storage.engine)
+    assert tb_name_daily_bar_diagnostics in inspector.get_table_names()
     account_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_accounts)}
     assert {
         "hk_commission_rate",
@@ -3501,6 +3505,85 @@ class TestSSFChangeSignalStorage:
         db.mark_ssf_change_signals_alerted(ids)
         pending = db.list_pending_ssf_change_signals()
         assert pending == []
+
+
+def test_postgresql_migrates_legacy_global_idempotency_index_to_account_scope(
+    monkeypatch, paper_trading_schema_upgrade
+):
+    """Exercise the live PostgreSQL upgrade without touching application tables."""
+    url = os.getenv("TEST_POSTGRESQL_URL", "postgresql://quant:quant@localhost:5432/quant")
+    schema = f"task3_{uuid.uuid4().hex}"
+    engine = None
+    admin_engine = None
+    try:
+        admin_engine = create_engine(url)
+        with admin_engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_engine(url)
+        event.listen(
+            engine,
+            "connect",
+            lambda dbapi_connection, _: dbapi_connection.cursor().execute(f'SET search_path TO "{schema}"'),
+        )
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_accounts (
+                        id INTEGER PRIMARY KEY,
+                        initial_cash NUMERIC(20, 4) NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE paper_orders (
+                        id INTEGER PRIMARY KEY,
+                        account_id INTEGER NOT NULL,
+                        idempotency_key VARCHAR(100)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text("ALTER TABLE paper_orders ADD CONSTRAINT uq_task3_legacy_idempotency UNIQUE (idempotency_key)")
+            )
+
+        db = StorageDb.__new__(StorageDb)
+        db.engine = engine
+        monkeypatch.setattr("storage.storage_db.tb_name_paper_orders", "paper_orders")
+        monkeypatch.setattr("storage.storage_db.tb_name_paper_trade_validity_checks", "paper_trade_validity_checks")
+        monkeypatch.setattr("storage.storage_db.tb_name_paper_accounts", "paper_accounts")
+        monkeypatch.setattr("storage.storage_db.tb_name_paper_cash_ledger", "paper_cash_ledger")
+        monkeypatch.setattr("storage.storage_db.tb_name_paper_account_snapshots", "paper_account_snapshots")
+        monkeypatch.setattr("storage.storage_db.tb_name_paper_trades", "paper_trades")
+        monkeypatch.setattr("storage.storage_db.tb_name_paper_positions", "paper_positions")
+        monkeypatch.setattr("storage.storage_db.tb_name_paper_position_lots", "paper_position_lots")
+        db.ensure_paper_trading_schema()
+
+        with engine.connect() as conn:
+            indexes = conn.execute(
+                text(
+                    "SELECT indexname, indexdef FROM pg_indexes "
+                    "WHERE schemaname = current_schema() AND tablename = 'paper_orders'"
+                )
+            ).all()
+        index_names = {row[0] for row in indexes}
+        index_defs = {row[1] for row in indexes}
+        assert "uq_task3_legacy_idempotency" not in index_names
+        assert any("(account_id, idempotency_key)" in definition for definition in index_defs)
+    except OperationalError as exc:
+        pytest.skip(f"PostgreSQL unavailable: {exc}")
+    finally:
+        if engine is not None:
+            assert admin_engine is not None
+            with admin_engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            engine.dispose()
+        if admin_engine is not None:
+            admin_engine.dispose()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -205,3 +207,59 @@ def test_snapshot_passes_position_market_to_get_daily_bar(sqlite_session):
     assert ("000001.SZ", "a_share") in md.captured or ("000001.SZ", None) in md.captured, (
         f"A-share position market not found, got {md.captured}"
     )
+
+
+def test_missing_exact_date_position_bar_records_valuation_gap(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("valuation-gap", Decimal("100000.00"))
+    repo.upsert_position(account.id, "300996", 100, 0, Decimal("900.00"))
+
+    class MissingBarProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError(f"No daily bar for {symbol} on {trade_date}")
+
+    outcome = SnapshotService(repo, MissingBarProvider()).generate_snapshot_or_gap(account.id, date(2026, 7, 28))
+
+    assert outcome.status == "valuation_gap"
+    assert repo.list_snapshots(account.id) == []
+    gap = repo.get_valuation_gap(account.id, date(2026, 7, 28))
+    assert gap is not None
+    assert gap.missing_symbols == ["300996"]
+    assert repo.list_trades(account.id) == []
+    assert repo.get_cash_available(account.id) == Decimal("100000.0000")
+
+
+def test_missing_bar_details_support_legacy_position_without_market():
+    trade_date = date(2026, 7, 28)
+
+    class MissingBarProvider:
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            assert market is None
+            raise KeyError(f"No daily bar for {symbol} on {trade_date}")
+
+    class LegacyPosition:
+        symbol = "300996"
+        total_quantity = 100
+
+    class Repository:
+        def get_positions(self, account_id):
+            return [LegacyPosition()]
+
+        def upsert_valuation_gap(self, account_id, requested_date, missing_symbols, details):
+            return SimpleNamespace(
+                account_id=account_id,
+                trade_date=requested_date,
+                missing_symbols=missing_symbols,
+                details=details,
+            )
+
+    outcome = SnapshotService(cast(Any, Repository()), cast(Any, MissingBarProvider())).generate_snapshot_or_gap(
+        1, trade_date
+    )
+
+    assert outcome.status == "valuation_gap"
+    assert outcome.valuation_gap is not None
+    assert outcome.valuation_gap.details == [
+        {"symbol": "300996", "market": None, "error": "'No daily bar for 300996 on 2026-07-28'"}
+    ]

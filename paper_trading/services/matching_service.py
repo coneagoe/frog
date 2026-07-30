@@ -33,13 +33,26 @@ class MatchingService:
         self.round_trip_service = RoundTripService(repo)
 
     def run(self, trade_date: date, account_id: int | None = None):
-        run = self.repo.create_matching_run(trade_date, account_id, MatchingRunStatus.RUNNING.value)
-        processed = filled = skipped = rejected = failed = 0
-        affected_accounts: set[int] = set()
-        for order in self.repo.get_orders_for_matching(trade_date, account_id):
+        run, owner = self.repo.acquire_matching_run(trade_date, account_id)
+        if not owner:
+            return run
+        processed = filled = skipped = rejected = failed = warning_count = 0
+        for order in self.repo.get_orders_for_matching_locked(trade_date, account_id):
             processed += 1
             try:
-                bar = self.market_data.get_daily_bar(order.symbol, trade_date, market=order.market)
+                try:
+                    bar = self.market_data.get_daily_bar(order.symbol, trade_date, market=order.market)
+                except KeyError as exc:
+                    warning_count += 1
+                    self.repo.upsert_daily_bar_diagnostic(
+                        trade_date,
+                        order.symbol,
+                        "bfq",
+                        "missing_exact_date",
+                        [{"provider": "market_data", "status": "empty", "detail": str(exc)}],
+                        False,
+                    )
+                    continue
                 if bar.suspended:
                     self._reject_order(order, "SUSPENDED_SYMBOL", "Symbol is suspended")
                     rejected += 1
@@ -50,17 +63,26 @@ class MatchingService:
                     skipped += 1
                     continue
                 self._fill_order(order)
+                self._resolve_matching_diagnostic(order)
                 filled += 1
-                affected_accounts.add(order.account_id)
             except Exception:
                 failed += 1
         snapshot_errors: list[str] = []
-        for current_account_id in affected_accounts:
+        snapshot_accounts = self.repo.get_accounts_for_snapshot(trade_date, account_id)
+        for current_account_id in sorted(set(snapshot_accounts)):
             try:
-                self.snapshot_service.generate_snapshot(current_account_id, trade_date)
+                outcome = self.snapshot_service.generate_snapshot_or_gap(current_account_id, trade_date)
+                if outcome.status == "valuation_gap":
+                    warning_count += 1
             except (KeyError, ValueError) as exc:
                 snapshot_errors.append(f"account={current_account_id}, trade_date={trade_date}: {exc}")
-        status = MatchingRunStatus.FAILED.value if snapshot_errors else MatchingRunStatus.COMPLETED.value
+        status = (
+            MatchingRunStatus.FAILED.value
+            if snapshot_errors
+            else MatchingRunStatus.COMPLETED_WITH_WARNINGS.value
+            if warning_count
+            else MatchingRunStatus.COMPLETED.value
+        )
         return self.repo.update_matching_run_counts(
             run,
             processed,
@@ -69,6 +91,7 @@ class MatchingService:
             rejected,
             failed,
             status,
+            warning_count=warning_count,
             error_details="; ".join(snapshot_errors) if snapshot_errors else None,
         )
 
@@ -99,6 +122,7 @@ class MatchingService:
             return "skipped"  # stays ACCEPTED
         try:
             self._fill_order(order)
+            self._resolve_matching_diagnostic(order)
             return "filled"
         except Exception:
             return "failed"  # stays ACCEPTED (run() outer except → failed)
@@ -117,6 +141,19 @@ class MatchingService:
             if position is not None:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
+
+    def _resolve_matching_diagnostic(self, order: PaperOrder) -> None:
+        if order.market == "a_share" and self.repo.has_unresolved_daily_bar_diagnostic(
+            order.trade_date, order.symbol, "bfq"
+        ):
+            self.repo.upsert_daily_bar_diagnostic(
+                order.trade_date,
+                order.symbol,
+                "bfq",
+                "resolved",
+                [{"provider": "market_data", "status": "downloaded"}],
+                True,
+            )
 
     def _next_trade_date(self, trade_date: date, n: int) -> date:
         """Return the n-th future trade date after trade_date via market_data."""

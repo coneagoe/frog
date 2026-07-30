@@ -90,6 +90,8 @@ uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account
 
 The `order update-comment` command with `--comment ""` clears the stored comment to `NULL` on the order and all linked trades.
 
+Order creation queues an accepted order; it does not run matching or create a trade immediately. If an `idempotency_key` is supplied, repeating the same request for the same account returns the original order without reserving cash again. Reusing that key for different order fields is rejected.
+
 Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. Explicit fee flags override the preset values for the new account.
 
 Use `--json` when machine-readable output is needed:
@@ -279,7 +281,7 @@ curl -X POST http://localhost:8000/paper/accounts/1/orders \
   -d '{"symbol":"000001","side":"buy","quantity":100,"limit_price":"10.00","trade_date":"2026-06-16","comment":"突破买入"}'
 ```
 
-Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, insufficient position, and A-share T+1 violation (same-day sell) are stored as rejected orders.
+Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, insufficient position, and A-share T+1 violation (same-day sell) are stored as rejected orders. A past A-share trade date can be used for a retry only when an unresolved BFQ daily-bar diagnostic exists for the symbol; otherwise the order is rejected as ineligible for a historical retry.
 
 ## Update Order Comment
 
@@ -340,9 +342,11 @@ curl -X POST http://localhost:8000/paper/matching/runs \
   -d '{"trade_date":"2026-06-16","account_id":1}'
 ```
 
-Matching processes accepted orders for the trade date. Tradable orders fill at limit price, untouched orders remain accepted, and suspended symbols are rejected.
+Matching processes accepted orders for the trade date. Tradable orders fill at limit price, untouched orders remain accepted, and suspended symbols are rejected. A missing exact-date A-share bar leaves the order accepted, records a daily-bar diagnostic, and allows a later same-date matching retry without duplicating an existing fill.
 
-If matching encounters a snapshot `KeyError` or `ValueError`, it commits the matching run with `status="failed"` and records the cause in `error_details`. Filled orders and trades are preserved, but no snapshot is written for the failed account. Inspect `error_details`, correct the market-data or holding issue, then use the documented order deletion and replay/rebuild workflow to reconstruct account state from the remaining order history. Do not retry the same matching request: matching only selects `ACCEPTED` orders, so reposting it cannot regenerate the missing snapshot.
+Snapshots require a daily bar for every held position. When one is unavailable, matching preserves fills, records a valuation gap, and completes with `status="completed_with_warnings"` and a non-zero `warning_count` instead of discarding the run. The account snapshot is created on a later retry once the missing data is available, and the valuation gap is marked resolved. Other matching or persistence errors remain failures and are reported in `error_details`.
+
+The daily A-share history DAG uses its scheduled local business date rather than wall-clock time, skips market holidays, and records provider outcomes for missing or failed BFQ/HFQ downloads. A warning summary still permits paper-trading matching; only a fatal aggregate failure prevents it from running.
 
 ## Query Account State
 

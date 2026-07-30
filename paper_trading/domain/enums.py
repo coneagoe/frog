@@ -37,6 +37,7 @@ class CashEventType(StrEnum):
 class MatchingRunStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
     FAILED = "failed"
 
 

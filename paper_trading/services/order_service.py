@@ -2,6 +2,8 @@ import re
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy.exc import IntegrityError
+
 from paper_trading.domain.enums import CashEventType, Market, OrderSide, OrderStatus
 from paper_trading.domain.errors import PaperTradingError
 from paper_trading.domain.fees import calculate_a_share_fees, fee_config_from_account
@@ -52,16 +54,39 @@ class OrderService:
         market: str | None = None,
     ) -> PaperOrder:
         resolved_market = Market.A_SHARE
+        idempotency_key = idempotency_key.strip() if idempotency_key and idempotency_key.strip() else None
+        market_error: PaperTradingError | None = None
         try:
-            try:
-                resolved_market = Market(market) if market else Market.A_SHARE
-            except ValueError:
+            resolved_market = Market(market) if market else Market.A_SHARE
+        except ValueError:
+            market_error = PaperTradingError(
+                "INVALID_MARKET",
+                f"Unsupported market: {market}",
+                {"market": market},
+            )
+        if idempotency_key:
+            existing = self.repo.get_order_by_idempotency_key(account_id, idempotency_key)
+            if existing is not None:
+                if market_error is not None:
+                    raise market_error
+                if self._matches_order_request(
+                    existing,
+                    account_id,
+                    symbol,
+                    side,
+                    quantity,
+                    limit_price,
+                    trade_date,
+                    resolved_market,
+                ):
+                    return existing
                 raise PaperTradingError(
-                    "INVALID_MARKET",
-                    f"Unsupported market: {market}",
-                    {"market": market},
+                    "IDEMPOTENCY_KEY_CONFLICT",
+                    "idempotency key already belongs to a different order",
                 )
-
+        try:
+            if market_error is not None:
+                raise market_error
             if resolved_market == Market.HK_CONNECT:
                 return self._place_hk_order(
                     account_id,
@@ -103,6 +128,43 @@ class OrderService:
             )
             self.validity_service.analyze_order(order)
             return order
+        except IntegrityError:
+            self.repo.session.rollback()
+            if idempotency_key:
+                existing = self.repo.get_order_by_idempotency_key(account_id, idempotency_key)
+                if existing is not None and self._matches_order_request(
+                    existing,
+                    account_id,
+                    symbol,
+                    side,
+                    quantity,
+                    limit_price,
+                    trade_date,
+                    resolved_market,
+                ):
+                    return existing
+            raise
+
+    @staticmethod
+    def _matches_order_request(
+        order: PaperOrder,
+        account_id: int,
+        symbol: str,
+        side: OrderSide,
+        quantity: int,
+        limit_price: Decimal,
+        trade_date: date,
+        market: Market,
+    ) -> bool:
+        return bool(
+            getattr(order, "account_id") == account_id
+            and getattr(order, "symbol") == symbol
+            and getattr(order, "side") == side.value
+            and getattr(order, "quantity") == quantity
+            and Decimal(str(getattr(order, "limit_price"))) == limit_price
+            and getattr(order, "trade_date") == trade_date
+            and getattr(order, "market") == market.value
+        )
 
     def _place_hk_order(
         self,
@@ -194,6 +256,16 @@ class OrderService:
                 "INVALID_TRADE_DATE",
                 "Trade date is not open",
                 {"trade_date": str(trade_date)},
+            )
+        if (
+            market == Market.A_SHARE
+            and trade_date < date.today()
+            and not self.repo.has_unresolved_daily_bar_diagnostic(trade_date, symbol)
+        ):
+            raise PaperTradingError(
+                "HISTORICAL_TRADE_DATE_NOT_ELIGIBLE",
+                "Past trade date is not eligible for retry",
+                {"trade_date": str(trade_date), "symbol": symbol},
             )
         if side == OrderSide.BUY:
             return self._accept_buy_order(
