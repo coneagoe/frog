@@ -940,10 +940,9 @@ def test_delete_regenerates_matching_runs(session):
         assert run.status == MatchingRunStatus.COMPLETED.value, f"Expected COMPLETED, got {run.status}"
 
 
-def test_match_order_unavailable_data_fails_not_rejects(session):
-    """When market data is unavailable during replay matching,
-    match_order must return 'failed' (not call _reject_order which
-    releases reservations and changes status).
+def test_match_order_unavailable_data_warns_not_rejects(session):
+    """When an exact-date bar is unavailable, matching records a warning
+    diagnostic and leaves the order accepted.
     """
     repo = PaperTradingRepository(session)
     market_data = FakeMarketDataProvider()
@@ -972,10 +971,60 @@ def test_match_order_unavailable_data_fails_not_rejects(session):
 
     outcome = matching_service.match_order(order)
 
-    # Must return 'failed' not True/False.
-    assert outcome == "failed", f"Expected 'failed', got {outcome!r}"
+    assert outcome == "warning", f"Expected 'warning', got {outcome!r}"
     # Order stays ACCEPTED, not rejected.
     assert order.status == OrderStatus.ACCEPTED.value, f"Expected ACCEPTED, got {order.status}"
+    diagnostic = next(
+        item
+        for item in repo.list_daily_bar_diagnostics()
+        if item.stock_id == "000001" and item.classification == "missing_exact_date"
+    )
+    assert diagnostic.classification == "missing_exact_date"
+    assert diagnostic.resolved is False
+
+
+def test_delete_replay_missing_bar_records_warning_run(session):
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("replay-warning", Decimal("100000"))
+    trade_date = date(2026, 7, 17)
+    surviving = repo.create_order(
+        account.id,
+        "000004",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0000"),
+    )
+    deleted = repo.create_order(
+        account.id,
+        "000002",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0000"),
+    )
+
+    class MissingSurvivingBar(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            if symbol == "000004":
+                raise KeyError(f"No daily bar for {symbol}")
+            return super().get_daily_bar(symbol, trade_date, market)
+
+    assert OrderDeleteService(repo, MissingSurvivingBar()).delete_order(deleted.id) is True
+
+    run = repo.list_matching_runs()[0]
+    assert run.processed_count == 1
+    assert run.warning_count == 1
+    assert run.failed_count == 0
+    assert run.status == MatchingRunStatus.COMPLETED_WITH_WARNINGS.value
+    assert repo.get_order(surviving.id).status == OrderStatus.ACCEPTED.value
+    diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "000004")
+    assert diagnostic.classification == "missing_exact_date"
+    assert diagnostic.resolved is False
 
 
 def test_delete_same_date_buy_then_sell_t1_rejects_if_no_matured_lot(session):

@@ -37,6 +37,7 @@ class MatchingService:
         if not owner:
             return run
         processed = filled = skipped = rejected = failed = warning_count = 0
+        order_errors: list[str] = []
         for order in self.repo.get_orders_for_matching_locked(trade_date, account_id):
             processed += 1
             try:
@@ -44,14 +45,7 @@ class MatchingService:
                     bar = self.market_data.get_daily_bar(order.symbol, trade_date, market=order.market)
                 except KeyError as exc:
                     warning_count += 1
-                    self.repo.upsert_daily_bar_diagnostic(
-                        trade_date,
-                        order.symbol,
-                        "bfq",
-                        "missing_exact_date",
-                        [{"provider": "market_data", "status": "empty", "detail": str(exc)}],
-                        False,
-                    )
+                    self._record_missing_exact_date_diagnostic(order, exc)
                     continue
                 if bar.suspended:
                     self._reject_order(order, "SUSPENDED_SYMBOL", "Symbol is suspended")
@@ -65,8 +59,9 @@ class MatchingService:
                 self._fill_order(order)
                 self._resolve_matching_diagnostic(order)
                 filled += 1
-            except Exception:
+            except Exception as exc:
                 failed += 1
+                order_errors.append(f"order={order.id}, account={order.account_id}, trade_date={trade_date}: {exc}")
         snapshot_errors: list[str] = []
         snapshot_accounts = self.repo.get_accounts_for_snapshot(trade_date, account_id)
         for current_account_id in sorted(set(snapshot_accounts)):
@@ -76,9 +71,10 @@ class MatchingService:
                     warning_count += 1
             except (KeyError, ValueError) as exc:
                 snapshot_errors.append(f"account={current_account_id}, trade_date={trade_date}: {exc}")
+        error_messages = [*order_errors, *snapshot_errors]
         status = (
             MatchingRunStatus.FAILED.value
-            if snapshot_errors
+            if error_messages
             else MatchingRunStatus.COMPLETED_WITH_WARNINGS.value
             if warning_count
             else MatchingRunStatus.COMPLETED.value
@@ -92,25 +88,30 @@ class MatchingService:
             failed,
             status,
             warning_count=warning_count,
-            error_details="; ".join(snapshot_errors) if snapshot_errors else None,
+            error_details="; ".join(error_messages) if error_messages else None,
         )
 
     def match_order(self, order: PaperOrder) -> str:
         """Match a single accepted order.
 
-        Returns one of ``'filled'``, ``'skipped'``, ``'rejected'``, or
-        ``'failed'``.  Does NOT create a matching run record or generate a
+        Returns one of ``'filled'``, ``'skipped'``, ``'rejected'``, ``'warning'``,
+        or ``'failed'``.  Does NOT create a matching run record or generate a
         snapshot — callers handle those.
 
         Semantics follow :meth:`run`:
         * ``'filled'``  — order was filled, status updated to FILLED.
         * ``'rejected'`` — symbol suspended (calls _reject_order).
         * ``'skipped'``  — price out of range; order stays ACCEPTED.
-        * ``'failed'``   — market data unavailable or fill error; order
+        * ``'warning'`` — exact-date market data is missing; a durable
+          diagnostic is recorded and the order stays ACCEPTED.
+        * ``'failed'``   — non-missing market-data error or fill error; order
           stays ACCEPTED with no side effects (matching *failed* outcome).
         """
         try:
             bar = self.market_data.get_daily_bar(order.symbol, order.trade_date, market=order.market)
+        except KeyError as exc:
+            self._record_missing_exact_date_diagnostic(order, exc)
+            return "warning"
         except Exception:
             return "failed"  # matches run() outer except → failed counter
         if bar.suspended:
@@ -141,6 +142,16 @@ class MatchingService:
             if position is not None:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
+
+    def _record_missing_exact_date_diagnostic(self, order: PaperOrder, error: KeyError) -> None:
+        self.repo.upsert_daily_bar_diagnostic(
+            order.trade_date,
+            order.symbol,
+            "bfq",
+            "missing_exact_date",
+            [{"provider": "market_data", "status": "empty", "detail": str(error)}],
+            False,
+        )
 
     def _resolve_matching_diagnostic(self, order: PaperOrder) -> None:
         if order.market == "a_share" and self.repo.has_unresolved_daily_bar_diagnostic(

@@ -101,7 +101,7 @@ def test_warning_aggregate_writes_structured_bounded_payload(monkeypatch):
     ti = MagicMock()
     ti.xcom_pull.side_effect = [
         {"adjust": "hfq", "outcomes": []},
-        {"adjust": "bfq", "outcomes": outcomes},
+        {"adjust": "bfq", "outcomes": list(reversed(outcomes))},
     ]
 
     dag_module.save_download_result_to_redis(
@@ -116,6 +116,33 @@ def test_warning_aggregate_writes_structured_bounded_payload(monkeypatch):
     assert payload["status"] == "warning"
     assert payload["missing_symbols"] == sorted(item["stock_id"] for item in outcomes)
     assert len(payload["provider_evidence"]) == 20
+    assert [item["stock_id"] for item in payload["provider_evidence"]] == [f"300{i:03d}" for i in range(20)]
+
+
+def test_complete_aggregate_writes_success_payload(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    business_date = date(2026, 7, 28)
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: business_date)
+    redis_client = MagicMock()
+    monkeypatch.setattr(dag_module, "get_redis_client", lambda: redis_client)
+    ti = MagicMock()
+    ti.xcom_pull.side_effect = [
+        {"adjust": "hfq", "outcomes": []},
+        {"adjust": "bfq", "outcomes": []},
+    ]
+
+    dag_module.save_download_result_to_redis(partition_count=1, ti=ti)
+
+    payload = json.loads(redis_client.set.call_args.args[1])
+    assert payload == {
+        "date": "2026-07-28",
+        "result": "success",
+        "status": "success",
+        "missing_symbols": [],
+        "provider_evidence": [],
+    }
 
 
 def test_warning_summary_runs_matching_with_same_business_date(monkeypatch):

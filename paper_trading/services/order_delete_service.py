@@ -66,7 +66,7 @@ class OrderDeleteService:
                 account_id,
                 MatchingRunStatus.RUNNING.value,
             )
-            processed = filled = skipped = rejected = failed = 0
+            processed = filled = skipped = rejected = failed = warning_count = 0
 
             for order in by_date[trade_date]:
                 processed += 1
@@ -83,6 +83,8 @@ class OrderDeleteService:
                     skipped += 1
                 elif outcome == "failed":
                     failed += 1
+                elif outcome == "warning":
+                    warning_count += 1
 
             if filled > 0:
                 matching_service.snapshot_service.generate_snapshot(
@@ -90,6 +92,13 @@ class OrderDeleteService:
                     trade_date,
                 )
 
+            status = (
+                MatchingRunStatus.FAILED.value
+                if failed
+                else MatchingRunStatus.COMPLETED_WITH_WARNINGS.value
+                if warning_count
+                else MatchingRunStatus.COMPLETED.value
+            )
             self.repo.update_matching_run_counts(
                 run,
                 processed,
@@ -97,7 +106,8 @@ class OrderDeleteService:
                 skipped,
                 rejected,
                 failed,
-                MatchingRunStatus.COMPLETED.value,
+                status,
+                warning_count=warning_count,
             )
 
         RoundTripService(self.repo).rebuild_account(account_id)

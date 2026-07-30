@@ -307,7 +307,7 @@ The order and its linked trades return `"comment": null` in API responses after 
 
 ### Delete an order
 
-Deleting an order hard-deletes the order. If the order had already filled, the paper trading backend recalculates the account's trades, cash ledger, positions, position lots, round trips, matching runs, validity checks, and snapshots from the remaining order history.
+Deleting an order hard-deletes the order. If the order had already filled, the paper trading backend recalculates the account's trades, cash ledger, positions, position lots, round trips, matching runs, validity checks, and snapshots from the remaining order history. A surviving order without an exact-date daily bar remains accepted; its replay matching run records a warning and daily-bar diagnostic rather than treating missing market data as a fatal replay failure.
 
 ```bash
 uv run tools/paper_trading_cli.py order delete --order-id 123
@@ -342,7 +342,7 @@ curl -X POST http://localhost:8000/paper/matching/runs \
   -d '{"trade_date":"2026-06-16","account_id":1}'
 ```
 
-Matching processes accepted orders for the trade date. Tradable orders fill at limit price, untouched orders remain accepted, and suspended symbols are rejected. A missing exact-date A-share bar leaves the order accepted, records a daily-bar diagnostic, and allows a later same-date matching retry without duplicating an existing fill.
+Matching processes accepted orders for the trade date. Tradable orders fill at limit price, untouched orders remain accepted, and suspended symbols are rejected. A missing exact-date A-share bar leaves the order accepted, records a daily-bar diagnostic, and allows a later same-date matching retry without duplicating an existing fill. Such missing-bar results complete with `status="completed_with_warnings"`; unexpected market-data, fill, settlement, trade, cash, position, or persistence errors mark the matching run as failed with contextual `error_details`.
 
 Snapshots require a daily bar for every held position. When one is unavailable, matching preserves fills, records a valuation gap, and completes with `status="completed_with_warnings"` and a non-zero `warning_count` instead of discarding the run. The account snapshot is created on a later retry once the missing data is available, and the valuation gap is marked resolved. Other matching or persistence errors remain failures and are reported in `error_details`.
 

@@ -461,6 +461,45 @@ def test_matching_mixed_exact_date_data_keeps_missing_order_accepted(tmp_path):
     engine.dispose()
 
 
+def test_matching_order_processing_failure_marks_run_failed(tmp_path, monkeypatch):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("fatal-order", Decimal("100000.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+    monkeypatch.setattr(
+        matching_service,
+        "_fill_order",
+        lambda current_order: (_ for _ in ()).throw(RuntimeError("cash ledger unavailable")),
+    )
+
+    run = matching_service.run(trade_date, account.id)
+
+    assert run.failed_count == 1
+    assert run.status == MatchingRunStatus.FAILED.value
+    assert f"order={order.id}" in run.error_details
+    assert "cash ledger unavailable" in run.error_details
+    assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
+    engine.dispose()
+
+
+def test_match_order_missing_exact_date_records_warning_diagnostic(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("missing-bar", Decimal("100000.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    class MissingMarketData:
+        def get_daily_bar(self, symbol, requested_date, market=None):
+            raise KeyError(f"No daily bar for {symbol} on {requested_date}")
+
+    matching_service.market_data = MissingMarketData()
+
+    assert matching_service.match_order(order) == "warning"
+    assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
+    diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "000001")
+    assert diagnostic.classification == "missing_exact_date"
+    assert diagnostic.resolved is False
+    engine.dispose()
+
+
 def test_matching_same_date_retry_fills_only_previously_accepted_order(tmp_path):
     engine, session, repo, order_service, _, trade_date = _services(tmp_path)
     account = repo.create_account("retry-data", Decimal("100000.00"))
