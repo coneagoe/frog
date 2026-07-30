@@ -19,6 +19,7 @@ class DownloadOutcome(TypedDict):
     provider_outcomes: list[dict[str, object]]
     resolved: bool
 
+
 PARTITION_DAG_SPECS = [
     (
         ROOT / "dags/download_stock_history_daily.py",
