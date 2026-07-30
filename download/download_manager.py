@@ -24,6 +24,7 @@ from download.provider_order import (
 )
 from paper_trading.domain.market_data_diagnostics import (
     ProviderOutcome,
+    ProviderStatus,
     StockHistoryOutcome,
     canonical_adjust_label,
 )
@@ -279,7 +280,7 @@ class DownloadManager:
                 outcomes.append(ProviderOutcome(provider, "downloaded", f"rows={len(validated)}"))
                 return validated, tuple(outcomes)
             except Exception as exc:  # noqa: BLE001
-                status = "empty" if isinstance(df, pd.DataFrame) and df.empty else "error"
+                status: ProviderStatus = "empty" if isinstance(df, pd.DataFrame) and df.empty else "error"
                 outcomes.append(ProviderOutcome(provider, status, str(exc)))
                 logging.warning(
                     "Stock history provider failed: provider=%s, stock_id=%s, error=%s", provider, stock_id, exc

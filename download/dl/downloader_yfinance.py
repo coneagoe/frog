@@ -2,6 +2,7 @@ import re
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import yfinance as yf
@@ -93,4 +94,4 @@ def download_history_data_stock_hk_yf(
     normalized[COL_TURNOVER_RATE] = 0.0
     normalized = normalized.reindex(columns=hk_history_columns)
     normalized[hk_history_numeric_columns] = normalized[hk_history_numeric_columns].astype("float64")
-    return normalized.reset_index(drop=True)
+    return cast(pd.DataFrame, normalized.reset_index(drop=True))

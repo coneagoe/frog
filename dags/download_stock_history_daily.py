@@ -5,7 +5,7 @@ import os
 import sys
 from dataclasses import asdict
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 import redis
 from airflow import DAG
@@ -62,7 +62,7 @@ PARTITION_COUNT = get_partition_count()
 
 def get_business_date(context: dict[str, Any]) -> date:
     """Get the scheduled business date in the configured local timezone."""
-    return context["data_interval_end"].in_timezone(LOCAL_TZ).date()
+    return cast(date, context["data_interval_end"].in_timezone(LOCAL_TZ).date())
 
 
 def ensure_a_share_trade_date(context: dict[str, Any]) -> date:
@@ -236,9 +236,8 @@ def save_download_result_to_redis(*, partition_count: int, **context):
 
 def run_paper_trading_matching_for_active_accounts(**context):
     """Run paper-trading matching for all active accounts after successful download."""
-    aggregate_summary = (
-        context.get("ti").xcom_pull(task_ids="save_download_result_to_redis") if context.get("ti") else None
-    )
+    ti: Any = context.get("ti")
+    aggregate_summary = ti.xcom_pull(task_ids="save_download_result_to_redis") if ti is not None else None
     aggregate_is_fatal = isinstance(aggregate_summary, dict) and aggregate_summary.get("result") != "success"
     aggregate_is_fatal = aggregate_is_fatal or (
         isinstance(aggregate_summary, str) and "result=fail" in aggregate_summary
