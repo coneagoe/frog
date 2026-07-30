@@ -52,8 +52,6 @@ def test_resolve_names_keeps_hk_results_when_a_share_loader_fails(sqlite_session
         return query(model)
 
     with patch.object(sqlite_session, "query", side_effect=query_with_a_share_failure):
-        result = provider.resolve_names(
-            [("a_share", "000001"), ("hk_connect", "00700")]
-        )
+        result = provider.resolve_names([("a_share", "000001"), ("hk_connect", "00700")])
 
     assert result == {("hk_connect", "00700"): "Tencent Holdings"}

@@ -411,7 +411,7 @@ class PaperTradingRepository:
             PaperOrder | None,
             self.session.query(PaperOrder)
             .filter(PaperOrder.account_id == account_id, PaperOrder.idempotency_key == idempotency_key)
-            .one_or_none()
+            .one_or_none(),
         )
 
     def get_order(self, order_id: int) -> PaperOrder:
@@ -487,7 +487,7 @@ class PaperTradingRepository:
     def get_valuation_gap(self, account_id: int, trade_date: date) -> PaperValuationGap | None:
         return cast(
             PaperValuationGap | None,
-            self.session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=trade_date).one_or_none()
+            self.session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=trade_date).one_or_none(),
         )
 
     def get_accounts_for_snapshot(self, trade_date: date, account_id: int | None = None) -> list[int]:

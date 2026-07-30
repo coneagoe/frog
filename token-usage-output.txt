@@ -1,0 +1,15 @@
+═══════════════════════════════════════════════════════════════════════════
+Token Analysis: Session current
+Status: Partial / failed analysis
+═══════════════════════════════════════════════════════════════════════════
+
+Timestamp: 2026-07-22T06:00:29.487Z
+
+TokenScope hit a non-fatal error and returned this fallback report so the OpenCode session stays usable.
+
+Fatal error: {"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_bc8b1ea0"}}
+
+Warnings:
+- TokenScope returned a fallback report instead of aborting the session: {"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_bc8b1ea0"}}
+
+Try again after switching to a supported model or updating the plugin.

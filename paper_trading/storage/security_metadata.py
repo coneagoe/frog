@@ -26,31 +26,15 @@ class SecurityNameProvider:
     def _resolve_a_share(self, symbols: Collection[str]) -> dict[tuple[str, str], str]:
         try:
             with self._session.begin_nested():
-                rows = (
-                    self._session.query(AStockBasic)
-                    .filter(AStockBasic.股票代码.in_(symbols))
-                    .all()
-                )
+                rows = self._session.query(AStockBasic).filter(AStockBasic.股票代码.in_(symbols)).all()
         except SQLAlchemyError:
             return {}
-        return {
-            ("a_share", row.股票代码): row.股票名称
-            for row in rows
-            if row.股票名称 and row.股票名称.strip()
-        }
+        return {("a_share", row.股票代码): row.股票名称 for row in rows if row.股票名称 and row.股票名称.strip()}
 
     def _resolve_hk_connect(self, symbols: Collection[str]) -> dict[tuple[str, str], str]:
         try:
             with self._session.begin_nested():
-                rows = (
-                    self._session.query(GeneralInfoGGT)
-                    .filter(GeneralInfoGGT.股票代码.in_(symbols))
-                    .all()
-                )
+                rows = self._session.query(GeneralInfoGGT).filter(GeneralInfoGGT.股票代码.in_(symbols)).all()
         except SQLAlchemyError:
             return {}
-        return {
-            ("hk_connect", row.股票代码): row.股票名称
-            for row in rows
-            if row.股票名称 and row.股票名称.strip()
-        }
+        return {("hk_connect", row.股票代码): row.股票名称 for row in rows if row.股票名称 and row.股票名称.strip()}

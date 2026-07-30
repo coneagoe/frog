@@ -1,0 +1,435 @@
+import logging
+
+import akshare as ak
+import pandas as pd
+
+from common.const import (
+    COL_CLOSE,
+    COL_ETF_ID,
+    COL_ETF_NAME,
+    COL_OPEN,
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
+    AdjustType,
+    PeriodType,
+    SecurityType,
+)
+from storage import get_storage
+
+# from utility import is_older_than_a_month, is_older_than_a_week, is_older_than_n_days
+
+g_df_stocks = None
+g_df_etfs = None
+g_df_hk_ggt_stocks = None
+
+
+def load_history_data_stock(
+    security_id: str,
+    period: PeriodType,
+    start_date: str,
+    end_date: str,
+    adjust: AdjustType = AdjustType.HFQ,
+) -> pd.DataFrame:
+    return get_storage().load_history_data_stock(
+        stock_id=security_id,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        adjust=adjust,
+    )
+
+
+def load_history_data_etf(
+    security_id: str,
+    period: PeriodType,
+    start_date: str,
+    end_date: str,
+    adjust: AdjustType = AdjustType.HFQ,
+) -> pd.DataFrame:
+    # Keep signature for compatibility; etf_daily backend does not support period/adjust.
+    if period != PeriodType.DAILY or adjust != AdjustType.HFQ:
+        logging.warning(
+            "load_history_data_etf now uses etf_daily only; period/adjust are ignored (%s, %s)",
+            period,
+            adjust,
+        )
+
+    return _load_etf_daily_wrapper(
+        security_id=security_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+def _load_etf_daily_wrapper(
+    security_id: str,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    return get_storage().load_etf_daily(
+        etf_id=security_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+def load_history_data_us_index(
+    security_id: str, period: PeriodType, start_date: str, end_date: str, **kwargs
+) -> pd.DataFrame:
+    pass
+
+    # download_history_data_us_index(
+    #     index=security_id, period=period, start_date=start_date, end_date=end_date
+    # )
+
+    # data_file_name = f"{security_id}.csv"
+    # if period == "daily":
+    #     data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    # elif period == "weekly":
+    #     data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    # else:
+    #     data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+
+    # start_date_ts0 = pd.Timestamp(start_date)
+    # end_date_ts0 = pd.Timestamp(end_date)
+    # df = pd.read_csv(data_path, encoding="utf_8_sig")
+    # df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+
+    # df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    # return df
+
+
+def load_history_data_a_index(
+    security_id: str, period: PeriodType, start_date: str, end_date: str, **kwargs
+) -> pd.DataFrame:
+    pass
+
+    # download_history_data_a_index(
+    #     index=security_id, period=period, start_date=start_date, end_date=end_date
+    # )
+
+    # data_file_name = f"{security_id}.csv"
+    # if period == "daily":
+    #     data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    # elif period == "weekly":
+    #     data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    # else:
+    #     data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+
+    # start_date_ts0 = pd.Timestamp(start_date)
+    # end_date_ts0 = pd.Timestamp(end_date)
+    # df = pd.read_csv(data_path, encoding="utf_8_sig")
+    # df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+
+    # df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    # return df
+
+
+def load_history_data_stock_hk_ggt(
+    security_id: str,
+    period: PeriodType,
+    start_date: str,
+    end_date: str,
+    adjust: AdjustType = AdjustType.HFQ,
+) -> pd.DataFrame:
+    return get_storage().load_history_data_stock_hk_ggt(
+        stock_id=security_id,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        adjust=adjust,
+    )
+
+    # download_history_data_stock_hk_ggt(security_id, period, start_date, end_date, adjust)
+
+    # data_file_name = f"{security_id}_{adjust}.csv"
+    # if period == "daily":
+    #     data_path = os.path.join(get_stock_data_path_1d(), data_file_name)
+    # elif period == "weekly":
+    #     data_path = os.path.join(get_stock_data_path_1w(), data_file_name)
+    # else:
+    #     data_path = os.path.join(get_stock_data_path_1M(), data_file_name)
+
+    # start_date_ts0 = pd.Timestamp(start_date)
+    # end_date_ts0 = pd.Timestamp(end_date)
+    # df = pd.read_csv(data_path, encoding="utf_8_sig")
+    # df[COL_DATE] = pd.to_datetime(df[COL_DATE])
+    # df = df[(start_date_ts0 <= df[COL_DATE]) & (df[COL_DATE] <= end_date_ts0)]
+    # return df
+
+
+def load_history_data(
+    security_id: str,
+    period: PeriodType,
+    start_date: str,
+    end_date: str,
+    adjust: AdjustType = AdjustType.HFQ,
+    security_type: SecurityType = SecurityType.AUTO,
+) -> pd.DataFrame:
+    if security_type == SecurityType.AUTO:
+        if is_stock(security_id):
+            loader = load_history_data_stock
+        elif is_etf(security_id):
+            loader = load_history_data_etf
+        elif is_us_index(security_id):
+            loader = load_history_data_us_index
+        elif is_a_index(security_id):
+            loader = load_history_data_a_index
+        elif is_hk_ggt_stock(security_id):
+            loader = load_history_data_stock_hk_ggt
+        else:
+            logging.error(f"Invalid security id: {security_id}")
+            exit(-1)
+    elif security_type == SecurityType.STOCK:
+        loader = load_history_data_stock
+    elif security_type == SecurityType.ETF:
+        loader = load_history_data_etf
+    elif security_type == SecurityType.US_INDEX:
+        loader = load_history_data_us_index
+    elif security_type == SecurityType.A_INDEX:
+        loader = load_history_data_a_index
+    elif security_type == SecurityType.HK_GGT_STOCK:
+        loader = load_history_data_stock_hk_ggt
+
+    df = loader(
+        security_id=security_id,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        adjust=adjust,
+    )
+
+    # df[COL_OPEN] = df[COL_OPEN].astype(float)
+    # df[COL_CLOSE] = df[COL_CLOSE].astype(float)
+    # df[COL_HIGH] = df[COL_HIGH].astype(float)
+    # df[COL_LOW] = df[COL_LOW].astype(float)
+    # df[COL_VOLUME] = df[COL_VOLUME].astype(float)
+
+    return df
+
+
+def load_general_info_stock() -> pd.DataFrame:
+    global g_df_stocks
+
+    if g_df_stocks is not None:
+        return g_df_stocks
+
+    try:
+        g_df_stocks = get_storage().load_general_info_stock()
+
+        return g_df_stocks
+
+    except Exception as e:
+        # Handle database errors gracefully and return empty DataFrame
+        logging.error(f"Failed to load stock general info: {e}")
+        g_df_stocks = pd.DataFrame(columns=[COL_STOCK_ID, COL_STOCK_NAME])
+        return g_df_stocks
+
+
+def load_general_info_etf():
+    global g_df_etfs
+
+    if g_df_etfs is not None:
+        return g_df_etfs
+
+    try:
+        storage = get_storage()
+
+        g_df_etfs = storage.load_general_info_etf()
+
+        return g_df_etfs
+
+    except Exception as e:
+        # Handle database errors gracefully and return empty DataFrame
+        logging.error(f"Failed to load ETF general info: {e}")
+        g_df_etfs = pd.DataFrame(columns=[COL_STOCK_ID, COL_STOCK_NAME])
+        return g_df_etfs
+
+
+def is_stock(stock_id: str):
+    global g_df_stocks
+
+    if g_df_stocks is None:
+        g_df_stocks = load_general_info_stock()
+
+    try:
+        return stock_id in g_df_stocks[COL_STOCK_ID].values
+    except KeyError:
+        return False
+
+
+def get_stock_name(stock_id: str):
+    global g_df_stocks
+
+    if g_df_stocks is None:
+        g_df_stocks = load_general_info_stock()
+
+    try:
+        return g_df_stocks.loc[g_df_stocks[COL_STOCK_ID] == stock_id][
+            COL_STOCK_NAME
+        ].iloc[0]
+    except IndexError:
+        return None
+
+
+def is_etf(etf_id: str):
+    global g_df_etfs
+
+    if g_df_etfs is None:
+        g_df_etfs = load_general_info_etf()
+
+    return etf_id in g_df_etfs[COL_ETF_ID].values
+
+
+def get_etf_name(etf_id: str):
+    global g_df_etfs
+
+    if g_df_etfs is None:
+        g_df_etfs = load_general_info_etf()
+
+    try:
+        return g_df_etfs.loc[g_df_etfs[COL_ETF_ID] == etf_id][COL_ETF_NAME].iloc[0]
+    except IndexError:
+        return None
+
+
+def is_us_index(security_id: str):
+    return security_id in [".IXIC", ".DJI", ".INX"]
+
+
+def is_a_index(security_id: str):
+    return security_id in [
+        "sz399987",  # 中证酒
+        "sh000813",  # 细分化工
+        "sz399552",  # 央视成长
+        "sz399998",  # 中证煤炭
+        "csi930901",  # 动漫游戏
+        "sh000300",  # 沪深300
+        "sz000905",  # 中证500
+        "sz000852",  # 中证1000
+        "sz399006",  # 创业板指
+    ]
+
+
+def get_security_name(security_id: str) -> str:
+    if security_id == ".IXIC":
+        return "NASDAQ Composite"
+    elif security_id == ".DJI":
+        return "Dow Jones Industrial Average"
+    elif security_id == ".INX":
+        return "S&P 500"
+    elif is_stock(security_id):
+        return get_stock_name(security_id)  # type: ignore
+    elif is_hk_ggt_stock(security_id):
+        return get_hk_ggt_stock_name(security_id)  # type: ignore
+    else:
+        return get_etf_name(security_id)  # type: ignore
+
+
+def is_hk_ggt_stock(stock_id: str):
+    """
+    是否是港股通股票
+    """
+    global g_df_hk_ggt_stocks
+
+    if g_df_hk_ggt_stocks is None:
+        g_df_hk_ggt_stocks = load_general_info_hk_ggt()
+
+    try:
+        return stock_id in g_df_hk_ggt_stocks[COL_STOCK_ID].values
+    except KeyError:
+        return False
+
+
+def get_hk_ggt_stock_name(stock_id: str):
+    global g_df_hk_ggt_stocks
+
+    if g_df_hk_ggt_stocks is None:
+        g_df_hk_ggt_stocks = load_general_info_hk_ggt()
+
+    try:
+        return g_df_hk_ggt_stocks.loc[g_df_hk_ggt_stocks[COL_STOCK_ID] == stock_id][
+            COL_STOCK_NAME
+        ].iloc[0]
+    except IndexError:
+        return None
+
+
+def load_general_info_hk_ggt() -> pd.DataFrame:
+    return get_storage().load_general_info_hk_ggt()
+
+
+def is_st(stock_id: str):
+    df = load_general_info_stock()
+    # print(df[df[COL_STOCK_ID] == stock_id])
+    return (
+        (df[COL_STOCK_ID] == stock_id)
+        & (
+            df[COL_STOCK_NAME].str.startswith("ST")
+            | df[COL_STOCK_NAME].str.startswith("*ST")
+        )
+    ).any()
+
+
+def drop_st(df: pd.DataFrame) -> pd.DataFrame:
+    df_gen_info = load_general_info_stock()
+    df_tmp = pd.merge(
+        df, df_gen_info[[COL_STOCK_ID, COL_STOCK_NAME]], on=COL_STOCK_ID, how="inner"
+    )
+    df_tmp = df_tmp[~df_tmp[COL_STOCK_NAME].str.startswith(("ST", "*ST"))]
+    return df_tmp
+
+
+def drop_low_price_stocks(
+    df: pd.DataFrame, start_date: str, end_date: str
+) -> pd.DataFrame:
+    def _get_first_price(stock_id: str, start_date: str, end_date: str) -> float:
+        df_stock = load_history_data_stock(
+            security_id=stock_id,
+            period=PeriodType.DAILY,
+            start_date=start_date,
+            end_date=end_date,
+            adjust=AdjustType.HFQ,
+        )
+        return df_stock[COL_CLOSE].iloc[0]  # type: ignore
+
+    df[COL_OPEN] = df[COL_STOCK_ID].apply(
+        lambda stock_id: _get_first_price(stock_id, start_date, end_date)
+    )
+    df = df[df[COL_OPEN] > 3]
+    return df
+
+
+def drop_suspended_stocks(stocks: list, date: str) -> list:
+    return stocks
+
+    date = date.replace("-", "")
+    df_suspended = ak.stock_tfp_em(date)
+    suspended_stocks = df_suspended["代码"].tolist()
+    filtered_stocks = [stock for stock in stocks if stock not in suspended_stocks]
+    return filtered_stocks
+
+
+def drop_delisted_stocks(stocks: list, start_date: str, end_date: str) -> list:
+    pass
+
+    # data_path = get_stock_delisting_info_path()
+    # if not os.path.exists(data_path) or is_older_than_n_days(data_path, 1):
+    #     download_delisted_stock_info()
+
+    # df = pd.read_csv(data_path, encoding="utf_8_sig")
+    # df[COL_STOCK_ID] = df[COL_STOCK_ID].astype(str)
+    # # FIXME: for hk stocks, the stock id is 5 digits
+    # df[COL_STOCK_ID] = df[COL_STOCK_ID].str.zfill(6)
+    # df = df[(start_date <= df[COL_IPO_DATE]) | (df[COL_DELISTING_DATE] <= end_date)]
+    # delisted_stocks = df[COL_STOCK_ID].tolist()
+    # filtered_stocks = [stock for stock in stocks if stock not in delisted_stocks]
+    # return filtered_stocks
+
+
+def load_ingredient_300(date: str) -> list:
+    return get_storage().load_ingredient_300().to_list()
+
+
+def load_ingredient_500(date: str) -> list:
+    return get_storage().load_ingredient_500().to_list()

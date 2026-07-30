@@ -80,3 +80,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 ## Detailed Reference
 - Local containers mount the repository at `/opt/airflow/frog`; DAG helpers also honor `FROG_PROJECT_ROOT` for import resolution.
 - Docker services use TimescaleDB/Postgres for Airflow metadata and business data, Redis for Celery broker/results, and Airflow with `CeleryExecutor`. Consult `docker-compose.yml` for the authoritative service, volume, and environment-variable configuration.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+This is a single-context repository. See `docs/agents/domain.md`.

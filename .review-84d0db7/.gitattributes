@@ -1,0 +1,46 @@
+# Force Unix line endings (LF) for all text files
+* text=auto eol=lf
+
+# Specific file types to ensure LF line endings
+*.py text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.csv text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.sh text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+*.conf text eol=lf
+*.xml text eol=lf
+*.sql text eol=lf
+
+# Dockerfile and related files
+Dockerfile text eol=lf
+*Dockerfile* text eol=lf
+docker-compose*.yml text eol=lf
+
+# Configuration files
+*.toml text eol=lf
+requirements.txt text eol=lf
+poetry.lock text eol=lf
+pyproject.toml text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Binary files (do not modify line endings)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.pyc binary

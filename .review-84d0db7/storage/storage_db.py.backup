@@ -1,0 +1,336 @@
+import json
+import logging
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+from .base import ConnectionError, DataNotFoundError, StorageBase, StorageError
+
+logger = logging.getLogger(__name__)
+
+
+class StorageDb(StorageBase):
+    """PostgreSQL数据库存储实现类"""
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """
+        初始化PostgreSQL数据库存储
+
+        Args:
+            config: 配置参数，包括:
+                - host: 数据库主机
+                - port: 数据库端口
+                - database: 数据库名
+                - username: 用户名
+                - password: 密码
+                - table_prefix: 表名前缀
+        """
+        super().__init__(config)
+        self.host = self.config.get("host", "localhost")
+        self.port = self.config.get("port", 5432)
+        self.database = self.config.get("database", "storage")
+        self.username = self.config.get("username", "")
+        self.password = self.config.get("password", "")
+        self.table_prefix = self.config.get("table_prefix", "storage_")
+
+        self.connection = None
+        self.cursor = None
+
+    def connect(self) -> bool:
+        """
+        建立PostgreSQL数据库连接
+
+        Returns:
+            bool: 连接是否成功
+        """
+        try:
+            connection_string = (
+                f"host={self.host} "
+                f"port={self.port} "
+                f"dbname={self.database} "
+                f"user={self.username} "
+                f"password={self.password}"
+            )
+
+            self.connection = psycopg2.connect(connection_string)
+            self.cursor = self.connection.cursor(cursor_factory=RealDictCursor)
+
+            # 创建存储表
+            self._create_storage_table()
+
+            self.is_connected = True
+            logger.info("PostgreSQL数据库连接成功")
+            return True
+
+        except Exception as e:
+            logger.error(f"PostgreSQL数据库连接失败: {str(e)}")
+            self.is_connected = False
+            # 确保在连接失败时清理资源
+            self.connection = None
+            self.cursor = None
+            return False
+
+    def disconnect(self) -> bool:
+        """
+        断开数据库连接
+
+        Returns:
+            bool: 断开是否成功
+        """
+        try:
+            # 修复：添加空值检查
+            if self.cursor is not None:
+                self.cursor.close()
+            if self.connection is not None:
+                self.connection.close()
+
+            self.cursor = None
+            self.connection = None
+            self.is_connected = False
+
+            logger.info("PostgreSQL数据库连接断开")
+            return True
+
+        except Exception as e:
+            logger.error(f"断开PostgreSQL数据库连接失败: {str(e)}")
+            return False
+
+    def _create_storage_table(self):
+        """创建存储表"""
+        # 修复：添加连接和游标的空值检查
+        if self.connection is None or self.cursor is None:
+            raise ConnectionError("数据库连接未建立")
+
+        table_name = f"{self.table_prefix}data"
+
+        sql = f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            key VARCHAR(255) PRIMARY KEY,
+            data TEXT,
+            data_type VARCHAR(50),
+            created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+
+        self.cursor.execute(sql)
+        self.connection.commit()
+
+    def _serialize_data(self, data: Any) -> tuple:
+        """序列化数据"""
+        if isinstance(data, pd.DataFrame):
+            return data.to_json(orient="records"), "dataframe"
+        elif isinstance(data, (dict, list)):
+            return json.dumps(data, ensure_ascii=False), "json"
+        elif isinstance(data, str):
+            return data, "string"
+        else:
+            return str(data), "string"
+
+    def _deserialize_data(self, data_str: str, data_type: str) -> Any:
+        """反序列化数据"""
+        if data_type == "dataframe":
+            return pd.read_json(data_str, orient="records")
+        elif data_type == "json":
+            return json.loads(data_str)
+        else:
+            return data_str
+
+    def _ensure_connection(self):
+        """确保数据库连接可用"""
+        if not self.is_connected or self.connection is None or self.cursor is None:
+            if not self.connect():
+                raise ConnectionError("无法建立数据库连接")
+
+    def save(self, data: Any, key: str, **kwargs) -> bool:
+        """
+        保存数据到PostgreSQL数据库
+
+        Args:
+            data: 要保存的数据
+            key: 数据标识键
+            **kwargs: 其他参数
+
+        Returns:
+            bool: 保存是否成功
+        """
+        try:
+            self._ensure_connection()
+
+            table_name = f"{self.table_prefix}data"
+            data_str, data_type = self._serialize_data(data)
+
+            # 使用INSERT ... ON CONFLICT
+            sql = f"""
+            INSERT INTO {table_name} (key, data, data_type)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (key) DO UPDATE SET
+            data = EXCLUDED.data,
+            data_type = EXCLUDED.data_type,
+            updated_time = CURRENT_TIMESTAMP
+            """
+            self.cursor.execute(sql, (key, data_str, data_type))
+
+            self.connection.commit()
+            logger.info(f"数据保存成功: {key}")
+            return True
+
+        except Exception as e:
+            logger.error(f"保存数据失败 {key}: {str(e)}")
+            if self.connection:
+                self.connection.rollback()
+            raise StorageError(f"保存数据失败: {str(e)}")
+
+    def load(self, key: str, **kwargs) -> Any:
+        """
+        从PostgreSQL数据库加载数据
+
+        Args:
+            key: 数据标识键
+            **kwargs: 其他参数
+
+        Returns:
+            Any: 加载的数据
+        """
+        try:
+            self._ensure_connection()
+
+            table_name = f"{self.table_prefix}data"
+
+            sql = f"SELECT data, data_type FROM {table_name} WHERE key = %s"
+            self.cursor.execute(sql, (key,))
+
+            result = self.cursor.fetchone()
+
+            if result is None:
+                raise DataNotFoundError(f"数据不存在: {key}")
+
+            data_str, data_type = result["data"], result["data_type"]
+            data = self._deserialize_data(data_str, data_type)
+
+            logger.info(f"数据加载成功: {key}")
+            return data
+
+        except DataNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"加载数据失败 {key}: {str(e)}")
+            raise StorageError(f"加载数据失败: {str(e)}")
+
+    def exists(self, key: str) -> bool:
+        """
+        检查数据是否存在
+
+        Args:
+            key: 数据标识键
+
+        Returns:
+            bool: 数据是否存在
+        """
+        try:
+            self._ensure_connection()
+
+            table_name = f"{self.table_prefix}data"
+
+            sql = f"SELECT 1 FROM {table_name} WHERE key = %s"
+            self.cursor.execute(sql, (key,))
+
+            return self.cursor.fetchone() is not None
+
+        except Exception as e:
+            logger.error(f"检查数据存在失败 {key}: {str(e)}")
+            return False
+
+    def delete(self, key: str) -> bool:
+        """
+        删除数据
+
+        Args:
+            key: 数据标识键
+
+        Returns:
+            bool: 删除是否成功
+        """
+        try:
+            self._ensure_connection()
+
+            table_name = f"{self.table_prefix}data"
+
+            sql = f"DELETE FROM {table_name} WHERE key = %s"
+            self.cursor.execute(sql, (key,))
+
+            self.connection.commit()
+
+            if self.cursor.rowcount > 0:
+                logger.info(f"数据删除成功: {key}")
+                return True
+            else:
+                logger.warning(f"数据不存在，无需删除: {key}")
+                return True
+
+        except Exception as e:
+            logger.error(f"删除数据失败 {key}: {str(e)}")
+            if self.connection:
+                self.connection.rollback()
+            return False
+
+    def list_keys(self, pattern: Optional[str] = None) -> List[str]:
+        """
+        列出所有键
+
+        Args:
+            pattern: 可选的匹配模式（支持SQL LIKE语法）
+
+        Returns:
+            List[str]: 键列表
+        """
+        try:
+            self._ensure_connection()
+
+            table_name = f"{self.table_prefix}data"
+
+            if pattern:
+                sql = f"SELECT key FROM {table_name} WHERE key LIKE %s"
+                self.cursor.execute(sql, (f"%{pattern}%",))
+            else:
+                sql = f"SELECT key FROM {table_name}"
+                self.cursor.execute(sql)
+
+            results = self.cursor.fetchall()
+            return [row["key"] for row in results]
+
+        except Exception as e:
+            logger.error(f"列出键失败: {str(e)}")
+            return []
+
+    def get_storage_info(self) -> Dict[str, Any]:
+        """
+        获取存储信息
+
+        Returns:
+            Dict: 存储统计信息
+        """
+        try:
+            self._ensure_connection()
+
+            table_name = f"{self.table_prefix}data"
+
+            # 统计记录数
+            self.cursor.execute(f"SELECT COUNT(*) as count FROM {table_name}")
+            total_count = self.cursor.fetchone()["count"]
+
+            return {
+                "db_type": "postgresql",
+                "total_records": total_count,
+                "connected": self.is_connected,
+                "table_name": table_name,
+            }
+
+        except Exception as e:
+            return {
+                "db_type": "postgresql",
+                "error": str(e),
+                "connected": self.is_connected,
+            }

@@ -54,9 +54,7 @@ def test_main_reports_sanitized_proxy_server(module, monkeypatch, tmp_path, caps
     assert "@" not in captured.out + captured.err
 
 
-def test_main_allows_proxy_pool_mode_without_qingguo_credentials(
-    module, monkeypatch, capsys
-):
+def test_main_allows_proxy_pool_mode_without_qingguo_credentials(module, monkeypatch, capsys):
     monkeypatch.setenv("PROXY_PROVIDER", "proxy_pool")
     monkeypatch.delenv("QG_PROXY_KEY", raising=False)
     monkeypatch.delenv("QG_PROXY_PWD", raising=False)
