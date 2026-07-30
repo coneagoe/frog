@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine
@@ -94,7 +95,7 @@ def test_provider_outcome_rejects_unknown_status_and_normalizes_detail():
 
     assert ProviderOutcome(provider="tushare", status="empty").detail is None
     with pytest.raises(ValueError, match="status"):
-        ProviderOutcome(provider="tushare", status="partial")
+        ProviderOutcome(provider="tushare", status=cast(Any, "partial"))
 
 
 def test_add_cash_event_persists_nav_share_fields(sqlite_session):

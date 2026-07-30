@@ -31,11 +31,16 @@ def test_main_reports_sanitized_proxy_server(module, monkeypatch, tmp_path, caps
         "https": "http://secret-key:secret-password@203.0.113.2:8080",
     }
     monkeypatch.setattr(module.proxy_module, "get_proxy", lambda: proxy)
-    calls = []
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_get(url: str, **kwargs: object) -> BaiduResponse:
+        calls.append((url, kwargs))
+        return BaiduResponse()
+
     monkeypatch.setattr(
         module.requests,
         "get",
-        lambda url, **kwargs: calls.append((url, kwargs)) or BaiduResponse(),
+        fake_get,
     )
 
     assert module.main() == 0
@@ -107,11 +112,16 @@ def test_main_handles_non_success_baidu_response(module, monkeypatch, tmp_path, 
         return proxy
 
     monkeypatch.setattr(module.proxy_module, "get_proxy", fake_get_proxy)
-    calls = []
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_requests_get(url: str, **kwargs: object) -> FailedBaiduResponse:
+        calls.append((url, kwargs))
+        return FailedBaiduResponse()
+
     monkeypatch.setattr(
         module.requests,
         "get",
-        lambda url, **kwargs: calls.append((url, kwargs)) or FailedBaiduResponse(),
+        fake_requests_get,
     )
 
     assert module.main() == 1
