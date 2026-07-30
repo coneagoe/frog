@@ -30,6 +30,9 @@ class StaticMarketData:
             raise KeyError(f"No daily bar for {symbol} on {trade_date.isoformat()}")
         return self.bar
 
+    def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+        return self.bar.close if self.bar is not None else None
+
 
 class FailingMarketData:
     """Market data that raises an unexpected (non-market-data) error."""
@@ -42,6 +45,25 @@ class FailingMarketData:
 
     def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
         raise RuntimeError("Unexpected infrastructure failure")
+
+    def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+        return None
+
+
+def test_market_data_provider_latest_daily_close():
+    provider = StaticMarketData(
+        DailyBar(
+            symbol="000001.SZ",
+            trade_date=date(2026, 7, 30),
+            open=Decimal("12.00"),
+            high=Decimal("13.00"),
+            low=Decimal("11.00"),
+            close=Decimal("12.34"),
+        )
+    )
+
+    assert provider.get_latest_daily_close("000001.SZ", date(2026, 7, 30)) == Decimal("12.34")
+    assert FailingMarketData().get_latest_daily_close("000001.SZ", date(2026, 7, 30)) is None
 
 
 def _repo(tmp_path):

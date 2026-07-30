@@ -39,6 +39,9 @@ def test_matching_api_records_snapshot_market_data_failure(monkeypatch, sqlite_s
         def __init__(self):
             self.calls = 0
 
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
         def get_daily_bar(self, symbol, trade_date, market=None):
             self.calls += 1
             if self.calls == 1:

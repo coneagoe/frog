@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from typing import cast
 
 import pandas as pd
 import pytest
@@ -91,13 +92,20 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     class MutableMarketData:
         available = False
 
-        def get_daily_bar(self, symbol, requested_date, market=None):
+        def is_trade_date(self, trade_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
+
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            requested_date = trade_date
             if symbol == "300996" and not self.available:
                 raise KeyError(f"No daily bar for {symbol} on {requested_date}")
             return DailyBar(symbol, requested_date, Decimal("10"), Decimal("100"), Decimal("1"), Decimal("10"))
-
-        def next_trade_date(self, requested_date):
-            return requested_date
 
     market_data = MutableMarketData()
     matching_service.market_data = market_data
@@ -139,7 +147,17 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
     repo.upsert_position(incomplete.id, "300996", 100, 0, Decimal("900.00"))
 
     class MixedMarketData:
-        def get_daily_bar(self, symbol, requested_date, market=None):
+        def is_trade_date(self, trade_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
+
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            requested_date = trade_date
             if symbol == "300996":
                 raise KeyError(f"No daily bar for {symbol} on {requested_date}")
             return DailyBar(symbol, requested_date, Decimal("10"), Decimal("100"), Decimal("1"), Decimal("10"))
@@ -365,7 +383,17 @@ def test_snapshot_failure_does_not_attempt_another_market(tmp_path):
             raise KeyError("No daily bar for 00700")
 
     class CapturingMarketData:
-        def get_daily_bar(self, symbol, snapshot_date, market=None):
+        def is_trade_date(self, trade_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
+
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            snapshot_date = trade_date
             calls.append((symbol, snapshot_date, market))
             return DailyBar(symbol, snapshot_date, Decimal("10"), Decimal("100"), Decimal("1"), Decimal("50"))
 
@@ -406,10 +434,19 @@ def test_matching_mixed_exact_date_data_keeps_missing_order_accepted(tmp_path):
     }
 
     class MixedMarketData:
-        def get_daily_bar(self, symbol, requested_date, market=None):
-            if (symbol, requested_date) not in bars:
-                raise KeyError(f"No daily bar for {symbol} on {requested_date}")
-            return bars[(symbol, requested_date)]
+        def is_trade_date(self, trade_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
+
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            if (symbol, trade_date) not in bars:
+                raise KeyError(f"No daily bar for {symbol} on {trade_date}")
+            return bars[(symbol, trade_date)]
 
     matching_service = MatchingService(repo, MixedMarketData(), SnapshotService(repo, MixedMarketData()))
     run = matching_service.run(trade_date, account.id)
@@ -430,21 +467,31 @@ def test_matching_same_date_retry_fills_only_previously_accepted_order(tmp_path)
     repo.upsert_daily_bar_diagnostic(trade_date, "000002.SZ", "bfq", "missing_market_data", [], resolved=False)
     available = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
     missing = order_service.place_order(account.id, "000002.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
-    missing_bar = {}
+    missing_bar: dict[str, object] = {}
 
     class RetryMarketData:
-        def get_daily_bar(self, symbol, requested_date, market=None):
+        def is_trade_date(self, trade_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
+
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            requested_date = trade_date
             if symbol == "000001.SZ":
                 return DailyBar(symbol, requested_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
             if not missing_bar:
                 raise KeyError(f"No daily bar for {symbol} on {requested_date}")
-            return missing_bar[(symbol, requested_date)]
+            return cast(dict[tuple[str, date], DailyBar], missing_bar)[(symbol, requested_date)]
 
     market_data = RetryMarketData()
     matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
     matching_service.run(trade_date, account.id)
     session.commit()
-    missing_bar[("000002.SZ", trade_date)] = DailyBar(
+    cast(dict[tuple[str, date], DailyBar], missing_bar)[("000002.SZ", trade_date)] = DailyBar(
         "000002.SZ", trade_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10")
     )
     retry = matching_service.run(trade_date, account.id)
@@ -464,8 +511,17 @@ def test_matching_fill_resolves_historical_retry_diagnostic(tmp_path):
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
     class ExactDateMarketData:
-        def get_daily_bar(self, symbol, requested_date, market=None):
-            return DailyBar(symbol, requested_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
+        def is_trade_date(self, trade_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
+
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            return DailyBar(symbol, trade_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
 
     market_data = ExactDateMarketData()
     matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
