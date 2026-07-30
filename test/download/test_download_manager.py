@@ -7,6 +7,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+import download.download_manager as dm  # noqa: E402
 from common.const import (
     COL_AMOUNT,
     COL_CLOSE,
@@ -39,7 +40,7 @@ class TestDownloadManager:
     def test_all_empty_providers_create_missing_market_data_outcome(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         storage.get_last_record.return_value = None
-        monkeypatch.setattr("download.download_manager.get_a_stock_trading_window", lambda *_: ("20260728", "20260728"))
+        monkeypatch.setattr(dm, "get_a_stock_trading_window", lambda *_: ("20260728", "20260728"))
         downloader.dl_history_data_stock_by_provider.return_value = pd.DataFrame()
         outcome = manager.download_stock_history_outcome(
             "300996", PeriodType.DAILY, "20260728", "20260728", AdjustType.BFQ
@@ -50,7 +51,7 @@ class TestDownloadManager:
     def test_provider_error_without_fallback_is_warning(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         storage.get_last_record.return_value = None
-        monkeypatch.setattr("download.download_manager.get_a_stock_trading_window", lambda *_: ("20260728", "20260728"))
+        monkeypatch.setattr(dm, "get_a_stock_trading_window", lambda *_: ("20260728", "20260728"))
         downloader.dl_history_data_stock_by_provider.side_effect = RuntimeError("provider down")
         outcome = manager.download_stock_history_outcome(
             "300996", PeriodType.DAILY, "20260728", "20260728", AdjustType.BFQ
@@ -61,7 +62,7 @@ class TestDownloadManager:
     def test_provider_none_is_recorded_as_error_not_empty(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         storage.get_last_record.return_value = None
-        monkeypatch.setattr("download.download_manager.get_a_stock_trading_window", lambda *_: ("20260728", "20260728"))
+        monkeypatch.setattr(dm, "get_a_stock_trading_window", lambda *_: ("20260728", "20260728"))
         downloader.dl_history_data_stock_by_provider.return_value = None
 
         outcome = manager.download_stock_history_outcome(
