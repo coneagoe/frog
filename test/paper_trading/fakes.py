@@ -87,3 +87,7 @@ class FakeMarketDataProvider:
             low=Decimal("1"),
             close=Decimal("50"),
         )
+
+    def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+        bar = self._bars.get((symbol, trade_date))
+        return None if bar is None else bar.close

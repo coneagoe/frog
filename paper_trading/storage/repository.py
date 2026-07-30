@@ -105,7 +105,7 @@ class PaperTradingRepository:
             setattr(diagnostic, "last_observed_at", now)
             setattr(diagnostic, "resolved", resolved)
         self.session.flush()
-        return diagnostic
+        return cast(DailyBarDiagnostic, diagnostic)
 
     def list_daily_bar_diagnostics(self) -> list[DailyBarDiagnostic]:
         return list(
@@ -407,7 +407,8 @@ class PaperTradingRepository:
         return order
 
     def get_order_by_idempotency_key(self, account_id: int, idempotency_key: str) -> PaperOrder | None:
-        return (
+        return cast(
+            PaperOrder | None,
             self.session.query(PaperOrder)
             .filter(PaperOrder.account_id == account_id, PaperOrder.idempotency_key == idempotency_key)
             .one_or_none()
@@ -481,10 +482,11 @@ class PaperTradingRepository:
                 gap.missing_symbols = missing_symbols
                 gap.details = details
         self.session.flush()
-        return gap
+        return cast(PaperValuationGap, gap)
 
     def get_valuation_gap(self, account_id: int, trade_date: date) -> PaperValuationGap | None:
-        return (
+        return cast(
+            PaperValuationGap | None,
             self.session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=trade_date).one_or_none()
         )
 

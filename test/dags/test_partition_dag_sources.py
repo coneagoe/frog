@@ -2,12 +2,23 @@ import json
 import re
 from datetime import date
 from pathlib import Path
+from typing import TypedDict
 from unittest.mock import MagicMock, Mock
 
 import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+class DownloadOutcome(TypedDict):
+    stock_id: str
+    business_date: str
+    adjust: str
+    classification: str
+    provider_outcomes: list[dict[str, object]]
+    resolved: bool
+
 
 PARTITION_DAG_SPECS = [
     (
@@ -76,7 +87,7 @@ def test_warning_aggregate_writes_structured_bounded_payload(monkeypatch):
     monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: business_date)
     redis_client = MagicMock()
     monkeypatch.setattr(dag_module, "get_redis_client", lambda: redis_client)
-    outcomes = [
+    outcomes: list[DownloadOutcome] = [
         {
             "stock_id": f"300{i:03d}",
             "business_date": business_date.isoformat(),

@@ -302,7 +302,7 @@ def test_auto_falls_back_to_qingguo_after_proxy_pool_validation_failure(monkeypa
             raise ProxyError("egress unavailable")
 
     monkeypatch.setattr(proxy_module, "_validate_proxy", validate_proxy)
-    deleted = []
+    deleted: list[str] = []
     monkeypatch.setattr(proxy_module, "_delete_proxy_from_pool", deleted.append)
     qingguo_proxy = {
         "http": "http://key:pwd@127.0.0.2:8080",
