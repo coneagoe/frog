@@ -161,7 +161,7 @@ def test_postgresql_dry_run_reports_preflight_facts_without_ddl(postgres_schema)
 
         assert result.dry_run is True
         assert result.converted is True
-        assert result.labels == ()
+        assert result.labels == LABELS
         assert result.index_verified is True
         assert (
             connection.execute(

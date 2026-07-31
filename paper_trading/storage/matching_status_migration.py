@@ -134,7 +134,7 @@ def migrate_paper_matching_status_enum(
         return MatchingStatusEnumMigrationResult(
             dry_run=True,
             converted=converted,
-            labels=actual_labels,
+            labels=actual_labels or MATCHING_STATUS_LABELS,
             index_verified=True,
         )
 

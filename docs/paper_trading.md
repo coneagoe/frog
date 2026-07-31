@@ -413,3 +413,115 @@ The response includes:
 `total_return` now represents NAV return: latest unit NAV versus the first valid unit NAV. `simple_asset_return` is the old scale-sensitive reference metric based on total assets versus initial cash. Drawdown and risk-adjusted metrics use the NAV series so deposits and withdrawals do not appear as trading gains or losses.
 
 Round-trip metrics use full-position cycles. A cycle opens when an account's symbol quantity moves from zero to positive and closes when that symbol returns to zero. Partial exits update the open cycle but do not count as closed round trips.
+
+## Matching Run Status Enum Migration
+
+The `paper_matching_runs.status` column uses the PostgreSQL enum
+`paper_matching_run_status` with these labels, in this order:
+`running`, `completed`, `completed_with_warnings`, and `failed`. The migration
+command is explicit and must be run as an operator-controlled maintenance
+procedure. It does not run automatically at API startup.
+
+### Rollout sequence
+
+Use one maintenance window and record the database name, schema, backup path,
+and migration output. Run commands from the repository root.
+
+1. Isolate all matching writes. Stop or drain the paper-trading API instances
+   that accept order/matching writes, stop the Celery workers that execute
+   matching tasks, and pause the Airflow DAGs or schedules that can submit
+   matching work. Keep read-only consumers available only if they tolerate a
+   maintenance window. Confirm there are no in-flight matching transactions
+   before continuing.
+2. Create and verify a database backup before changing the schema. The normal
+   business-table backup is:
+
+   ```bash
+   bash tools/db_export.sh --schema public --out ./backups/paper_matching_pre_enum.sql.gz
+   ```
+
+   Verify that the file exists and is readable, and retain the exact command
+   output with the maintenance record. For a non-Docker database, use the
+   equivalent `pg_dump --format=plain --no-owner --no-privileges` command.
+3. Run the migration preflight without changing the database:
+
+   ```bash
+   uv run tools/migrate_paper_matching_run_status_enum.py --dry-run --json
+   ```
+
+   Require exit code zero, `labels` equal to
+   `['running', 'completed', 'completed_with_warnings', 'failed']`, and
+   `index_verified` equal to `true`. A non-empty unknown-status error must be
+   resolved before the actual migration. Do not bypass it by deleting or
+   relabeling rows without an approved data decision.
+4. Resolve invalid statuses while writes remain isolated. Inspect the affected
+   rows, decide the correct lifecycle state from the matching and order audit
+   trail, update only approved rows in a transaction, and rerun the dry-run
+   until it succeeds. Do not invent a new enum label during this migration.
+5. Run the actual migration in the same isolated window:
+
+   ```bash
+   uv run tools/migrate_paper_matching_run_status_enum.py --json
+   ```
+
+   Require exit code zero, `converted` to reflect whether conversion occurred,
+   the four expected `labels`, and `index_verified: true`. The migration
+   creates or validates the enum, converts the column, and verifies the unique
+   active-run partial index on `(trade_date, scope_key)` for `status =
+   'running'`.
+6. Before deployment, independently verify the type labels and index in the
+   target schema:
+
+   ```sql
+   SELECT e.enumlabel
+   FROM pg_enum AS e
+   JOIN pg_type AS t ON t.oid = e.enumtypid
+   JOIN pg_namespace AS n ON n.oid = t.typnamespace
+   WHERE n.nspname = 'public' AND t.typname = 'paper_matching_run_status'
+   ORDER BY e.enumsortorder;
+
+   SELECT indexname, indexdef
+   FROM pg_indexes
+   WHERE schemaname = 'public'
+     AND indexname = 'uq_matching_active_scope';
+   ```
+
+   The first query must return the four labels in the documented order. The
+   second must show a unique index over `(trade_date, scope_key)` with the
+   `status = 'running'` predicate.
+7. Deploy the enum-aware API, Celery worker, and Airflow code together. Start
+   the API and workers only after the verification queries pass, then confirm
+   health checks and a read-only matching-run listing.
+8. Resume or retry the paused Airflow matching tasks using the normal Airflow
+   operator procedure. Retry only the affected date/account partitions after
+   confirming that no successful fill will be replayed as a duplicate. A
+   missing exact-date bar is an expected warning path: verify the resulting
+   run has `status="completed_with_warnings"` and a non-zero `warning_count`,
+   and verify the corresponding daily-bar diagnostic or valuation gap. An
+   unexpected error remains `failed` and must be investigated rather than
+   retried blindly.
+
+### Future label compatibility
+
+Enum labels are a compatibility contract across the database, SQLAlchemy
+models, API responses, CLI output, Celery tasks, Airflow DAGs, and frontend
+consumers. Additive labels require a separately reviewed migration and a
+compatibility pass across every consumer. Existing labels must never be
+renamed or removed in place; PostgreSQL enum ordering and persisted values are
+part of the contract. A service must be able to read all labels present in the
+database before that label is introduced in production. Treat unknown labels
+as a deployment/schema mismatch, not as a value to coerce silently.
+
+### Backup restore ordering
+
+The table dump scripts export and import business table data; they do not
+replace enum-type DDL. When restoring a backup containing enum-typed matching
+rows, restore the enum type and all labels first, then restore the table
+definition/column and its rows, and finally restore the dependent indexes and
+constraints. In particular, the `paper_matching_run_status` type must exist
+before `paper_matching_runs.status` data is loaded, and
+`uq_matching_active_scope` must be recreated only after the status column has
+the enum type. If restoring a pre-migration text dump into an enum schema,
+restore the type first, load only validated labels, convert the column, then
+recreate and verify the active index. Test the restore in an isolated database
+before any production recovery.
