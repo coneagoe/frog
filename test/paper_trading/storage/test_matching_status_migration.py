@@ -135,6 +135,62 @@ def test_postgresql_migration_is_idempotent(postgres_schema):
     assert second.index_verified is True
 
 
+def test_postgresql_dry_run_reports_preflight_facts_without_ddl(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        result = migrate_paper_matching_status_enum(connection, dry_run=True)
+
+        assert result.dry_run is True
+        assert result.converted is True
+        assert result.labels == ()
+        assert result.index_verified is True
+        assert (
+            connection.execute(
+                text(
+                    "SELECT EXISTS ("
+                    "SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+                    "WHERE n.nspname = :schema AND t.typname = 'paper_matching_run_status'"
+                    ")"
+                ),
+                {"schema": schema},
+            ).scalar_one()
+            is False
+        )
+
+
+def test_postgresql_type_detection_is_schema_scoped(postgres_schema):
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text('CREATE SCHEMA "other_migration_test"'))
+        connection.execute(
+            text(
+                'CREATE TYPE "other_migration_test".paper_matching_run_status AS ENUM '
+                "('running', 'completed', 'completed_with_warnings', 'failed')"
+            )
+        )
+    try:
+        with _connection(engine, schema) as connection:
+            result = migrate_paper_matching_status_enum(connection)
+            assert result.converted is True
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text('DROP SCHEMA "other_migration_test" CASCADE'))
+
+
+def test_postgresql_index_verification_requires_expected_columns(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("DROP INDEX uq_matching_active_scope"))
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX uq_matching_active_scope "
+                "ON paper_matching_runs (scope_key) WHERE status = 'running'"
+            )
+        )
+        with pytest.raises(MatchingStatusEnumMigrationError, match="partial index"):
+            migrate_paper_matching_status_enum(connection)
+
+
 def test_postgresql_enum_rejects_invalid_insert_and_enforces_active_index(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
