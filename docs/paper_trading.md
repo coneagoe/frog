@@ -520,14 +520,24 @@ as a deployment/schema mismatch, not as a value to coerce silently.
 
 ### Backup restore ordering
 
-The table dump scripts export and import business table data; they do not
-replace enum-type DDL. When restoring a backup containing enum-typed matching
-rows, restore the enum type and all labels first, then restore the table
-definition/column and its rows, and finally restore the dependent indexes and
-constraints. In particular, the `paper_matching_run_status` type must exist
-before `paper_matching_runs.status` data is loaded, and
-`uq_matching_active_scope` must be recreated only after the status column has
-the enum type. If restoring a pre-migration text dump into an enum schema,
-restore the type first, load only validated labels, convert the column, then
-recreate and verify the active index. Test the restore in an isolated database
-before any production recovery.
+The table dump scripts are enum-aware for `paper_matching_runs`. An export that
+includes that table queries the live `paper_matching_run_status` labels and
+writes `CREATE TYPE` before the table dump, preserving their PostgreSQL sort
+order. `db_import.sh` therefore loads the type before the table definition and
+rows; dependent indexes and constraints are recreated by the dump afterward.
+For `--clean`, the importer drops `paper_matching_runs` first and then drops
+`paper_matching_run_status` before loading the dump. Unrelated table exports and
+imports retain their existing behavior.
+
+The scripts are not a point-in-time rollback mechanism. A clean import commits
+its drop phase before loading the dump, so an import failure can leave a
+partially restored database; test recovery in an isolated database and retain
+the original backup. A pre-enum text dump does not supply the enum definition;
+restore the type and convert only validated labels before loading such a dump.
+
+Enum labels are a forward-compatibility boundary: exports preserve any labels
+present in the source database, but older application code may reject a dump
+containing a newer label. Additive labels require a separately reviewed schema
+and consumer migration; existing labels must not be renamed or removed in
+place. Test the restore with the target application version before production
+recovery.

@@ -8,6 +8,9 @@ usage() {
   cat <<'USAGE'
 Import business tables into PostgreSQL using psql.
 
+Matching-run dumps restore the status enum before the table definition and
+rows. Clean imports drop the dependent table before dropping that enum.
+
 Uses Docker (docker compose exec db). Input should be a plain SQL dump (optionally .gz).
 
 Usage:
@@ -103,6 +106,9 @@ if [[ $CLEAN -eq 1 ]]; then
     for t in "${BUSINESS_TABLES[@]}"; do
       DROP_SQL+=" DROP TABLE IF EXISTS \"${SCHEMA}\".\"${t}\" CASCADE;"
     done
+  fi
+  if [[ -z "$TABLE_NAME" || "$TABLE_NAME" == "$PAPER_MATCHING_RUNS_TABLE" ]]; then
+    DROP_SQL+=" DROP TYPE IF EXISTS \"${SCHEMA}\".\"${PAPER_MATCHING_RUN_STATUS_TYPE}\" CASCADE;"
   fi
   DROP_SQL+=" COMMIT;"
 fi

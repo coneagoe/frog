@@ -8,6 +8,9 @@ usage() {
   cat <<'USAGE'
 Export business tables from PostgreSQL as plain SQL using pg_dump.
 
+Exports of paper_matching_runs include the matching-run status enum definition
+before the table dump.
+
 Uses Docker (docker compose exec db). Output is plain SQL suitable for psql restore.
 
 Usage:
@@ -122,6 +125,11 @@ if [[ -z "$OUT_FILE" ]]; then
   fi
 fi
 
+EXPORTS_MATCHING_RUNS=0
+if [[ -z "$TABLE_NAME" || "$TABLE_NAME" == "$PAPER_MATCHING_RUNS_TABLE" ]]; then
+  EXPORTS_MATCHING_RUNS=1
+fi
+
 # Build pg_dump args
 DUMP_ARGS=(
   --format=plain
@@ -130,7 +138,7 @@ DUMP_ARGS=(
   --verbose
 )
 
-if [[ $CLEAN -eq 1 ]]; then
+if [[ $CLEAN -eq 1 && $EXPORTS_MATCHING_RUNS -eq 0 ]]; then
   DUMP_ARGS+=(--clean --if-exists)
 fi
 
@@ -142,6 +150,18 @@ else
     DUMP_ARGS+=("--table=${SCHEMA}.${t}")
   done
 fi
+
+ENUM_DDL_FILE=""
+if [[ $EXPORTS_MATCHING_RUNS -eq 1 ]]; then
+  ENUM_DDL_FILE="$(mktemp)"
+  trap 'rm -f "$ENUM_DDL_FILE"' EXIT
+fi
+
+psql_args_common=(
+  -v ON_ERROR_STOP=1
+  -U "$DB_USER"
+  -d "$DB_NAME"
+)
 
 run_export_docker() {
   local dc
@@ -155,12 +175,37 @@ run_export_docker() {
     export PGPASSWORD="$DB_PASSWORD"
   fi
 
+  if [[ $EXPORTS_MATCHING_RUNS -eq 1 ]]; then
+    local enum_query
+    enum_query="SELECT quote_literal(e.enumlabel) FROM pg_enum AS e JOIN pg_type AS t ON t.oid = e.enumtypid JOIN pg_namespace AS n ON n.oid = t.typnamespace WHERE n.nspname = :'schema' AND t.typname = :'type' ORDER BY e.enumsortorder;"
+    # shellcheck disable=SC2086
+    $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -v "schema=$SCHEMA" -v "type=$PAPER_MATCHING_RUN_STATUS_TYPE" -At -c "$enum_query" >"$ENUM_DDL_FILE"
+    if [[ -s "$ENUM_DDL_FILE" ]]; then
+      {
+        if [[ $CLEAN -eq 1 ]]; then
+          if [[ -n "$TABLE_NAME" ]]; then
+            printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "$TABLE_NAME"
+          else
+            for ((index=${#BUSINESS_TABLES[@]} - 1; index >= 0; index--)); do
+              printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "${BUSINESS_TABLES[index]}"
+            done
+          fi
+          printf 'DROP TYPE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "$PAPER_MATCHING_RUN_STATUS_TYPE"
+        fi
+        printf 'CREATE TYPE "%s"."%s" AS ENUM (' "$SCHEMA" "$PAPER_MATCHING_RUN_STATUS_TYPE"
+        paste -sd, "$ENUM_DDL_FILE"
+        printf ');\n'
+      } >"${ENUM_DDL_FILE}.sql"
+      mv "${ENUM_DDL_FILE}.sql" "$ENUM_DDL_FILE"
+    fi
+  fi
+
   if [[ $GZIP -eq 1 ]]; then
     # shellcheck disable=SC2086
-    $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}" | gzip -c >"$OUT_FILE"
+    { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; } | gzip -c >"$OUT_FILE"
   else
     # shellcheck disable=SC2086
-    $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}" >"$OUT_FILE"
+    { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; } >"$OUT_FILE"
   fi
 }
 

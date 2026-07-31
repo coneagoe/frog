@@ -48,6 +48,9 @@ BUSINESS_TABLES=(
   paper_valuation_gaps
 )
 
+PAPER_MATCHING_RUNS_TABLE="paper_matching_runs"
+PAPER_MATCHING_RUN_STATUS_TYPE="paper_matching_run_status"
+
 # Common database configuration defaults
 DEFAULT_MODE="docker"
 DEFAULT_SERVICE="db"

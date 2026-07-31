@@ -1,0 +1,96 @@
+import os
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log_file = tmp_path / "commands.log"
+    docker = bin_dir / "docker"
+    docker.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"\n'
+        "if [[ \"$*\" == *' psql '* && \"$*\" == *' -c '* ]]; then\n"
+        "  printf \"'running'\\n'completed'\\n'completed_with_warnings'\\n'failed'\\n\"\n"
+        "else\n"
+        "  printf '%s\\n' '-- dump output'\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    environment = os.environ.copy()
+    environment["PATH"] = f"{bin_dir}:{environment['PATH']}"
+    environment["COMMAND_LOG"] = str(log_file)
+    result = subprocess.run(
+        ["bash", str(ROOT / "tools" / script), *arguments],
+        cwd=ROOT,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout, log_file.read_text(encoding="utf-8")
+
+
+def test_export_places_enum_before_matching_table_dump(tmp_path: Path):
+    output_file = tmp_path / "matching.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--table", "paper_matching_runs", "--out", str(output_file)], tmp_path)
+
+    dump = output_file.read_text(encoding="utf-8")
+    assert dump.index("CREATE TYPE") < dump.index("-- dump output")
+    assert "'running','completed','completed_with_warnings','failed'" in dump
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
+    database_commands = [command for command in commands if " psql " in command or " pg_dump " in command]
+    assert database_commands[0].endswith("ORDER BY e.enumsortorder;")
+    assert "pg_dump" in database_commands[1]
+
+
+def test_clean_import_drops_matching_table_before_enum(tmp_path: Path):
+    input_file = tmp_path / "matching.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    _run_script("db_import.sh", ["--clean", "--table", "paper_matching_runs", "--in", str(input_file)], tmp_path)
+
+    drop_command = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    drop_sql = drop_command.split(" -c ", 1)[1]
+    assert drop_sql.index('DROP TABLE IF EXISTS "public"."paper_matching_runs"') < drop_sql.index(
+        'DROP TYPE IF EXISTS "public"."paper_matching_run_status"'
+    )
+
+
+def test_clean_matching_export_drops_before_recreating_enum(tmp_path: Path):
+    output_file = tmp_path / "matching.sql"
+    _run_script(
+        "db_export.sh",
+        ["--no-gzip", "--clean", "--table", "paper_matching_runs", "--out", str(output_file)],
+        tmp_path,
+    )
+
+    dump = output_file.read_text(encoding="utf-8")
+    assert dump.index("DROP TABLE") < dump.index("DROP TYPE") < dump.index("CREATE TYPE")
+    command = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    assert "--table=public.paper_matching_runs" in command
+    assert "--clean" not in command
+
+
+def test_clean_full_matching_export_retains_business_table_selection(tmp_path: Path):
+    output_file = tmp_path / "matching.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--clean", "--out", str(output_file)], tmp_path)
+
+    command = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    assert "--table=public.a_stock_basic" in command
+    assert "--table=public.paper_matching_runs" in command
+    assert "--table=public.paper_valuation_gaps" in command
+    assert "--clean" not in command
+
+
+def test_unrelated_export_does_not_query_enum(tmp_path: Path):
+    output_file = tmp_path / "stock.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--table", "a_stock_basic", "--out", str(output_file)], tmp_path)
+
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    assert "psql" not in commands
+    assert "pg_dump" in commands
