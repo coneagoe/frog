@@ -138,3 +138,8 @@ dmypy.json
 .slim/worktrees/
 .slim/worktrees.json
 # END oh-my-opencode-slim worktrees
+
+# Local runtime and review artifacts
+/docker/
+/logs/
+/.review-*

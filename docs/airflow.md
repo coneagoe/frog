@@ -128,6 +128,12 @@ DOWNLOAD_PROCESS_COUNT=4
 - 建议 `DOWNLOAD_PROCESS_COUNT` 不要超过 Celery worker 的实际并发能力（否则会排队，且对 DB/网络压力更大）。
 - 周末 QFQ DAG 会先清空表再分片下载（全量重建）。
 
+### A 股日线日期语义
+
+- A 股 BFQ/HFQ 日线 DAG 从 Airflow `context['data_interval_end']` 转换为 `Asia/Shanghai` 后，只派生一个业务日期，并将同一日期作为两类下载的 `end_date`；周末及非交易日会跳过。
+- 汇总完成后，EOD 模拟交易匹配也使用这个相同的显式日期。
+- 其余仍按墙上时钟运行的路径包括：周末 QFQ 历史 DAG、`daily_basic`/`stk_limit`/`suspend_d` DAG，以及调用方未传 `end_date` 时 `DownloadManager` 的通用回退逻辑。
+
 ## 每日监控与黑屋任务
 
 `monitor_stock_daily` 每天 15:30 运行一次。DAG 中的每日股票监控任务仍会在非 A 股交易日自动跳过；股东减持公告同步黑屋任务不受交易日限制，会在每个 DAG 运行日执行，并使用当前 Airflow logical date 作为 Tushare 查询日期。黑屋剩余天数倒计时任务在股东减持同步之后执行，并允许在每日股票监控被跳过时继续运行。
