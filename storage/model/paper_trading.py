@@ -4,6 +4,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -14,6 +15,8 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.sql import func
+
+from paper_trading.domain.enums import MatchingRunStatus
 
 from .base import Base
 
@@ -260,7 +263,16 @@ class PaperMatchingRun(Base):
     trade_date = Column(Date, nullable=False, index=True)
     account_id = Column(Integer, nullable=True, index=True)
     scope_key = Column(String(40), nullable=False, default="all")
-    status = Column(String(20), nullable=False)
+    status = Column(
+        Enum(
+            MatchingRunStatus,
+            name="paper_matching_run_status",
+            values_callable=lambda enum_type: [member.value for member in enum_type],
+            native_enum=True,
+            validate_strings=True,
+        ),
+        nullable=False,
+    )
     processed_count = Column(Integer, nullable=False, server_default=text("0"))
     filled_count = Column(Integer, nullable=False, server_default=text("0"))
     skipped_count = Column(Integer, nullable=False, server_default=text("0"))

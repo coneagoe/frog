@@ -9,7 +9,13 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from paper_trading.domain.enums import REPLAY_REJECTION_MARKER, CashEventType, OrderSide, OrderStatus
+from paper_trading.domain.enums import (
+    REPLAY_REJECTION_MARKER,
+    CashEventType,
+    MatchingRunStatus,
+    OrderSide,
+    OrderStatus,
+)
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label, canonical_stock_id
 from paper_trading.storage.models import (
@@ -695,7 +701,7 @@ class PaperTradingRepository:
                 PaperMatchingRun.trade_date == trade_date,
                 PaperMatchingRun.account_id == account_id,
                 PaperMatchingRun.scope_key == (str(account_id) if account_id is not None else "all"),
-                PaperMatchingRun.status == "running",
+                PaperMatchingRun.status == MatchingRunStatus.RUNNING.value,
             )
             .with_for_update()
             .first()
@@ -706,7 +712,7 @@ class PaperTradingRepository:
             trade_date=trade_date,
             account_id=account_id,
             scope_key=str(account_id) if account_id is not None else "all",
-            status="running",
+            status=MatchingRunStatus.RUNNING.value,
         )
         self.session.add(run)
         try:
@@ -718,7 +724,7 @@ class PaperTradingRepository:
                 .filter(
                     PaperMatchingRun.trade_date == trade_date,
                     PaperMatchingRun.scope_key == (str(account_id) if account_id is not None else "all"),
-                    PaperMatchingRun.status == "running",
+                    PaperMatchingRun.status == MatchingRunStatus.RUNNING.value,
                 )
                 .first()
             )

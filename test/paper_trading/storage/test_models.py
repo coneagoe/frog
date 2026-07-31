@@ -1,13 +1,17 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import Boolean, create_engine, inspect
 from sqlalchemy.dialects.postgresql import dialect
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
+from paper_trading.domain.enums import MatchingRunStatus
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
+    PaperMatchingRun,
     PaperPositionLot,
     tb_name_daily_bar_diagnostics,
     tb_name_paper_accounts,
@@ -108,3 +112,32 @@ def test_daily_bar_diagnostic_resolved_has_postgresql_boolean_default():
     assert str(resolved.server_default.arg) == "false"
     ddl = str(CreateTable(DailyBarDiagnostic.__table__).compile(dialect=dialect()))
     assert "resolved BOOLEAN DEFAULT false NOT NULL" in ddl
+
+
+def test_matching_run_status_round_trips_lowercase_enum_value(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        run = PaperMatchingRun(trade_date=date(2026, 7, 31), status=MatchingRunStatus.RUNNING.value)
+        session.add(run)
+        session.commit()
+        session.expire_all()
+
+        loaded = session.get(PaperMatchingRun, run.id)
+        assert loaded is not None
+        assert loaded.status == MatchingRunStatus.RUNNING.value
+
+    engine.dispose()
+
+
+def test_matching_run_status_rejects_unknown_value(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(PaperMatchingRun(trade_date=date(2026, 7, 31), status="in_progress"))
+        with pytest.raises((StatementError, ValueError)):
+            session.flush()
+
+    engine.dispose()
