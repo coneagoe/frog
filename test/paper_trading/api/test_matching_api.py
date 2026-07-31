@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_session
@@ -69,3 +70,42 @@ def test_matching_api_records_snapshot_market_data_failure(monkeypatch, sqlite_s
     assert repo.list_snapshots(account.id) == []
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
     assert len(repo.list_trades(account.id)) == 1
+
+
+def test_matching_api_rolls_back_and_hides_persistence_error(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("api-persistence-failure", Decimal("100000.00"))
+    rollback_calls = 0
+
+    def fail_commit():
+        raise SQLAlchemyError("SELECT secret_column FROM paper_accounts WHERE password='secret'")
+
+    def track_rollback():
+        nonlocal rollback_calls
+        rollback_calls += 1
+
+    monkeypatch.setattr(sqlite_session, "commit", fail_commit)
+    monkeypatch.setattr(sqlite_session, "rollback", track_rollback)
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: sqlite_session
+
+    response = TestClient(app).post(
+        "/paper/matching/runs",
+        json={"trade_date": "2026-07-31", "account_id": account.id},
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": {
+            "code": "MATCHING_PERSISTENCE_FAILED",
+            "message": "Matching persistence failed",
+            "details": {},
+        }
+    }
+    assert rollback_calls == 1
+    assert "secret_column" not in response.text
+    assert "password" not in response.text
