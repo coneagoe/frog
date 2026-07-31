@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import (
@@ -13,6 +16,7 @@ from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 
 router = APIRouter(prefix="/paper/matching/runs", dependencies=[Depends(require_api_token)])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=MatchingRunResponse)
@@ -22,10 +26,26 @@ def run_matching(
     market_data: MarketDataProvider = Depends(get_market_data_provider),
 ):
     repo = PaperTradingRepository(session)
-    run = MatchingService(repo, market_data, SnapshotService(repo, market_data)).run(
-        request.trade_date, request.account_id
-    )
-    session.commit()
+    try:
+        run = MatchingService(repo, market_data, SnapshotService(repo, market_data)).run(
+            request.trade_date, request.account_id
+        )
+        session.commit()
+    except SQLAlchemyError:
+        session.rollback()
+        logger.exception(
+            "Matching persistence failed: trade_date=%s account_id=%s",
+            request.trade_date,
+            request.account_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "MATCHING_PERSISTENCE_FAILED",
+                "message": "Matching persistence failed",
+                "details": {},
+            },
+        ) from None
     return run
 
 

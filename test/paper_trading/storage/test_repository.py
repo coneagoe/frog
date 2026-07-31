@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from paper_trading.domain.enums import CashEventType, OrderSide, OrderStatus
+from paper_trading.domain.enums import CashEventType, MatchingRunStatus, OrderSide, OrderStatus
 from paper_trading.storage.models import PaperTradeValidityCheck
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -26,6 +26,31 @@ def test_create_account_initializes_nav_share_state(sqlite_session):
     assert ledger[0].event_type == "deposit"
     assert ledger[0].net_asset_value == Decimal("1.000000")
     assert ledger[0].share_delta == Decimal("100000.000000")
+
+
+def test_acquire_matching_run_uses_canonical_active_status(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    trade_date = date(2026, 7, 31)
+
+    first, first_owner = repo.acquire_matching_run(trade_date, None)
+    second, second_owner = repo.acquire_matching_run(trade_date, None)
+
+    assert first_owner is True
+    assert second_owner is False
+    assert second.id == first.id
+    assert first.status == MatchingRunStatus.RUNNING.value
+
+
+def test_replay_cleanup_removes_matching_runs(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("replay-status", Decimal("100000.00"))
+    repo.create_matching_run(date(2026, 7, 31), account.id, MatchingRunStatus.COMPLETED.value)
+
+    repo.clear_account_rebuild_state(account.id)
+
+    assert repo.list_matching_runs() == []
 
 
 def test_upsert_daily_bar_diagnostic_reuses_business_date_symbol_adjustment(sqlite_session):
