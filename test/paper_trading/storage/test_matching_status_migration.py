@@ -124,6 +124,22 @@ def test_postgresql_converts_labels_and_verifies_active_partial_index(postgres_s
             .find("running")
             >= 0
         )
+        assert (
+            connection.execute(
+                text(
+                    "SELECT pg_get_expr(indpred, indrelid) FROM pg_index "
+                    "JOIN pg_class ON pg_class.oid = pg_index.indexrelid "
+                    "JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace "
+                    "WHERE pg_namespace.nspname = :schema "
+                    "AND pg_class.relname = 'uq_matching_active_scope'"
+                ),
+                {"schema": schema},
+            )
+            .scalar_one()
+            .lower()
+            .find("paper_matching_run_status")
+            >= 0
+        )
 
 
 def test_postgresql_migration_is_idempotent(postgres_schema):
@@ -215,7 +231,8 @@ def test_postgresql_enum_rejects_invalid_insert_and_enforces_active_index(postgr
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
         migrate_paper_matching_status_enum(connection)
-        with connection.begin_nested():
+        savepoint = connection.begin_nested()
+        try:
             with pytest.raises(Exception):
                 connection.execute(
                     text(
@@ -223,13 +240,16 @@ def test_postgresql_enum_rejects_invalid_insert_and_enforces_active_index(postgr
                         "VALUES ('2026-07-31', 'bad', 'invalid')"
                     )
                 )
+        finally:
+            savepoint.rollback()
         connection.execute(
             text(
                 "INSERT INTO paper_matching_runs (trade_date, scope_key, status) "
                 "VALUES ('2026-07-31', 'all', 'running')"
             )
         )
-        with connection.begin_nested():
+        savepoint = connection.begin_nested()
+        try:
             with pytest.raises(Exception):
                 connection.execute(
                     text(
@@ -237,3 +257,5 @@ def test_postgresql_enum_rejects_invalid_insert_and_enforces_active_index(postgr
                         "VALUES ('2026-07-31', 'all', 'running')"
                     )
                 )
+        finally:
+            savepoint.rollback()
