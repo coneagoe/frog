@@ -2,9 +2,31 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 from paper_trading.storage.matching_status_migration import MatchingStatusEnumMigrationResult
 from tools import migrate_paper_matching_run_status_enum as command
+
+
+def test_script_entrypoint_bootstraps_repository_root():
+    script = Path(__file__).parents[2] / "tools" / "migrate_paper_matching_run_status_enum.py"
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+
+    completed = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=script.parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Migrate paper matching run statuses to an enum" in completed.stdout
 
 
 class FakeTransaction:

@@ -7,13 +7,18 @@ import json
 import logging
 import sys
 from dataclasses import asdict
+from pathlib import Path
 
-from conf import parse_config
-from paper_trading.storage.matching_status_migration import (
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from conf import parse_config  # noqa: E402
+from paper_trading.storage.matching_status_migration import (  # noqa: E402
     MatchingStatusEnumMigrationResult,
     migrate_paper_matching_status_enum,
 )
-from storage import get_storage
+from storage import get_storage  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

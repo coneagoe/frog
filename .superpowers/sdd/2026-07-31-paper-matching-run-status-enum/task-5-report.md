@@ -46,3 +46,32 @@
   `TEST_POSTGRESQL_URL` is not configured.
 - Operators should use module execution if the direct script form does not
   provide the repository root on `PYTHONPATH`.
+
+## Task 5 Fix
+
+- `tools/migrate_paper_matching_run_status_enum.py`: bootstrapped the repository
+  root in `sys.path` before importing project modules, preserving both script
+  and module execution.
+- `test/tools/test_migrate_paper_matching_run_status_enum.py`: added a
+  subprocess regression test for direct script execution without `PYTHONPATH`.
+
+## Fix Verification
+
+- RED test first reproduced `ModuleNotFoundError: No module named 'conf'`.
+- `uv run pytest test/tools/test_migrate_paper_matching_run_status_enum.py
+  test/paper_trading/storage/test_matching_status_migration.py` — `6 passed,
+  8 skipped`.
+- `uv run tools/migrate_paper_matching_run_status_enum.py --dry-run --json` —
+  passed against Docker configuration; returned all four labels and
+  `index_verified: true`.
+- `TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5432/quant uv run
+  pytest test/paper_trading/storage/test_matching_status_migration.py` — `8
+  passed, 1 failed`; the existing shared database contains duplicate enum type
+  names across schemas, causing the test's unqualified `pg_type` assertion to
+  raise `MultipleResultsFound`.
+- `uv run ruff check ...` and `uv run ruff format --check ...` — passed.
+
+## Fix Concerns
+
+- PostgreSQL migration execution reaches the migration and contract assertions;
+  the one failure is database-state/schema isolation, not the entrypoint fix.
