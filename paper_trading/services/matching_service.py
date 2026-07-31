@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from paper_trading.domain.enums import (
     CashEventType,
     MatchingRunStatus,
@@ -59,6 +61,8 @@ class MatchingService:
                 self._fill_order(order)
                 self._resolve_matching_diagnostic(order)
                 filled += 1
+            except SQLAlchemyError:
+                raise
             except Exception as exc:
                 failed += 1
                 order_errors.append(f"order={order.id}, account={order.account_id}, trade_date={trade_date}: {exc}")
@@ -112,6 +116,8 @@ class MatchingService:
         except KeyError as exc:
             self._record_missing_exact_date_diagnostic(order, exc)
             return "warning"
+        except SQLAlchemyError:
+            raise
         except Exception:
             return "failed"  # matches run() outer except → failed counter
         if bar.suspended:
@@ -119,12 +125,16 @@ class MatchingService:
             return "rejected"
         try:
             ensure_price_in_daily_range(Decimal(order.limit_price), bar.low, bar.high)
+        except SQLAlchemyError:
+            raise
         except Exception:
             return "skipped"  # stays ACCEPTED
         try:
             self._fill_order(order)
             self._resolve_matching_diagnostic(order)
             return "filled"
+        except SQLAlchemyError:
+            raise
         except Exception:
             return "failed"  # stays ACCEPTED (run() outer except → failed)
 

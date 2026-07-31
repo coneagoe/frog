@@ -5,6 +5,7 @@ from typing import cast
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from common.const import (
@@ -481,6 +482,23 @@ def test_matching_order_processing_failure_marks_run_failed(tmp_path, monkeypatc
     engine.dispose()
 
 
+def test_matching_order_persistence_failure_propagates(tmp_path, monkeypatch):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("persistence-failure", Decimal("100000.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    def fail_create_trade(*args, **kwargs):
+        raise SQLAlchemyError("trade insert failed")
+
+    monkeypatch.setattr(repo, "create_trade", fail_create_trade)
+
+    with pytest.raises(SQLAlchemyError, match="trade insert failed"):
+        matching_service.run(trade_date, account.id)
+
+    assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
+    engine.dispose()
+
+
 def test_match_order_missing_exact_date_records_warning_diagnostic(tmp_path):
     engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("missing-bar", Decimal("100000.00"))
@@ -497,6 +515,39 @@ def test_match_order_missing_exact_date_records_warning_diagnostic(tmp_path):
     diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "000001")
     assert diagnostic.classification == "missing_exact_date"
     assert diagnostic.resolved is False
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("method_name", "error"),
+    [
+        ("_fill_order", SQLAlchemyError("trade insert failed")),
+        ("_resolve_matching_diagnostic", SQLAlchemyError("diagnostic update failed")),
+        ("_fill_order", RuntimeError("cash ledger unavailable")),
+    ],
+)
+def test_match_order_propagates_sqlalchemy_errors_but_returns_failed_for_other_errors(
+    tmp_path, monkeypatch, method_name, error
+):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("match-order-errors", Decimal("100000.00"))
+    order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
+
+    if method_name == "_resolve_matching_diagnostic":
+        monkeypatch.setattr(matching_service, "_fill_order", lambda current_order: None)
+    monkeypatch.setattr(
+        matching_service,
+        method_name,
+        lambda current_order: (_ for _ in ()).throw(error),
+    )
+
+    if isinstance(error, SQLAlchemyError):
+        with pytest.raises(SQLAlchemyError, match=str(error)):
+            matching_service.match_order(order)
+    else:
+        assert matching_service.match_order(order) == "failed"
+    assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
+    session.rollback()
     engine.dispose()
 
 
