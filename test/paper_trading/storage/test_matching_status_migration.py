@@ -98,15 +98,24 @@ def test_postgresql_converts_labels_and_verifies_active_partial_index(postgres_s
         assert result.index_verified is True
         assert (
             connection.execute(
-                text("SELECT typname FROM pg_type WHERE typname = 'paper_matching_run_status'")
+                text(
+                    "SELECT t.typname FROM pg_type t "
+                    "JOIN pg_namespace n ON n.oid = t.typnamespace "
+                    "WHERE n.nspname = :schema AND t.typname = 'paper_matching_run_status'"
+                ),
+                {"schema": schema},
             ).scalar_one()
             == "paper_matching_run_status"
         )
         assert connection.execute(
             text(
-                "SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
-                "WHERE pg_type.typname = 'paper_matching_run_status' ORDER BY enumsortorder"
-            )
+                "SELECT enumlabel FROM pg_enum "
+                "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                "JOIN pg_namespace ON pg_namespace.oid = pg_type.typnamespace "
+                "WHERE pg_namespace.nspname = :schema "
+                "AND pg_type.typname = 'paper_matching_run_status' ORDER BY enumsortorder"
+            ),
+            {"schema": schema},
         ).all() == [(label,) for label in LABELS]
         assert (
             connection.execute(
