@@ -11,6 +11,11 @@ _TYPE_NAME = "paper_matching_run_status"
 _TABLE_NAME = "paper_matching_runs"
 _INDEX_NAME = "uq_matching_active_scope"
 _EXPECTED_INDEX_COLUMNS = ("trade_date", "scope_key")
+_ACTIVE_INDEX_PREDICATE = re.compile(
+    r"\(*\s*status\s*\)*(?:\s*::\s*[\w.]+)*\s*=\s*"
+    r"\(*\s*'running'\s*\)*(?:\s*::\s*[\w.]+)*\s*\)*$",
+    re.IGNORECASE,
+)
 
 
 class MatchingStatusEnumMigrationError(RuntimeError):
@@ -106,7 +111,7 @@ def migrate_paper_matching_status_enum(
         and index_facts[0]
         and tuple(index_facts[1]) == _EXPECTED_INDEX_COLUMNS
         and predicate
-        and re.search(r"\bstatus\s*=\s*'running'", predicate, re.IGNORECASE)
+        and _ACTIVE_INDEX_PREDICATE.search(predicate.strip())
     )
     if not index_verified:
         raise MatchingStatusEnumMigrationError("Active matching-run partial index is missing or invalid")

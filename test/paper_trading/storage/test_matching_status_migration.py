@@ -113,8 +113,11 @@ def test_postgresql_converts_labels_and_verifies_active_partial_index(postgres_s
                 text(
                     "SELECT pg_get_expr(indpred, indrelid) FROM pg_index "
                     "JOIN pg_class ON pg_class.oid = pg_index.indexrelid "
-                    "WHERE pg_class.relname = 'uq_matching_active_scope'"
-                )
+                    "JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace "
+                    "WHERE pg_namespace.nspname = :schema "
+                    "AND pg_class.relname = 'uq_matching_active_scope'"
+                ),
+                {"schema": schema},
             )
             .scalar_one()
             .lower()
@@ -189,6 +192,23 @@ def test_postgresql_index_verification_requires_expected_columns(postgres_schema
         )
         with pytest.raises(MatchingStatusEnumMigrationError, match="partial index"):
             migrate_paper_matching_status_enum(connection)
+
+
+def test_postgresql_index_verification_accepts_normalized_status_predicate(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("DROP INDEX uq_matching_active_scope"))
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX uq_matching_active_scope "
+                "ON paper_matching_runs (trade_date, scope_key) "
+                "WHERE (status::text = 'running'::text)"
+            )
+        )
+
+        result = migrate_paper_matching_status_enum(connection, dry_run=True)
+
+    assert result.index_verified is True
 
 
 def test_postgresql_enum_rejects_invalid_insert_and_enforces_active_index(postgres_schema):
