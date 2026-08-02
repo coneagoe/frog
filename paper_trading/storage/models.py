@@ -3,6 +3,7 @@ from storage.model.paper_trading import (
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
+    PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
     PaperPendingSettlement,
@@ -29,6 +30,7 @@ from storage.model.paper_trading import (
 
 __all__ = [
     "DailyBarDiagnostic",
+    "PaperLedgerRebuild",
     "PaperAccount",
     "PaperCashLedger",
     "PaperPendingSettlement",

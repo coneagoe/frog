@@ -92,6 +92,14 @@ The `order update-comment` command with `--comment ""` clears the stored comment
 
 Order creation queues an accepted order; it does not run matching or create a trade immediately. If an `idempotency_key` is supplied, repeating the same request for the same account returns the original order without reserving cash again. Reusing that key for different order fields is rejected.
 
+After a daily BFQ history download, the daily-history DAG automatically calls
+the delayed-bar rebuild endpoint. It selects accepted A-share orders with an
+unresolved exact-date BFQ diagnostic whose bar is now available, then rebuilds
+each affected account's current derived ledger from the earliest affected
+order. The rebuild preserves manual cash events and cancellations, reapplies
+normal matching rules, and records lightweight rebuild audit metadata. The
+authenticated endpoint is `POST /paper/matching/runs/rebuilds`.
+
 Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. Explicit fee flags override the preset values for the new account.
 
 Use `--json` when machine-readable output is needed:

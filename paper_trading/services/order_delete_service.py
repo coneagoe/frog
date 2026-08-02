@@ -116,6 +116,76 @@ class OrderDeleteService:
         self._regenerate_validity_checks(account_id)
         return True
 
+    def rebuild_account_from(self, account_id: int, start_date: date, triggering_order_ids: list[int]):
+        """Rebuild an account's derived ledger after delayed daily-bar data arrives."""
+        with self.repo.session.begin_nested():
+            deleted_counts = self.repo.clear_account_rebuild_state(account_id, preserve_execution_history=True)
+            self.repo.reset_orders_for_replay(account_id)
+            self.repo.session.expunge_all()
+
+            matching_service = MatchingService(
+                self.repo,
+                self.market_data,
+                SnapshotService(self.repo, self.market_data),
+            )
+            regenerated_counts = {"trades": 0, "snapshots": 0, "matching_runs": 0}
+            orders = self.repo.list_orders(account_id)
+            by_date: dict[date, list[PaperOrder]] = defaultdict(list)
+            for order in orders:
+                if order.status == OrderStatus.ACCEPTED.value:
+                    by_date[order.trade_date].append(order)
+
+            for trade_date in sorted(by_date):
+                run = self.repo.create_matching_run(trade_date, account_id, MatchingRunStatus.RUNNING.value)
+                regenerated_counts["matching_runs"] += 1
+                processed = filled = skipped = rejected = failed = warning_count = 0
+                for order in sorted(by_date[trade_date], key=lambda current_order: current_order.id):
+                    processed += 1
+                    self._restore_single_reservation(account_id, order)
+                    if order.status != OrderStatus.ACCEPTED.value:
+                        rejected += 1
+                        continue
+                    outcome = matching_service.match_order(order)
+                    if outcome == "filled":
+                        filled += 1
+                        regenerated_counts["trades"] += 1
+                    elif outcome == "rejected":
+                        rejected += 1
+                    elif outcome == "skipped":
+                        skipped += 1
+                    elif outcome == "failed":
+                        failed += 1
+                    else:
+                        warning_count += 1
+                if filled:
+                    matching_service.snapshot_service.generate_snapshot(account_id, trade_date)
+                    regenerated_counts["snapshots"] += 1
+                run_status = (
+                    MatchingRunStatus.FAILED.value
+                    if failed
+                    else MatchingRunStatus.COMPLETED_WITH_WARNINGS.value
+                    if warning_count
+                    else MatchingRunStatus.COMPLETED.value
+                )
+                self.repo.update_matching_run_counts(
+                    run,
+                    processed,
+                    filled,
+                    skipped,
+                    rejected,
+                    failed,
+                    run_status,
+                    warning_count=warning_count,
+                )
+            RoundTripService(self.repo).rebuild_account(account_id)
+            return self.repo.create_ledger_rebuild(
+                account_id,
+                start_date,
+                triggering_order_ids,
+                deleted_counts,
+                regenerated_counts,
+            )
+
     @staticmethod
     def _check_sell_reservation(
         position: PaperPosition,
