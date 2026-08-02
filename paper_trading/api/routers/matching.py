@@ -9,8 +9,9 @@ from paper_trading.api.deps import (
     get_session,
     require_api_token,
 )
-from paper_trading.schemas.matching import MatchingRunRequest, MatchingRunResponse
+from paper_trading.schemas.matching import LedgerRebuildResponse, MatchingRunRequest, MatchingRunResponse
 from paper_trading.services.matching_service import MatchingService
+from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
@@ -52,6 +53,37 @@ def run_matching(
 @router.get("", response_model=list[MatchingRunResponse])
 def list_runs(session: Session = Depends(get_session)):
     return PaperTradingRepository(session).list_matching_runs()
+
+
+@router.post("/rebuilds", response_model=LedgerRebuildResponse)
+def rebuild_delayed_daily_bar_orders(
+    session: Session = Depends(get_session),
+    market_data: MarketDataProvider = Depends(get_market_data_provider),
+):
+    repo = PaperTradingRepository(session)
+    eligible = []
+    for order in repo.list_eligible_daily_bar_rebuild_orders():
+        try:
+            market_data.get_daily_bar(order.symbol, order.trade_date, market=order.market)
+        except KeyError:
+            continue
+        eligible.append(order)
+    by_account: dict[int, list] = {}
+    for order in eligible:
+        by_account.setdefault(order.account_id, []).append(order)
+    try:
+        service = OrderDeleteService(repo, market_data)
+        for account_id, orders in by_account.items():
+            service.rebuild_account_from(account_id, orders[0].trade_date, [order.id for order in orders])
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Historical ledger rebuild failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Historical ledger rebuild failed",
+        ) from None
+    return LedgerRebuildResponse(rebuilt_account_ids=sorted(by_account))
 
 
 @router.get("/{run_id}", response_model=MatchingRunResponse)

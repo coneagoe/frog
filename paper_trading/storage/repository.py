@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +23,7 @@ from paper_trading.storage.models import (
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
+    PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
     PaperPendingSettlement,
@@ -117,6 +118,25 @@ class PaperTradingRepository:
         return list(
             self.session.query(DailyBarDiagnostic)
             .order_by(DailyBarDiagnostic.business_date.asc(), DailyBarDiagnostic.stock_id.asc())
+            .all()
+        )
+
+    def list_eligible_daily_bar_rebuild_orders(self) -> list[PaperOrder]:
+        return list(
+            self.session.query(PaperOrder)
+            .join(
+                DailyBarDiagnostic,
+                (DailyBarDiagnostic.business_date == PaperOrder.trade_date)
+                & (DailyBarDiagnostic.stock_id == PaperOrder.symbol)
+                & (DailyBarDiagnostic.adjust == "bfq"),
+            )
+            .filter(
+                PaperOrder.status == OrderStatus.ACCEPTED.value,
+                PaperOrder.market == "a_share",
+                DailyBarDiagnostic.resolved.is_(False),
+                DailyBarDiagnostic.classification == "missing_exact_date",
+            )
+            .order_by(PaperOrder.account_id.asc(), PaperOrder.trade_date.asc(), PaperOrder.id.asc())
             .all()
         )
 
@@ -869,7 +889,30 @@ class PaperTradingRepository:
         self.session.delete(order)
         return order
 
-    def clear_account_rebuild_state(self, account_id: int) -> None:
+    def create_ledger_rebuild(
+        self,
+        account_id: int,
+        start_date: date,
+        triggering_order_ids: list[int],
+        deleted_counts: dict[str, int],
+        regenerated_counts: dict[str, int],
+    ) -> PaperLedgerRebuild:
+        rebuild = PaperLedgerRebuild(
+            account_id=account_id,
+            start_date=start_date,
+            triggering_order_ids=triggering_order_ids,
+            status="completed",
+            deleted_counts=deleted_counts,
+            regenerated_counts=regenerated_counts,
+        )
+        self.session.add(rebuild)
+        self.session.flush()
+        return rebuild
+
+    def clear_account_rebuild_state(
+        self, account_id: int, *, preserve_execution_history: bool = False
+    ) -> dict[str, int]:
+        counts: dict[str, int] = {}
         imported_lots = (
             self.session.query(PaperPositionLot)
             .filter(
@@ -884,31 +927,60 @@ class PaperTradingRepository:
             if market != lot.market:
                 raise ValueError(f"conflicting markets for imported symbol: {lot.symbol}")
 
-        self.session.query(PaperTradeValidityCheck).filter(PaperTradeValidityCheck.account_id == account_id).delete(
-            synchronize_session=False
+        if not preserve_execution_history:
+            counts["validity_checks"] = (
+                self.session.query(PaperTradeValidityCheck)
+                .filter(PaperTradeValidityCheck.account_id == account_id)
+                .delete(synchronize_session=False)
+            )
+        counts["cash_events"] = (
+            self.session.query(PaperCashLedger)
+            .filter(
+                PaperCashLedger.account_id == account_id,
+                PaperCashLedger.event_type.in_(
+                    [
+                        CashEventType.FREEZE.value,
+                        CashEventType.RELEASE.value,
+                        CashEventType.TRADE.value,
+                        CashEventType.FEE.value,
+                    ]
+                ),
+            )
+            .delete(synchronize_session=False)
         )
-        self.session.query(PaperCashLedger).filter(
-            PaperCashLedger.account_id == account_id,
-            or_(PaperCashLedger.note.is_(None), PaperCashLedger.note != "initial_cash"),
-        ).delete(synchronize_session=False)
-        self.session.query(PaperPositionRoundTrip).filter(PaperPositionRoundTrip.account_id == account_id).delete(
-            synchronize_session=False
+        counts["round_trips"] = (
+            self.session.query(PaperPositionRoundTrip)
+            .filter(PaperPositionRoundTrip.account_id == account_id)
+            .delete(synchronize_session=False)
         )
-        self.session.query(PaperTrade).filter(PaperTrade.account_id == account_id).delete(synchronize_session=False)
-        self.session.query(PaperAccountSnapshot).filter(PaperAccountSnapshot.account_id == account_id).delete(
-            synchronize_session=False
+        counts["trades"] = (
+            self.session.query(PaperTrade).filter(PaperTrade.account_id == account_id).delete(synchronize_session=False)
         )
-        self.session.query(PaperPendingSettlement).filter(PaperPendingSettlement.account_id == account_id).delete(
-            synchronize_session=False
+        counts["snapshots"] = (
+            self.session.query(PaperAccountSnapshot)
+            .filter(PaperAccountSnapshot.account_id == account_id)
+            .delete(synchronize_session=False)
         )
-        self.session.query(PaperMatchingRun).filter(PaperMatchingRun.account_id == account_id).delete(
-            synchronize_session=False
+        counts["pending_settlements"] = (
+            self.session.query(PaperPendingSettlement)
+            .filter(PaperPendingSettlement.account_id == account_id)
+            .delete(synchronize_session=False)
         )
+        if not preserve_execution_history:
+            counts["matching_runs"] = (
+                self.session.query(PaperMatchingRun)
+                .filter(PaperMatchingRun.account_id == account_id)
+                .delete(synchronize_session=False)
+            )
         # Delete trade-derived lots; imported lots are the durable baseline.
-        self.session.query(PaperPositionLot).filter(
-            PaperPositionLot.account_id == account_id,
-            PaperPositionLot.source == "trade",
-        ).delete(synchronize_session=False)
+        counts["trade_lots"] = (
+            self.session.query(PaperPositionLot)
+            .filter(
+                PaperPositionLot.account_id == account_id,
+                PaperPositionLot.source == "trade",
+            )
+            .delete(synchronize_session=False)
+        )
         # Reset imported lots to their original quantity (undo any sell reductions).
         self.session.query(PaperPositionLot).filter(
             PaperPositionLot.account_id == account_id,
@@ -926,8 +998,10 @@ class PaperTradingRepository:
             .all()
         )
         # Delete all positions (aggregate state must be rebuilt from imported lots).
-        self.session.query(PaperPosition).filter(PaperPosition.account_id == account_id).delete(
-            synchronize_session="fetch"
+        counts["positions"] = (
+            self.session.query(PaperPosition)
+            .filter(PaperPosition.account_id == account_id)
+            .delete(synchronize_session="fetch")
         )
         # Rebuild aggregate positions from surviving imported lots.
         total_qty: dict[str, int] = defaultdict(int)
@@ -948,6 +1022,7 @@ class PaperTradingRepository:
             )
             self.session.add(position)
         self.session.flush()
+        return {key: int(value) for key, value in counts.items()}
 
     def reset_orders_for_replay(self, account_id: int) -> None:
         # Reset orders that can be replayed (active statuses).

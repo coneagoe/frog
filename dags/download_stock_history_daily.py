@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 """DAG for downloading stock history (HFQ) on weekdays."""
 
 import json
@@ -37,7 +38,8 @@ from common.const import (  # noqa: E402
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label  # noqa: E402
 from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
 from stock.market import is_a_share_trade_date  # noqa: E402
-from tools.paper_trading_cli import run_paper_trading_matching  # noqa: E402
+from tools.paper_trading_cli import run_paper_trading_ledger_rebuild  # noqa: E402
+from tools.paper_trading_cli import run_paper_trading_matching  # noqa: E402, I001
 
 
 def _persist_diagnostic(session, business_date, stock_id, adjust, outcome):
@@ -251,10 +253,15 @@ def run_paper_trading_matching_for_active_accounts(**context):
         token=os.environ["PAPER_TRADING_API_TOKEN"],
     )
     warning_count = result.get("warning_count")
+    rebuild_result = run_paper_trading_ledger_rebuild(
+        base_url=os.environ.get("PAPER_TRADING_API_BASE_URL", "http://paper-trading:8000"),
+        token=os.environ["PAPER_TRADING_API_TOKEN"],
+    )
+    rebuilt_accounts = rebuild_result.get("rebuilt_account_ids", [])
     warning_suffix = f", warning_count={warning_count}" if warning_count is not None else ""
     return (
         f"Paper trading matching completed: trade_date={trade_date.isoformat()}, "
-        f"run_id={result.get('id')}{warning_suffix}"
+        f"run_id={result.get('id')}{warning_suffix}, rebuilt_accounts={len(rebuilt_accounts)}"
     )
 
 

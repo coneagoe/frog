@@ -237,6 +237,9 @@ class PaperTradingApiClient:
             json={"positions": positions},
         )
 
+    def rebuild_delayed_daily_bar_orders(self) -> dict[str, Any]:
+        return self._request("POST", "/paper/matching/runs/rebuilds")
+
 
 def run_paper_trading_matching(
     trade_date: str,
@@ -248,6 +251,10 @@ def run_paper_trading_matching(
     _validate_trade_date(trade_date)
     client = PaperTradingApiClient(base_url=base_url, token=token)
     return client.run_matching(trade_date=trade_date, account_id=account_id)
+
+
+def run_paper_trading_ledger_rebuild(base_url: str | None = None, token: str | None = None) -> dict[str, Any]:
+    return PaperTradingApiClient(base_url, token).rebuild_delayed_daily_bar_orders()
 
 
 def _add_account_subparsers(subparsers: Any) -> None:

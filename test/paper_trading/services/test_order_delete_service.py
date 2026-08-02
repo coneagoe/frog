@@ -103,6 +103,106 @@ def test_delete_filled_order_rebuilds_account_from_remaining_orders(session):
     assert repo.get_cash_available(account.id) < Decimal("100000")
 
 
+def test_rebuild_from_fills_delayed_order_and_replays_later_ledger(session):
+    repo = PaperTradingRepository(session)
+    early_date = date(2026, 7, 17)
+    later_date = date(2026, 7, 18)
+    account = repo.create_account("delayed-history", Decimal("100000"))
+    early_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        early_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0000"),
+    )
+    later_order = repo.create_order(
+        account.id,
+        "000002",
+        OrderSide.BUY,
+        100,
+        Decimal("20.00"),
+        later_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("2005.0000"),
+    )
+    market_data = FakeMarketDataProvider()
+    matching = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+    matching.run(later_date, account.id)
+    repo.upsert_daily_bar_diagnostic(early_date, "000001", "bfq", "missing_exact_date", [], resolved=False)
+
+    rebuild = OrderDeleteService(repo, market_data).rebuild_account_from(account.id, early_date, [early_order.id])
+
+    assert repo.get_order(early_order.id).status == OrderStatus.FILLED.value
+    assert repo.get_order(later_order.id).status == OrderStatus.FILLED.value
+    assert [trade.order_id for trade in repo.list_trades(account.id)] == [early_order.id, later_order.id]
+    assert rebuild.start_date == early_date
+
+
+def test_rebuild_from_preserves_deposit_and_resolves_readable_skipped_diagnostic(session):
+    repo = PaperTradingRepository(session)
+    trade_date = date(2026, 7, 17)
+    account = repo.create_account("rebuild-source-facts", Decimal("100000"))
+    repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("1000"), trade_date=trade_date, note="manual")
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("200.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("20005.0000"),
+    )
+    repo.upsert_daily_bar_diagnostic(trade_date, "000001", "bfq", "missing_exact_date", [], resolved=False)
+
+    rebuild = OrderDeleteService(repo, FakeMarketDataProvider()).rebuild_account_from(
+        account.id, trade_date, [order.id]
+    )
+
+    assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
+    assert any(event.note == "manual" for event in repo.list_cash_ledger(account.id))
+    diagnostic = next(
+        item
+        for item in repo.list_daily_bar_diagnostics()
+        if item.stock_id == "000001" and item.business_date == trade_date
+    )
+    assert diagnostic.resolved is True
+    assert rebuild.regenerated_counts["trades"] == 0
+
+
+def test_rebuild_from_rolls_back_derived_ledger_on_unexpected_error(session, monkeypatch):
+    repo = PaperTradingRepository(session)
+    trade_date = date(2026, 7, 17)
+    account = repo.create_account("rebuild-rollback", Decimal("100000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0000"),
+    )
+    market_data = FakeMarketDataProvider()
+    MatchingService(repo, market_data, SnapshotService(repo, market_data)).run(trade_date, account.id)
+    before_trade_ids = [trade.id for trade in repo.list_trades(account.id)]
+
+    def raise_unexpected(*args, **kwargs):
+        raise RuntimeError("unexpected replay failure")
+
+    monkeypatch.setattr(MatchingService, "match_order", raise_unexpected)
+
+    with pytest.raises(RuntimeError, match="unexpected replay failure"):
+        OrderDeleteService(repo, FakeMarketDataProvider()).rebuild_account_from(account.id, trade_date, [order.id])
+
+    assert [trade.id for trade in repo.list_trades(account.id)] == before_trade_ids
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+
+
 # ── Bug reproduction: cash freeze / position freeze / validity checks ──────────
 
 

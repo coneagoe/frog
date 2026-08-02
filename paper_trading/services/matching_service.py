@@ -53,6 +53,7 @@ class MatchingService:
                     self._reject_order(order, "SUSPENDED_SYMBOL", "Symbol is suspended")
                     rejected += 1
                     continue
+                self._resolve_matching_diagnostic(order)
                 try:
                     ensure_price_in_daily_range(Decimal(order.limit_price), bar.low, bar.high)
                 except Exception:
@@ -123,6 +124,7 @@ class MatchingService:
         if bar.suspended:
             self._reject_order(order, "SUSPENDED_SYMBOL", "Symbol is suspended")
             return "rejected"
+        self._resolve_matching_diagnostic(order)
         try:
             ensure_price_in_daily_range(Decimal(order.limit_price), bar.low, bar.high)
         except SQLAlchemyError:

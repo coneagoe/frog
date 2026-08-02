@@ -43,6 +43,7 @@ BUSINESS_TABLES=(
   paper_position_round_trips
   paper_account_snapshots
   paper_matching_runs
+  paper_ledger_rebuilds
   paper_pending_settlement
   daily_bar_diagnostics
   paper_valuation_gaps

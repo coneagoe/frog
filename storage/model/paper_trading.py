@@ -33,6 +33,7 @@ tb_name_paper_trade_validity_checks = "paper_trade_validity_checks"
 tb_name_paper_pending_settlement = "paper_pending_settlement"
 tb_name_daily_bar_diagnostics = "daily_bar_diagnostics"
 tb_name_paper_valuation_gaps = "paper_valuation_gaps"
+tb_name_paper_ledger_rebuilds = "paper_ledger_rebuilds"
 
 
 class PaperAccount(Base):
@@ -294,6 +295,20 @@ class PaperPendingSettlement(Base):
     trade_id = Column(Integer, nullable=True)
     source = Column(String(20), nullable=False)  # "hk_sell"
     settled = Column(Boolean, nullable=False, server_default=text("0"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaperLedgerRebuild(Base):
+    __tablename__ = tb_name_paper_ledger_rebuilds
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True)
+    start_date = Column(Date, nullable=False, index=True)
+    triggering_order_ids = Column(JSON, nullable=False)
+    status = Column(String(20), nullable=False, index=True)
+    deleted_counts = Column(JSON, nullable=False)
+    regenerated_counts = Column(JSON, nullable=False)
+    error_details = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

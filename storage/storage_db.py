@@ -2383,11 +2383,17 @@ class StorageDb:
 
         Called once per process from ``__init__``.
         """
-        from .model.paper_trading import DailyBarDiagnostic, PaperTradeValidityCheck, PaperValuationGap  # noqa: F401
+        from .model.paper_trading import (  # noqa: F401
+            DailyBarDiagnostic,
+            PaperLedgerRebuild,
+            PaperTradeValidityCheck,
+            PaperValuationGap,
+        )
 
         PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
         DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
         PaperValuationGap.__table__.create(self.engine, checkfirst=True)
+        PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
 
         # Bail out if the paper_orders table does not exist yet --- fresh
         # installs rely on Base.metadata.create_all in __init__.

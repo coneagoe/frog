@@ -153,7 +153,9 @@ def test_warning_summary_runs_matching_with_same_business_date(monkeypatch):
     monkeypatch.setattr(dag_module, "get_business_date", lambda context: date(2026, 7, 28))
     monkeypatch.setattr(dag_module, "is_a_share_trade_date", lambda business_date: True)
     run_matching = Mock(return_value={"id": 7, "warning_count": 1})
+    run_rebuild = Mock(return_value={"rebuilt_account_ids": [1]})
     monkeypatch.setattr(dag_module, "run_paper_trading_matching", run_matching)
+    monkeypatch.setattr(dag_module, "run_paper_trading_ledger_rebuild", run_rebuild)
     result = dag_module.run_paper_trading_matching_for_active_accounts(
         data_interval_end=pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
         ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"})),
@@ -161,6 +163,8 @@ def test_warning_summary_runs_matching_with_same_business_date(monkeypatch):
     assert run_matching.call_args.kwargs["trade_date"] == "2026-07-28"
     assert "run_id=7" in result
     assert "warning_count=1" in result
+    assert "rebuilt_accounts=1" in result
+    run_rebuild.assert_called_once()
 
 
 def test_closed_date_does_not_run_matching(monkeypatch):

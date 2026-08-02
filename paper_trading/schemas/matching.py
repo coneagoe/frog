@@ -22,3 +22,7 @@ class MatchingRunResponse(BaseModel):
     failed_count: int
     warning_count: int
     error_details: str | None = None
+
+
+class LedgerRebuildResponse(BaseModel):
+    rebuilt_account_ids: list[int]
