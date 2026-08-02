@@ -42,15 +42,25 @@ from tools.paper_trading_cli import run_paper_trading_ledger_rebuild  # noqa: E4
 from tools.paper_trading_cli import run_paper_trading_matching  # noqa: E402, I001
 
 
-def _persist_diagnostic(session, business_date, stock_id, adjust, outcome):
-    PaperTradingRepository(session).upsert_daily_bar_diagnostic(
-        business_date,
-        stock_id,
-        canonical_adjust_label(adjust),
-        outcome.classification,
-        [asdict(item) for item in outcome.provider_outcomes],
-        outcome.resolved,
-    )
+def _persist_diagnostic(storage, business_date, stock_id, adjust, outcome):
+    """Persist one diagnostic without holding a connection during downloads."""
+    assert storage.Session is not None
+    session = storage.Session()
+    try:
+        PaperTradingRepository(session).upsert_daily_bar_diagnostic(
+            business_date,
+            stock_id,
+            canonical_adjust_label(adjust),
+            outcome.classification,
+            [asdict(item) for item in outcome.provider_outcomes],
+            outcome.resolved,
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def get_redis_client() -> redis.Redis:
@@ -109,30 +119,21 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
     manager = DownloadManager()
 
     outcomes = []
-    storage = get_storage()
-    assert storage.Session is not None
-    session = storage.Session()
     total = len(my_ids)
-    try:
-        for idx, stock_id in enumerate(my_ids, start=1):
-            outcome = manager.download_stock_history_outcome(
-                stock_id=stock_id,
-                period=PeriodType.DAILY,
-                start_date=start_date,
-                end_date=business_date.isoformat(),
-                adjust=AdjustType.HFQ,
-            )
-            outcomes.append(asdict(outcome))
-            if outcome.classification != "downloaded":
-                _persist_diagnostic(session, business_date, stock_id, AdjustType.HFQ, outcome)
-            if idx % 50 == 0 or idx == total:
-                print(f"[HFQ p{partition_id:02d}] 进度: {idx}/{total}")
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    storage = get_storage()
+    for idx, stock_id in enumerate(my_ids, start=1):
+        outcome = manager.download_stock_history_outcome(
+            stock_id=stock_id,
+            period=PeriodType.DAILY,
+            start_date=start_date,
+            end_date=business_date.isoformat(),
+            adjust=AdjustType.HFQ,
+        )
+        outcomes.append(asdict(outcome))
+        if outcome.classification != "downloaded":
+            _persist_diagnostic(storage, business_date, stock_id, AdjustType.HFQ, outcome)
+        if idx % 50 == 0 or idx == total:
+            print(f"[HFQ p{partition_id:02d}] 进度: {idx}/{total}")
 
     return {"adjust": "hfq", "partition_id": partition_id, "count": total, "outcomes": outcomes}
 
@@ -171,30 +172,21 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
     manager = DownloadManager()
 
     outcomes = []
-    storage = get_storage()
-    assert storage.Session is not None
-    session = storage.Session()
     total = len(my_ids)
-    try:
-        for idx, stock_id in enumerate(my_ids, start=1):
-            outcome = manager.download_stock_history_outcome(
-                stock_id=stock_id,
-                period=PeriodType.DAILY,
-                start_date=start_date,
-                end_date=business_date.isoformat(),
-                adjust=AdjustType.BFQ,
-            )
-            outcomes.append(asdict(outcome))
-            if outcome.classification != "downloaded":
-                _persist_diagnostic(session, business_date, stock_id, AdjustType.BFQ, outcome)
-            if idx % 50 == 0 or idx == total:
-                print(f"[BFQ p{partition_id:02d}] 进度: {idx}/{total}")
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    storage = get_storage()
+    for idx, stock_id in enumerate(my_ids, start=1):
+        outcome = manager.download_stock_history_outcome(
+            stock_id=stock_id,
+            period=PeriodType.DAILY,
+            start_date=start_date,
+            end_date=business_date.isoformat(),
+            adjust=AdjustType.BFQ,
+        )
+        outcomes.append(asdict(outcome))
+        if outcome.classification != "downloaded":
+            _persist_diagnostic(storage, business_date, stock_id, AdjustType.BFQ, outcome)
+        if idx % 50 == 0 or idx == total:
+            print(f"[BFQ p{partition_id:02d}] 进度: {idx}/{total}")
 
     return {"adjust": "bfq", "partition_id": partition_id, "count": total, "outcomes": outcomes}
 

@@ -225,8 +225,50 @@ def test_partition_diagnostic_failure_rolls_back_and_fails(monkeypatch):
             data_interval_end=pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
         )
 
-    session.rollback.assert_called_once_with()
-    session.close.assert_called_once_with()
+    storage.Session.assert_not_called()
+
+
+def test_persist_diagnostic_commits_and_closes_its_session(monkeypatch):
+    pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+    from paper_trading.domain.market_data_diagnostics import StockHistoryOutcome
+
+    events = []
+    session = MagicMock()
+    session.commit.side_effect = lambda: events.append("commit")
+    session.close.side_effect = lambda: events.append("close")
+    storage = MagicMock(Session=MagicMock(return_value=session))
+
+    class Repository:
+        def __init__(self, received_session):
+            assert received_session is session
+
+        def upsert_daily_bar_diagnostic(self, *args):
+            events.append("upsert")
+
+    monkeypatch.setattr(dag_module, "PaperTradingRepository", Repository)
+    outcome = StockHistoryOutcome("300996", "2026-07-28", "bfq", "missing_market_data", (), False)
+
+    dag_module._persist_diagnostic(
+        storage,
+        date(2026, 7, 28),
+        "300996",
+        "bfq",
+        outcome,
+    )
+
+    assert events == ["upsert", "commit", "close"]
+
+
+def test_daily_dag_closes_diagnostic_session_with_each_write():
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+    diagnostic_source = source[source.index("def _persist_diagnostic") : source.index("def get_redis_client")]
+
+    assert "def _persist_diagnostic(storage," in diagnostic_source
+    assert "session = storage.Session()" in diagnostic_source
+    assert "session.commit()" in diagnostic_source
+    assert "session.close()" in diagnostic_source
 
 
 def build_task_signature_pattern(task_name: str) -> str:

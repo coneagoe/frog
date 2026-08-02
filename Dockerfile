@@ -20,7 +20,6 @@ COPY common ./common
 COPY conf ./conf
 COPY download ./download
 COPY fund ./fund
-COPY indicator ./indicator
 COPY monitor ./monitor
 COPY ocr ./ocr
 COPY stock ./stock
