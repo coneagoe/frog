@@ -75,6 +75,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 ## Type Checking Scope
 - Mypy is intentionally relaxed for legacy areas: `app.*`, `stock.*`, `fund.*`, `tools.*`, `backtest.deprecate.*`, and third-party libs without stubs (`akshare`, `retrying`, `baostock`, `tushare`). See `pyproject.toml` for full overrides.
+- When updating the SQLAlchemy version in `uv.lock`, update the matching `sqlalchemy==...` pin in `.pre-commit-config.yaml`.
 - Keep changes type-aware where checking is enabled; do not force large refactors in excluded modules.
 
 ## Detailed Reference
