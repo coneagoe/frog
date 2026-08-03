@@ -21,3 +21,23 @@ def test_pyproject_uses_uv_and_ruff_instead_of_poetry_lint_stack():
     assert "poetry" not in data["tool"]
     assert "isort" not in data["tool"]
     assert data["tool"]["uv"]["package"] is False
+
+
+def test_mypy_config_has_explicit_active_source_targets():
+    config = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+
+    assert config["tool"]["mypy"]["files"] == [
+        "celery_app.py",
+        "common",
+        "conf",
+        "dags",
+        "download",
+        "factor",
+        "monitor",
+        "ocr",
+        "paper_trading",
+        "storage",
+        "task",
+        "top10_floatholder",
+        "utility",
+    ]

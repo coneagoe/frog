@@ -73,6 +73,11 @@ indent-style = "space"
 package = false
 
 [tool.mypy]
+files = [
+    "celery_app.py", "common", "conf", "dags", "download", "factor",
+    "monitor", "ocr", "paper_trading", "storage", "task",
+    "top10_floatholder", "utility",
+]
 python_version = "3.12"
 explicit_package_bases = true
 warn_return_any = true
