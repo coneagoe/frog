@@ -17,6 +17,7 @@ def _client(monkeypatch, sqlite_session):
     Base.metadata.create_all(session.get_bind())
     app = create_app()
     app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_position_valuation_service] = lambda: _FakePositionValuationService({})
     return TestClient(app), {"Authorization": "Bearer secret"}, session
 
 

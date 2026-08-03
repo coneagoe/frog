@@ -73,9 +73,13 @@ def get_order(order_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/orders/{order_id}/cancel", response_model=OrderResponse)
-def cancel_order(order_id: int, session: Session = Depends(get_session)):
+def cancel_order(
+    order_id: int,
+    session: Session = Depends(get_session),
+    market_data: MarketDataProvider = Depends(get_market_data_provider),
+):
     repo = PaperTradingRepository(session)
-    order = OrderService(repo, get_market_data_provider()).cancel_order(order_id)
+    order = OrderService(repo, market_data).cancel_order(order_id)
     session.commit()
     return order
 
@@ -96,10 +100,15 @@ def delete_order(
 
 
 @router.patch("/orders/{order_id}/comment", response_model=OrderResponse)
-def update_order_comment(order_id: int, request: UpdateOrderCommentRequest, session: Session = Depends(get_session)):
+def update_order_comment(
+    order_id: int,
+    request: UpdateOrderCommentRequest,
+    session: Session = Depends(get_session),
+    market_data: MarketDataProvider = Depends(get_market_data_provider),
+):
     repo = PaperTradingRepository(session)
     try:
-        order = OrderService(repo, get_market_data_provider()).update_order_comment(order_id, request.comment)
+        order = OrderService(repo, market_data).update_order_comment(order_id, request.comment)
     except KeyError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper order not found: {order_id}")
     session.commit()

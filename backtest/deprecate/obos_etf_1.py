@@ -7,18 +7,18 @@ import pandas as pd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from bt_common import drop_suspended, run  # noqa: E402
-from my_strategy import MyStrategy, OrderState  # noqa: E402
-from obos_indicator import OBOS  # noqa: E402
-from stop_price_manager_ema import EmaStopPriceManager as StopPriceManager  # noqa: E402
-from trend_follow_etf_pool import etf_pool as stocks  # noqa: E402
-
-import conf  # noqa: E402
 from indicator import (  # noqa: E402
     OBOS_OVERBUY_THRESHOLD,
     OBOS_OVERSELL_THRESHOLD,
     OBOS_PARAM_M,
     OBOS_PARAM_N,
 )
+from my_strategy import MyStrategy, OrderState  # noqa: E402
+from obos_indicator import OBOS  # noqa: E402
+from stop_price_manager_ema import EmaStopPriceManager as StopPriceManager  # noqa: E402
+from trend_follow_etf_pool import etf_pool as stocks  # noqa: E402
+
+import conf  # noqa: E402
 from stock import COL_STOCK_ID, drop_delisted_stocks  # noqa: E402
 
 conf.parse_config()

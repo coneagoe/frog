@@ -130,6 +130,7 @@ def test_matching_api_rolls_back_and_hides_persistence_error(monkeypatch, sqlite
 
     app = create_app()
     app.dependency_overrides[get_session] = lambda: sqlite_session
+    app.dependency_overrides[get_market_data_provider] = object
 
     response = TestClient(app).post(
         "/paper/matching/runs",

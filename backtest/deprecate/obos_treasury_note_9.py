@@ -7,17 +7,17 @@ import pandas as pd
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from bt_common import run  # noqa: E402
-from my_strategy import MyStrategy, OrderState, parse_args  # noqa: E402
-from obos_indicator import OBOS  # noqa: E402
-from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
-
-import conf  # noqa: E402
 from indicator import (  # noqa: E402
     OBOS_OVERBUY_THRESHOLD,
     OBOS_OVERSELL_THRESHOLD_SHORT,
     OBOS_PARAM_M,
     OBOS_PARAM_N,
 )
+from my_strategy import MyStrategy, OrderState, parse_args  # noqa: E402
+from obos_indicator import OBOS  # noqa: E402
+from stop_price_manager import StopPriceManagerEma as StopPriceManager  # noqa: E402
+
+import conf  # noqa: E402
 from stock import COL_STOCK_ID  # noqa: E402
 
 conf.parse_config()
