@@ -12,6 +12,7 @@ from paper_trading.domain.enums import MatchingRunStatus
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
     PaperMatchingRun,
+    PaperOrder,
     PaperPositionLot,
     tb_name_daily_bar_diagnostics,
     tb_name_paper_accounts,
@@ -42,6 +43,29 @@ def test_position_lot_market_defaults_to_a_share(tmp_path):
     market_column = PaperPositionLot.__table__.c.market
     assert market_column.nullable is False
     assert market_column.server_default is not None
+    engine.dispose()
+
+
+def test_paper_order_round_trips_nullable_and_non_nullable_values(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        order = PaperOrder(
+            account_id=1,
+            symbol="000001",
+            side="buy",
+            quantity=100,
+            limit_price=Decimal("10.00"),
+            trade_date=date(2026, 6, 16),
+            status="accepted",
+        )
+        session.add(order)
+        session.flush()
+
+        assert order.quantity == 100
+        assert order.rejection_code is None
+
     engine.dispose()
 
 
