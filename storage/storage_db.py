@@ -10,7 +10,9 @@ import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.dialects.postgresql import Insert as PostgreSQLInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -1427,6 +1429,7 @@ class StorageDb:
                 return True
 
             primary_keys = list(table.primary_key.columns.keys())
+            stmt: PostgreSQLInsert | SQLiteInsert
             if self.engine.dialect.name == "postgresql":
                 stmt = pg_insert(table).values(records).on_conflict_do_nothing(index_elements=primary_keys)
             elif self.engine.dialect.name == "sqlite":
@@ -1846,6 +1849,7 @@ class StorageDb:
 
         assert self.engine is not None
         table = SSFChangeSignal.__table__
+        insert_fn: Any
         if self.engine.dialect.name == "postgresql":
             insert_fn = pg_insert
         elif self.engine.dialect.name == "sqlite":
