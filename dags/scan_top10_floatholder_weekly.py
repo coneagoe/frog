@@ -14,7 +14,7 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common_dags import (  # noqa: E402
+from dags.common_dags import (  # noqa: E402, I001
     get_default_args,
     get_partition_count,
     get_partition_ids,

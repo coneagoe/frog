@@ -44,7 +44,7 @@ def small_market_capital_2():
     try:
         r = get_redis_client()
         result = r.get(REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY)
-        if not result:
+        if not isinstance(result, str) or not result:
             return "Skip: missing Redis download result."
 
         data = json.loads(result)

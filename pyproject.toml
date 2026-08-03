@@ -156,6 +156,18 @@ ignore_missing_imports = true
 module = ["airflow", "airflow.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["celery"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["yfinance"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["alphapurify"]
+ignore_missing_imports = true
+
 [[tool.uv.index]]
 name = "ali"
 url = "https://mirrors.aliyun.com/pypi/simple/"

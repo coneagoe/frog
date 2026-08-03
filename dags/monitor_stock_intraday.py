@@ -13,7 +13,7 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from common_dags import get_default_args  # noqa: E402
+from dags.common_dags import get_default_args  # noqa: E402, I001
 
 from stock.market import is_a_market_open_today  # noqa: E402
 

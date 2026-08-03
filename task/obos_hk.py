@@ -30,7 +30,7 @@ def obos_hk():
     try:
         r = get_redis_client()
         result = r.get(REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY)
-        if not result:
+        if not isinstance(result, str) or not result:
             return "Skip: missing Redis download result."
 
         data = json.loads(result)
