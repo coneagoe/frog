@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
+import paper_trading.services.order_service as order_service_module
 from common.const import (
     COL_CLOSE,
     COL_DATE,
@@ -24,6 +25,17 @@ from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvide
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
+
+
+class _TestDate(date):
+    @classmethod
+    def today(cls) -> date:
+        return cls(2026, 6, 16)
+
+
+@pytest.fixture(autouse=True)
+def fixed_today(monkeypatch):
+    monkeypatch.setattr(order_service_module, "date", _TestDate)
 
 
 def _services(tmp_path):
@@ -630,8 +642,8 @@ def test_matching_fill_resolves_historical_retry_diagnostic(tmp_path):
         Decimal("10.00"),
         trade_date,
     )
-    assert retry.status == OrderStatus.REJECTED.value
-    assert retry.rejection_code == "HISTORICAL_TRADE_DATE_NOT_ELIGIBLE"
+    assert retry.status == OrderStatus.ACCEPTED.value
+    assert retry.rejection_code is None
     engine.dispose()
 
 

@@ -2,8 +2,10 @@ from datetime import date
 from decimal import Decimal
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
+import paper_trading.services.order_service as order_service_module
 from common.const import COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_security_name_provider, get_session
@@ -13,6 +15,17 @@ from paper_trading.storage.models import PaperCashLedger, PaperMatchingRun, Pape
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar, _FakeSecurityNameProvider
+
+
+class _TestDate(date):
+    @classmethod
+    def today(cls) -> date:
+        return cls(2026, 6, 16)
+
+
+@pytest.fixture(autouse=True)
+def fixed_today(monkeypatch):
+    monkeypatch.setattr(order_service_module, "date", _TestDate)
 
 
 def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):

@@ -99,7 +99,18 @@ class OrderService:
                     idempotency_key,
                     comment,
                 )
-            # A-share path (unchanged logic)
+            if trade_date < date.today():
+                return self._place_historical_a_share_order(
+                    account_id,
+                    symbol,
+                    side,
+                    quantity,
+                    limit_price,
+                    trade_date,
+                    resolved_market,
+                    idempotency_key,
+                    comment,
+                )
             return self._place_a_share_order(
                 account_id,
                 symbol,
@@ -231,6 +242,65 @@ class OrderService:
     def _looks_like_hk_symbol(symbol: str) -> bool:
         """Return True if symbol is a bare 5-digit string (HK stock code pattern)."""
         return bool(re.match(r"^\d{5}$", symbol))
+
+    def _place_historical_a_share_order(
+        self,
+        account_id: int,
+        symbol: str,
+        side: OrderSide,
+        quantity: int,
+        limit_price: Decimal,
+        trade_date: date,
+        market: Market,
+        idempotency_key: str | None,
+        comment: str | None,
+    ) -> PaperOrder:
+        if self._looks_like_hk_symbol(symbol):
+            raise PaperTradingError(
+                "MARKET_SYMBOL_MISMATCH",
+                f"Symbol {symbol} appears to be an HK stock; use market=HK_CONNECT",
+                {"symbol": symbol, "market": market.value},
+            )
+        ensure_lot_size(quantity)
+        if not self.market_data.is_trade_date(trade_date):
+            raise PaperTradingError(
+                "INVALID_TRADE_DATE",
+                "Trade date is not open",
+                {"trade_date": str(trade_date)},
+            )
+        account = self.repo.get_account(account_id)
+        if account is None:
+            raise ValueError(f"paper account not found: {account_id}")
+
+        frozen_cash = Decimal("0")
+        if side == OrderSide.BUY:
+            amount = Decimal(quantity) * limit_price
+            frozen_cash = (
+                amount + calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account)).total
+            ).quantize(Decimal("0.0001"))
+
+        order = self.repo.create_order(
+            account_id=account_id,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            limit_price=limit_price,
+            trade_date=trade_date,
+            status=OrderStatus.ACCEPTED,
+            frozen_cash=frozen_cash,
+            frozen_quantity=quantity if side == OrderSide.SELL else 0,
+            idempotency_key=idempotency_key,
+            comment=comment,
+            market=market.value,
+        )
+        self.validity_service.analyze_order(order)
+
+        from paper_trading.services.order_delete_service import OrderDeleteService
+
+        OrderDeleteService(self.repo, self.market_data, self.hk_metadata).rebuild_account_from(
+            account_id, trade_date, [order.id]
+        )
+        return self.repo.get_order(order.id)
 
     def _place_a_share_order(
         self,

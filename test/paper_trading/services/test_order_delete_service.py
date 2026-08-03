@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pytest
 
+import paper_trading.services.order_service as order_service_module
 from paper_trading.domain.enums import (
     REPLAY_REJECTION_MARKER,
     CashEventType,
@@ -24,16 +25,20 @@ from storage.model.general_info_ggt import GeneralInfoGGT
 from test.paper_trading.fakes import FakeMarketDataProvider
 
 
+class _TestDate(date):
+    @classmethod
+    def today(cls) -> date:
+        return cls(2026, 7, 17)
+
+
+@pytest.fixture(autouse=True)
+def fixed_today(monkeypatch):
+    monkeypatch.setattr(order_service_module, "date", _TestDate)
+
+
 @pytest.fixture(autouse=True)
 def seed_historical_a_share_diagnostics(session):
-    """Make the replay orders eligible under the historical A-share rule.
-
-    These tests intentionally use July 2026 dates, which are historical when
-    the suite runs on 2026-07-30.  The replay fixtures do not exercise missing
-    market-data diagnostics themselves, so establish the unresolved canonical
-    BFQ evidence they would have received from the download path.  HK orders
-    are deliberately not included here and continue through their own path.
-    """
+    """Seed diagnostics needed by delayed-data replay scenarios."""
     repo = PaperTradingRepository(session)
     symbols = ("000001", "000002", "000003", "999999")
     trade_dates = tuple(date(2026, 7, day) for day in (15, 16, 17, 18, 19, 21, 22))

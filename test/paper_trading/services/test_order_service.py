@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
+import paper_trading.services.order_service as order_service_module
 from common.const import (
     COL_CLOSE,
     COL_DATE,
@@ -23,11 +24,22 @@ from common.const import (
 from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.services.order_service import OrderService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
-from paper_trading.storage.market_data import StorageMarketDataProvider
+from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from storage.model.general_info_ggt import GeneralInfoGGT
 from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
+
+
+class _TestDate(date):
+    @classmethod
+    def today(cls) -> date:
+        return cls(2026, 6, 16)
+
+
+@pytest.fixture(autouse=True)
+def fixed_today(monkeypatch):
+    monkeypatch.setattr(order_service_module, "date", _TestDate)
 
 
 class FakeHistoryStorageWithEngine:
@@ -254,7 +266,13 @@ def test_place_order_integrity_collision_rolls_back_and_re_fetches_existing_orde
     engine.dispose()
 
 
-def test_place_order_rejects_open_historical_date_without_unresolved_bfq_diagnostic(tmp_path):
+def test_place_order_accepts_open_historical_date_without_unresolved_bfq_diagnostic(tmp_path, monkeypatch):
+    class HistoricalToday(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2026, 8, 2)
+
+    monkeypatch.setattr(order_service_module, "date", HistoricalToday)
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("historical-date", Decimal("100000.00"))
 
@@ -268,9 +286,116 @@ def test_place_order_rejects_open_historical_date_without_unresolved_bfq_diagnos
     )
     session.commit()
 
-    assert order.status == OrderStatus.REJECTED.value
-    assert order.rejection_code == "HISTORICAL_TRADE_DATE_NOT_ELIGIBLE"
-    assert repo.get_cash_available(account.id) == Decimal("100000.0000")
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.rejection_code is None
+    assert repo.get_cash_available(account.id) == Decimal("98994.9900")
+    engine.dispose()
+
+
+def test_place_order_replays_past_a_share_buy_without_current_cash_freeze(tmp_path, monkeypatch):
+    class HistoricalToday(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2026, 8, 2)
+
+    monkeypatch.setattr(order_service_module, "date", HistoricalToday)
+    engine = create_engine(f"sqlite:///{tmp_path / 'historical_buy.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    service = OrderService(repo, FakeMarketDataProvider())
+    account = repo.create_account("historical-buy", Decimal("100000.00"))
+    trade_date = date(2026, 6, 16)
+
+    order = service.place_order(
+        account.id,
+        "000002.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+    )
+
+    assert order.status == OrderStatus.FILLED.value
+    assert order.frozen_cash == Decimal("1005.0100")
+    assert repo.get_cash_available(account.id) == Decimal("98994.9900")
+    assert repo.get_position(account.id, "000002.SZ").total_quantity == 100
+    engine.dispose()
+
+
+def test_place_order_replays_past_sell_against_historical_matured_position(tmp_path, monkeypatch):
+    class HistoricalToday(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2026, 8, 2)
+
+    monkeypatch.setattr(order_service_module, "date", HistoricalToday)
+    engine = create_engine(f"sqlite:///{tmp_path / 'historical_sell.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    service = OrderService(repo, FakeMarketDataProvider())
+    account = repo.create_account("historical-sell", Decimal("100000.00"))
+    buy_date = date(2026, 6, 15)
+    sell_date = date(2026, 6, 16)
+
+    service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        1100,
+        Decimal("10.00"),
+        buy_date,
+    )
+    sell = service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.SELL,
+        1100,
+        Decimal("11.00"),
+        sell_date,
+    )
+
+    assert sell.status == OrderStatus.FILLED.value
+    assert sell.rejection_code is None
+    assert repo.get_position(account.id, "000001.SZ").total_quantity == 0
+    engine.dispose()
+
+
+def test_historical_order_33_sell_is_not_rejected_for_past_date(tmp_path, monkeypatch):
+    class HistoricalToday(date):
+        @classmethod
+        def today(cls) -> date:
+            return cls(2026, 8, 2)
+
+    monkeypatch.setattr(order_service_module, "date", HistoricalToday)
+    engine = create_engine(f"sqlite:///{tmp_path / 'order_33.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    buy_date = date(2026, 7, 29)
+    sell_date = date(2026, 7, 30)
+    market_data = FakeMarketDataProvider(
+        {
+            ("002558", sell_date): DailyBar(
+                "002558",
+                sell_date,
+                Decimal("28.00"),
+                Decimal("29.65"),
+                Decimal("27.52"),
+                Decimal("28.00"),
+            )
+        }
+    )
+    service = OrderService(repo, market_data)
+    account = repo.create_account("order-33", Decimal("100000.00"))
+    service.place_order(account.id, "002558", OrderSide.BUY, 1100, Decimal("10.00"), buy_date)
+
+    sell = service.place_order(account.id, "002558", OrderSide.SELL, 1100, Decimal("28.00"), sell_date)
+
+    assert sell.status == OrderStatus.FILLED.value
+    assert sell.rejection_code is None
+    assert repo.get_position(account.id, "002558").total_quantity == 0
     engine.dispose()
 
 

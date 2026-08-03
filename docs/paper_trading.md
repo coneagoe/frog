@@ -92,6 +92,14 @@ The `order update-comment` command with `--comment ""` clears the stored comment
 
 Order creation queues an accepted order; it does not run matching or create a trade immediately. If an `idempotency_key` is supplied, repeating the same request for the same account returns the original order without reserving cash again. Reusing that key for different order fields is rejected.
 
+Past-date A-share orders are recorded as historical source orders and immediately
+rebuild the affected account ledger. The replay processes orders by trade date
+and order ID, so historical cash, holdings, T+1 eligibility, and exact-date
+market data determine the result. Historical order entry does not reserve the
+account's pre-replay current cash or position; replay creates the appropriate
+historical reservation. Current-date orders retain their normal immediate
+reservation behavior.
+
 After a daily BFQ history download, the daily-history DAG automatically calls
 the delayed-bar rebuild endpoint. It selects accepted A-share orders with an
 unresolved exact-date BFQ diagnostic whose bar is now available, then rebuilds
