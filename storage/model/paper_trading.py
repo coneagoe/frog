@@ -17,12 +17,12 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from paper_trading.domain.enums import MatchingRunStatus
 
 from .base import Base
+from .orm_compat import Mapped, mapped_column
 
 tb_name_paper_accounts = "paper_accounts"
 tb_name_paper_cash_ledger = "paper_cash_ledger"

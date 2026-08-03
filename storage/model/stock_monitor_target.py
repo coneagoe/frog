@@ -2,10 +2,10 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, text
-from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from .base import Base
+from .orm_compat import Mapped, mapped_column
 
 tb_name_stock_monitor_target = "stock_monitor_targets"
 

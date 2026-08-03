@@ -1,10 +1,10 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, text
-from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from .base import Base
+from .orm_compat import Mapped, mapped_column
 
 tb_name_blackroom_record = "blackroom_records"
 
