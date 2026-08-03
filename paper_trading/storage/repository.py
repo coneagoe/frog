@@ -112,7 +112,7 @@ class PaperTradingRepository:
             setattr(diagnostic, "last_observed_at", now)
             setattr(diagnostic, "resolved", resolved)
         self.session.flush()
-        return cast(DailyBarDiagnostic, diagnostic)
+        return diagnostic
 
     def list_daily_bar_diagnostics(self) -> list[DailyBarDiagnostic]:
         return list(
@@ -433,15 +433,14 @@ class PaperTradingRepository:
         return order
 
     def get_order_by_idempotency_key(self, account_id: int, idempotency_key: str) -> PaperOrder | None:
-        return cast(
-            PaperOrder | None,
+        return (
             self.session.query(PaperOrder)
             .filter(PaperOrder.account_id == account_id, PaperOrder.idempotency_key == idempotency_key)
-            .one_or_none(),
+            .one_or_none()
         )
 
     def get_order(self, order_id: int) -> PaperOrder:
-        order = cast(PaperOrder | None, self.session.get(PaperOrder, order_id))
+        order = self.session.get(PaperOrder, order_id)
         if order is None:
             raise KeyError(f"paper order not found: {order_id}")
         return order
@@ -508,12 +507,11 @@ class PaperTradingRepository:
                 gap.missing_symbols = missing_symbols
                 gap.details = details
         self.session.flush()
-        return cast(PaperValuationGap, gap)
+        return gap
 
     def get_valuation_gap(self, account_id: int, trade_date: date) -> PaperValuationGap | None:
-        return cast(
-            PaperValuationGap | None,
-            self.session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=trade_date).one_or_none(),
+        return (
+            self.session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=trade_date).one_or_none()
         )
 
     def get_accounts_for_snapshot(self, trade_date: date, account_id: int | None = None) -> list[int]:
@@ -805,11 +803,10 @@ class PaperTradingRepository:
         return order
 
     def get_position(self, account_id: int, symbol: str) -> PaperPosition | None:
-        return cast(
-            PaperPosition | None,
+        return (
             self.session.query(PaperPosition)
             .filter(PaperPosition.account_id == account_id, PaperPosition.symbol == symbol)
-            .one_or_none(),
+            .one_or_none()
         )
 
     def get_lots(self, account_id: int, symbol: str) -> list[PaperPositionLot]:
@@ -846,8 +843,7 @@ class PaperTradingRepository:
         return cycle
 
     def get_open_round_trip(self, account_id: int, symbol: str) -> PaperPositionRoundTrip | None:
-        return cast(
-            PaperPositionRoundTrip | None,
+        return (
             self.session.query(PaperPositionRoundTrip)
             .filter(
                 PaperPositionRoundTrip.account_id == account_id,
@@ -855,7 +851,7 @@ class PaperTradingRepository:
                 PaperPositionRoundTrip.status == "open",
             )
             .order_by(PaperPositionRoundTrip.id.desc())
-            .first(),
+            .first()
         )
 
     def update_round_trip(self, cycle: PaperPositionRoundTrip, **values: Any) -> PaperPositionRoundTrip:
