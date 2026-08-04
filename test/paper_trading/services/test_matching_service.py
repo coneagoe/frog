@@ -250,6 +250,8 @@ def test_matching_closes_round_trip_when_position_returns_to_zero(tmp_path):
     assert len(cycles) == 1
     assert cycles[0].status == "closed"
     assert cycles[0].close_trade_date == next_date
+    assert repo.get_position(account.id, "000001.SZ") is None
+    assert repo.get_account(account.id).realized_pnl == Decimal("44.4600")
     engine.dispose()
 
 

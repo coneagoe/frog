@@ -50,6 +50,7 @@ class PaperAccount(Base):
     net_asset_value: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, server_default=text("1"))
     cumulative_deposit: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
     cumulative_withdrawal: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
     fee_preset: Mapped[str] = mapped_column(String(30), nullable=False, server_default="a_share")
     commission_rate: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False, server_default=text("0.0003"))
     min_commission: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("5.00"))

@@ -61,6 +61,21 @@ def test_generate_snapshot_values_positions_at_close(tmp_path):
     engine.dispose()
 
 
+def test_generate_snapshot_uses_account_realized_pnl_after_position_is_closed(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_realized_pnl.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("closed-position-pnl", Decimal("100000.00"))
+    account.realized_pnl = Decimal("75.5000")
+
+    snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 6, 16))
+
+    assert snapshot.realized_pnl == Decimal("75.5000")
+    assert snapshot.position_count == 0
+    engine.dispose()
+
+
 def test_generate_snapshot_persists_nav_fields(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_nav.db'}")
     Base.metadata.create_all(engine)

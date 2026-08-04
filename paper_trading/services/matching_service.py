@@ -240,6 +240,12 @@ class MatchingService:
                 trade,
                 post_position_quantity=0 if position is None else int(position.total_quantity or 0),
             )
+            if (
+                position is not None
+                and int(position.total_quantity or 0) <= 0
+                and int(position.frozen_quantity or 0) == 0
+            ):
+                self.repo.delete_position(position)
         order.filled_quantity = quantity
         self.repo.update_order_status(order, OrderStatus.FILLED)
 
@@ -301,6 +307,9 @@ class MatchingService:
         position.total_quantity = int(position.total_quantity or 0) - quantity_to_sell
         position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         position.cost_amount = (Decimal(position.cost_amount or 0) - cost_reduction).quantize(Decimal("0.0001"))
-        position.realized_pnl = (Decimal(position.realized_pnl or 0) + amount - fees - cost_reduction).quantize(
-            Decimal("0.0001")
-        )
+        realized_pnl = (amount - fees - cost_reduction).quantize(Decimal("0.0001"))
+        position.realized_pnl = (Decimal(position.realized_pnl or 0) + realized_pnl).quantize(Decimal("0.0001"))
+        account = self.repo.get_account(order.account_id)
+        if account is None:
+            raise ValueError(f"paper account not found: {order.account_id}")
+        self.repo.add_account_realized_pnl(account, realized_pnl)

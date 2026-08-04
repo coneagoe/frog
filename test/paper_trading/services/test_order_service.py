@@ -358,7 +358,7 @@ def test_place_order_replays_past_sell_against_historical_matured_position(tmp_p
 
     assert sell.status == OrderStatus.FILLED.value
     assert sell.rejection_code is None
-    assert repo.get_position(account.id, "000001.SZ").total_quantity == 0
+    assert repo.get_position(account.id, "000001.SZ") is None
     engine.dispose()
 
 
@@ -395,7 +395,7 @@ def test_historical_order_33_sell_is_not_rejected_for_past_date(tmp_path, monkey
 
     assert sell.status == OrderStatus.FILLED.value
     assert sell.rejection_code is None
-    assert repo.get_position(account.id, "002558").total_quantity == 0
+    assert repo.get_position(account.id, "002558") is None
     engine.dispose()
 
 

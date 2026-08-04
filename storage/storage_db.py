@@ -2525,6 +2525,7 @@ class StorageDb:
                 "net_asset_value": "NUMERIC(20, 6) NOT NULL DEFAULT 1",
                 "cumulative_deposit": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
                 "cumulative_withdrawal": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
+                "realized_pnl": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
             }
             missing_account_nav_columns = [
                 column_name for column_name in account_nav_columns if column_name not in account_columns
@@ -2539,6 +2540,7 @@ class StorageDb:
                     "net_asset_value": "1",
                     "cumulative_deposit": "initial_cash",
                     "cumulative_withdrawal": "0",
+                    "realized_pnl": "0",
                 }
                 assignments = ", ".join(
                     f"{column_name} = {backfill_values[column_name]}" for column_name in missing_account_nav_columns
