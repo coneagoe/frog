@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, Self
 from unittest.mock import Mock
 
 import pandas as pd
@@ -33,7 +33,7 @@ from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider,
 
 class _TestDate(date):
     @classmethod
-    def today(cls) -> date:
+    def today(cls) -> Self:
         return cls(2026, 6, 16)
 
 
@@ -269,7 +269,7 @@ def test_place_order_integrity_collision_rolls_back_and_re_fetches_existing_orde
 def test_place_order_accepts_open_historical_date_without_unresolved_bfq_diagnostic(tmp_path, monkeypatch):
     class HistoricalToday(date):
         @classmethod
-        def today(cls) -> date:
+        def today(cls) -> Self:
             return cls(2026, 8, 2)
 
     monkeypatch.setattr(order_service_module, "date", HistoricalToday)
@@ -295,7 +295,7 @@ def test_place_order_accepts_open_historical_date_without_unresolved_bfq_diagnos
 def test_place_order_replays_past_a_share_buy_without_current_cash_freeze(tmp_path, monkeypatch):
     class HistoricalToday(date):
         @classmethod
-        def today(cls) -> date:
+        def today(cls) -> Self:
             return cls(2026, 8, 2)
 
     monkeypatch.setattr(order_service_module, "date", HistoricalToday)
@@ -319,14 +319,16 @@ def test_place_order_replays_past_a_share_buy_without_current_cash_freeze(tmp_pa
     assert order.status == OrderStatus.FILLED.value
     assert order.frozen_cash == Decimal("1005.0100")
     assert repo.get_cash_available(account.id) == Decimal("98994.9900")
-    assert repo.get_position(account.id, "000002.SZ").total_quantity == 100
+    position = repo.get_position(account.id, "000002.SZ")
+    assert position is not None
+    assert position.total_quantity == 100
     engine.dispose()
 
 
 def test_place_order_replays_past_sell_against_historical_matured_position(tmp_path, monkeypatch):
     class HistoricalToday(date):
         @classmethod
-        def today(cls) -> date:
+        def today(cls) -> Self:
             return cls(2026, 8, 2)
 
     monkeypatch.setattr(order_service_module, "date", HistoricalToday)
@@ -365,7 +367,7 @@ def test_place_order_replays_past_sell_against_historical_matured_position(tmp_p
 def test_historical_order_33_sell_is_not_rejected_for_past_date(tmp_path, monkeypatch):
     class HistoricalToday(date):
         @classmethod
-        def today(cls) -> date:
+        def today(cls) -> Self:
             return cls(2026, 8, 2)
 
     monkeypatch.setattr(order_service_module, "date", HistoricalToday)

@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from typing import cast
+from typing import Self, cast
 
 import pandas as pd
 import pytest
@@ -29,7 +29,7 @@ from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
 
 class _TestDate(date):
     @classmethod
-    def today(cls) -> date:
+    def today(cls) -> Self:
         return cls(2026, 6, 16)
 
 

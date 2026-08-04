@@ -88,10 +88,10 @@ class TestHistoryDataDailyAStockTableCreation:
     def test_model_attributes(self):
         """测试模型的属性设置和获取"""
         daily_stock = HistoryDataDailyAStockQFQ()
-        daily_stock.日期 = "2023-01-01"
-        daily_stock.股票代码 = "000001"
-        daily_stock.开盘 = 10.5
-        daily_stock.收盘 = 11.2
+        setattr(daily_stock, "日期", "2023-01-01")
+        setattr(daily_stock, "股票代码", "000001")
+        setattr(daily_stock, "开盘", 10.5)
+        setattr(daily_stock, "收盘", 11.2)
 
         # 验证属性设置正确
         assert daily_stock.日期 == "2023-01-01"
@@ -100,10 +100,10 @@ class TestHistoryDataDailyAStockTableCreation:
         assert daily_stock.收盘 == 11.2
 
         weekly_stock = HistoryDataWeeklyAStockQFQ()
-        weekly_stock.日期 = "2023-01-01"
-        weekly_stock.股票代码 = "000001"
-        weekly_stock.最高 = 12.0
-        weekly_stock.最低 = 9.8
+        setattr(weekly_stock, "日期", "2023-01-01")
+        setattr(weekly_stock, "股票代码", "000001")
+        setattr(weekly_stock, "最高", 12.0)
+        setattr(weekly_stock, "最低", 9.8)
 
         # 验证属性设置正确
         assert weekly_stock.日期 == "2023-01-01"

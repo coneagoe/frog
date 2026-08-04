@@ -21,7 +21,9 @@ def test_cleanup_backfills_account_pnl_and_removes_closed_positions():
     result = cleanup_zero_paper_positions(session)
 
     assert result == {"accounts": 1, "positions": 1}
-    assert repo.get_account(account.id).realized_pnl == Decimal("95.0000")
+    persisted_account = repo.get_account(account.id)
+    assert persisted_account is not None
+    assert persisted_account.realized_pnl == Decimal("95.0000")
     assert repo.get_position(account.id, "CLOSED") is None
     assert repo.get_position(account.id, "OPEN") is not None
 
@@ -37,7 +39,9 @@ def test_cleanup_rejects_frozen_closed_position_without_writes():
     with pytest.raises(CleanupBlockedError):
         cleanup_zero_paper_positions(session)
 
-    assert repo.get_account(account.id).realized_pnl == Decimal("0.0000")
+    persisted_account = repo.get_account(account.id)
+    assert persisted_account is not None
+    assert persisted_account.realized_pnl == Decimal("0.0000")
     assert repo.get_position(account.id, "FROZEN") is not None
 
 
@@ -52,7 +56,9 @@ def test_cleanup_dry_run_reports_candidates_without_writes():
     result = cleanup_zero_paper_positions(session, dry_run=True)
 
     assert result == {"accounts": 1, "positions": 1}
-    assert repo.get_account(account.id).realized_pnl == Decimal("0.0000")
+    persisted_account = repo.get_account(account.id)
+    assert persisted_account is not None
+    assert persisted_account.realized_pnl == Decimal("0.0000")
     assert repo.get_position(account.id, "CLOSED") is not None
 
 
@@ -68,5 +74,7 @@ def test_cleanup_rejects_overwriting_existing_account_realized_pnl():
     with pytest.raises(CleanupBlockedError, match="non-zero realized PnL"):
         cleanup_zero_paper_positions(session)
 
-    assert repo.get_account(account.id).realized_pnl == Decimal("75.0000")
+    persisted_account = repo.get_account(account.id)
+    assert persisted_account is not None
+    assert persisted_account.realized_pnl == Decimal("75.0000")
     assert repo.get_position(account.id, "CLOSED") is not None

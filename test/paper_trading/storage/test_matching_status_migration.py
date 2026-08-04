@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 
 from paper_trading.storage.matching_status_migration import (
     MatchingStatusEnumMigrationError,
@@ -26,10 +26,11 @@ def test_sqlite_dry_run_does_not_execute_postgresql_ddl():
     assert result.index_verified is False
 
 
-def postgres_engine():
+def postgres_engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
     return create_engine(url)
 
 
@@ -65,7 +66,7 @@ def postgres_schema():
     engine.dispose()
 
 
-def _connection(engine, schema) -> Connection:
+def _connection(engine: Engine, schema: str) -> Connection:
     connection = engine.connect()
     connection.execute(text(f'SET search_path TO "{schema}"'))
     return connection

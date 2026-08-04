@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from typing import Self
 
 import pytest
 
@@ -27,7 +28,7 @@ from test.paper_trading.fakes import FakeMarketDataProvider
 
 class _TestDate(date):
     @classmethod
-    def today(cls) -> date:
+    def today(cls) -> Self:
         return cls(2026, 7, 17)
 
 
@@ -455,7 +456,9 @@ def test_delete_surviving_buy_then_sell_same_symbol_preserves_position(session):
 
     # Position for the buy/sell symbol must be correct.
     assert repo.get_position(account.id, "000001") is None
-    assert repo.get_account(account.id).realized_pnl == Decimal("494.2300")
+    persisted_account = repo.get_account(account.id)
+    assert persisted_account is not None
+    assert persisted_account.realized_pnl == Decimal("494.2300")
 
     # Trades for the buy+sell must survive.
     trades = repo.list_trades(account.id)
