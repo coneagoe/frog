@@ -454,14 +454,8 @@ def test_delete_surviving_buy_then_sell_same_symbol_preserves_position(session):
     assert deleted is True
 
     # Position for the buy/sell symbol must be correct.
-    position = repo.get_position(account.id, "000001")
-    assert position is not None
-    assert int(position.frozen_quantity) == 0, (
-        f"Expected frozen_quantity=0 after full cycle, got {position.frozen_quantity}"
-    )
-    assert int(position.total_quantity) == 0, (
-        f"Expected total_quantity=0 after buy 100 / sell 100, got {position.total_quantity}"
-    )
+    assert repo.get_position(account.id, "000001") is None
+    assert repo.get_account(account.id).realized_pnl == Decimal("494.2300")
 
     # Trades for the buy+sell must survive.
     trades = repo.list_trades(account.id)
@@ -920,7 +914,7 @@ def test_delete_same_date_sell_fills_before_buy_cash_check(session):
 
     # Position 000001 = 0 (sold), 000002 = 1000 (bought).
     pos1 = repo.get_position(account.id, "000001")
-    assert pos1 is not None and int(pos1.total_quantity) == 0
+    assert pos1 is None
     pos2 = repo.get_position(account.id, "000002")
     assert pos2 is not None and int(pos2.total_quantity) == 1000
 

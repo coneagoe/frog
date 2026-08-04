@@ -436,6 +436,24 @@ The response includes:
 
 Round-trip metrics use full-position cycles. A cycle opens when an account's symbol quantity moves from zero to positive and closes when that symbol returns to zero. Partial exits update the open cycle but do not count as closed round trips.
 
+## Closed Position Cleanup
+
+Fully sold paper positions are removed from active holdings after their round trip is recorded. Historical position lots, orders, trades, round trips, cash ledger entries, and snapshots remain available. Account-level cumulative realized PnL is preserved for future snapshots.
+
+For databases created before this behavior, run the temporary cleanup during a maintenance window after deploying the account-level schema upgrade. Isolate matching writes and create a verified backup first. Preview all affected accounts and positions without writing:
+
+```bash
+uv run tools/cleanup_zero_paper_positions.py --dry-run
+```
+
+The command aborts without writes if a zero/negative aggregate position has frozen quantity or an account already has non-zero cumulative realized PnL. If the preview count is expected, run the command without `--dry-run` in the same maintenance window:
+
+```bash
+uv run tools/cleanup_zero_paper_positions.py
+```
+
+Record the reported account and position counts, confirm the Accounts Positions card no longer lists cleaned symbols, then remove the temporary command from the deployment branch.
+
 ## Matching Run Status Enum Migration
 
 The `paper_matching_runs.status` column uses the PostgreSQL enum

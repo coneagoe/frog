@@ -57,10 +57,7 @@ class SnapshotService:
             cash_frozen=cash_frozen,
             market_value=market_value.quantize(Decimal("0.0001")),
             total_assets=total_assets,
-            realized_pnl=sum(
-                (Decimal(position.realized_pnl or 0) for position in positions),
-                Decimal("0"),
-            ).quantize(Decimal("0.0001")),
+            realized_pnl=Decimal(account.realized_pnl or 0).quantize(Decimal("0.0001")),
             unrealized_pnl=unrealized_pnl.quantize(Decimal("0.0001")),
             position_count=len(active_positions),
             order_count=self.repo.count_orders(account_id, trade_date),

@@ -946,9 +946,13 @@ class TestEnsurePaperTradingSchema:
         account_columns = {col["name"] for col in inspector.get_columns("paper_accounts")}
         cash_ledger_columns = {col["name"] for col in inspector.get_columns("paper_cash_ledger")}
         snapshot_columns = {col["name"] for col in inspector.get_columns("paper_account_snapshots")}
-        assert {"share_count", "net_asset_value", "cumulative_deposit", "cumulative_withdrawal"}.issubset(
-            account_columns
-        )
+        assert {
+            "share_count",
+            "net_asset_value",
+            "cumulative_deposit",
+            "cumulative_withdrawal",
+            "realized_pnl",
+        }.issubset(account_columns)
         assert {"trade_date", "net_asset_value", "share_delta"}.issubset(cash_ledger_columns)
         assert {
             "net_asset_value",

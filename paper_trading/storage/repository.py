@@ -202,6 +202,11 @@ class PaperTradingRepository:
     def get_account(self, account_id: int) -> PaperAccount | None:
         return cast(PaperAccount | None, self.session.get(PaperAccount, account_id))
 
+    def add_account_realized_pnl(self, account: PaperAccount, amount: Decimal) -> PaperAccount:
+        account.realized_pnl = (Decimal(account.realized_pnl or 0) + amount).quantize(Decimal("0.0001"))
+        self.session.flush()
+        return account
+
     def list_accounts(self) -> list[PaperAccount]:
         return list(self.session.query(PaperAccount).order_by(PaperAccount.id.asc()).all())
 
@@ -809,6 +814,10 @@ class PaperTradingRepository:
             .one_or_none()
         )
 
+    def delete_position(self, position: PaperPosition) -> None:
+        self.session.delete(position)
+        self.session.flush()
+
     def get_lots(self, account_id: int, symbol: str) -> list[PaperPositionLot]:
         return list(
             self.session.query(PaperPositionLot)
@@ -909,6 +918,10 @@ class PaperTradingRepository:
         self, account_id: int, *, preserve_execution_history: bool = False
     ) -> dict[str, int]:
         counts: dict[str, int] = {}
+        account = self.get_account(account_id)
+        if account is None:
+            raise KeyError(f"paper account not found: {account_id}")
+        account.realized_pnl = Decimal("0.0000")
         imported_lots = (
             self.session.query(PaperPositionLot)
             .filter(
