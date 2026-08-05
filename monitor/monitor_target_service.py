@@ -45,6 +45,9 @@ def _format_condition_summary(condition: dict[str, Any] | None) -> str:
     if ctype == "price_cross_ma":
         prefix = "价格下穿" if direction == "below" else "价格上穿"
         return f"{prefix}{condition.get('period')}日均线"
+    if ctype == "price_vs_ma":
+        prefix = "价格低于" if direction == "below" else "价格高于"
+        return f"{prefix}{condition.get('period')}日均线"
     if ctype == "ma_cross":
         prefix = "下穿" if direction == "death" else "上穿"
         return f"{condition.get('fast')}日均线{prefix}{condition.get('slow')}日均线"
@@ -321,6 +324,11 @@ class MonitorTargetService:
             return
 
         if ctype == "price_cross_ma":
+            self._validate_direction(condition.get("direction"), {"above", "below"})
+            self._expect_int(condition, "period")
+            return
+
+        if ctype == "price_vs_ma":
             self._validate_direction(condition.get("direction"), {"above", "below"})
             self._expect_int(condition, "period")
             return

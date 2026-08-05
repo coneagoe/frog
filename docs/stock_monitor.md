@@ -12,6 +12,15 @@
 - `stock-monitor target list [--frequency daily|intraday] [--enabled|--disabled]`
 - `stock-monitor target get --target-id ...`
 
+### 监控条件
+
+- `{"type":"price_vs_ma","direction":"above","period":20}`：以日线最新收盘价持续高于 20 日简单均线时成立。它不同于 `price_cross_ma`，不要求当天发生上穿。
+- 日频 `price_vs_ma` 仅使用同一前复权日线序列的最终收盘价和均线；数据不足时不会改变监控目标的边沿触发状态。
+
+### 业绩预告数据
+
+Tushare `forecast` 数据可经 `DownloadManager.download_forecast(ann_date=...)` 下载并保存到 `forecasts` 表。保存数据会标准化沪深 A 股代码及公告/报告期日期；候选查询只返回当前报告期内最新公告、类型为 `预增`、增长下限不低于 50%、且当前为非 ST 的上市 A 股。
+
 ### 黑屋管理（全局禁买）
 
 - `stock-monitor blackroom ban --stock-code ... --market ... --ban-days ... [--note ...]`

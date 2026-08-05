@@ -1,7 +1,7 @@
 import logging
 import os
 import textwrap
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 from typing import Any, Dict, List, Literal, Optional, Set, cast
 
@@ -49,6 +49,9 @@ from common.const import (
     COL_FLOAT_HOLDER_NAME,
     COL_FLOAT_HOLDER_TYPE,
     COL_FLOAT_SHARE,
+    COL_FORECAST_CHANGE_MAX,
+    COL_FORECAST_CHANGE_MIN,
+    COL_FORECAST_TYPE,
     COL_FREE_SHARE,
     COL_FULLNAME,
     COL_HIGH,
@@ -94,6 +97,7 @@ from .model import (
     tb_name_daily_basic_a_stock,
     tb_name_etf_basic,
     tb_name_etf_daily,
+    tb_name_forecast,
     tb_name_general_info_etf,
     tb_name_general_info_ggt,
     tb_name_general_info_stock,
@@ -192,6 +196,15 @@ COL_MAP_TOP10_FLOATHOLDERS = {
     "hold_float_ratio": COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
     "hold_change": COL_FLOAT_HOLDER_HOLD_CHANGE,
     "holder_type": COL_FLOAT_HOLDER_TYPE,
+}
+
+COL_MAP_FORECAST = {
+    "ts_code": COL_STOCK_ID,
+    "ann_date": COL_ANN_DATE,
+    "end_date": COL_END_DATE,
+    "type": COL_FORECAST_TYPE,
+    "p_change_min": COL_FORECAST_CHANGE_MIN,
+    "p_change_max": COL_FORECAST_CHANGE_MAX,
 }
 
 
@@ -1445,6 +1458,86 @@ class StorageDb:
         except Exception as e:
             logger.error(f"保存前十大流通股东数据失败: {str(e)}")
             return False
+
+    def ensure_forecasts_table(self) -> None:
+        from .model.forecast import Forecast  # noqa: F401
+
+        Forecast.__table__.create(self.engine, checkfirst=True)
+
+    def save_forecasts(self, df: pd.DataFrame) -> bool:
+        prepared = df.rename(columns=COL_MAP_FORECAST).copy()
+        required = [
+            COL_STOCK_ID,
+            COL_ANN_DATE,
+            COL_END_DATE,
+            COL_FORECAST_TYPE,
+            COL_FORECAST_CHANGE_MIN,
+            COL_FORECAST_CHANGE_MAX,
+        ]
+        missing = set(required) - set(prepared.columns)
+        if missing:
+            raise ValueError(f"forecast 缺少字段: {sorted(missing)}")
+        prepared = prepared[required]
+        prepared[COL_STOCK_ID] = prepared[COL_STOCK_ID].astype(str).str.split(".").str[0]
+        for column in [COL_ANN_DATE, COL_END_DATE]:
+            prepared[column] = pd.to_datetime(prepared[column], errors="raise").dt.date
+        for column in [COL_FORECAST_CHANGE_MIN, COL_FORECAST_CHANGE_MAX]:
+            prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
+
+        from .model.forecast import Forecast
+
+        table = Forecast.__table__
+        records = prepared.to_dict(orient="records")
+        if not records:
+            return True
+        stmt: PostgreSQLInsert | SQLiteInsert
+        if self.engine.dialect.name == "postgresql":
+            postgres_insert = pg_insert(table).values(records)
+            stmt = postgres_insert.on_conflict_do_update(
+                index_elements=list(table.primary_key.columns.keys()),
+                set_={column.name: getattr(postgres_insert.excluded, column.name) for column in table.columns},
+            )
+        elif self.engine.dialect.name == "sqlite":
+            sqlite_insert_stmt = sqlite_insert(table).values(records)
+            stmt = sqlite_insert_stmt.on_conflict_do_update(
+                index_elements=list(table.primary_key.columns.keys()),
+                set_={column.name: getattr(sqlite_insert_stmt.excluded, column.name) for column in table.columns},
+            )
+        else:
+            raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
+        with self.engine.begin() as conn:
+            conn.execute(stmt)
+        return True
+
+    def load_active_forecast_candidates(self, as_of_date: date) -> pd.DataFrame:
+        sql = text(
+            f"""
+            WITH active_period AS (
+                SELECT MAX(\"{COL_END_DATE}\") AS end_date
+                FROM {tb_name_forecast}
+                WHERE \"{COL_END_DATE}\" <= :as_of_date
+            ), latest AS (
+                SELECT \"{COL_STOCK_ID}\", MAX(\"{COL_ANN_DATE}\") AS ann_date
+                FROM {tb_name_forecast}
+                WHERE \"{COL_END_DATE}\" = (SELECT end_date FROM active_period)
+                GROUP BY \"{COL_STOCK_ID}\"
+            )
+            SELECT f.*
+            FROM {tb_name_forecast} f
+            JOIN latest l ON l.\"{COL_STOCK_ID}\" = f.\"{COL_STOCK_ID}\" AND l.ann_date = f.\"{COL_ANN_DATE}\"
+            JOIN {tb_name_a_stock_basic} b ON b.\"{COL_STOCK_ID}\" = f.\"{COL_STOCK_ID}\"
+            WHERE f.\"{COL_END_DATE}\" = (SELECT end_date FROM active_period)
+              AND f.\"{COL_FORECAST_TYPE}\" = '预增'
+              AND f.\"{COL_FORECAST_CHANGE_MIN}\" >= 50
+              AND b.\"{COL_LIST_STATUS}\" = 'L'
+              AND b.\"{COL_STOCK_NAME}\" NOT LIKE '%ST%'
+            ORDER BY f.\"{COL_STOCK_ID}\"
+            """
+        )
+        result = pd.read_sql(sql, self.engine, params={"as_of_date": as_of_date})
+        for column in [COL_ANN_DATE, COL_END_DATE]:
+            result[column] = pd.to_datetime(result[column], errors="raise").dt.date
+        return result
 
     @connect_once
     def get_last_stk_holdernumber_ann_date(self, stock_id: str) -> Optional[str]:

@@ -815,6 +815,52 @@ top10_floatholders_fields = [
     "holder_type",
 ]
 
+forecast_fields = [
+    "ts_code",
+    "ann_date",
+    "end_date",
+    "type",
+    "p_change_min",
+    "p_change_max",
+]
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
+def download_forecast(ann_date: str = "", pro: Any | None = None) -> pd.DataFrame:
+    if ann_date:
+        ann_date = convert_date(ann_date)
+    client = require_pro_client(pro)
+    df = client.forecast(ann_date=ann_date, fields=forecast_fields)
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(f"Expected DataFrame, got {type(df)}")
+    required = set(forecast_fields)
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"forecast 缺少字段: {sorted(missing)}")
+
+    result = df[df["ts_code"].astype(str).str.endswith((".SH", ".SZ"))].copy()
+    result["ts_code"] = result["ts_code"].str.split(".").str[0]
+    result = result.rename(
+        columns={
+            "ts_code": "股票代码",
+            "ann_date": "公告日期",
+            "end_date": "截止日期",
+            "type": "预告类型",
+            "p_change_min": "增长下限",
+            "p_change_max": "增长上限",
+        }
+    )
+    for column in ["公告日期", "截止日期"]:
+        result[column] = pd.to_datetime(result[column], format="%Y%m%d", errors="raise").dt.date
+    for column in ["增长下限", "增长上限"]:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+    return result[["股票代码", "公告日期", "截止日期", "预告类型", "增长下限", "增长上限"]]
+
 
 @retrying.retry(
     wait_exponential_multiplier=2000,

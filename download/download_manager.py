@@ -142,6 +142,16 @@ def _save_etf_daily_wrapper(
 
 
 class DownloadManager:
+    def download_forecast(self, ann_date: str) -> bool:
+        try:
+            df = self.downloader.dl_forecast(ann_date=ann_date)
+            if df is None:
+                raise ValueError("forecast provider returned None")
+            return get_storage().save_forecasts(df)
+        except Exception as exc:
+            logging.error("下载业绩预告数据失败: %s", exc)
+            return False
+
     def __init__(self):
         self.downloader = Downloader()
 

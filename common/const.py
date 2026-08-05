@@ -81,6 +81,11 @@ COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO = "占流通股本比例"
 COL_FLOAT_HOLDER_HOLD_CHANGE = "持股变动"
 COL_FLOAT_HOLDER_TYPE = "股东类型"
 
+# TuShare forecast
+COL_FORECAST_TYPE = "预告类型"
+COL_FORECAST_CHANGE_MIN = "增长下限"
+COL_FORECAST_CHANGE_MAX = "增长上限"
+
 # TuShare stock_basic
 COL_TS_CODE = "TS代码"
 COL_AREA = "地域"

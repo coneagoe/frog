@@ -37,6 +37,17 @@ def _make_manager(monkeypatch):
 
 
 class TestDownloadManager:
+    def test_download_forecast_saves_provider_result(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        forecast = pd.DataFrame({"股票代码": ["600001"]})
+        downloader.dl_forecast.return_value = forecast
+        storage.save_forecasts.return_value = True
+
+        result = manager.download_forecast(ann_date="2025-01-01")
+
+        downloader.dl_forecast.assert_called_once_with(ann_date="2025-01-01")
+        storage.save_forecasts.assert_called_once_with(forecast)
+        assert result is True
     def test_all_empty_providers_create_missing_market_data_outcome(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         storage.get_last_record.return_value = None

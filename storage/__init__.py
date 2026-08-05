@@ -1,10 +1,12 @@
 from .config import StorageConfig
 from .model import (
     BlackroomRecord,
+    Forecast,
     SSFChangeSignal,
     tb_name_a_stock_basic,
     tb_name_blackroom_record,
     tb_name_daily_basic_a_stock,
+    tb_name_forecast,
     tb_name_general_info_ggt,
     tb_name_general_info_stock,
     tb_name_history_data_daily_a_stock_bfq,
@@ -57,6 +59,8 @@ __all__ = [
     "tb_name_ingredient_500",
     "tb_name_a_stock_basic",
     "tb_name_daily_basic_a_stock",
+    "Forecast",
+    "tb_name_forecast",
     "SSFChangeSignal",
     "tb_name_ssf_change_signal",
     "tb_name_stk_limit_a_stock",

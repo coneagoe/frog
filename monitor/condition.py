@@ -88,6 +88,18 @@ def evaluate_condition(
         triggered = price > ma if direction == "above" else price < ma
         return ConditionResult.TRIGGERED if triggered else ConditionResult.NOT_TRIGGERED
 
+    elif ctype == "price_vs_ma":
+        period = int(condition["period"])
+        if history_df is None or len(history_df) < period:
+            return ConditionResult.INSUFFICIENT_DATA
+        closes = history_df[COL_CLOSE]
+        ma = _compute_ma(closes, period)
+        close = closes.iloc[-1]
+        if np.isnan(ma) or is_missing_number(close):
+            return ConditionResult.INSUFFICIENT_DATA
+        triggered = float(close) > ma if direction == "above" else float(close) < ma
+        return ConditionResult.TRIGGERED if triggered else ConditionResult.NOT_TRIGGERED
+
     elif ctype == "ma_cross":
         fast = int(condition["fast"])
         slow = int(condition["slow"])

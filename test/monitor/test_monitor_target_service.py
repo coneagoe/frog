@@ -209,6 +209,31 @@ def test_bool_numeric_condition_value_is_rejected():
     assert "condition.value" in result["message"]
 
 
+def test_add_target_accepts_price_vs_ma_condition():
+    storage = MagicMock()
+    storage.create_monitor_target.return_value = MagicMock(
+        id=1,
+        stock_code="600519",
+        market="A",
+        condition={"type": "price_vs_ma", "direction": "above", "period": 20},
+        note=None,
+        frequency="daily",
+        reset_mode="auto",
+        enabled=True,
+        last_state=False,
+        triggered_at=None,
+        created_at=None,
+    )
+
+    result = MonitorTargetService(storage=storage).add_target(
+        stock_code="600519",
+        market="A",
+        condition={"type": "price_vs_ma", "direction": "above", "period": 20},
+    )
+
+    assert result["success"] is True
+
+
 def test_custom_errors_are_exposed_for_validation_and_not_found_paths():
     assert issubclass(TargetValidationError, ValueError)
     assert issubclass(TargetNotFoundError, LookupError)
