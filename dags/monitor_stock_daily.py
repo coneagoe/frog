@@ -76,6 +76,19 @@ def sync_shareholder_selling_blackroom(**context):
     )
 
 
+def sync_forecast_ssf_monitor_targets(**context):
+    """Sync forecast and SSF-derived targets before daily monitor evaluation."""
+    from monitor.forecast_ssf_monitor_sync import ForecastSSFMonitorSyncService
+
+    run_date = _format_logical_date(context)
+    as_of_date = datetime.strptime(run_date, "%Y%m%d").date()
+    result = ForecastSSFMonitorSyncService().sync(as_of_date=as_of_date)
+    _raise_if_failed(result, "业绩预增社保基金监控目标同步")
+    return (
+        f"业绩预增社保基金监控目标同步完成: date={run_date}, {json.dumps(result.get('data') or {}, ensure_ascii=False)}"
+    )
+
+
 def countdown_blackroom_records(**context):
     """Update blackroom remaining-day countdown values."""
     from monitor.blackroom_countdown import BlackroomCountdownService
@@ -101,6 +114,12 @@ daily_monitor_task = PythonOperator(
     dag=dag,
 )
 
+sync_forecast_ssf_targets_task = PythonOperator(
+    task_id="sync_forecast_ssf_targets",
+    python_callable=sync_forecast_ssf_monitor_targets,
+    dag=dag,
+)
+
 sync_shareholder_selling_task = PythonOperator(
     task_id="sync_shareholder_selling_blackroom",
     python_callable=sync_shareholder_selling_blackroom,
@@ -114,5 +133,6 @@ countdown_blackroom_task = PythonOperator(
     dag=dag,
 )
 
+sync_forecast_ssf_targets_task >> daily_monitor_task
 sync_shareholder_selling_task >> countdown_blackroom_task
 daily_monitor_task >> countdown_blackroom_task
