@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from common.const import COL_ANN_DATE, COL_FLOAT_HOLDER_NAME
-from storage.model import Base
+from storage.model import Base, ForecastSSFCandidate
 from storage.storage_db import StorageDb
 
 
@@ -45,7 +45,8 @@ def test_candidate_upsert_preserves_one_auditable_record(tmp_path):
 
     rows = db.list_forecast_ssf_candidates()
 
-    assert first.id == second.id
+    assert first.stock_code == second.stock_code == "600001"
+    assert list(ForecastSSFCandidate.__table__.primary_key.columns.keys()) == ["stock_code"]
     assert [(row.stock_code, row.state, row.monitor_target_id) for row in rows] == [("600001", "blackroom", 7)]
     assert rows[0].evidence == {"blackroom": {"banned": True}}
 
@@ -117,3 +118,27 @@ def test_workflow_monitor_target_rejects_duplicate_markers(tmp_path):
 
     with pytest.raises(ValueError, match="多个 workflow='forecast_ssf' 的监控目标"):
         db.find_workflow_monitor_target("600001", "A", "forecast_ssf")
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        {"price": {"above": 10}},
+        {"workflow": "other_workflow", "price": {"above": 10}},
+    ],
+)
+def test_workflow_monitor_target_rejects_missing_or_conflicting_marker(tmp_path, condition):
+    db = _sqlite_storage(tmp_path)
+
+    with pytest.raises(ValueError, match="workflow marker"):
+        db.upsert_workflow_monitor_target(
+            "600001",
+            "A",
+            "forecast_ssf_ma20",
+            condition,
+            "workflow",
+            enabled=True,
+            reset_last_state=False,
+        )
+
+    assert db.list_monitor_targets() == []

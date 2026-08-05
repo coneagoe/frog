@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Date, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Date, DateTime, Integer, String
 from sqlalchemy.sql import func
 
 from .base import Base
@@ -12,10 +12,8 @@ tb_name_forecast_ssf_candidate = "forecast_ssf_candidates"
 
 class ForecastSSFCandidate(Base):
     __tablename__ = tb_name_forecast_ssf_candidate
-    __table_args__ = (UniqueConstraint("stock_code", name="uq_forecast_ssf_candidate_stock_code"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    stock_code: Mapped[str] = mapped_column(String(6), nullable=False, comment="股票代码")
+    stock_code: Mapped[str] = mapped_column(String(6), primary_key=True, comment="股票代码")
     market: Mapped[str] = mapped_column(String(5), nullable=False, default="A", server_default="A")
     report_end_date: Mapped[date] = mapped_column(Date, nullable=False, comment="业绩预告报告期")
     state: Mapped[str] = mapped_column(String(32), nullable=False, comment="候选状态")

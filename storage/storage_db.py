@@ -2285,6 +2285,8 @@ class StorageDb:
         enabled: bool,
         reset_last_state: bool,
     ) -> Any:
+        if condition.get("workflow") != workflow:
+            raise ValueError(f"condition workflow marker must match {workflow!r}")
         target = self.find_workflow_monitor_target(stock_code, market, workflow)
         if target is None:
             return self.create_monitor_target(
