@@ -5,6 +5,7 @@ from .daily_basic_a_stock import DailyBasicAStock, tb_name_daily_basic_a_stock
 from .etf_basic import ETFBasic, tb_name_etf_basic
 from .etf_daily import ETFDaily, tb_name_etf_daily
 from .forecast import Forecast, tb_name_forecast
+from .forecast_ssf_candidate import ForecastSSFCandidate, tb_name_forecast_ssf_candidate
 from .general_info_etf import GeneralInfoETF, tb_name_general_info_etf
 from .general_info_ggt import GeneralInfoGGT, tb_name_general_info_ggt
 from .general_info_stock import GeneralInfoStock, tb_name_general_info_stock
@@ -80,6 +81,7 @@ __all__ = [
     "ETFBasic",
     "ETFDaily",
     "Forecast",
+    "ForecastSSFCandidate",
     "HistoryDataDailyAStockBFQ",
     "HistoryDataDailyAStockQFQ",
     "HistoryDataDailyAStockHFQ",
@@ -114,6 +116,7 @@ __all__ = [
     "tb_name_etf_basic",
     "tb_name_etf_daily",
     "tb_name_forecast",
+    "tb_name_forecast_ssf_candidate",
     "tb_name_history_data_weekly_a_stock_qfq",
     "tb_name_history_data_weekly_a_stock_hfq",
     "HistoryDataDailyHkStockBFQ",

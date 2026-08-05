@@ -6,6 +6,7 @@ BUSINESS_TABLES=(
   a_stock_basic
   daily_basic_a_stock
   forecasts
+  forecast_ssf_candidates
   general_info_stock
   general_info_etf
   general_info_hk_ggt

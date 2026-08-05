@@ -9,7 +9,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, func, inspect, text
 from sqlalchemy.dialects.postgresql import Insert as PostgreSQLInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
@@ -1464,6 +1464,79 @@ class StorageDb:
 
         Forecast.__table__.create(self.engine, checkfirst=True)
 
+    def ensure_forecast_ssf_candidates_table(self) -> None:
+        from .model.forecast_ssf_candidate import ForecastSSFCandidate  # noqa: F401
+
+        ForecastSSFCandidate.__table__.create(self.engine, checkfirst=True)
+
+    def upsert_forecast_ssf_candidate(
+        self,
+        stock_code: str,
+        market: str,
+        report_end_date: date,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+        monitor_target_id: int | None,
+    ) -> Any:
+        from .model.forecast_ssf_candidate import ForecastSSFCandidate
+
+        assert self.engine is not None
+        table = ForecastSSFCandidate.__table__
+        record = {
+            "stock_code": stock_code,
+            "market": market,
+            "report_end_date": report_end_date,
+            "state": state,
+            "state_reason": state_reason,
+            "evidence": evidence,
+            "monitor_target_id": monitor_target_id,
+        }
+        stmt: PostgreSQLInsert | SQLiteInsert
+        update_fields = [
+            "market",
+            "report_end_date",
+            "state",
+            "state_reason",
+            "evidence",
+            "monitor_target_id",
+        ]
+        if self.engine.dialect.name == "postgresql":
+            insert_stmt = pg_insert(table).values(record)
+            stmt = insert_stmt.on_conflict_do_update(
+                index_elements=["stock_code"],
+                set_={field: getattr(insert_stmt.excluded, field) for field in update_fields}
+                | {"updated_at": func.now()},
+            )
+        elif self.engine.dialect.name == "sqlite":
+            insert_stmt = sqlite_insert(table).values(record)
+            stmt = insert_stmt.on_conflict_do_update(
+                index_elements=["stock_code"],
+                set_={field: getattr(insert_stmt.excluded, field) for field in update_fields}
+                | {"updated_at": func.now()},
+            )
+        else:
+            raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
+        with self.engine.begin() as conn:
+            conn.execute(stmt)
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return session.query(ForecastSSFCandidate).filter_by(stock_code=stock_code).one()
+        finally:
+            session.close()
+
+    def list_forecast_ssf_candidates(self) -> list[Any]:
+        from .model.forecast_ssf_candidate import ForecastSSFCandidate
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return cast(list[Any], session.query(ForecastSSFCandidate).order_by(ForecastSSFCandidate.stock_code).all())
+        finally:
+            session.close()
+
     def save_forecasts(self, df: pd.DataFrame) -> bool:
         prepared = df.rename(columns=COL_MAP_FORECAST).copy()
         required = [
@@ -1911,6 +1984,26 @@ class StorageDb:
             df[COL_ANN_DATE] = pd.to_datetime(df[COL_ANN_DATE])
         return df
 
+    def load_latest_top10_floatholders(self, stock_id: str) -> pd.DataFrame:
+        sql = text(
+            f'''\
+            SELECT *
+            FROM {tb_name_top10_floatholders}
+            WHERE "{COL_STOCK_ID}" = :stock_id
+              AND "{COL_ANN_DATE}" = (
+                  SELECT MAX("{COL_ANN_DATE}")
+                  FROM {tb_name_top10_floatholders}
+                  WHERE "{COL_STOCK_ID}" = :stock_id
+              )
+            ORDER BY "{COL_FLOAT_HOLDER_NAME}"
+            '''
+        )
+        assert self.engine is not None
+        df = pd.read_sql(sql, self.engine, params={"stock_id": stock_id})
+        if COL_ANN_DATE in df.columns:
+            df[COL_ANN_DATE] = pd.to_datetime(df[COL_ANN_DATE])
+        return df
+
     def save_ssf_change_signals(self, records: List[Dict[str, Any]]) -> List[int]:
         """保存 SSF 变动信号，已存在的 `(stock_id, ann_date)` 记录会跳过。"""
         normalized_records = []
@@ -2169,6 +2262,44 @@ class StorageDb:
             StockMonitorTarget 对象列表。
         """
         return self.list_monitor_targets(frequency=frequency, enabled=True)
+
+    def find_workflow_monitor_target(self, stock_code: str, market: str, workflow: str) -> Any | None:
+        matches = [
+            target
+            for target in self.list_monitor_targets()
+            if target.stock_code == stock_code
+            and target.market == market
+            and target.condition.get("workflow") == workflow
+        ]
+        if len(matches) > 1:
+            raise ValueError(f"发现多个 workflow={workflow!r} 的监控目标: {stock_code}/{market}")
+        return matches[0] if matches else None
+
+    def upsert_workflow_monitor_target(
+        self,
+        stock_code: str,
+        market: str,
+        workflow: str,
+        condition: dict[str, Any],
+        note: str,
+        enabled: bool,
+        reset_last_state: bool,
+    ) -> Any:
+        target = self.find_workflow_monitor_target(stock_code, market, workflow)
+        if target is None:
+            return self.create_monitor_target(
+                stock_code=stock_code,
+                market=market,
+                condition=condition,
+                note=note,
+                enabled=enabled,
+            )
+        updates: dict[str, Any] = {"condition": condition, "note": note, "enabled": enabled}
+        if reset_last_state:
+            updates["last_state"] = False
+        updated = self.update_monitor_target(target.id, **updates)
+        assert updated is not None
+        return updated
 
     def update_monitor_target_state(
         self,
