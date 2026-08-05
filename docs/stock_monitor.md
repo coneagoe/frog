@@ -23,7 +23,7 @@ Tushare `forecast` 数据可经 `DownloadManager.download_forecast(ann_date=...)
 
 ### 业绩预增社保基金监控同步
 
-每日工作流使用既有的合格业绩预告、有效黑屋过滤和社保基金检测器生成监控候选，并将业绩预告、股东、黑屋及目标的审计证据保存到 `forecast_ssf_candidates` 表。工作流只管理标记为 `workflow: "forecast_ssf_ma20"` 的目标，不会修改手工创建的目标。
+每日工作流使用既有的合格业绩预告、活跃黑屋过滤和既有 SSF 检测器生成监控候选，并将业绩预告、股东、黑屋及目标的审计证据保存到 `forecast_ssf_candidates` 表。工作流只管理标记为 `workflow: "forecast_ssf_ma20"` 的目标，不会修改手工创建的目标。
 
 ### 黑屋管理（全局禁买）
 
