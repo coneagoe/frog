@@ -87,7 +87,7 @@ class ForecastSSFMonitorSyncService:
             "shareholder": {"ann_date": None, "matched_holder": None},
             "blackroom": {"banned": banned},
         }
-        target = self.storage.find_workflow_monitor_target(stock_code, "A", WORKFLOW_NAME)
+        target = self.storage.find_workflow_monitor_target(stock_code, "A", "daily", WORKFLOW_NAME)
         target_id = getattr(target, "id", None)
         if banned:
             summary["blackroom_excluded"] += 1
@@ -131,6 +131,7 @@ class ForecastSSFMonitorSyncService:
         updated_target = self.storage.upsert_workflow_monitor_target(
             stock_code=stock_code,
             market="A",
+            frequency="daily",
             workflow=WORKFLOW_NAME,
             condition=_CONDITION,
             note=_NOTE,
@@ -152,6 +153,7 @@ class ForecastSSFMonitorSyncService:
         self.storage.upsert_workflow_monitor_target(
             stock_code=stock_code,
             market="A",
+            frequency="daily",
             workflow=WORKFLOW_NAME,
             condition=_CONDITION,
             note=_NOTE,

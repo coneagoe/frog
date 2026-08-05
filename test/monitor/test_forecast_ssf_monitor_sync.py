@@ -75,6 +75,7 @@ def test_sync_creates_target_and_persists_matching_evidence():
     storage.upsert_workflow_monitor_target.assert_called_once_with(
         stock_code="600001",
         market="A",
+        frequency="daily",
         workflow="forecast_ssf_ma20",
         condition={"type": "price_vs_ma", "direction": "above", "period": 20, "workflow": "forecast_ssf_ma20"},
         note="业绩预增+社保基金+MA20",
@@ -157,7 +158,19 @@ def test_sync_never_mutates_manual_target():
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
-    storage.find_workflow_monitor_target.assert_called_once_with("600001", "A", "forecast_ssf_ma20")
+    storage.find_workflow_monitor_target.assert_called_once_with("600001", "A", "daily", "forecast_ssf_ma20")
+    storage.upsert_workflow_monitor_target.assert_not_called()
+
+
+def test_sync_never_mutates_intraday_workflow_target():
+    storage = _storage(_forecasts("600001"))
+    storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "普通股东")
+    blackroom = MagicMock()
+    blackroom.is_banned.return_value = _blackroom()
+
+    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
+
+    storage.find_workflow_monitor_target.assert_called_once_with("600001", "A", "daily", "forecast_ssf_ma20")
     storage.upsert_workflow_monitor_target.assert_not_called()
 
 
@@ -186,6 +199,29 @@ def test_sync_forecast_load_failure_mutates_nothing():
     with pytest.raises(RuntimeError, match="database unavailable"):
         ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
+    storage.upsert_workflow_monitor_target.assert_not_called()
+    storage.upsert_forecast_ssf_candidate.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "blackroom_result",
+    [
+        {"success": False, "code": "STORAGE_ERROR", "message": "blackroom unavailable", "data": None},
+        RuntimeError("blackroom unavailable"),
+    ],
+)
+def test_sync_blackroom_failure_mutates_nothing(blackroom_result):
+    storage = _storage(_forecasts("600001"))
+    blackroom = MagicMock()
+    if isinstance(blackroom_result, Exception):
+        blackroom.is_banned.side_effect = blackroom_result
+    else:
+        blackroom.is_banned.return_value = blackroom_result
+
+    with pytest.raises(RuntimeError, match="blackroom unavailable"):
+        ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
+
+    storage.find_workflow_monitor_target.assert_not_called()
     storage.upsert_workflow_monitor_target.assert_not_called()
     storage.upsert_forecast_ssf_candidate.assert_not_called()
 

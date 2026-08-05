@@ -1492,7 +1492,6 @@ class StorageDb:
             "evidence": evidence,
             "monitor_target_id": monitor_target_id,
         }
-        stmt: PostgreSQLInsert | SQLiteInsert
         update_fields = [
             "market",
             "report_end_date",
@@ -1502,17 +1501,17 @@ class StorageDb:
             "monitor_target_id",
         ]
         if self.engine.dialect.name == "postgresql":
-            insert_stmt = pg_insert(table).values(record)
-            stmt = insert_stmt.on_conflict_do_update(
+            postgres_insert_stmt = pg_insert(table).values(record)
+            stmt: PostgreSQLInsert | SQLiteInsert = postgres_insert_stmt.on_conflict_do_update(
                 index_elements=["stock_code"],
-                set_={field: getattr(insert_stmt.excluded, field) for field in update_fields}
+                set_={field: getattr(postgres_insert_stmt.excluded, field) for field in update_fields}
                 | {"updated_at": func.now()},
             )
         elif self.engine.dialect.name == "sqlite":
-            insert_stmt = sqlite_insert(table).values(record)
-            stmt = insert_stmt.on_conflict_do_update(
+            sqlite_insert_stmt = sqlite_insert(table).values(record)
+            stmt = sqlite_insert_stmt.on_conflict_do_update(
                 index_elements=["stock_code"],
-                set_={field: getattr(insert_stmt.excluded, field) for field in update_fields}
+                set_={field: getattr(sqlite_insert_stmt.excluded, field) for field in update_fields}
                 | {"updated_at": func.now()},
             )
         else:
@@ -2263,22 +2262,24 @@ class StorageDb:
         """
         return self.list_monitor_targets(frequency=frequency, enabled=True)
 
-    def find_workflow_monitor_target(self, stock_code: str, market: str, workflow: str) -> Any | None:
+    def find_workflow_monitor_target(self, stock_code: str, market: str, frequency: str, workflow: str) -> Any | None:
         matches = [
             target
             for target in self.list_monitor_targets()
             if target.stock_code == stock_code
             and target.market == market
+            and target.frequency == frequency
             and target.condition.get("workflow") == workflow
         ]
         if len(matches) > 1:
-            raise ValueError(f"发现多个 workflow={workflow!r} 的监控目标: {stock_code}/{market}")
+            raise ValueError(f"发现多个 workflow={workflow!r} 的监控目标: {stock_code}/{market}/{frequency}")
         return matches[0] if matches else None
 
     def upsert_workflow_monitor_target(
         self,
         stock_code: str,
         market: str,
+        frequency: str,
         workflow: str,
         condition: dict[str, Any],
         note: str,
@@ -2287,13 +2288,14 @@ class StorageDb:
     ) -> Any:
         if condition.get("workflow") != workflow:
             raise ValueError(f"condition workflow marker must match {workflow!r}")
-        target = self.find_workflow_monitor_target(stock_code, market, workflow)
+        target = self.find_workflow_monitor_target(stock_code, market, frequency, workflow)
         if target is None:
             return self.create_monitor_target(
                 stock_code=stock_code,
                 market=market,
                 condition=condition,
                 note=note,
+                frequency=frequency,
                 enabled=enabled,
             )
         updates: dict[str, Any] = {"condition": condition, "note": note, "enabled": enabled}

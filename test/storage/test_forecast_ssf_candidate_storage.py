@@ -86,10 +86,11 @@ def test_workflow_monitor_target_uses_only_matching_marker_and_preserves_id(tmp_
         last_state=True,
     )
 
-    found = db.find_workflow_monitor_target("600001", "A", "forecast_ssf")
+    found = db.find_workflow_monitor_target("600001", "A", "daily", "forecast_ssf")
     updated = db.upsert_workflow_monitor_target(
         "600001",
         "A",
+        "daily",
         "forecast_ssf",
         {"workflow": "forecast_ssf", "price": {"above": 12}},
         "updated workflow",
@@ -117,7 +118,7 @@ def test_workflow_monitor_target_rejects_duplicate_markers(tmp_path):
         )
 
     with pytest.raises(ValueError, match="多个 workflow='forecast_ssf' 的监控目标"):
-        db.find_workflow_monitor_target("600001", "A", "forecast_ssf")
+        db.find_workflow_monitor_target("600001", "A", "daily", "forecast_ssf")
 
 
 @pytest.mark.parametrize(
@@ -134,6 +135,7 @@ def test_workflow_monitor_target_rejects_missing_or_conflicting_marker(tmp_path,
         db.upsert_workflow_monitor_target(
             "600001",
             "A",
+            "daily",
             "forecast_ssf_ma20",
             condition,
             "workflow",
@@ -142,3 +144,35 @@ def test_workflow_monitor_target_rejects_missing_or_conflicting_marker(tmp_path,
         )
 
     assert db.list_monitor_targets() == []
+
+
+def test_workflow_monitor_target_scope_does_not_mutate_intraday_target(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    intraday = db.create_monitor_target(
+        "600001",
+        "A",
+        {"workflow": "forecast_ssf", "price": {"above": 11}},
+        note="intraday workflow",
+        frequency="intraday",
+        last_state=True,
+    )
+
+    assert db.find_workflow_monitor_target("600001", "A", "daily", "forecast_ssf") is None
+    daily = db.upsert_workflow_monitor_target(
+        "600001",
+        "A",
+        "daily",
+        "forecast_ssf",
+        {"workflow": "forecast_ssf", "price": {"above": 12}},
+        "daily workflow",
+        enabled=True,
+        reset_last_state=True,
+    )
+
+    targets = db.list_monitor_targets()
+    unchanged_intraday = next(target for target in targets if target.id == intraday.id)
+    assert daily.frequency == "daily"
+    assert len(targets) == 2
+    assert unchanged_intraday.frequency == "intraday"
+    assert unchanged_intraday.enabled is True
+    assert unchanged_intraday.last_state is True
