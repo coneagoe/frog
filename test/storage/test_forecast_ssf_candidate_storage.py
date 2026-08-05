@@ -3,6 +3,7 @@ from datetime import date
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 
 from common.const import COL_ANN_DATE, COL_FLOAT_HOLDER_NAME
 from storage.model import Base, ForecastSSFCandidate
@@ -109,16 +110,10 @@ def test_workflow_monitor_target_uses_only_matching_marker_and_preserves_id(tmp_
 
 def test_workflow_monitor_target_rejects_duplicate_markers(tmp_path):
     db = _sqlite_storage(tmp_path)
-    for note in ["first", "second"]:
-        db.create_monitor_target(
-            "600001",
-            "A",
-            {"workflow": "forecast_ssf", "price": {"above": 10}},
-            note=note,
-        )
+    db.create_monitor_target("600001", "A", {"workflow": "forecast_ssf", "price": {"above": 10}}, note="first")
 
-    with pytest.raises(ValueError, match="多个 workflow='forecast_ssf' 的监控目标"):
-        db.find_workflow_monitor_target("600001", "A", "daily", "forecast_ssf")
+    with pytest.raises(IntegrityError):
+        db.create_monitor_target("600001", "A", {"workflow": "forecast_ssf", "price": {"above": 10}}, note="second")
 
 
 @pytest.mark.parametrize(
@@ -176,3 +171,85 @@ def test_workflow_monitor_target_scope_does_not_mutate_intraday_target(tmp_path)
     assert unchanged_intraday.frequency == "intraday"
     assert unchanged_intraday.enabled is True
     assert unchanged_intraday.last_state is True
+
+
+@pytest.mark.parametrize(
+    ("existing_target", "enabled"),
+    [(False, True), (True, False)],
+    ids=["eligible_create", "disable"],
+)
+def test_atomic_workflow_target_transition_rolls_back_when_candidate_persistence_fails(
+    tmp_path, monkeypatch, existing_target, enabled
+):
+    db = _sqlite_storage(tmp_path)
+    if existing_target:
+        original = db.upsert_workflow_monitor_target(
+            "600001",
+            "A",
+            "daily",
+            "forecast_ssf_ma20",
+            {"workflow": "forecast_ssf_ma20"},
+            "workflow",
+            enabled=True,
+            reset_last_state=False,
+        )
+
+    def fail_candidate(*args, **kwargs):
+        raise RuntimeError("candidate persistence failed")
+
+    monkeypatch.setattr(db, "_upsert_forecast_ssf_candidate_in_transaction", fail_candidate)
+
+    with pytest.raises(RuntimeError, match="candidate persistence failed"):
+        db.upsert_forecast_ssf_candidate_with_workflow_target(
+            stock_code="600001",
+            market="A",
+            report_end_date=date(2025, 12, 31),
+            state="eligible" if enabled else "ineligible",
+            state_reason="test",
+            evidence={"test": True},
+            workflow="forecast_ssf_ma20",
+            frequency="daily",
+            condition={"workflow": "forecast_ssf_ma20"},
+            note="workflow",
+            target_enabled=enabled,
+            reset_last_state=enabled,
+        )
+
+    target = db.find_workflow_monitor_target("600001", "A", "daily", "forecast_ssf_ma20")
+    assert db.list_forecast_ssf_candidates() == []
+    if existing_target:
+        assert target.id == original.id
+        assert target.enabled is True
+    else:
+        assert target is None
+
+
+def test_workflow_target_conflict_safe_upsert_preserves_one_durable_owner(tmp_path):
+    db = _sqlite_storage(tmp_path)
+
+    first = db.upsert_workflow_monitor_target(
+        "600001",
+        "A",
+        "daily",
+        "forecast_ssf_ma20",
+        {"workflow": "forecast_ssf_ma20", "version": 1},
+        "first",
+        enabled=True,
+        reset_last_state=False,
+    )
+    second = db.upsert_workflow_monitor_target(
+        "600001",
+        "A",
+        "daily",
+        "forecast_ssf_ma20",
+        {"workflow": "forecast_ssf_ma20", "version": 2},
+        "second",
+        enabled=True,
+        reset_last_state=False,
+    )
+
+    targets = [target for target in db.list_monitor_targets() if target.workflow == "forecast_ssf_ma20"]
+    assert first.id == second.id
+    assert [(target.stock_code, target.market, target.frequency, target.workflow) for target in targets] == [
+        ("600001", "A", "daily", "forecast_ssf_ma20")
+    ]

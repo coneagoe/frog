@@ -31,6 +31,7 @@ class StockMonitorTarget(Base):
         server_default="daily",
         comment="监控频率: daily / intraday",
     )
+    workflow: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="工作流所有者；手工目标为空")
     reset_mode: Mapped[str] = mapped_column(
         String(10),
         nullable=False,

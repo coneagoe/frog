@@ -1482,7 +1482,38 @@ class StorageDb:
         from .model.forecast_ssf_candidate import ForecastSSFCandidate
 
         assert self.engine is not None
-        table = ForecastSSFCandidate.__table__
+        with self.engine.begin() as conn:
+            self._upsert_forecast_ssf_candidate_in_transaction(
+                conn,
+                ForecastSSFCandidate.__table__,
+                stock_code,
+                market,
+                report_end_date,
+                state,
+                state_reason,
+                evidence,
+                monitor_target_id,
+            )
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return session.query(ForecastSSFCandidate).filter_by(stock_code=stock_code).one()
+        finally:
+            session.close()
+
+    def _upsert_forecast_ssf_candidate_in_transaction(
+        self,
+        conn: Any,
+        table: Any,
+        stock_code: str,
+        market: str,
+        report_end_date: date,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+        monitor_target_id: int | None,
+    ) -> None:
         record = {
             "stock_code": stock_code,
             "market": market,
@@ -1516,15 +1547,7 @@ class StorageDb:
             )
         else:
             raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
-        with self.engine.begin() as conn:
-            conn.execute(stmt)
-
-        assert self.Session is not None
-        session = self.Session()
-        try:
-            return session.query(ForecastSSFCandidate).filter_by(stock_code=stock_code).one()
-        finally:
-            session.close()
+        conn.execute(stmt)
 
     def list_forecast_ssf_candidates(self) -> list[Any]:
         from .model.forecast_ssf_candidate import ForecastSSFCandidate
@@ -2173,6 +2196,8 @@ class StorageDb:
         """创建监控目标。"""
         from .model.stock_monitor_target import StockMonitorTarget
 
+        if condition.get("workflow"):
+            self._ensure_workflow_monitor_target_identity()
         assert self.Session is not None
         session = self.Session()
         try:
@@ -2182,6 +2207,7 @@ class StorageDb:
                 condition=condition,
                 note=note,
                 frequency=frequency,
+                workflow=condition.get("workflow"),
                 reset_mode=reset_mode,
                 enabled=enabled,
                 last_state=last_state,
@@ -2263,14 +2289,19 @@ class StorageDb:
         return self.list_monitor_targets(frequency=frequency, enabled=True)
 
     def find_workflow_monitor_target(self, stock_code: str, market: str, frequency: str, workflow: str) -> Any | None:
-        matches = [
-            target
-            for target in self.list_monitor_targets()
-            if target.stock_code == stock_code
-            and target.market == market
-            and target.frequency == frequency
-            and target.condition.get("workflow") == workflow
-        ]
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        self._ensure_workflow_monitor_target_identity()
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            matches = (
+                session.query(StockMonitorTarget)
+                .filter_by(stock_code=stock_code, market=market, frequency=frequency, workflow=workflow)
+                .all()
+            )
+        finally:
+            session.close()
         if len(matches) > 1:
             raise ValueError(f"发现多个 workflow={workflow!r} 的监控目标: {stock_code}/{market}/{frequency}")
         return matches[0] if matches else None
@@ -2288,22 +2319,177 @@ class StorageDb:
     ) -> Any:
         if condition.get("workflow") != workflow:
             raise ValueError(f"condition workflow marker must match {workflow!r}")
-        target = self.find_workflow_monitor_target(stock_code, market, frequency, workflow)
+        self._ensure_workflow_monitor_target_identity()
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            with session.begin():
+                target = self._upsert_workflow_monitor_target_in_transaction(
+                    session, stock_code, market, frequency, workflow, condition, note, enabled, reset_last_state
+                )
+            session.refresh(target)
+            return target
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _upsert_workflow_monitor_target_in_transaction(
+        self,
+        session: Any,
+        stock_code: str,
+        market: str,
+        frequency: str,
+        workflow: str,
+        condition: dict[str, Any],
+        note: str,
+        enabled: bool,
+        reset_last_state: bool,
+    ) -> Any:
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        target = (
+            session.query(StockMonitorTarget)
+            .filter_by(stock_code=stock_code, market=market, frequency=frequency, workflow=workflow)
+            .first()
+        )
         if target is None:
-            return self.create_monitor_target(
-                stock_code=stock_code,
-                market=market,
-                condition=condition,
-                note=note,
-                frequency=frequency,
-                enabled=enabled,
+            record = {
+                "stock_code": stock_code,
+                "market": market,
+                "condition": condition,
+                "note": note,
+                "frequency": frequency,
+                "workflow": workflow,
+                "enabled": enabled,
+                "last_state": False,
+            }
+            if session.bind.dialect.name == "postgresql":
+                stmt: PostgreSQLInsert | SQLiteInsert = (
+                    pg_insert(StockMonitorTarget.__table__)
+                    .values(record)
+                    .on_conflict_do_nothing(index_elements=["stock_code", "market", "frequency", "workflow"])
+                )
+            elif session.bind.dialect.name == "sqlite":
+                stmt = (
+                    sqlite_insert(StockMonitorTarget.__table__)
+                    .values(record)
+                    .on_conflict_do_nothing(index_elements=["stock_code", "market", "frequency", "workflow"])
+                )
+            else:
+                raise ConnectionError(f"Unsupported database dialect: {session.bind.dialect.name}")
+            session.execute(stmt)
+            target = (
+                session.query(StockMonitorTarget)
+                .filter_by(stock_code=stock_code, market=market, frequency=frequency, workflow=workflow)
+                .one()
             )
-        updates: dict[str, Any] = {"condition": condition, "note": note, "enabled": enabled}
-        if reset_last_state:
-            updates["last_state"] = False
-        updated = self.update_monitor_target(target.id, **updates)
-        assert updated is not None
-        return updated
+            if target.condition != condition or target.note != note or target.enabled != enabled:
+                target.condition = condition
+                target.note = note
+                target.enabled = enabled
+                if reset_last_state:
+                    target.last_state = False
+        else:
+            if target.condition.get("workflow") != workflow:
+                raise ValueError(f"workflow target condition must retain marker {workflow!r}")
+            target.condition = condition
+            target.note = note
+            target.enabled = enabled
+            if reset_last_state:
+                target.last_state = False
+        session.flush()
+        return target
+
+    def upsert_forecast_ssf_candidate_with_workflow_target(
+        self,
+        *,
+        stock_code: str,
+        market: str,
+        report_end_date: date,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+        workflow: str,
+        frequency: str,
+        condition: dict[str, Any],
+        note: str,
+        target_enabled: bool,
+        reset_last_state: bool,
+    ) -> Any:
+        from .model.forecast_ssf_candidate import ForecastSSFCandidate
+
+        if condition.get("workflow") != workflow:
+            raise ValueError(f"condition workflow marker must match {workflow!r}")
+        self._ensure_workflow_monitor_target_identity()
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            with session.begin():
+                target = self._upsert_workflow_monitor_target_in_transaction(
+                    session,
+                    stock_code,
+                    market,
+                    frequency,
+                    workflow,
+                    condition,
+                    note,
+                    target_enabled,
+                    reset_last_state,
+                )
+                self._upsert_forecast_ssf_candidate_in_transaction(
+                    session.connection(),
+                    ForecastSSFCandidate.__table__,
+                    stock_code,
+                    market,
+                    report_end_date,
+                    state,
+                    state_reason,
+                    evidence,
+                    target.id,
+                )
+            session.refresh(target)
+            return target
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _ensure_workflow_monitor_target_identity(self) -> None:
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.engine is not None
+        columns = {column["name"] for column in inspect(self.engine).get_columns(StockMonitorTarget.__tablename__)}
+        if "workflow" not in columns:
+            with self.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {StockMonitorTarget.__tablename__} ADD COLUMN workflow VARCHAR(64)"))
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            for target in session.query(StockMonitorTarget).filter_by(workflow=None):
+                workflow = target.condition.get("workflow")
+                if workflow:
+                    target.workflow = workflow
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+        index_name = "uq_stock_monitor_targets_workflow_owner"
+        indexes = {index["name"] for index in inspect(self.engine).get_indexes(StockMonitorTarget.__tablename__)}
+        if index_name not in indexes:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {StockMonitorTarget.__tablename__} "
+                        "(stock_code, market, frequency, workflow)"
+                    )
+                )
 
     def update_monitor_target_state(
         self,

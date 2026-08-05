@@ -91,8 +91,9 @@ class ForecastSSFMonitorSyncService:
         target_id = getattr(target, "id", None)
         if banned:
             summary["blackroom_excluded"] += 1
-            self._disable_target(stock_code, target, summary)
-            self._persist(stock_code, report_end_date, "blackroom", "active_blackroom", evidence, target_id)
+            self._persist_with_target(
+                stock_code, report_end_date, "blackroom", "active_blackroom", evidence, target, False, False, summary
+            )
             return
 
         try:
@@ -119,8 +120,17 @@ class ForecastSSFMonitorSyncService:
         )
         evidence["shareholder"]["matched_holder"] = matched_holder
         if matched_holder is None:
-            self._disable_target(stock_code, target, summary)
-            self._persist(stock_code, report_end_date, "ineligible", "ssf_holder_not_found", evidence, target_id)
+            self._persist_with_target(
+                stock_code,
+                report_end_date,
+                "ineligible",
+                "ssf_holder_not_found",
+                evidence,
+                target,
+                False,
+                False,
+                summary,
+            )
             return
 
         summary["ssf_matched"] += 1
@@ -128,14 +138,18 @@ class ForecastSSFMonitorSyncService:
             getattr(previous_candidate, "state", None) == "eligible"
             and getattr(previous_candidate, "monitor_target_id", None) == target_id
         )
-        updated_target = self.storage.upsert_workflow_monitor_target(
+        updated_target = self.storage.upsert_forecast_ssf_candidate_with_workflow_target(
             stock_code=stock_code,
             market="A",
-            frequency="daily",
+            report_end_date=report_end_date,
+            state="eligible",
+            state_reason="ssf_holder_match",
+            evidence=evidence,
             workflow=WORKFLOW_NAME,
+            frequency="daily",
             condition=_CONDITION,
             note=_NOTE,
-            enabled=True,
+            target_enabled=True,
             reset_last_state=reset_last_state,
         )
         target_id = updated_target.id
@@ -145,22 +159,38 @@ class ForecastSSFMonitorSyncService:
             summary["updated"] += 1
         else:
             summary["unchanged"] += 1
-        self._persist(stock_code, report_end_date, "eligible", "ssf_holder_match", evidence, target_id)
 
-    def _disable_target(self, stock_code: str, target: Any | None, summary: dict[str, int]) -> None:
-        if target is None or not target.enabled:
+    def _persist_with_target(
+        self,
+        stock_code: str,
+        report_end_date: date,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+        target: Any | None,
+        target_enabled: bool,
+        reset_last_state: bool,
+        summary: dict[str, int],
+    ) -> None:
+        if target is None:
+            self._persist(stock_code, report_end_date, state, state_reason, evidence, None)
             return
-        self.storage.upsert_workflow_monitor_target(
+        self.storage.upsert_forecast_ssf_candidate_with_workflow_target(
             stock_code=stock_code,
             market="A",
+            report_end_date=report_end_date,
+            state=state,
+            state_reason=state_reason,
+            evidence=evidence,
             frequency="daily",
             workflow=WORKFLOW_NAME,
             condition=_CONDITION,
             note=_NOTE,
-            enabled=False,
-            reset_last_state=False,
+            target_enabled=target_enabled,
+            reset_last_state=reset_last_state,
         )
-        summary["disabled"] += 1
+        if target.enabled and not target_enabled:
+            summary["disabled"] += 1
 
     def _persist(
         self,
