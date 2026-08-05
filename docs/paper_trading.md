@@ -297,7 +297,7 @@ curl -X POST http://localhost:8000/paper/accounts/1/orders \
   -d '{"symbol":"000001","side":"buy","quantity":100,"limit_price":"10.00","trade_date":"2026-06-16","comment":"突破买入"}'
 ```
 
-Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, insufficient position, and A-share T+1 violation (same-day sell) are stored as rejected orders. A past A-share trade date can be used for a retry only when an unresolved BFQ daily-bar diagnostic exists for the symbol; otherwise the order is rejected as ineligible for a historical retry.
+Buy orders freeze estimated cash. Sell orders freeze sellable position quantity. Invalid lot size, insufficient cash, insufficient position, and A-share T+1 violation (same-day sell) are stored as rejected orders. Past open-date A-share orders are accepted as historical source orders without reserving present-day cash or inventory; replay evaluates them against historical cash, holdings, T+1, and exact-date market data. Current-date orders retain their normal immediate reservation behavior.
 
 ## Update Order Comment
 
@@ -323,7 +323,7 @@ The order and its linked trades return `"comment": null` in API responses after 
 
 ### Delete an order
 
-Deleting an order hard-deletes the order. If the order had already filled, the paper trading backend recalculates the account's trades, cash ledger, positions, position lots, round trips, matching runs, validity checks, and snapshots from the remaining order history. A surviving order without an exact-date daily bar remains accepted; its replay matching run records a warning and daily-bar diagnostic rather than treating missing market data as a fatal replay failure.
+Deleting an order hard-deletes the order. If the order had already filled, the paper trading backend recalculates the account's trades, cash ledger, positions, position lots, round trips, matching runs, validity checks, and snapshots from the remaining order history. Historical replay uses the same account-level database lock as account-scoped matching, preserves manual cash events, comments, and cancellations, and rolls back the complete rebuild on unexpected errors. A surviving order without an exact-date daily bar remains accepted; its replay matching run records a warning and daily-bar diagnostic rather than treating missing market data as a fatal replay failure.
 
 ```bash
 uv run tools/paper_trading_cli.py order delete --order-id 123

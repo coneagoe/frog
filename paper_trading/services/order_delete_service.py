@@ -119,6 +119,7 @@ class OrderDeleteService:
     def rebuild_account_from(self, account_id: int, start_date: date, triggering_order_ids: list[int]):
         """Rebuild an account's derived ledger after delayed daily-bar data arrives."""
         with self.repo.session.begin_nested():
+            self.repo.lock_account(account_id)
             deleted_counts = self.repo.clear_account_rebuild_state(account_id, preserve_execution_history=True)
             self.repo.reset_orders_for_replay(account_id)
             self.repo.session.expunge_all()

@@ -202,6 +202,12 @@ class PaperTradingRepository:
     def get_account(self, account_id: int) -> PaperAccount | None:
         return cast(PaperAccount | None, self.session.get(PaperAccount, account_id))
 
+    def lock_account(self, account_id: int) -> PaperAccount:
+        account = self.session.query(PaperAccount).filter(PaperAccount.id == account_id).with_for_update().one_or_none()
+        if account is None:
+            raise KeyError(f"paper account not found: {account_id}")
+        return account
+
     def add_account_realized_pnl(self, account: PaperAccount, amount: Decimal) -> PaperAccount:
         account.realized_pnl = (Decimal(account.realized_pnl or 0) + amount).quantize(Decimal("0.0001"))
         self.session.flush()

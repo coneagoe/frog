@@ -401,6 +401,41 @@ def test_historical_order_33_sell_is_not_rejected_for_past_date(tmp_path, monkey
     engine.dispose()
 
 
+def test_historical_order_33_sell_without_matured_inventory_reports_position_failure(tmp_path, monkeypatch):
+    class HistoricalToday(date):
+        @classmethod
+        def today(cls) -> Self:
+            return cls(2026, 8, 2)
+
+    monkeypatch.setattr(order_service_module, "date", HistoricalToday)
+    engine = create_engine(f"sqlite:///{tmp_path / 'order_33_insufficient_inventory.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    sell_date = date(2026, 7, 30)
+    market_data = FakeMarketDataProvider(
+        {
+            ("002558", sell_date): DailyBar(
+                "002558",
+                sell_date,
+                Decimal("28.00"),
+                Decimal("29.65"),
+                Decimal("27.52"),
+                Decimal("28.00"),
+            )
+        }
+    )
+    service = OrderService(repo, market_data)
+    account = repo.create_account("order-33-insufficient", Decimal("100000.00"))
+
+    sell = service.place_order(account.id, "002558", OrderSide.SELL, 1100, Decimal("28.00"), sell_date)
+
+    assert sell.status == OrderStatus.REJECTED.value
+    assert sell.rejection_code == "INSUFFICIENT_POSITION"
+    assert sell.rejection_code != "HISTORICAL_TRADE_DATE_NOT_ELIGIBLE"
+    engine.dispose()
+
+
 def test_past_a_share_order_requires_unresolved_canonical_bfq_diagnostic(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("historical-canonical", Decimal("100000.00"))

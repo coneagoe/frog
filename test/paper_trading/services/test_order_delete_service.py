@@ -147,6 +147,29 @@ def test_rebuild_from_fills_delayed_order_and_replays_later_ledger(session):
     assert rebuild.start_date == early_date
 
 
+def test_rebuild_locks_account_before_clearing_derived_state(session, monkeypatch):
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("rebuild-lock", Decimal("100000"))
+    calls: list[str] = []
+    original_lock = repo.lock_account
+    original_clear = repo.clear_account_rebuild_state
+
+    def lock_account(account_id: int):
+        calls.append("lock")
+        return original_lock(account_id)
+
+    def clear_account_rebuild_state(account_id: int, *, preserve_execution_history: bool = False):
+        calls.append("clear")
+        return original_clear(account_id, preserve_execution_history=preserve_execution_history)
+
+    monkeypatch.setattr(repo, "lock_account", lock_account)
+    monkeypatch.setattr(repo, "clear_account_rebuild_state", clear_account_rebuild_state)
+
+    OrderDeleteService(repo, FakeMarketDataProvider()).rebuild_account_from(account.id, date(2026, 7, 17), [])
+
+    assert calls[:2] == ["lock", "clear"]
+
+
 def test_rebuild_from_preserves_deposit_and_resolves_readable_skipped_diagnostic(session):
     repo = PaperTradingRepository(session)
     trade_date = date(2026, 7, 17)
@@ -207,6 +230,160 @@ def test_rebuild_from_rolls_back_derived_ledger_on_unexpected_error(session, mon
 
     assert [trade.id for trade in repo.list_trades(account.id)] == before_trade_ids
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+
+
+def test_repeated_rebuild_preserves_source_facts_and_current_derived_counts(session):
+    repo = PaperTradingRepository(session)
+    market_data = FakeMarketDataProvider()
+    account = repo.create_account("rebuild-idempotent", Decimal("100000"))
+    trade_date = date(2026, 7, 17)
+    later_date = date(2026, 7, 18)
+    repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("1000"), trade_date=trade_date, note="manual")
+    buy = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0000"),
+        comment="keep this comment",
+    )
+    sell = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        100,
+        Decimal("11.00"),
+        later_date,
+        OrderStatus.ACCEPTED,
+        frozen_quantity=100,
+    )
+    cancelled = repo.create_order(
+        account.id,
+        "000002",
+        OrderSide.BUY,
+        100,
+        Decimal("20.00"),
+        later_date,
+        OrderStatus.CANCELLED,
+        comment="cancelled source order",
+    )
+
+    service = OrderDeleteService(repo, market_data)
+    service.rebuild_account_from(account.id, trade_date, [buy.id, sell.id])
+    first_counts = {
+        "trades": len(repo.list_trades(account.id)),
+        "lots": repo.count_position_lots(account.id),
+        "round_trips": len(repo.list_round_trips(account.id)),
+        "snapshots": len(repo.list_snapshots(account.id)),
+        "cash_by_order": sorted(
+            (event.order_id, event.event_type, event.amount)
+            for event in repo.list_cash_ledger(account.id)
+            if event.order_id
+        ),
+    }
+
+    service.rebuild_account_from(account.id, trade_date, [buy.id, sell.id])
+    second_counts = {
+        "trades": len(repo.list_trades(account.id)),
+        "lots": repo.count_position_lots(account.id),
+        "round_trips": len(repo.list_round_trips(account.id)),
+        "snapshots": len(repo.list_snapshots(account.id)),
+        "cash_by_order": sorted(
+            (event.order_id, event.event_type, event.amount)
+            for event in repo.list_cash_ledger(account.id)
+            if event.order_id
+        ),
+    }
+
+    assert first_counts == second_counts
+    assert repo.get_order(buy.id).comment == "keep this comment"
+    assert repo.get_order(sell.id).status == OrderStatus.FILLED.value
+    assert repo.get_order(cancelled.id).status == OrderStatus.CANCELLED.value
+    assert [event.note for event in repo.list_cash_ledger(account.id)].count("manual") == 1
+
+
+def test_rebuild_isolates_missing_untouched_and_suspended_orders(session):
+    repo = PaperTradingRepository(session)
+    missing_date = date(2026, 7, 17)
+    later_date = date(2026, 7, 18)
+    account = repo.create_account("rebuild-outcomes", Decimal("100000"))
+    orders = [
+        repo.create_order(
+            account.id,
+            "000001",
+            OrderSide.BUY,
+            100,
+            Decimal("10.00"),
+            missing_date,
+            OrderStatus.ACCEPTED,
+            frozen_cash=Decimal("1005.0000"),
+        ),
+        repo.create_order(
+            account.id,
+            "000002",
+            OrderSide.BUY,
+            100,
+            Decimal("20.00"),
+            missing_date,
+            OrderStatus.ACCEPTED,
+            frozen_cash=Decimal("2005.0000"),
+        ),
+        repo.create_order(
+            account.id,
+            "000003",
+            OrderSide.BUY,
+            100,
+            Decimal("30.00"),
+            missing_date,
+            OrderStatus.ACCEPTED,
+            frozen_cash=Decimal("3005.0000"),
+        ),
+        repo.create_order(
+            account.id,
+            "000004",
+            OrderSide.BUY,
+            100,
+            Decimal("40.00"),
+            later_date,
+            OrderStatus.ACCEPTED,
+            frozen_cash=Decimal("4005.0000"),
+        ),
+    ]
+
+    class IsolatedOutcomeMarketData(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            if symbol == "000001":
+                raise KeyError("missing exact-date bar")
+            if symbol == "000002":
+                return DailyBar(symbol, trade_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
+            if symbol == "000003":
+                return DailyBar(
+                    symbol,
+                    trade_date,
+                    Decimal("10"),
+                    Decimal("100"),
+                    Decimal("1"),
+                    Decimal("10"),
+                    suspended=True,
+                )
+            return super().get_daily_bar(symbol, trade_date, market)
+
+    OrderDeleteService(repo, IsolatedOutcomeMarketData()).rebuild_account_from(
+        account.id, missing_date, [order.id for order in orders]
+    )
+
+    assert repo.get_order(orders[0].id).status == OrderStatus.ACCEPTED.value
+    assert repo.get_order(orders[1].id).status == OrderStatus.ACCEPTED.value
+    assert repo.get_order(orders[2].id).rejection_code == "SUSPENDED_SYMBOL"
+    assert repo.get_order(orders[3].id).status == OrderStatus.FILLED.value
+    diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "000001")
+    assert diagnostic.resolved is False
+    assert repo.list_snapshots(account.id)
+    assert repo.get_valuation_gap(account.id, later_date) is None
+    assert len(repo.list_trades(account.id)) == 1
 
 
 # ── Bug reproduction: cash freeze / position freeze / validity checks ──────────

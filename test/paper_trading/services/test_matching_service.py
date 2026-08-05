@@ -667,6 +667,22 @@ def test_matching_duplicate_active_run_returns_non_owner_without_double_fill(tmp
     engine.dispose()
 
 
+def test_account_scoped_matching_locks_account_before_processing(tmp_path, monkeypatch):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("account-lock", Decimal("100000.00"))
+    locked_accounts: list[int] = []
+
+    def lock_account(account_id: int):
+        locked_accounts.append(account_id)
+        return repo.get_account(account_id)
+
+    monkeypatch.setattr(repo, "lock_account", lock_account)
+    matching_service.run(trade_date, account.id)
+
+    assert locked_accounts == [account.id]
+    engine.dispose()
+
+
 # ── HK Connect matching ──────────────────────────────────────────────────────
 
 

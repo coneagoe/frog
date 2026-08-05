@@ -35,6 +35,8 @@ class MatchingService:
         self.round_trip_service = RoundTripService(repo)
 
     def run(self, trade_date: date, account_id: int | None = None):
+        if account_id is not None:
+            self.repo.lock_account(account_id)
         run, owner = self.repo.acquire_matching_run(trade_date, account_id)
         if not owner:
             return run
