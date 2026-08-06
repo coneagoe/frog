@@ -3,7 +3,7 @@ import os
 import textwrap
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
-from typing import Any, Dict, List, Literal, Optional, Set, cast
+from typing import Any, Callable, Dict, List, Literal, Optional, Set, cast
 
 import pandas as pd
 import psycopg2
@@ -2335,6 +2335,20 @@ class StorageDb:
         state_reason: str,
         evidence: dict[str, Any],
     ) -> bool:
+        return self._delete_forecast_ssf_target_with_candidate_transition(
+            target_id,
+            state,
+            state_reason,
+            lambda _candidate: evidence,
+        )
+
+    def _delete_forecast_ssf_target_with_candidate_transition(
+        self,
+        target_id: int,
+        state: str,
+        state_reason: str,
+        evidence_builder: Callable[[Any], dict[str, Any]],
+    ) -> bool:
         from .model.forecast_ssf_candidate import ForecastSSFCandidate
         from .model.stock_monitor_target import StockMonitorTarget
 
@@ -2352,6 +2366,7 @@ class StorageDb:
                 if not candidates:
                     return False
                 candidate = candidates[0]
+                evidence = evidence_builder(candidate)
                 candidate.state = state
                 candidate.state_reason = state_reason
                 candidate.evidence = evidence
@@ -2370,17 +2385,22 @@ class StorageDb:
         session.flush()
 
     def delete_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
-        candidate = self.get_forecast_ssf_candidate_for_target(target_id)
-        if candidate is None:
-            return False
-        evidence = dict(candidate.evidence or {})
-        evidence["lifecycle"] = {
-            "as_of_date": date.today().isoformat(),
-            "state": "blackroom",
-            "reason": reason,
-            "previous_state": candidate.state,
-        }
-        return self.delete_forecast_ssf_target_with_candidate_transition(target_id, "blackroom", reason, evidence)
+        def build_evidence(candidate: Any) -> dict[str, Any]:
+            evidence = dict(candidate.evidence or {})
+            evidence["lifecycle"] = {
+                "as_of_date": date.today().isoformat(),
+                "state": "blackroom",
+                "reason": reason,
+                "previous_state": candidate.state,
+            }
+            return evidence
+
+        return self._delete_forecast_ssf_target_with_candidate_transition(
+            target_id,
+            "blackroom",
+            reason,
+            build_evidence,
+        )
 
     def disable_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
         return self.delete_forecast_ssf_target_for_blackroom(target_id, reason)

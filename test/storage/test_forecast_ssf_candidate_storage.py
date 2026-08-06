@@ -126,9 +126,12 @@ def test_delete_transition_removes_owned_target_and_retains_candidate(tmp_path):
     target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
     evidence = {"lifecycle": {"state": "ineligible", "reason": "ssf_holder_not_found"}}
 
-    assert db.delete_forecast_ssf_target_with_candidate_transition(
-        target.id, "ineligible", "ssf_holder_not_found", evidence
-    ) is True
+    assert (
+        db.delete_forecast_ssf_target_with_candidate_transition(
+            target.id, "ineligible", "ssf_holder_not_found", evidence
+        )
+        is True
+    )
 
     assert db.get_monitor_target(target.id) is None
     assert db.get_forecast_ssf_candidate_for_target(target.id) is None
@@ -177,6 +180,39 @@ def test_blackroom_delete_builds_lifecycle_evidence_with_previous_state(tmp_path
             "state": "blackroom",
             "reason": "active_blackroom",
             "previous_state": "eligible",
+        },
+    }
+
+
+def test_blackroom_delete_uses_current_candidate_without_detached_pre_read(tmp_path, monkeypatch):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    db.upsert_forecast_ssf_candidate(
+        stock_code="600001",
+        market="A",
+        report_end_date=date(2025, 12, 31),
+        state="paused",
+        state_reason="sync_paused",
+        evidence={"forecast": {"ann_date": "2026-02-01"}, "sync": {"version": 2}},
+        monitor_target_id=target.id,
+    )
+    monkeypatch.setattr(
+        db,
+        "get_forecast_ssf_candidate_for_target",
+        MagicMock(side_effect=AssertionError("blackroom transition must not pre-read candidate")),
+    )
+
+    assert db.delete_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is True
+
+    saved = db.list_forecast_ssf_candidates()[0]
+    assert saved.evidence == {
+        "forecast": {"ann_date": "2026-02-01"},
+        "sync": {"version": 2},
+        "lifecycle": {
+            "as_of_date": date.today().isoformat(),
+            "state": "blackroom",
+            "reason": "active_blackroom",
+            "previous_state": "paused",
         },
     }
 
@@ -239,9 +275,12 @@ def test_delete_transition_leaves_unowned_or_unlinked_target_unchanged(tmp_path,
             monitor_target_id=target.id,
         )
 
-    assert db.delete_forecast_ssf_target_with_candidate_transition(
-        target.id, "blackroom", "active_blackroom", {"after": True}
-    ) is False
+    assert (
+        db.delete_forecast_ssf_target_with_candidate_transition(
+            target.id, "blackroom", "active_blackroom", {"after": True}
+        )
+        is False
+    )
     assert db.get_monitor_target(target.id) is not None
     saved = db.get_forecast_ssf_candidate_for_target(target.id)
     if linked:
@@ -269,9 +308,12 @@ def test_delete_transition_leaves_owned_non_daily_target_unchanged(tmp_path):
         monitor_target_id=target.id,
     )
 
-    assert db.delete_forecast_ssf_target_with_candidate_transition(
-        target.id, "blackroom", "active_blackroom", {"after": True}
-    ) is False
+    assert (
+        db.delete_forecast_ssf_target_with_candidate_transition(
+            target.id, "blackroom", "active_blackroom", {"after": True}
+        )
+        is False
+    )
 
     assert db.get_monitor_target(target.id) is not None
     saved = db.get_forecast_ssf_candidate_for_target(target.id)
