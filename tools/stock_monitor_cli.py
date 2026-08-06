@@ -99,6 +99,12 @@ def build_parser() -> _StableParser:
         help="上次状态为 false",
     )
 
+    pause_parser = target_subparsers.add_parser("pause", help="暂停工作流监控目标")
+    pause_parser.add_argument("--target-id", type=int, required=True, help="监控目标ID")
+
+    resume_parser = target_subparsers.add_parser("resume", help="恢复工作流监控目标")
+    resume_parser.add_argument("--target-id", type=int, required=True, help="监控目标ID")
+
     remove_parser = target_subparsers.add_parser("remove", help="删除监控目标")
     remove_parser.add_argument("--target-id", type=int, required=True, help="监控目标ID")
 
@@ -296,6 +302,10 @@ def main(
                     if value is not None
                 }
                 result = _svc.update(args.target_id, **updates)
+            elif args.target_command == "pause":
+                result = _svc.pause(args.target_id)
+            elif args.target_command == "resume":
+                result = _svc.resume(args.target_id)
             elif args.target_command == "remove":
                 result = _svc.remove(args.target_id)
             elif args.target_command == "list":

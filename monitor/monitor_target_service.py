@@ -244,6 +244,24 @@ class MonitorTargetService:
         except TargetNotFoundError as exc:
             return self._result(False, "NOT_FOUND", str(exc), None)
 
+    def pause(self, target_id: int) -> dict[str, Any]:
+        return self._set_workflow_pause(target_id, paused=True, message="target paused")
+
+    def resume(self, target_id: int) -> dict[str, Any]:
+        return self._set_workflow_pause(target_id, paused=False, message="target resumed")
+
+    def _set_workflow_pause(self, target_id: int, paused: bool, message: str) -> dict[str, Any]:
+        try:
+            self._validate_target_id(target_id)
+            target = self.storage.set_workflow_monitor_target_paused(target_id, paused=paused)
+            if target is None:
+                raise TargetNotFoundError(f"monitor target not found: {target_id}")
+            return self._result(True, "OK", message, self._serialize_target(target))
+        except (TargetValidationError, ValueError) as exc:
+            return self._result(False, "VALIDATION_ERROR", str(exc), None)
+        except TargetNotFoundError as exc:
+            return self._result(False, "NOT_FOUND", str(exc), None)
+
     @staticmethod
     def _result(success: bool, code: str, message: str, data: Any) -> dict[str, Any]:
         return {
@@ -369,6 +387,7 @@ class MonitorTargetService:
             "frequency": getattr(target, "frequency", None),
             "reset_mode": getattr(target, "reset_mode", None),
             "enabled": getattr(target, "enabled", None),
+            "paused": getattr(target, "paused", False),
             "last_state": getattr(target, "last_state", None),
             "triggered_at": MonitorTargetService._to_iso(getattr(target, "triggered_at", None)),
             "created_at": MonitorTargetService._to_iso(getattr(target, "created_at", None)),
