@@ -2477,12 +2477,52 @@ class StorageDb:
         try:
             for target in session.query(StockMonitorTarget).filter_by(workflow=None):
                 workflow = target.condition.get("workflow")
-                if workflow:
+                if workflow is not None:
                     target.workflow = workflow
             session.commit()
         except Exception:
             session.rollback()
             raise
+        finally:
+            session.close()
+
+        session = self.Session()
+        try:
+            duplicate_owners = (
+                session.query(
+                    StockMonitorTarget.stock_code,
+                    StockMonitorTarget.market,
+                    StockMonitorTarget.frequency,
+                    StockMonitorTarget.workflow,
+                )
+                .filter(StockMonitorTarget.workflow.is_not(None))
+                .group_by(
+                    StockMonitorTarget.stock_code,
+                    StockMonitorTarget.market,
+                    StockMonitorTarget.frequency,
+                    StockMonitorTarget.workflow,
+                )
+                .having(func.count(StockMonitorTarget.id) > 1)
+                .all()
+            )
+            for stock_code, market, frequency, workflow in duplicate_owners:
+                target_ids = [
+                    target_id
+                    for (target_id,) in (
+                        session.query(StockMonitorTarget.id)
+                        .filter_by(
+                            stock_code=stock_code,
+                            market=market,
+                            frequency=frequency,
+                            workflow=workflow,
+                        )
+                        .order_by(StockMonitorTarget.id.asc())
+                        .all()
+                    )
+                ]
+                raise ValueError(
+                    f"发现重复的 workflow 监控目标: {stock_code}/{market}/{frequency}/{workflow!r} (ids: {target_ids})"
+                )
         finally:
             session.close()
 
@@ -2534,6 +2574,7 @@ class StorageDb:
         from .model.stock_monitor_target import StockMonitorTarget  # noqa: F401
 
         StockMonitorTarget.__table__.create(self.engine, checkfirst=True)
+        self._ensure_workflow_monitor_target_identity()
 
     # ------------------------------------------------------------------
     # Blackroom record CRUD

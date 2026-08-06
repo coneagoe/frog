@@ -2,7 +2,7 @@ from datetime import date
 
 import pandas as pd
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from common.const import COL_ANN_DATE, COL_FLOAT_HOLDER_NAME
@@ -17,6 +17,35 @@ def _sqlite_storage(tmp_path):
 
     db.Session = sessionmaker(bind=db.engine)
     Base.metadata.create_all(db.engine)
+    return db
+
+
+def _legacy_monitor_target_storage(tmp_path):
+    db = StorageDb.__new__(StorageDb)
+    db.engine = create_engine(f"sqlite:///{tmp_path}/legacy_monitor_targets.db")
+    from sqlalchemy.orm import sessionmaker
+
+    db.Session = sessionmaker(bind=db.engine)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE stock_monitor_targets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stock_code VARCHAR(10) NOT NULL,
+                    market VARCHAR(5) NOT NULL DEFAULT 'A',
+                    condition JSON NOT NULL,
+                    note TEXT,
+                    frequency VARCHAR(10) NOT NULL DEFAULT 'daily',
+                    reset_mode VARCHAR(10) NOT NULL DEFAULT 'auto',
+                    enabled BOOLEAN NOT NULL DEFAULT true,
+                    last_state BOOLEAN NOT NULL DEFAULT false,
+                    triggered_at DATETIME,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
     return db
 
 
@@ -106,6 +135,60 @@ def test_workflow_monitor_target_uses_only_matching_marker_and_preserves_id(tmp_
     assert not updated.enabled
     assert not updated.last_state
     assert len(db.list_monitor_targets()) == 3
+
+
+def test_legacy_monitor_target_migration_backfills_empty_workflow_before_orm_access(tmp_path):
+    db = _legacy_monitor_target_storage(tmp_path)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO stock_monitor_targets (stock_code, market, condition, note)
+                VALUES
+                    ('600001', 'A', :workflow_condition, 'workflow target'),
+                    ('600002', 'A', :manual_condition, 'manual target')
+                """
+            ),
+            {
+                "workflow_condition": '{"workflow": "", "price": {"above": 10}}',
+                "manual_condition": '{"price": {"below": 8}}',
+            },
+        )
+
+    db.ensure_monitor_targets_table()
+    targets = db.list_monitor_targets()
+    created = db.create_monitor_target("600003", "A", {"price": {"above": 11}}, note="new manual target")
+
+    assert [(target.stock_code, target.workflow) for target in targets] == [("600001", ""), ("600002", None)]
+    assert created.stock_code == "600003"
+
+
+def test_legacy_monitor_target_migration_reports_duplicate_workflow_owners_before_index_creation(tmp_path):
+    db = _legacy_monitor_target_storage(tmp_path)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO stock_monitor_targets (stock_code, market, condition, note)
+                VALUES
+                    ('600001', 'A', :first_condition, 'first workflow target'),
+                    ('600001', 'A', :second_condition, 'second workflow target')
+                """
+            ),
+            {
+                "first_condition": '{"workflow": "forecast_ssf_ma20"}',
+                "second_condition": '{"workflow": "forecast_ssf_ma20"}',
+            },
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"600001/A/daily/'forecast_ssf_ma20'.*ids: \[1, 2\]",
+    ):
+        db.ensure_monitor_targets_table()
+
+    index_names = {index["name"] for index in inspect(db.engine).get_indexes("stock_monitor_targets")}
+    assert "uq_stock_monitor_targets_workflow_owner" not in index_names
 
 
 def test_workflow_monitor_target_rejects_duplicate_markers(tmp_path):
