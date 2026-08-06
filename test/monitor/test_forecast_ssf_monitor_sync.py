@@ -293,7 +293,13 @@ def test_sync_empty_universe_retires_only_matching_daily_workflow_targets():
     assert result["data"]["disabled"] == 1
     assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_count == 1
     assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["stock_code"] == "600001"
-    storage.upsert_forecast_ssf_candidate.assert_not_called()
+    assert [call.kwargs["stock_code"] for call in storage.upsert_forecast_ssf_candidate.call_args_list] == [
+        "600002",
+        "600003",
+    ]
+    assert all(
+        call.kwargs["monitor_target_id"] is None for call in storage.upsert_forecast_ssf_candidate.call_args_list
+    )
 
 
 def test_sync_retires_unlinked_absent_candidate_without_creating_target():
@@ -323,3 +329,48 @@ def test_sync_retires_unlinked_absent_candidate_without_creating_target():
         },
         "monitor_target_id": None,
     }
+
+
+@pytest.mark.parametrize("daily_target", [None, _target(18, enabled=True)], ids=["missing", "mismatched"])
+def test_sync_retires_absent_candidate_with_stale_target_link(daily_target):
+    storage = _storage(_forecasts())
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(
+            stock_code="600001",
+            report_end_date=date(2025, 12, 31),
+            monitor_target_id=17,
+            evidence={"forecast": {"ann_date": "2026-01-15"}},
+        )
+    ]
+    storage.find_workflow_monitor_target.return_value = daily_target
+
+    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+
+    assert result["data"]["disabled"] == 0
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
+    assert storage.upsert_forecast_ssf_candidate.call_args.kwargs == {
+        "stock_code": "600001",
+        "market": "A",
+        "report_end_date": date(2025, 12, 31),
+        "state": "ineligible",
+        "state_reason": "forecast_no_longer_qualified",
+        "evidence": {
+            "forecast": {"ann_date": "2026-01-15"},
+            "lifecycle": {"as_of_date": "2026-01-20", "reason": "forecast_no_longer_qualified"},
+        },
+        "monitor_target_id": None,
+    }
+
+
+def test_sync_repeated_retirement_preserves_disabled_target_without_recounting():
+    storage = _storage(_forecasts())
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(stock_code="600001", report_end_date=date(2025, 12, 31), monitor_target_id=17, evidence={})
+    ]
+    storage.find_workflow_monitor_target.return_value = _target(17, enabled=False)
+
+    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+
+    assert result["data"]["disabled"] == 0
+    assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["target_enabled"] is False
+    assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["reset_last_state"] is False

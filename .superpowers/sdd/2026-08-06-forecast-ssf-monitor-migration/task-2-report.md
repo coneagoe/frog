@@ -79,3 +79,55 @@ guidance.
 
 None identified within Task 2 scope. The full project test suite was not run;
 the required focused workflow regression suite passed.
+
+## Review Fix: Stale Target Links
+
+### Defect
+
+Retirement previously skipped an absent candidate when its non-null stored
+`monitor_target_id` no longer matched the daily `forecast_ssf_ma20` workflow
+lookup. This left the candidate in its prior state with a stale link.
+
+### Correction
+
+When the daily workflow target is absent or its id differs from the stored
+candidate link, retirement now persists the candidate-only ineligible state,
+adds the standard lifecycle evidence, and clears `monitor_target_id` to
+`None`. It does not invoke the atomic target upsert, so a manual or intraday
+target cannot be mutated. A matching already-disabled workflow target remains
+disabled and does not increment the `disabled` summary count again.
+
+### TDD Evidence
+
+Before the correction:
+
+```text
+uv run pytest test/monitor/test_forecast_ssf_monitor_sync.py -k 'stale_target_link or repeated_retirement' -v
+2 failed, 1 passed, 15 deselected
+```
+
+The failing variants covered a missing daily target and a daily target with a
+different id. Both showed no candidate persistence before the fix.
+
+After the correction:
+
+```text
+uv run pytest test/monitor/test_forecast_ssf_monitor_sync.py -k 'stale_target_link or repeated_retirement' -v
+3 passed, 15 deselected
+```
+
+Focused Task 2 regression and quality checks:
+
+```text
+uv run pytest test/monitor/test_forecast_ssf_monitor_sync.py test/storage/test_forecast_ssf_candidate_storage.py test/monitor/test_monitor_target_service.py test/dags/test_monitor_stock_daily.py -v
+59 passed
+
+uv run ruff format --check monitor/forecast_ssf_monitor_sync.py test/monitor/test_forecast_ssf_monitor_sync.py
+2 files already formatted
+
+uv run ruff check monitor/forecast_ssf_monitor_sync.py test/monitor/test_forecast_ssf_monitor_sync.py
+All checks passed!
+```
+
+No repository documentation update was needed for this internal corrective
+change. The report itself was appended as required by the review round.

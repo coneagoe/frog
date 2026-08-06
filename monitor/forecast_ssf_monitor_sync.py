@@ -101,6 +101,14 @@ class ForecastSSFMonitorSyncService:
                 continue
             target = self.storage.find_workflow_monitor_target(stock_code, "A", "daily", WORKFLOW_NAME)
             if target is None or target.id != target_id:
+                self._persist(
+                    stock_code,
+                    candidate.report_end_date,
+                    "ineligible",
+                    "forecast_no_longer_qualified",
+                    evidence,
+                    None,
+                )
                 continue
             self._persist_with_target(
                 stock_code,
