@@ -1559,6 +1559,16 @@ class StorageDb:
         finally:
             session.close()
 
+    def get_forecast_ssf_candidate_for_target(self, target_id: int) -> Any | None:
+        from .model.forecast_ssf_candidate import ForecastSSFCandidate
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target_id).first()
+        finally:
+            session.close()
+
     def load_a_stock_listing_status(self, stock_codes: list[str]) -> pd.DataFrame:
         columns = [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
         if not stock_codes:
@@ -2157,13 +2167,16 @@ class StorageDb:
         finally:
             session.close()
 
-    def list_monitor_targets(self, frequency: Optional[str] = None, enabled: Optional[bool] = None) -> List[Any]:
+    def list_monitor_targets(
+        self, frequency: Optional[str] = None, enabled: Optional[bool] = None, workflow: Optional[str] = None
+    ) -> List[Any]:
         """
         查询监控目标列表。
 
         Args:
             frequency: 可选，按频率过滤 ('daily' 或 'intraday')。
             enabled: 可选，按启用状态过滤。
+            workflow: 可选，按工作流所有者过滤。
         Returns:
             StockMonitorTarget 对象列表。
         """
@@ -2178,6 +2191,8 @@ class StorageDb:
                 query = query.filter_by(enabled=enabled)
             if frequency:
                 query = query.filter_by(frequency=frequency)
+            if workflow is not None:
+                query = query.filter_by(workflow=workflow)
             return cast(List[Any], query.order_by(StockMonitorTarget.id.asc()).all())
         finally:
             session.close()
@@ -2298,16 +2313,52 @@ class StorageDb:
         finally:
             session.close()
 
-    def load_monitor_targets(self, frequency: Optional[str] = None) -> List[Any]:
+    def load_monitor_targets(self, frequency: Optional[str] = None, workflow: Optional[str] = None) -> List[Any]:
         """
         加载所有启用的监控目标。
 
         Args:
             frequency: 可选，按频率过滤 ('daily' 或 'intraday')；None 则返回全部。
+            workflow: 可选，按工作流所有者过滤。
         Returns:
             StockMonitorTarget 对象列表。
         """
-        return self.list_monitor_targets(frequency=frequency, enabled=True)
+        return self.list_monitor_targets(frequency=frequency, enabled=True, workflow=workflow)
+
+    def disable_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
+        from .model.forecast_ssf_candidate import ForecastSSFCandidate
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        self.ensure_monitor_targets_table()
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            with session.begin():
+                target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+                if target is None or target.workflow != "forecast_ssf_ma20":
+                    return False
+                candidate = session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target_id).first()
+                if candidate is None:
+                    return False
+                evidence = dict(candidate.evidence or {})
+                lifecycle = {
+                    "as_of_date": date.today().isoformat(),
+                    "state": "blackroom",
+                    "reason": reason,
+                }
+                if candidate.state != "blackroom":
+                    lifecycle["previous_state"] = candidate.state
+                evidence["lifecycle"] = lifecycle
+                target.enabled = False
+                candidate.state = "blackroom"
+                candidate.state_reason = reason
+                candidate.evidence = evidence
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def find_workflow_monitor_target(self, stock_code: str, market: str, frequency: str, workflow: str) -> Any | None:
         from .model.stock_monitor_target import StockMonitorTarget

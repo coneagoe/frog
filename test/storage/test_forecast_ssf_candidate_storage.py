@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -49,6 +50,27 @@ def _legacy_monitor_target_storage(tmp_path):
     return db
 
 
+def _create_target(db, *, workflow: str | None, enabled: bool = True):
+    condition: dict[str, Any] = {"price": {"above": 10}}
+    if workflow is not None:
+        condition["workflow"] = workflow
+    return db.create_monitor_target("600001", "A", condition, workflow or "manual", enabled=enabled)
+
+
+def _create_linked_forecast_ssf_target(db, *, enabled: bool, state: str):
+    target = _create_target(db, workflow="forecast_ssf_ma20", enabled=enabled)
+    candidate = db.upsert_forecast_ssf_candidate(
+        stock_code="600001",
+        market="A",
+        report_end_date=date(2025, 12, 31),
+        state=state,
+        state_reason="ssf_holder_match",
+        evidence={"forecast": {"ann_date": "2026-01-15"}},
+        monitor_target_id=target.id,
+    )
+    return target, candidate
+
+
 def test_candidate_upsert_preserves_one_auditable_record(tmp_path):
     db = _sqlite_storage(tmp_path)
     first = db.upsert_forecast_ssf_candidate(
@@ -79,6 +101,70 @@ def test_candidate_upsert_preserves_one_auditable_record(tmp_path):
     assert list(ForecastSSFCandidate.__table__.primary_key.columns.keys()) == ["stock_code"]
     assert [(row.stock_code, row.state, row.monitor_target_id) for row in rows] == [("600001", "blackroom", 7)]
     assert rows[0].evidence == {"blackroom": {"banned": True}}
+
+
+def test_load_monitor_targets_filters_enabled_targets_by_workflow(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    workflow_target = _create_target(db, workflow="forecast_ssf_ma20")
+    _create_target(db, workflow=None)
+    _create_target(db, workflow="other_workflow", enabled=False)
+
+    assert [target.id for target in db.load_monitor_targets("daily", "forecast_ssf_ma20")] == [workflow_target.id]
+
+
+def test_get_forecast_ssf_candidate_for_target_returns_linked_candidate(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, candidate = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+
+    assert saved.stock_code == candidate.stock_code
+    assert db.get_forecast_ssf_candidate_for_target(target.id + 1) is None
+
+
+def test_blackroom_disable_updates_target_and_linked_candidate_atomically(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+
+    assert db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is True
+    assert db.get_monitor_target(target.id).enabled is False
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert saved.state == "blackroom"
+    assert saved.state_reason == "active_blackroom"
+    assert saved.evidence == {
+        "forecast": {"ann_date": "2026-01-15"},
+        "lifecycle": {
+            "as_of_date": date.today().isoformat(),
+            "state": "blackroom",
+            "reason": "active_blackroom",
+            "previous_state": "eligible",
+        },
+    }
+
+
+@pytest.mark.parametrize("workflow, linked", [(None, False), ("other_workflow", True), ("forecast_ssf_ma20", False)])
+def test_blackroom_disable_leaves_manual_or_unlinked_targets_unchanged(tmp_path, workflow, linked):
+    db = _sqlite_storage(tmp_path)
+    target = _create_target(db, workflow=workflow)
+    if linked:
+        db.upsert_forecast_ssf_candidate(
+            stock_code="600001",
+            market="A",
+            report_end_date=date(2025, 12, 31),
+            state="eligible",
+            state_reason="ssf_holder_match",
+            evidence={"before": True},
+            monitor_target_id=target.id,
+        )
+
+    assert db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is False
+    assert db.get_monitor_target(target.id).enabled is True
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    if linked:
+        assert saved.state == "eligible"
+        assert saved.evidence == {"before": True}
+    else:
+        assert saved is None
 
 
 def test_load_latest_top10_floatholders_returns_all_holders_for_latest_announcement(tmp_path):
