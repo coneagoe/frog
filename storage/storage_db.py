@@ -2328,7 +2328,13 @@ class StorageDb:
         """
         return self.list_monitor_targets(frequency=frequency, enabled=True, workflow=workflow)
 
-    def disable_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
+    def delete_forecast_ssf_target_with_candidate_transition(
+        self,
+        target_id: int,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+    ) -> bool:
         from .model.forecast_ssf_candidate import ForecastSSFCandidate
         from .model.stock_monitor_target import StockMonitorTarget
 
@@ -2346,24 +2352,35 @@ class StorageDb:
                 if not candidates:
                     return False
                 candidate = candidates[0]
-                evidence = dict(candidate.evidence or {})
-                lifecycle = {
-                    "as_of_date": date.today().isoformat(),
-                    "state": "blackroom",
-                    "reason": reason,
-                    "previous_state": candidate.state,
-                }
-                evidence["lifecycle"] = lifecycle
-                target.enabled = False
-                candidate.state = "blackroom"
-                candidate.state_reason = reason
+                candidate.state = state
+                candidate.state_reason = state_reason
                 candidate.evidence = evidence
+                candidate.monitor_target_id = None
+                session.flush()
+                self._delete_workflow_target_in_transaction(session, target)
             return True
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+
+    def _delete_workflow_target_in_transaction(self, session: Any, target: Any) -> None:
+        session.delete(target)
+        session.flush()
+
+    def delete_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
+        candidate = self.get_forecast_ssf_candidate_for_target(target_id)
+        if candidate is None:
+            return False
+        evidence = dict(candidate.evidence or {})
+        evidence["lifecycle"] = {
+            "as_of_date": date.today().isoformat(),
+            "state": "blackroom",
+            "reason": reason,
+            "previous_state": candidate.state,
+        }
+        return self.delete_forecast_ssf_target_with_candidate_transition(target_id, "blackroom", reason, evidence)
 
     def find_workflow_monitor_target(self, stock_code: str, market: str, frequency: str, workflow: str) -> Any | None:
         from .model.stock_monitor_target import StockMonitorTarget

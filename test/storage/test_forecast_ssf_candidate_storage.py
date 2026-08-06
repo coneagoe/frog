@@ -1,5 +1,6 @@
 from datetime import date
 from typing import Any
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
@@ -120,7 +121,27 @@ def test_get_forecast_ssf_candidate_for_target_returns_linked_candidate(tmp_path
     assert db.get_forecast_ssf_candidate_for_target(target.id + 1) is None
 
 
-def test_blackroom_disable_updates_target_and_linked_candidate_atomically(tmp_path, monkeypatch):
+def test_delete_transition_removes_owned_target_and_retains_candidate(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    evidence = {"lifecycle": {"state": "ineligible", "reason": "ssf_holder_not_found"}}
+
+    assert db.delete_forecast_ssf_target_with_candidate_transition(
+        target.id, "ineligible", "ssf_holder_not_found", evidence
+    ) is True
+
+    assert db.get_monitor_target(target.id) is None
+    assert db.get_forecast_ssf_candidate_for_target(target.id) is None
+    saved = db.list_forecast_ssf_candidates()[0]
+    assert (saved.state, saved.state_reason, saved.monitor_target_id) == (
+        "ineligible",
+        "ssf_holder_not_found",
+        None,
+    )
+    assert saved.evidence == evidence
+
+
+def test_blackroom_delete_builds_lifecycle_evidence_with_previous_state(tmp_path, monkeypatch):
     db = _sqlite_storage(tmp_path)
     target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
     fixed_date = date(2026, 8, 6)
@@ -132,11 +153,12 @@ def test_blackroom_disable_updates_target_and_linked_candidate_atomically(tmp_pa
 
     monkeypatch.setattr(storage_db_module, "date", FrozenDate)
 
-    assert db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is True
-    assert db.get_monitor_target(target.id).enabled is False
-    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert db.delete_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is True
+    assert db.get_monitor_target(target.id) is None
+    saved = db.list_forecast_ssf_candidates()[0]
     assert saved.state == "blackroom"
     assert saved.state_reason == "active_blackroom"
+    assert saved.monitor_target_id is None
     assert saved.evidence == {
         "forecast": {"ann_date": "2026-01-15"},
         "lifecycle": {
@@ -148,30 +170,25 @@ def test_blackroom_disable_updates_target_and_linked_candidate_atomically(tmp_pa
     }
 
 
-def test_repeated_blackroom_disable_records_previous_blackroom_state(tmp_path, monkeypatch):
+def test_blackroom_delete_rolls_back_candidate_when_target_delete_fails(tmp_path, monkeypatch):
     db = _sqlite_storage(tmp_path)
     target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
-    fixed_date = date(2026, 8, 6)
+    monkeypatch.setattr(
+        db,
+        "_delete_workflow_target_in_transaction",
+        MagicMock(side_effect=RuntimeError("delete failed")),
+    )
 
-    class FrozenDate(date):
-        @classmethod
-        def today(cls):
-            return fixed_date
+    with pytest.raises(RuntimeError, match="delete failed"):
+        db.delete_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
 
-    monkeypatch.setattr(storage_db_module, "date", FrozenDate)
-    db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
-    db.disable_forecast_ssf_target_for_blackroom(target.id, "still_active")
-
-    saved = db.get_forecast_ssf_candidate_for_target(target.id)
-    assert saved.evidence["lifecycle"] == {
-        "as_of_date": fixed_date.isoformat(),
-        "state": "blackroom",
-        "reason": "still_active",
-        "previous_state": "blackroom",
-    }
+    assert db.get_monitor_target(target.id) is not None
+    saved = db.list_forecast_ssf_candidates()[0]
+    assert (saved.state, saved.monitor_target_id) == ("eligible", target.id)
+    assert saved.evidence == {"forecast": {"ann_date": "2026-01-15"}}
 
 
-def test_blackroom_disable_rejects_duplicate_candidates_before_mutation(tmp_path):
+def test_delete_transition_rejects_duplicate_candidates_before_mutation(tmp_path):
     db = _sqlite_storage(tmp_path)
     target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
     db.upsert_forecast_ssf_candidate(
@@ -188,57 +205,16 @@ def test_blackroom_disable_rejects_duplicate_candidates_before_mutation(tmp_path
         db.get_forecast_ssf_candidate_for_target(target.id)
 
     with pytest.raises(ValueError, match=r"multiple candidates.*monitor_target_id"):
-        db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+        db.delete_forecast_ssf_target_with_candidate_transition(
+            target.id, "blackroom", "active_blackroom", {"after": True}
+        )
 
-    assert db.get_monitor_target(target.id).enabled is True
+    assert db.get_monitor_target(target.id) is not None
     assert {candidate.state for candidate in db.list_forecast_ssf_candidates()} == {"eligible"}
 
 
-def test_blackroom_disable_leaves_manual_target_with_erroneous_candidate_link_unchanged(tmp_path):
-    db = _sqlite_storage(tmp_path)
-    target = _create_target(db, workflow=None)
-    db.upsert_forecast_ssf_candidate(
-        stock_code="600001",
-        market="A",
-        report_end_date=date(2025, 12, 31),
-        state="eligible",
-        state_reason="ssf_holder_match",
-        evidence={"before": True},
-        monitor_target_id=target.id,
-    )
-
-    assert db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is False
-    assert db.get_monitor_target(target.id).enabled is True
-    saved = db.get_forecast_ssf_candidate_for_target(target.id)
-    assert saved.state == "eligible"
-    assert saved.state_reason == "ssf_holder_match"
-    assert saved.evidence == {"before": True}
-
-
-def test_blackroom_disable_rolls_back_target_when_candidate_persistence_fails(tmp_path, monkeypatch):
-    db = _sqlite_storage(tmp_path)
-    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
-    original_session = db.Session
-
-    class FailingSession(original_session.class_):
-        def flush(self, *args, **kwargs):
-            raise RuntimeError("candidate persistence failed")
-
-    db.Session = sessionmaker(bind=db.engine, class_=FailingSession)
-    try:
-        with pytest.raises(RuntimeError, match="candidate persistence failed"):
-            db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
-    finally:
-        db.Session = original_session
-
-    assert db.get_monitor_target(target.id).enabled is True
-    saved = db.get_forecast_ssf_candidate_for_target(target.id)
-    assert saved.state == "eligible"
-    assert saved.evidence == {"forecast": {"ann_date": "2026-01-15"}}
-
-
-@pytest.mark.parametrize("workflow, linked", [(None, False), ("other_workflow", True), ("forecast_ssf_ma20", False)])
-def test_blackroom_disable_leaves_manual_or_unlinked_targets_unchanged(tmp_path, workflow, linked):
+@pytest.mark.parametrize("workflow, linked", [(None, True), ("other_workflow", True), ("forecast_ssf_ma20", False)])
+def test_delete_transition_leaves_unowned_or_unlinked_target_unchanged(tmp_path, workflow, linked):
     db = _sqlite_storage(tmp_path)
     target = _create_target(db, workflow=workflow)
     if linked:
@@ -252,8 +228,10 @@ def test_blackroom_disable_leaves_manual_or_unlinked_targets_unchanged(tmp_path,
             monitor_target_id=target.id,
         )
 
-    assert db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is False
-    assert db.get_monitor_target(target.id).enabled is True
+    assert db.delete_forecast_ssf_target_with_candidate_transition(
+        target.id, "blackroom", "active_blackroom", {"after": True}
+    ) is False
+    assert db.get_monitor_target(target.id) is not None
     saved = db.get_forecast_ssf_candidate_for_target(target.id)
     if linked:
         assert saved.state == "eligible"
