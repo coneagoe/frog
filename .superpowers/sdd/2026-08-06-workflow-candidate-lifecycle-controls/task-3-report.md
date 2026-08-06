@@ -7,7 +7,7 @@ Completed. Task 3 adds listing-status preflight, lifecycle evidence, pause-aware
 ## Commits
 
 - `f2fc45c Enforce forecast candidate lifecycle`
-- Report commit: pending at report creation time.
+- `8d4d62e Document lifecycle task verification`
 
 ## Changed Files
 
