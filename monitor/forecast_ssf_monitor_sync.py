@@ -49,7 +49,7 @@ class ForecastSSFMonitorSyncService:
             "deferred": 0,
             "created": 0,
             "updated": 0,
-            "disabled": 0,
+            "deleted": 0,
             "unchanged": 0,
             "errors": 0,
         }
@@ -123,15 +123,13 @@ class ForecastSSFMonitorSyncService:
                     as_of_date,
                 )
                 continue
-            self._persist_with_target(
+            self._delete_target_or_persist(
                 stock_code,
                 candidate.report_end_date,
                 state,
                 reason,
                 evidence,
                 target,
-                False,
-                False,
                 summary,
                 candidate,
                 as_of_date,
@@ -165,15 +163,13 @@ class ForecastSSFMonitorSyncService:
             target = None
             target_id = None
         if not listed:
-            self._persist_with_target(
+            self._delete_target_or_persist(
                 stock_code,
                 report_end_date,
                 "delisted_or_unlisted",
                 "delisted_or_unlisted",
                 evidence,
                 target,
-                False,
-                False,
                 summary,
                 previous_candidate,
                 as_of_date,
@@ -181,15 +177,13 @@ class ForecastSSFMonitorSyncService:
             return
         if banned:
             summary["blackroom_excluded"] += 1
-            self._persist_with_target(
+            self._delete_target_or_persist(
                 stock_code,
                 report_end_date,
                 "blackroom",
                 "active_blackroom",
                 evidence,
                 target,
-                False,
-                False,
                 summary,
                 previous_candidate,
                 as_of_date,
@@ -198,15 +192,13 @@ class ForecastSSFMonitorSyncService:
         if previous_candidate is not None and report_end_date > getattr(
             previous_candidate, "report_end_date", report_end_date
         ):
-            self._persist_with_target(
+            self._delete_target_or_persist(
                 stock_code,
                 report_end_date,
                 "ineligible",
                 "reporting_period_superseded",
                 evidence,
                 target,
-                False,
-                True,
                 summary,
                 previous_candidate,
                 as_of_date,
@@ -309,15 +301,13 @@ class ForecastSSFMonitorSyncService:
         )
         evidence["shareholder"]["matched_holder"] = matched_holder
         if matched_holder is None:
-            self._persist_with_target(
+            self._delete_target_or_persist(
                 stock_code,
                 report_end_date,
                 "ineligible",
                 "ssf_holder_not_found",
                 evidence,
                 target,
-                False,
-                False,
                 summary,
                 previous_candidate,
                 as_of_date,
@@ -373,6 +363,33 @@ class ForecastSSFMonitorSyncService:
         else:
             summary["unchanged"] += 1
 
+    def _delete_target_or_persist(
+        self,
+        stock_code: str,
+        report_end_date: date,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+        target: Any | None,
+        summary: dict[str, int],
+        previous_candidate: Any | None = None,
+        as_of_date: date | None = None,
+    ) -> None:
+        evidence = self._with_lifecycle(previous_candidate, evidence, as_of_date or date.today(), state, state_reason)
+        if state_reason == "reporting_period_superseded" and previous_candidate is not None:
+            evidence["lifecycle"].update(
+                {
+                    "old_report_end_date": self._as_date(previous_candidate.report_end_date).isoformat(),
+                    "new_report_end_date": report_end_date.isoformat(),
+                }
+            )
+        if target is not None and self.storage.delete_forecast_ssf_target_with_candidate_transition(
+            target.id, state, state_reason, evidence
+        ):
+            summary["deleted"] += 1
+            return
+        self._persist(stock_code, report_end_date, state, state_reason, evidence, None)
+
     def _persist_with_target(
         self,
         stock_code: str,
@@ -419,8 +436,6 @@ class ForecastSSFMonitorSyncService:
             target_enabled=target_enabled,
             reset_last_state=reset_last_state,
         )
-        if target.enabled is True and not target_enabled:
-            summary["disabled"] += 1
 
     def _persist(
         self,
