@@ -1,38 +1,33 @@
-# Post-Close Forecast SSF MA20 Orchestration Design
+# Forecast SSF MA20 Candidate Synchronization Design
 
 ## Goal
 
-Run the forecast, social-security-holder, blackroom, and MA20 monitoring workflow at 20:00 on every calendar day, but evaluate only A-share trading days. The workflow must verify final daily-bar availability before mutating candidates or targets, make its outcome operationally visible, and prevent a workflow security added to the blackroom after synchronization from sending a technical alert.
+Synchronize forecast, social-security-holder, and blackroom-qualified A-share candidates into the existing stock monitor before its daily scan. The synchronizer runs at 15:05, while the existing 15:30 stock monitor remains the sole MA20 evaluator and alert sender.
 
 ## Scope
 
-- Add a separate additive Airflow DAG named `forecast_ssf_ma20_post_close` scheduled at `0 20 * * *` with `max_active_runs=1`.
-- Preserve `monitor_stock_daily` without changing its schedule, dependencies, retries, task boundaries, or SLA.
-- Verify A-share daily-bar completeness for the logical trading date before candidate synchronization.
-- Synchronize `forecast_ssf_ma20` candidates and then evaluate only that workflow's daily monitor targets.
-- Emit a structured operational summary that separates a valid empty result from a failed run.
-- Recheck blackroom status immediately before a workflow alert email is sent, disable a newly banned target, and suppress its email.
+- Add a separate Airflow DAG named `forecast_ssf_ma20_sync` scheduled at `5 15 * * *` with `max_active_runs=1`.
+- The new DAG only synchronizes candidates; it does not validate daily-bar completeness, calculate MA20, evaluate monitor targets, or send email.
+- Preserve the existing `monitor_stock_daily` 15:30 schedule and daily technical-condition scan. Remove only its forecast SSF synchronization task, so this workflow has one target-mutation path.
+- Emit a structured synchronization summary that separates a valid empty result from a failed run.
+- Recheck blackroom status immediately before a workflow alert email is sent, delete a newly banned target, and suppress its email.
 - Include forecast and social-security-holder evidence in workflow alert emails.
 
-## DAG Design
+## Candidate Synchronization
 
-The DAG runs at 20:00 (`0 20 * * *`) with a single active run. On non-trading days, the daily-bar verification task skips the run before any synchronization or monitoring action.
+The DAG runs at 15:05 (`5 15 * * *`) with a single active run. On non-trading days it skips before candidate mutation.
 
-On a trading day, the DAG uses three ordered Python tasks:
+On a trading day, its single `sync_forecast_ssf_targets` task invokes `ForecastSSFMonitorSyncService.sync(as_of_date)`. Systemic source and validation failures raise before candidate or target mutation. A successful empty forecast universe is a successful zero-count result.
 
-1. `verify_daily_bar_completeness` verifies that the finalized front-adjusted A-share daily bars required by the daily monitor are available for the logical trading date. A missing, stale, or failed verification raises an error and blocks all later tasks.
-2. `sync_forecast_ssf_targets` invokes `ForecastSSFMonitorSyncService.sync(as_of_date)`. Its existing systemic validation and source failures raise before candidate or workflow-target mutation. A successful empty forecast universe remains a successful synchronization and is returned as a zero-count summary.
-3. `run_forecast_ssf_daily_monitor` invokes the monitor runner with `frequency="daily"` and workflow `forecast_ssf_ma20`. It combines its trigger, skip, and error counts with the synchronization summary for a structured operational result in task logs and the return value.
-
-The DAG sequence is strictly completeness verification, synchronization, then monitor evaluation. Existing monitor targets without the workflow owner are excluded from the final task.
+Candidates that qualify create or update one owned daily monitor target with `workflow="forecast_ssf_ma20"`. A candidate that becomes ineligible, blackroom-blocked, delisted, superseded, or leaves the qualified universe has its owned daily monitor target physically deleted. Its `forecast_ssf_candidate` record remains, with its state, reason, and evidence updated for audit. Deferred shareholder evidence still preserves any existing target, because it does not safely establish ineligibility.
 
 ## Runner Integration
 
-`run_monitor` gains an optional workflow filter. With no filter, it keeps current behavior for all existing callers. With `forecast_ssf_ma20`, it evaluates only daily targets whose durable workflow owner matches that value.
+The existing `monitor_stock_daily` DAG runs at 15:30 after the 15:05 synchronization. It remains the only daily MA20 evaluator and alert sender for both manual and workflow-owned targets. `run_monitor(frequency="daily")` retains the existing all-enabled-target behavior.
 
-Before sending an edge-trigger email for a workflow-owned target, the runner asks `BlackroomService` for its current A-share status:
+Before sending an edge-trigger email for every target whose durable owner is `forecast_ssf_ma20`, including an ordinary unfiltered daily-monitor run, the runner asks `BlackroomService` for its current A-share status:
 
-- A successful banned result disables the workflow target and records candidate lifecycle state `blackroom` with reason `active_blackroom`; no email is sent and the target is not marked triggered.
+- A successful banned result deletes the workflow target and records candidate lifecycle state `blackroom` with reason `active_blackroom`; no email is sent and the target is not marked triggered.
 - A failed blackroom lookup is a monitor error; no email is sent and the target is not marked triggered.
 - A non-banned result permits the normal email path.
 
@@ -42,24 +37,18 @@ The runner writes a triggered state only after `send_email` succeeds. An email e
 
 ## Operational Summary And Errors
 
-The final task returns a JSON-serializable summary with these sections:
-
-- `daily_bar`: logical date and completeness result.
-- `synchronization`: the existing source, screening, blackroom, SSF-match, deferred, creation/update/disable/no-op, and error counts.
-- `monitor`: evaluated-target, triggered, skipped, and error counts with representative error details.
-
-The DAG fails for daily-bar verification failures, synchronization failures, or monitor errors. It succeeds for a complete daily bar and a valid empty candidate result, clearly reporting zero synchronization and monitor counts. Per-stock shareholder deferrals remain successful synchronization outcomes and are visible in the synchronization section.
+The synchronization task returns a JSON-serializable source, screening, blackroom, SSF-match, deferred, target creation/update/deletion/no-op, and error summary. A successful empty result and per-stock shareholder deferrals remain successful outcomes. Systemic source or validation failures fail the DAG before candidate or target mutation.
 
 ## Testing
 
-- DAG tests mock Airflow, daily-bar verification, synchronization, and monitor execution. They verify the `0 20 * * *` schedule, task order, trading-day skip, completeness failure short-circuiting, synchronization failure short-circuiting, and structured valid-empty summary.
-- Runner tests mock storage, price data, blackroom lookup, and email delivery. They verify workflow filtering, blackroom suppression and disablement, blackroom lookup failures, email evidence enrichment, and no state update after email failure.
-- Existing unfiltered monitor-runner behavior remains regression-covered.
+- DAG tests mock Airflow and synchronization. They verify the `5 15 * * *` schedule, trading-day skip, synchronization failure, and valid-empty summary.
+- Runner tests mock storage, price data, blackroom lookup, and email delivery. They verify workflow filtering, blackroom suppression and target deletion, blackroom lookup failures, email evidence enrichment, and no state update after email failure.
+- Runner tests verify that workflow-owned targets receive the blackroom recheck and evidence enrichment in an ordinary unfiltered `run_monitor(frequency="daily")` call, while manual targets retain existing behavior.
 - All provider, database, Airflow, and email integrations are mocked in unit and DAG tests; no live external calls are made.
 
 ## Out Of Scope
 
-- Any change to the existing `monitor_stock_daily` DAG's schedule, dependencies, retries, task boundaries, or SLA.
+- Changing the existing `monitor_stock_daily` schedule, retries, SLA, or its monitoring and countdown paths.
 - Changes to the forecast-SSF candidate eligibility, lifecycle, pause/resume, or monitor-target ownership rules implemented by prior issues.
 - Automatic trading, portfolio actions, or paper-trading integration.
-- Alerts for manually owned monitor targets beyond their existing behavior.
+- Physical deletion of `forecast_ssf_candidate` audit records.
