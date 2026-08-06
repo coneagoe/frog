@@ -89,8 +89,6 @@ def run_monitor(frequency: str = "daily", workflow: str | None = None) -> Monito
     targets = storage.load_monitor_targets(frequency=frequency, workflow=workflow)
     if workflow is not None:
         targets = [target for target in targets if getattr(target, "workflow", None) == workflow]
-    blackroom = BlackroomService(storage=storage) if workflow is not None else None
-
     summary = MonitorSummary(total=len(targets))
 
     for target in targets:
@@ -119,17 +117,21 @@ def run_monitor(frequency: str = "daily", workflow: str | None = None) -> Monito
                 continue
 
             condition_met = result == ConditionResult.TRIGGERED
+            is_forecast_ssf_workflow = target.workflow == "forecast_ssf_ma20"
 
             # Edge trigger: only alert on False→True transition
             if condition_met and not target.last_state:
                 now = datetime.now(timezone.utc)
                 evidence = None
-                if blackroom is not None:
+                if is_forecast_ssf_workflow:
+                    blackroom = BlackroomService(storage=storage)
                     ban_result = blackroom.is_banned(target.stock_code, target.market)
                     if not ban_result.get("success"):
                         raise RuntimeError(ban_result.get("message") or "blackroom lookup failed")
                     if ban_result.get("data", {}).get("banned"):
-                        storage.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+                        deleted = storage.delete_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+                        if not deleted:
+                            raise RuntimeError("failed to delete forecast SSF target for active blackroom")
                         summary.skipped += 1
                         continue
                     candidate = storage.get_forecast_ssf_candidate_for_target(target.id)
@@ -138,7 +140,9 @@ def run_monitor(frequency: str = "daily", workflow: str | None = None) -> Monito
                     if not ban_result.get("success"):
                         raise RuntimeError(ban_result.get("message") or "blackroom lookup failed")
                     if ban_result.get("data", {}).get("banned"):
-                        storage.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+                        deleted = storage.delete_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+                        if not deleted:
+                            raise RuntimeError("failed to delete forecast SSF target for active blackroom")
                         summary.skipped += 1
                         continue
                 _send_alert(target, current_price, change_pct, evidence=evidence)

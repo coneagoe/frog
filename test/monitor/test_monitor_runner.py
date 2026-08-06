@@ -99,6 +99,45 @@ def test_unfiltered_run_does_not_create_blackroom_or_load_candidate_evidence():
     storage.get_forecast_ssf_candidate_for_target.assert_not_called()
 
 
+def test_unfiltered_daily_run_rechecks_workflow_target_blackroom_before_email():
+    target = _make_target(last_state=False)
+    target.workflow = "forecast_ssf_ma20"
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+    blackroom = MagicMock(is_banned=lambda *_: {"success": True, "data": {"banned": True}})
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(frequency="daily")
+
+    email.assert_not_called()
+    storage.delete_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
+    assert summary.skipped == 1
+
+
+def test_unfiltered_daily_run_leaves_manual_target_without_blackroom_lookup():
+    target = _make_target(last_state=False)
+    target.workflow = None
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.BlackroomService") as blackroom,
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email"),
+    ):
+        run_monitor(frequency="daily")
+
+    blackroom.assert_not_called()
+
+
 def test_run_monitor_no_repeat_alert_when_already_triggered():
     """When condition is True but last_state was already True, no email sent (auto reset)."""
     target = _make_target(last_state=True, reset_mode="auto")
@@ -361,7 +400,7 @@ def test_banned_workflow_target_is_disabled_without_email():
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
     email.assert_not_called()
-    storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
+    storage.delete_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
 
@@ -437,9 +476,33 @@ def test_workflow_final_blackroom_recheck_suppresses_email_after_evidence_lookup
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
     email.assert_not_called()
-    storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
+    storage.delete_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
+
+
+def test_workflow_blackroom_deletion_failure_counts_as_error():
+    target = _make_target(last_state=False)
+    target.workflow = "forecast_ssf_ma20"
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+    storage.delete_forecast_ssf_target_for_blackroom.return_value = False
+    blackroom = MagicMock()
+    blackroom.is_banned.return_value = {"success": True, "data": {"banned": True}}
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(workflow="forecast_ssf_ma20")
+
+    email.assert_not_called()
+    assert summary.skipped == 0
+    assert summary.errors == 1
+    assert "failed to delete forecast SSF target" in summary.error_details[0]
 
 
 def test_workflow_email_failure_does_not_update_triggered_state():
