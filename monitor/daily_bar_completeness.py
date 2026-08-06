@@ -26,7 +26,7 @@ def verify_daily_bar_completeness(as_of_date: date, redis_client: Any = None) ->
             "status": "skipped",
         }
 
-    client = redis_client or _get_redis_client()
+    client = _get_redis_client() if redis_client is None else redis_client
     raw_result = client.get(REDIS_KEY_DOWNLOAD_STOCK_HISTORY_DAILY)
     evidence: Any = raw_result
     try:
