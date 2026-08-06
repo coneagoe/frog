@@ -1565,9 +1565,12 @@ class StorageDb:
         assert self.Session is not None
         session = self.Session()
         try:
-            return session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target_id).first()
+            matches = session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target_id).all()
         finally:
             session.close()
+        if len(matches) > 1:
+            raise ValueError(f"multiple candidates found for monitor_target_id={target_id}")
+        return matches[0] if matches else None
 
     def load_a_stock_listing_status(self, stock_codes: list[str]) -> pd.DataFrame:
         columns = [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
@@ -2337,17 +2340,19 @@ class StorageDb:
                 target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
                 if target is None or target.workflow != "forecast_ssf_ma20":
                     return False
-                candidate = session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target_id).first()
-                if candidate is None:
+                candidates = session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target_id).all()
+                if len(candidates) > 1:
+                    raise ValueError(f"multiple candidates found for monitor_target_id={target_id}")
+                if not candidates:
                     return False
+                candidate = candidates[0]
                 evidence = dict(candidate.evidence or {})
                 lifecycle = {
                     "as_of_date": date.today().isoformat(),
                     "state": "blackroom",
                     "reason": reason,
+                    "previous_state": candidate.state,
                 }
-                if candidate.state != "blackroom":
-                    lifecycle["previous_state"] = candidate.state
                 evidence["lifecycle"] = lifecycle
                 target.enabled = False
                 candidate.state = "blackroom"

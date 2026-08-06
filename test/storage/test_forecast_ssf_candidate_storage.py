@@ -5,8 +5,10 @@ import pandas as pd
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 from common.const import COL_ANN_DATE, COL_DELISTING_DATE, COL_FLOAT_HOLDER_NAME, COL_LIST_STATUS, COL_STOCK_ID
+from storage import storage_db as storage_db_module
 from storage.model import AStockBasic, Base, ForecastSSFCandidate
 from storage.storage_db import StorageDb
 
@@ -14,8 +16,6 @@ from storage.storage_db import StorageDb
 def _sqlite_storage(tmp_path):
     db = StorageDb.__new__(StorageDb)
     db.engine = create_engine(f"sqlite:///{tmp_path}/forecast_ssf_candidates.db")
-    from sqlalchemy.orm import sessionmaker
-
     db.Session = sessionmaker(bind=db.engine)
     Base.metadata.create_all(db.engine)
     return db
@@ -24,8 +24,6 @@ def _sqlite_storage(tmp_path):
 def _legacy_monitor_target_storage(tmp_path):
     db = StorageDb.__new__(StorageDb)
     db.engine = create_engine(f"sqlite:///{tmp_path}/legacy_monitor_targets.db")
-    from sqlalchemy.orm import sessionmaker
-
     db.Session = sessionmaker(bind=db.engine)
     with db.engine.begin() as conn:
         conn.execute(
@@ -122,9 +120,17 @@ def test_get_forecast_ssf_candidate_for_target_returns_linked_candidate(tmp_path
     assert db.get_forecast_ssf_candidate_for_target(target.id + 1) is None
 
 
-def test_blackroom_disable_updates_target_and_linked_candidate_atomically(tmp_path):
+def test_blackroom_disable_updates_target_and_linked_candidate_atomically(tmp_path, monkeypatch):
     db = _sqlite_storage(tmp_path)
     target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    fixed_date = date(2026, 8, 6)
+
+    class FrozenDate(date):
+        @classmethod
+        def today(cls):
+            return fixed_date
+
+    monkeypatch.setattr(storage_db_module, "date", FrozenDate)
 
     assert db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is True
     assert db.get_monitor_target(target.id).enabled is False
@@ -134,12 +140,101 @@ def test_blackroom_disable_updates_target_and_linked_candidate_atomically(tmp_pa
     assert saved.evidence == {
         "forecast": {"ann_date": "2026-01-15"},
         "lifecycle": {
-            "as_of_date": date.today().isoformat(),
+            "as_of_date": fixed_date.isoformat(),
             "state": "blackroom",
             "reason": "active_blackroom",
             "previous_state": "eligible",
         },
     }
+
+
+def test_repeated_blackroom_disable_records_previous_blackroom_state(tmp_path, monkeypatch):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    fixed_date = date(2026, 8, 6)
+
+    class FrozenDate(date):
+        @classmethod
+        def today(cls):
+            return fixed_date
+
+    monkeypatch.setattr(storage_db_module, "date", FrozenDate)
+    db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+    db.disable_forecast_ssf_target_for_blackroom(target.id, "still_active")
+
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert saved.evidence["lifecycle"] == {
+        "as_of_date": fixed_date.isoformat(),
+        "state": "blackroom",
+        "reason": "still_active",
+        "previous_state": "blackroom",
+    }
+
+
+def test_blackroom_disable_rejects_duplicate_candidates_before_mutation(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    db.upsert_forecast_ssf_candidate(
+        stock_code="600002",
+        market="A",
+        report_end_date=date(2025, 12, 31),
+        state="eligible",
+        state_reason="ssf_holder_match",
+        evidence={"before": True},
+        monitor_target_id=target.id,
+    )
+
+    with pytest.raises(ValueError, match=r"multiple candidates.*monitor_target_id"):
+        db.get_forecast_ssf_candidate_for_target(target.id)
+
+    with pytest.raises(ValueError, match=r"multiple candidates.*monitor_target_id"):
+        db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+
+    assert db.get_monitor_target(target.id).enabled is True
+    assert {candidate.state for candidate in db.list_forecast_ssf_candidates()} == {"eligible"}
+
+
+def test_blackroom_disable_leaves_manual_target_with_erroneous_candidate_link_unchanged(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = _create_target(db, workflow=None)
+    db.upsert_forecast_ssf_candidate(
+        stock_code="600001",
+        market="A",
+        report_end_date=date(2025, 12, 31),
+        state="eligible",
+        state_reason="ssf_holder_match",
+        evidence={"before": True},
+        monitor_target_id=target.id,
+    )
+
+    assert db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is False
+    assert db.get_monitor_target(target.id).enabled is True
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert saved.state == "eligible"
+    assert saved.state_reason == "ssf_holder_match"
+    assert saved.evidence == {"before": True}
+
+
+def test_blackroom_disable_rolls_back_target_when_candidate_persistence_fails(tmp_path, monkeypatch):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    original_session = db.Session
+
+    class FailingSession(original_session.class_):
+        def flush(self, *args, **kwargs):
+            raise RuntimeError("candidate persistence failed")
+
+    db.Session = sessionmaker(bind=db.engine, class_=FailingSession)
+    try:
+        with pytest.raises(RuntimeError, match="candidate persistence failed"):
+            db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+    finally:
+        db.Session = original_session
+
+    assert db.get_monitor_target(target.id).enabled is True
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert saved.state == "eligible"
+    assert saved.evidence == {"forecast": {"ann_date": "2026-01-15"}}
 
 
 @pytest.mark.parametrize("workflow, linked", [(None, False), ("other_workflow", True), ("forecast_ssf_ma20", False)])
