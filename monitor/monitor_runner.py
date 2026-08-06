@@ -8,6 +8,7 @@ from typing import Optional
 import pandas as pd
 
 from common.const import COL_CLOSE
+from monitor.blackroom_service import BlackroomService
 from monitor.condition import ConditionResult, evaluate_condition, is_missing_number
 from monitor.monitor_target_service import format_monitor_target_label, resolve_stock_name
 from monitor.price_fetcher import fetch_current_price, fetch_history_df
@@ -70,7 +71,7 @@ def _resolve_current_price(
     return float(latest_close)
 
 
-def run_monitor(frequency: str = "daily") -> MonitorSummary:
+def run_monitor(frequency: str = "daily", workflow: str | None = None) -> MonitorSummary:
     """
     Load all enabled monitoring targets for the given frequency,
     evaluate their conditions, and send email alerts on edge triggers.
@@ -83,7 +84,10 @@ def run_monitor(frequency: str = "daily") -> MonitorSummary:
     """
     storage = get_storage()
     storage.ensure_monitor_targets_table()
-    targets = storage.load_monitor_targets(frequency=frequency)
+    targets = storage.load_monitor_targets(frequency=frequency, workflow=workflow)
+    if workflow is not None:
+        targets = [target for target in targets if getattr(target, "workflow", None) == workflow]
+    blackroom = BlackroomService(storage=storage) if workflow is not None else None
 
     summary = MonitorSummary(total=len(targets))
 
@@ -117,7 +121,18 @@ def run_monitor(frequency: str = "daily") -> MonitorSummary:
             # Edge trigger: only alert on False→True transition
             if condition_met and not target.last_state:
                 now = datetime.now(timezone.utc)
-                _send_alert(target, current_price, change_pct)
+                evidence = None
+                if blackroom is not None:
+                    ban_result = blackroom.is_banned(target.stock_code, target.market)
+                    if not ban_result.get("success"):
+                        raise RuntimeError(ban_result.get("message") or "blackroom lookup failed")
+                    if ban_result.get("data", {}).get("banned"):
+                        storage.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+                        summary.skipped += 1
+                        continue
+                    candidate = storage.get_forecast_ssf_candidate_for_target(target.id)
+                    evidence = getattr(candidate, "evidence", None) if candidate is not None else None
+                _send_alert(target, current_price, change_pct, evidence=evidence)
                 storage.update_monitor_target_state(target.id, True, triggered_at=now)
                 summary.triggered += 1
                 logger.info(f"[monitor] 告警触发: {target.stock_code} note={target.note!r} price={current_price}")
@@ -134,7 +149,7 @@ def run_monitor(frequency: str = "daily") -> MonitorSummary:
     return summary
 
 
-def _send_alert(target, current_price: Optional[float], change_pct: Optional[float]):
+def _send_alert(target, current_price: Optional[float], change_pct: Optional[float], evidence=None):
     """Compose and send an email alert for a triggered condition."""
     label = format_monitor_target_label(
         target.stock_code,
@@ -152,5 +167,10 @@ def _send_alert(target, current_price: Optional[float], change_pct: Optional[flo
     if change_pct is not None:
         lines.append(f"当日涨跌幅: {change_pct:.2f}%")
     lines.append(f"触发条件: {target.condition}")
+    if evidence:
+        for section in ("forecast", "shareholder"):
+            for key, value in evidence.get(section, {}).items():
+                if value is not None:
+                    lines.append(f"{section}.{key}: {value}")
 
     send_email(subject, "\n".join(lines))

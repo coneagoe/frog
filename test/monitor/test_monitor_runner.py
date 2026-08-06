@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -33,7 +34,24 @@ def _make_target(
     t.reset_mode = reset_mode
     t.last_state = last_state
     t.stock_name = stock_name
+    t.workflow = None
     return t
+
+
+def _candidate_evidence():
+    return SimpleNamespace(
+        evidence={
+            "forecast": {
+                "report_end_date": "2025-12-31",
+                "p_change_min": 50.0,
+                "ann_date": "2026-01-15",
+            },
+            "shareholder": {
+                "matched_holder": "全国社保基金一一八组合",
+                "ann_date": "2026-01-10",
+            },
+        }
+    )
 
 
 def test_run_monitor_triggers_alert_and_updates_state():
@@ -266,3 +284,113 @@ def test_run_monitor_alert_subject_graceful_fallback_on_resolver_failure():
     subject, _body = mock_email.call_args[0][:2]
     # No stock name, condition fallback
     assert subject == "[股票监控告警] 600519 价格低于1500.0"
+
+
+def test_run_monitor_filters_by_workflow():
+    owned = _make_target(id=1)
+    owned.workflow = "forecast_ssf_ma20"
+    manual = _make_target(id=2)
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [owned, manual]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email"),
+    ):
+        summary = run_monitor(workflow="forecast_ssf_ma20")
+
+    assert summary.total == 1
+    assert storage.load_monitor_targets.call_args.kwargs == {"frequency": "daily", "workflow": "forecast_ssf_ma20"}
+
+
+def test_banned_workflow_target_is_disabled_without_email():
+    target = _make_target(last_state=False)
+    target.workflow = "forecast_ssf_ma20"
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+    blackroom = MagicMock()
+    blackroom.is_banned.return_value = {"success": True, "data": {"banned": True}}
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(workflow="forecast_ssf_ma20")
+
+    email.assert_not_called()
+    storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
+    storage.update_monitor_target_state.assert_not_called()
+    assert summary.skipped == 1
+
+
+def test_workflow_blackroom_lookup_failure_counts_as_error():
+    target = _make_target(last_state=False)
+    target.workflow = "forecast_ssf_ma20"
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+    blackroom = MagicMock()
+    blackroom.is_banned.return_value = {"success": False, "message": "blackroom unavailable", "data": None}
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(workflow="forecast_ssf_ma20")
+
+    email.assert_not_called()
+    storage.update_monitor_target_state.assert_not_called()
+    assert summary.errors == 1
+    assert summary.error_details == ["600519: blackroom unavailable"]
+
+
+def test_workflow_alert_includes_candidate_evidence():
+    target = _make_target(last_state=False)
+    target.workflow = "forecast_ssf_ma20"
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+    storage.get_forecast_ssf_candidate_for_target.return_value = _candidate_evidence()
+    blackroom = MagicMock()
+    blackroom.is_banned.return_value = {"success": True, "data": {"banned": False}}
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        run_monitor(workflow="forecast_ssf_ma20")
+
+    body = email.call_args.args[1]
+    for value in ("2025-12-31", "50.0", "2026-01-15", "全国社保基金一一八组合", "2026-01-10"):
+        assert value in body
+
+
+def test_workflow_email_failure_does_not_update_triggered_state():
+    target = _make_target(last_state=False)
+    target.workflow = "forecast_ssf_ma20"
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+    storage.get_forecast_ssf_candidate_for_target.return_value = _candidate_evidence()
+    blackroom = MagicMock()
+    blackroom.is_banned.return_value = {"success": True, "data": {"banned": False}}
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email", side_effect=RuntimeError("email unavailable")),
+    ):
+        summary = run_monitor(workflow="forecast_ssf_ma20")
+
+    storage.update_monitor_target_state.assert_not_called()
+    assert summary.errors == 1
