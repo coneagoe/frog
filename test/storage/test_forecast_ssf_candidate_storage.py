@@ -163,6 +163,38 @@ def test_legacy_monitor_target_migration_backfills_empty_workflow_before_orm_acc
     assert created.stock_code == "600003"
 
 
+@pytest.mark.parametrize(
+    "operation",
+    ["list", "get", "create", "update", "delete", "state"],
+)
+def test_generic_monitor_target_operations_migrate_legacy_schema_before_orm_access(tmp_path, operation):
+    db = _legacy_monitor_target_storage(tmp_path)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO stock_monitor_targets (stock_code, market, condition, note)
+                VALUES ('600001', 'A', :condition, 'legacy manual target')
+                """
+            ),
+            {"condition": '{"price": {"above": 10}}'},
+        )
+
+    if operation == "list":
+        assert [target.id for target in db.list_monitor_targets()] == [1]
+    elif operation == "get":
+        assert db.get_monitor_target(1).stock_code == "600001"
+    elif operation == "create":
+        assert db.create_monitor_target("600002", "A", {"price": {"below": 8}}).id == 2
+    elif operation == "update":
+        assert db.update_monitor_target(1, note="updated legacy target").note == "updated legacy target"
+    elif operation == "delete":
+        assert db.delete_monitor_target(1) is True
+    else:
+        db.update_monitor_target_state(1, True)
+        assert db.get_monitor_target(1).last_state is True
+
+
 def test_legacy_monitor_target_migration_reports_duplicate_workflow_owners_before_index_creation(tmp_path):
     db = _legacy_monitor_target_storage(tmp_path)
     with db.engine.begin() as conn:
@@ -298,6 +330,18 @@ def test_manual_monitor_target_accepts_unmarked_condition_replacement(tmp_path):
 
     assert updated.condition == {"price": {"above": 11}}
     assert updated.workflow is None
+
+
+def test_manual_monitor_target_rejects_condition_workflow_marker(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_monitor_target("600001", "A", {"price": {"above": 10}}, note="manual")
+
+    with pytest.raises(ValueError, match="manual.*workflow marker"):
+        db.update_monitor_target(target.id, condition={"workflow": "forecast_ssf", "price": {"above": 11}})
+
+    persisted = db.get_monitor_target(target.id)
+    assert persisted.condition == {"price": {"above": 10}}
+    assert persisted.workflow is None
 
 
 def test_workflow_monitor_target_scope_does_not_mutate_intraday_target(tmp_path):

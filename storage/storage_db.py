@@ -2157,6 +2157,7 @@ class StorageDb:
         Returns:
             StockMonitorTarget 对象列表。
         """
+        self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
         assert self.Session is not None
@@ -2173,6 +2174,7 @@ class StorageDb:
 
     def get_monitor_target(self, target_id: int) -> Optional[Any]:
         """按 ID 查询单个监控目标。"""
+        self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
         assert self.Session is not None
@@ -2194,10 +2196,9 @@ class StorageDb:
         last_state: bool = False,
     ) -> Any:
         """创建监控目标。"""
+        self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
-        if condition.get("workflow") is not None:
-            self._ensure_workflow_monitor_target_identity()
         assert self.Session is not None
         session = self.Session()
         try:
@@ -2224,6 +2225,7 @@ class StorageDb:
 
     def update_monitor_target(self, target_id: int, **updates: Any) -> Optional[Any]:
         """更新监控目标。目标不存在时返回 None。"""
+        self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
         allowed_fields = {
@@ -2253,6 +2255,8 @@ class StorageDb:
                 and updates["condition"].get("workflow") != target.workflow
             ):
                 raise ValueError(f"condition workflow marker must match {target.workflow!r}")
+            if "condition" in updates and target.workflow is None and updates["condition"].get("workflow") is not None:
+                raise ValueError("manual monitor target condition cannot include a workflow marker")
             for key, value in updates.items():
                 setattr(target, key, value)
             session.commit()
@@ -2266,6 +2270,7 @@ class StorageDb:
 
     def delete_monitor_target(self, target_id: int) -> bool:
         """删除监控目标。删除成功返回 True，目标不存在返回 False。"""
+        self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
         assert self.Session is not None
@@ -2551,6 +2556,7 @@ class StorageDb:
             last_state: 本次条件是否成立
             triggered_at: 触发时间（条件刚触发时传入，否则为 None）
         """
+        self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
         assert self.Session is not None
