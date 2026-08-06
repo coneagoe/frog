@@ -78,6 +78,8 @@ def run_monitor(frequency: str = "daily", workflow: str | None = None) -> Monito
 
     Args:
         frequency: 'daily' or 'intraday'
+        workflow: optional durable workflow owner used to scope targets and
+            apply workflow-specific alert guards and evidence enrichment.
 
     Returns:
         MonitorSummary with counts of triggered/skipped/error targets.
@@ -132,6 +134,13 @@ def run_monitor(frequency: str = "daily", workflow: str | None = None) -> Monito
                         continue
                     candidate = storage.get_forecast_ssf_candidate_for_target(target.id)
                     evidence = getattr(candidate, "evidence", None) if candidate is not None else None
+                    ban_result = blackroom.is_banned(target.stock_code, target.market)
+                    if not ban_result.get("success"):
+                        raise RuntimeError(ban_result.get("message") or "blackroom lookup failed")
+                    if ban_result.get("data", {}).get("banned"):
+                        storage.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+                        summary.skipped += 1
+                        continue
                 _send_alert(target, current_price, change_pct, evidence=evidence)
                 storage.update_monitor_target_state(target.id, True, triggered_at=now)
                 summary.triggered += 1
