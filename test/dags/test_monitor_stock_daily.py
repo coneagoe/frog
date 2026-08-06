@@ -1,7 +1,7 @@
 import importlib
 import sys
 import types
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
@@ -101,36 +101,6 @@ def test_sync_shareholder_selling_blackroom_failure_raises(monkeypatch, monitor_
         monitor_stock_daily_module.sync_shareholder_selling_blackroom(logical_date=datetime(2026, 6, 3, 15, 30))
 
 
-def test_sync_forecast_ssf_monitor_targets_uses_logical_date(monkeypatch, monitor_stock_daily_module):
-    service = MagicMock()
-    service.return_value.sync.return_value = {
-        "success": True,
-        "code": "OK",
-        "message": "sync completed",
-        "data": {"forecast_candidates": 2, "ssf_matched": 1, "created": 1},
-    }
-    monkeypatch.setattr("monitor.forecast_ssf_monitor_sync.ForecastSSFMonitorSyncService", service)
-
-    result = monitor_stock_daily_module.sync_forecast_ssf_monitor_targets(logical_date=datetime(2026, 1, 20, 15, 30))
-
-    service.return_value.sync.assert_called_once_with(as_of_date=date(2026, 1, 20))
-    assert "业绩预增社保基金监控目标同步完成" in result
-
-
-def test_sync_forecast_ssf_monitor_targets_failure_raises(monkeypatch, monitor_stock_daily_module):
-    service = MagicMock()
-    service.return_value.sync.return_value = {
-        "success": False,
-        "code": "STORAGE_ERROR",
-        "message": "boom",
-        "data": None,
-    }
-    monkeypatch.setattr("monitor.forecast_ssf_monitor_sync.ForecastSSFMonitorSyncService", service)
-
-    with pytest.raises(Exception, match="STORAGE_ERROR: boom"):
-        monitor_stock_daily_module.sync_forecast_ssf_monitor_targets(logical_date=datetime(2026, 1, 20, 15, 30))
-
-
 def test_countdown_blackroom_records_calls_service(monkeypatch, monitor_stock_daily_module):
     service = MagicMock()
     service.return_value.run.return_value = {
@@ -170,11 +140,11 @@ def test_shareholder_sync_is_not_downstream_of_daily_monitor():
     assert "daily_monitor_task >> countdown_blackroom_task" in source
 
 
-def test_forecast_ssf_sync_precedes_daily_monitor_without_joining_countdown(monitor_stock_daily_module):
+def test_daily_monitor_has_no_forecast_sync_upstream(monitor_stock_daily_module):
     tasks = {operator.task_id: operator for operator in FakePythonOperator.instances}
 
-    assert tasks["run_daily_monitor"].upstream == [tasks["sync_forecast_ssf_targets"]]
-    assert tasks["sync_forecast_ssf_targets"].downstream == [tasks["run_daily_monitor"]]
+    assert "sync_forecast_ssf_targets" not in tasks
+    assert tasks["run_daily_monitor"].upstream == []
     assert tasks["countdown_blackroom_records"].upstream == [
         tasks["sync_shareholder_selling_blackroom"],
         tasks["run_daily_monitor"],

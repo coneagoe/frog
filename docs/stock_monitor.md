@@ -29,11 +29,11 @@ Tushare `forecast` 数据可经 `DownloadManager.download_forecast(ann_date=...)
 
 工作流只管理标记为 `workflow: "forecast_ssf_ma20"` 的日频目标。`stock-monitor target pause --target-id ...` 会立即禁用该工作流目标，但工作流仍会继续收集审计证据；`stock-monitor target resume --target-id ...` 只解除暂停，目标须在随后一次成功同步中重新满足条件后才会自动启用。缺失或过期的股东证据会产生 `deferred`，不会禁用仍处于活动状态的目标。活跃黑屋、离开合格范围、报告期被更新报告取代，或退市/非上市分类，只会禁用对应的日频工作流目标；手工创建的目标和盘中目标保持不变。
 
-### 业绩预增社保基金收盘后 DAG
+### 业绩预增社保基金同步 DAG
 
-`forecast_ssf_ma20_post_close` 每天 20:00（`0 20 * * *`）运行，且同一时间只允许一个活跃实例。任务按以下顺序执行：验证日线数据完整性、同步 `forecast_ssf_ma20` 目标、运行日频监控。非交易日的运行会在日线完整性和交易日验证阶段后跳过整个工作流；同步结果为空但成功时仍会继续执行监控。
+`forecast_ssf_ma20_sync` 每个日历日 15:05（`5 15 * * *`）运行，且同一时间只允许一个活跃实例。它只同步由业绩预告和 SSF 证据生成的 `forecast_ssf_ma20` 候选目标，不负责日线完整性检查或监控执行。非交易日跳过同步；`monitor_stock_daily` 仍在 15:30 扫描这些目标。
 
-监控任务返回包含 `daily_bar`、`synchronization` 和 `monitor` 三个字段的结构化摘要。日线完整性或同步服务失败，以及监控摘要中的 `errors > 0`，都会使 DAG 任务失败。
+同步服务对已确认不符合条件的工作流目标执行删除，但保留候选证据；暂时无法确认的证据会标记为 `deferred` 并保留目标。
 
 ### 黑屋管理（全局禁买）
 
