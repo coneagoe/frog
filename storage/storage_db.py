@@ -2344,7 +2344,7 @@ class StorageDb:
         try:
             with session.begin():
                 target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
-                if target is None or target.workflow != "forecast_ssf_ma20":
+                if target is None or target.workflow != "forecast_ssf_ma20" or target.frequency != "daily":
                     return False
                 candidates = session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target_id).all()
                 if len(candidates) > 1:
@@ -2381,6 +2381,9 @@ class StorageDb:
             "previous_state": candidate.state,
         }
         return self.delete_forecast_ssf_target_with_candidate_transition(target_id, "blackroom", reason, evidence)
+
+    def disable_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
+        return self.delete_forecast_ssf_target_for_blackroom(target_id, reason)
 
     def find_workflow_monitor_target(self, stock_code: str, market: str, frequency: str, workflow: str) -> Any | None:
         from .model.stock_monitor_target import StockMonitorTarget

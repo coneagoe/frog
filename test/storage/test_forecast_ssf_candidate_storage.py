@@ -141,6 +141,17 @@ def test_delete_transition_removes_owned_target_and_retains_candidate(tmp_path):
     assert saved.evidence == evidence
 
 
+def test_disable_blackroom_wrapper_deletes_target_and_retains_candidate(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+
+    assert db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom") is True
+
+    assert db.get_monitor_target(target.id) is None
+    saved = db.list_forecast_ssf_candidates()[0]
+    assert (saved.state, saved.state_reason, saved.monitor_target_id) == ("blackroom", "active_blackroom", None)
+
+
 def test_blackroom_delete_builds_lifecycle_evidence_with_previous_state(tmp_path, monkeypatch):
     db = _sqlite_storage(tmp_path)
     target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
@@ -238,6 +249,35 @@ def test_delete_transition_leaves_unowned_or_unlinked_target_unchanged(tmp_path,
         assert saved.evidence == {"before": True}
     else:
         assert saved is None
+
+
+def test_delete_transition_leaves_owned_non_daily_target_unchanged(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_monitor_target(
+        "600001",
+        "A",
+        {"workflow": "forecast_ssf_ma20", "price": {"above": 10}},
+        frequency="intraday",
+    )
+    db.upsert_forecast_ssf_candidate(
+        stock_code="600001",
+        market="A",
+        report_end_date=date(2025, 12, 31),
+        state="eligible",
+        state_reason="ssf_holder_match",
+        evidence={"before": True},
+        monitor_target_id=target.id,
+    )
+
+    assert db.delete_forecast_ssf_target_with_candidate_transition(
+        target.id, "blackroom", "active_blackroom", {"after": True}
+    ) is False
+
+    assert db.get_monitor_target(target.id) is not None
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert saved.state == "eligible"
+    assert saved.monitor_target_id == target.id
+    assert saved.evidence == {"before": True}
 
 
 def test_load_latest_top10_floatholders_returns_all_holders_for_latest_announcement(tmp_path):
