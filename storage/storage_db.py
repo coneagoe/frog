@@ -9,7 +9,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
-from sqlalchemy import create_engine, func, inspect, text
+from sqlalchemy import bindparam, create_engine, func, inspect, text
 from sqlalchemy.dialects.postgresql import Insert as PostgreSQLInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
@@ -1559,6 +1559,16 @@ class StorageDb:
         finally:
             session.close()
 
+    def load_a_stock_listing_status(self, stock_codes: list[str]) -> pd.DataFrame:
+        columns = [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
+        if not stock_codes:
+            return pd.DataFrame(columns=columns)
+        stmt = text(
+            f'SELECT "{COL_STOCK_ID}", "{COL_LIST_STATUS}", "{COL_DELISTING_DATE}" '
+            f'FROM {tb_name_a_stock_basic} WHERE "{COL_STOCK_ID}" IN :stock_codes'
+        ).bindparams(bindparam("stock_codes", expanding=True))
+        return pd.read_sql(stmt, self.engine, params={"stock_codes": stock_codes})  # type: ignore[arg-type]
+
     def save_forecasts(self, df: pd.DataFrame) -> bool:
         prepared = df.rename(columns=COL_MAP_FORECAST).copy()
         required = [
@@ -2317,6 +2327,33 @@ class StorageDb:
             raise ValueError(f"发现多个 workflow={workflow!r} 的监控目标: {stock_code}/{market}/{frequency}")
         return matches[0] if matches else None
 
+    def set_workflow_monitor_target_paused(self, target_id: int, paused: bool) -> Any | None:
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            with session.begin():
+                target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+                if target is None:
+                    return None
+                if target.workflow is None:
+                    raise ValueError("only workflow monitor targets can be paused or resumed")
+                if paused:
+                    target.paused = True
+                    target.enabled = False
+                else:
+                    target.paused = False
+                session.flush()
+            session.refresh(target)
+            return target
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def upsert_workflow_monitor_target(
         self,
         stock_code: str,
@@ -2374,6 +2411,7 @@ class StorageDb:
                 "frequency": frequency,
                 "workflow": workflow,
                 "enabled": enabled,
+                "paused": False,
                 "last_state": False,
             }
             if session.bind.dialect.name == "postgresql":
@@ -2396,10 +2434,11 @@ class StorageDb:
                 .filter_by(stock_code=stock_code, market=market, frequency=frequency, workflow=workflow)
                 .one()
             )
-            if target.condition != condition or target.note != note or target.enabled != enabled:
+            effective_enabled = False if target.paused else enabled
+            if target.condition != condition or target.note != note or target.enabled != effective_enabled:
                 target.condition = condition
                 target.note = note
-                target.enabled = enabled
+                target.enabled = effective_enabled
                 if reset_last_state:
                     target.last_state = False
         else:
@@ -2407,7 +2446,7 @@ class StorageDb:
                 raise ValueError(f"workflow target condition must retain marker {workflow!r}")
             target.condition = condition
             target.note = note
-            target.enabled = enabled
+            target.enabled = False if target.paused else enabled
             if reset_last_state:
                 target.last_state = False
         session.flush()
@@ -2476,6 +2515,15 @@ class StorageDb:
         if "workflow" not in columns:
             with self.engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {StockMonitorTarget.__tablename__} ADD COLUMN workflow VARCHAR(64)"))
+            columns.add("workflow")
+        if "paused" not in columns:
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {StockMonitorTarget.__tablename__} "
+                        "ADD COLUMN paused BOOLEAN NOT NULL DEFAULT false"
+                    )
+                )
 
         assert self.Session is not None
         session = self.Session()

@@ -11,6 +11,8 @@
 - `stock-monitor target remove --target-id ...`
 - `stock-monitor target list [--frequency daily|intraday] [--enabled|--disabled]`
 - `stock-monitor target get --target-id ...`
+- `stock-monitor target pause --target-id ...`
+- `stock-monitor target resume --target-id ...`
 
 ### 监控条件
 
@@ -23,7 +25,9 @@ Tushare `forecast` 数据可经 `DownloadManager.download_forecast(ann_date=...)
 
 ### 业绩预增社保基金监控同步
 
-每日工作流使用既有的合格业绩预告、活跃黑屋过滤和既有 SSF 检测器生成监控候选，并将业绩预告、股东、黑屋及目标的审计证据保存到 `forecast_ssf_candidates` 表。工作流只管理标记为 `workflow: "forecast_ssf_ma20"` 的日频目标：股票离开当前合格业绩预告范围时，会禁用该工作流拥有的日频目标。手工创建的目标和盘中目标不受影响。
+每日工作流使用既有的合格业绩预告、活跃黑屋过滤和既有 SSF 检测器生成监控候选，并将业绩预告、股东、黑屋及目标的审计证据保存到 `forecast_ssf_candidates` 表。候选状态包括 `eligible`、`deferred`、`blackroom`、`ineligible`、`delisted_or_unlisted` 和 `paused`；其中 `ineligible` 表示仍在上市但不再符合条件，`delisted_or_unlisted` 表示经上市状态校验后退市或不在上市数据中，退休是非破坏性的，审计记录会保留。
+
+工作流只管理标记为 `workflow: "forecast_ssf_ma20"` 的日频目标。`stock-monitor target pause --target-id ...` 会立即禁用该工作流目标，但工作流仍会继续收集审计证据；`stock-monitor target resume --target-id ...` 只解除暂停，目标须在随后一次成功同步中重新满足条件后才会自动启用。缺失或过期的股东证据会产生 `deferred`，不会禁用仍处于活动状态的目标。活跃黑屋、离开合格范围、报告期被更新报告取代，或退市/非上市分类，只会禁用对应的日频工作流目标；手工创建的目标和盘中目标保持不变。
 
 ### 黑屋管理（全局禁买）
 

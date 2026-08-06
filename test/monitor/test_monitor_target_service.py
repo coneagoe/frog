@@ -19,6 +19,7 @@ def _make_target(**overrides):
         "frequency": "daily",
         "reset_mode": "auto",
         "enabled": True,
+        "paused": False,
         "last_state": False,
         "triggered_at": None,
         "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -88,6 +89,29 @@ def test_get_target_returns_not_found_result():
         "message": "monitor target not found: 999",
         "data": None,
     }
+
+
+def test_get_target_serializes_missing_paused_attribute_as_false():
+    target = MagicMock()
+    target.id = 1
+    target.stock_code = "600519"
+    target.market = "A"
+    target.condition = {"type": "price_threshold", "direction": "below", "value": 1500}
+    target.note = None
+    target.frequency = "daily"
+    target.reset_mode = "auto"
+    target.enabled = True
+    target.last_state = False
+    target.triggered_at = None
+    target.created_at = None
+    storage = MagicMock()
+    storage.get_monitor_target.return_value = target
+
+    result = MonitorTargetService(storage=storage).get_target(1)
+
+    assert result["success"] is True
+    assert result["data"]["paused"] is False
+    assert type(result["data"]["paused"]) is bool
 
 
 def test_list_targets_returns_serialized_targets():
@@ -183,6 +207,61 @@ def test_set_target_status_validates_and_updates_enabled_flag():
     assert valid["success"] is True
     assert valid["data"]["enabled"] is False
     storage.update_monitor_target.assert_called_once_with(1, enabled=False)
+
+
+def test_pause_delegates_to_workflow_storage_and_serializes_state():
+    storage = MagicMock()
+    storage.set_workflow_monitor_target_paused.return_value = _make_target(enabled=False, paused=True)
+
+    result = MonitorTargetService(storage=storage).pause(1)
+
+    assert result["success"] is True
+    assert result["code"] == "OK"
+    assert result["message"] == "target paused"
+    assert result["data"]["paused"] is True
+    storage.set_workflow_monitor_target_paused.assert_called_once_with(1, paused=True)
+
+
+def test_resume_returns_enabled_false_and_paused_false():
+    storage = MagicMock()
+    storage.set_workflow_monitor_target_paused.return_value = _make_target(enabled=False, paused=False)
+
+    result = MonitorTargetService(storage=storage).resume(1)
+
+    assert result["success"] is True
+    assert result["code"] == "OK"
+    assert result["message"] == "target resumed"
+    assert result["data"]["enabled"] is False
+    assert result["data"]["paused"] is False
+    storage.set_workflow_monitor_target_paused.assert_called_once_with(1, paused=False)
+
+
+def test_pause_maps_workflow_storage_validation_failure():
+    storage = MagicMock()
+    storage.set_workflow_monitor_target_paused.side_effect = ValueError("workflow targets only")
+
+    result = MonitorTargetService(storage=storage).pause(1)
+
+    assert result == {
+        "success": False,
+        "code": "VALIDATION_ERROR",
+        "message": "workflow targets only",
+        "data": None,
+    }
+
+
+def test_resume_maps_missing_workflow_target_to_not_found():
+    storage = MagicMock()
+    storage.set_workflow_monitor_target_paused.return_value = None
+
+    result = MonitorTargetService(storage=storage).resume(99)
+
+    assert result == {
+        "success": False,
+        "code": "NOT_FOUND",
+        "message": "monitor target not found: 99",
+        "data": None,
+    }
 
 
 def test_target_id_true_is_rejected_as_validation_error():

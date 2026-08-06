@@ -141,6 +141,34 @@ def test_target_update_command_calls_service_update():
     service.update.assert_called_once_with(1, note="new-note", enabled=False)
 
 
+def test_target_pause_command_calls_service_pause():
+    service = MagicMock()
+    service.pause.return_value = {
+        "success": True,
+        "code": "OK",
+        "message": "target paused",
+        "data": {"id": 1, "paused": True},
+    }
+
+    assert main(["target", "pause", "--target-id", "1"], service=service) == 0
+
+    service.pause.assert_called_once_with(1)
+
+
+def test_target_resume_command_calls_service_and_preserves_error_exit_mapping():
+    service = MagicMock()
+    service.resume.return_value = {
+        "success": False,
+        "code": "NOT_FOUND",
+        "message": "monitor target not found: 1",
+        "data": None,
+    }
+
+    assert main(["target", "resume", "--target-id", "1"], service=service) == EXIT_NOT_FOUND
+
+    service.resume.assert_called_once_with(1)
+
+
 def test_target_remove_list_get_and_status_commands_are_wired():
     service = MagicMock()
     service.remove.return_value = {
