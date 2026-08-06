@@ -31,7 +31,7 @@ Tushare `forecast` 数据可经 `DownloadManager.download_forecast(ann_date=...)
 
 ### 业绩预增社保基金收盘后 DAG
 
-`forecast_ssf_ma20_post_close` 每个交易日 20:00（`0 20 * * *`）运行，且同一时间只允许一个活跃实例。任务按以下顺序执行：验证日线数据完整性、同步 `forecast_ssf_ma20` 目标、运行日频监控。非交易日会跳过整个工作流；同步结果为空但成功时仍会继续执行监控。
+`forecast_ssf_ma20_post_close` 每天 20:00（`0 20 * * *`）运行，且同一时间只允许一个活跃实例。任务按以下顺序执行：验证日线数据完整性、同步 `forecast_ssf_ma20` 目标、运行日频监控。非交易日的运行会在日线完整性和交易日验证阶段后跳过整个工作流；同步结果为空但成功时仍会继续执行监控。
 
 监控任务返回包含 `daily_bar`、`synchronization` 和 `monitor` 三个字段的结构化摘要。日线完整性或同步服务失败，以及监控摘要中的 `errors > 0`，都会使 DAG 任务失败。
 
