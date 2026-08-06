@@ -7,10 +7,12 @@ import pytest
 
 from common.const import (
     COL_ANN_DATE,
+    COL_DELISTING_DATE,
     COL_END_DATE,
     COL_FLOAT_HOLDER_NAME,
     COL_FORECAST_CHANGE_MIN,
     COL_FORECAST_TYPE,
+    COL_LIST_STATUS,
     COL_STOCK_ID,
 )
 from monitor.forecast_ssf_monitor_sync import ForecastSSFMonitorSyncService
@@ -36,8 +38,8 @@ def _blackroom(*, banned: bool = False) -> dict:
     return {"success": True, "code": "OK", "message": "ban status checked", "data": {"banned": banned}}
 
 
-def _target(target_id: int = 1, enabled: bool = True) -> SimpleNamespace:
-    return SimpleNamespace(id=target_id, enabled=enabled)
+def _target(target_id: int = 1, enabled: bool = True, paused: bool = False) -> SimpleNamespace:
+    return SimpleNamespace(id=target_id, enabled=enabled, paused=paused)
 
 
 def _storage(forecasts: pd.DataFrame) -> MagicMock:
@@ -45,6 +47,13 @@ def _storage(forecasts: pd.DataFrame) -> MagicMock:
     storage.load_active_forecast_candidates.return_value = forecasts
     storage.list_forecast_ssf_candidates.return_value = []
     storage.find_workflow_monitor_target.return_value = None
+    storage.load_a_stock_listing_status.return_value = pd.DataFrame(
+        {
+            COL_STOCK_ID: forecasts[COL_STOCK_ID],
+            COL_LIST_STATUS: ["L"] * len(forecasts),
+            COL_DELISTING_DATE: [None] * len(forecasts),
+        }
+    )
     return storage
 
 
@@ -91,6 +100,7 @@ def test_sync_creates_target_and_persists_matching_evidence():
             },
             "shareholder": {"ann_date": "2026-01-10", "matched_holder": "全国社保基金一一八组合"},
             "blackroom": {"banned": False},
+            "lifecycle": {"as_of_date": "2026-01-20", "state": "eligible", "reason": "ssf_holder_match"},
         },
         target_enabled=True,
         reset_last_state=True,
@@ -254,6 +264,13 @@ def test_sync_retires_absent_daily_workflow_candidate_with_lifecycle_evidence():
     ]
     storage.find_workflow_monitor_target.side_effect = [None, _target(17, enabled=True)]
     storage.load_latest_top10_floatholders.return_value = pd.DataFrame()
+    storage.load_a_stock_listing_status.return_value = pd.DataFrame(
+        {
+            COL_STOCK_ID: ["600001", "600002"],
+            COL_LIST_STATUS: ["L", "L"],
+            COL_DELISTING_DATE: [None, None],
+        }
+    )
     blackroom = MagicMock()
     blackroom.is_banned.return_value = _blackroom()
 
@@ -268,7 +285,11 @@ def test_sync_retires_absent_daily_workflow_candidate_with_lifecycle_evidence():
         "state_reason": "forecast_no_longer_qualified",
         "evidence": {
             "forecast": {"ann_date": "2026-01-15"},
-            "lifecycle": {"as_of_date": "2026-01-20", "reason": "forecast_no_longer_qualified"},
+            "lifecycle": {
+                "as_of_date": "2026-01-20",
+                "state": "ineligible",
+                "reason": "forecast_no_longer_qualified",
+            },
         },
         "workflow": "forecast_ssf_ma20",
         "frequency": "daily",
@@ -312,6 +333,13 @@ def test_sync_retires_unlinked_absent_candidate_without_creating_target():
             evidence={"shareholder": {"matched_holder": "全国社保基金一一八组合"}},
         )
     ]
+    storage.load_a_stock_listing_status.return_value = pd.DataFrame(
+        {
+            COL_STOCK_ID: ["600001"],
+            COL_LIST_STATUS: ["L"],
+            COL_DELISTING_DATE: [None],
+        }
+    )
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
@@ -325,7 +353,11 @@ def test_sync_retires_unlinked_absent_candidate_without_creating_target():
         "state_reason": "forecast_no_longer_qualified",
         "evidence": {
             "shareholder": {"matched_holder": "全国社保基金一一八组合"},
-            "lifecycle": {"as_of_date": "2026-01-20", "reason": "forecast_no_longer_qualified"},
+            "lifecycle": {
+                "as_of_date": "2026-01-20",
+                "state": "ineligible",
+                "reason": "forecast_no_longer_qualified",
+            },
         },
         "monitor_target_id": None,
     }
@@ -343,6 +375,13 @@ def test_sync_retires_absent_candidate_with_stale_target_link(daily_target):
         )
     ]
     storage.find_workflow_monitor_target.return_value = daily_target
+    storage.load_a_stock_listing_status.return_value = pd.DataFrame(
+        {
+            COL_STOCK_ID: ["600001"],
+            COL_LIST_STATUS: ["L"],
+            COL_DELISTING_DATE: [None],
+        }
+    )
 
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
@@ -356,7 +395,11 @@ def test_sync_retires_absent_candidate_with_stale_target_link(daily_target):
         "state_reason": "forecast_no_longer_qualified",
         "evidence": {
             "forecast": {"ann_date": "2026-01-15"},
-            "lifecycle": {"as_of_date": "2026-01-20", "reason": "forecast_no_longer_qualified"},
+            "lifecycle": {
+                "as_of_date": "2026-01-20",
+                "state": "ineligible",
+                "reason": "forecast_no_longer_qualified",
+            },
         },
         "monitor_target_id": None,
     }
@@ -374,3 +417,134 @@ def test_sync_repeated_retirement_preserves_disabled_target_without_recounting()
     assert result["data"]["disabled"] == 0
     assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["target_enabled"] is False
     assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["reset_last_state"] is False
+
+
+def test_sync_paused_eligible_candidate_keeps_target_disabled_and_records_evaluated_outcome():
+    storage = _storage(_forecasts("600001"))
+    storage.find_workflow_monitor_target.return_value = _target(17, enabled=False, paused=True)
+    storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "全国社保基金一一八组合")
+    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())).sync(
+        date(2026, 1, 20)
+    )
+    call = storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["state"], call["target_enabled"]) == ("paused", False)
+    assert call["evidence"]["evaluation"]["state"] == "eligible"
+
+
+def test_sync_deferral_does_not_change_enabled_target():
+    storage = _storage(_forecasts("600001"))
+    storage.find_workflow_monitor_target.return_value = _target(17, enabled=True)
+    storage.load_latest_top10_floatholders.return_value = pd.DataFrame()
+    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())).sync(
+        date(2026, 1, 20)
+    )
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
+
+
+def test_sync_listing_preflight_failure_mutates_nothing():
+    storage = _storage(_forecasts("600001"))
+    storage.load_a_stock_listing_status.side_effect = RuntimeError("listing unavailable")
+    with pytest.raises(RuntimeError, match="listing unavailable"):
+        ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+    storage.upsert_forecast_ssf_candidate.assert_not_called()
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
+
+
+def test_sync_reporting_period_promotion_disables_without_evaluating_new_period():
+    storage = _storage(_forecasts("600001"))
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(stock_code="600001", report_end_date=date(2025, 9, 30), state="eligible", evidence={})
+    ]
+    storage.find_workflow_monitor_target.return_value = _target(17, enabled=True)
+    result = ForecastSSFMonitorSyncService(
+        storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
+    ).sync(date(2026, 1, 20))
+    call = storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert result["data"]["disabled"] == 1
+    assert (call["state"], call["state_reason"], call["target_enabled"]) == (
+        "ineligible",
+        "reporting_period_superseded",
+        False,
+    )
+    assert call["evidence"]["lifecycle"]["new_report_end_date"] == "2025-12-31"
+    storage.load_latest_top10_floatholders.assert_not_called()
+
+
+def test_sync_absent_listing_retires_candidate_with_delisted_reason():
+    storage = _storage(_forecasts())
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(stock_code="600001", report_end_date=date(2025, 12, 31), state="eligible", evidence={})
+    ]
+    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+    call = storage.upsert_forecast_ssf_candidate.call_args.kwargs
+    assert result["data"]["disabled"] == 0
+    assert call["state_reason"] == "delisted_or_unlisted"
+
+
+def test_sync_blackroom_recovery_reenables_eligible_target_after_expiry():
+    storage = _storage(_forecasts("600001"))
+    storage.find_workflow_monitor_target.return_value = _target(17, enabled=False)
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(
+            stock_code="600001",
+            report_end_date=date(2025, 12, 31),
+            state="blackroom",
+            monitor_target_id=17,
+            evidence={"blackroom": {"banned": True}},
+        )
+    ]
+    storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "全国社保基金一一八组合")
+
+    result = ForecastSSFMonitorSyncService(
+        storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom(banned=False))
+    ).sync(date(2026, 1, 20))
+
+    call = storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert result["data"]["updated"] == 1
+    assert (call["state"], call["target_enabled"]) == ("eligible", True)
+    assert call["evidence"]["lifecycle"]["previous_state"] == "blackroom"
+
+
+def test_sync_repeated_disabled_lifecycle_does_not_increment_action_counters():
+    storage = _storage(_forecasts("600001"))
+    storage.find_workflow_monitor_target.return_value = _target(17, enabled=False)
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(
+            stock_code="600001",
+            report_end_date=date(2025, 12, 31),
+            state="ineligible",
+            monitor_target_id=17,
+            evidence={},
+        )
+    ]
+    storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "普通股东")
+
+    result = ForecastSSFMonitorSyncService(
+        storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
+    ).sync(date(2026, 1, 20))
+
+    assert result["data"]["disabled"] == 0
+    assert result["data"]["updated"] == 0
+    assert result["data"]["created"] == 0
+
+
+def test_sync_repeated_paused_eligible_candidate_does_not_increment_updated_counter():
+    storage = _storage(_forecasts("600001"))
+    storage.find_workflow_monitor_target.return_value = _target(17, enabled=False, paused=True)
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(
+            stock_code="600001",
+            report_end_date=date(2025, 12, 31),
+            state="paused",
+            monitor_target_id=17,
+            evidence={},
+        )
+    ]
+    storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "全国社保基金一一八组合")
+
+    result = ForecastSSFMonitorSyncService(
+        storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
+    ).sync(date(2026, 1, 20))
+
+    assert result["data"]["updated"] == 0
+    assert result["data"]["created"] == 0

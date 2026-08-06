@@ -9,7 +9,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
-from sqlalchemy import create_engine, func, inspect, text
+from sqlalchemy import bindparam, create_engine, func, inspect, text
 from sqlalchemy.dialects.postgresql import Insert as PostgreSQLInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
@@ -1558,6 +1558,16 @@ class StorageDb:
             return cast(list[Any], session.query(ForecastSSFCandidate).order_by(ForecastSSFCandidate.stock_code).all())
         finally:
             session.close()
+
+    def load_a_stock_listing_status(self, stock_codes: list[str]) -> pd.DataFrame:
+        columns = [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
+        if not stock_codes:
+            return pd.DataFrame(columns=columns)
+        stmt = text(
+            f'SELECT "{COL_STOCK_ID}", "{COL_LIST_STATUS}", "{COL_DELISTING_DATE}" '
+            f'FROM {tb_name_a_stock_basic} WHERE "{COL_STOCK_ID}" IN :stock_codes'
+        ).bindparams(bindparam("stock_codes", expanding=True))
+        return pd.read_sql(stmt, self.engine, params={"stock_codes": stock_codes})
 
     def save_forecasts(self, df: pd.DataFrame) -> bool:
         prepared = df.rename(columns=COL_MAP_FORECAST).copy()

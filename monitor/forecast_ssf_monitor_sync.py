@@ -13,6 +13,7 @@ from common.const import (
     COL_FLOAT_HOLDER_NAME,
     COL_FORECAST_CHANGE_MIN,
     COL_FORECAST_TYPE,
+    COL_LIST_STATUS,
     COL_STOCK_ID,
 )
 from monitor.blackroom_service import BlackroomService
@@ -33,6 +34,14 @@ class ForecastSSFMonitorSyncService:
 
     def sync(self, as_of_date: date) -> dict[str, Any]:
         forecasts = self.storage.load_active_forecast_candidates(as_of_date)
+        current_rows = [cast(dict[str, Any], row) for row in forecasts.to_dict("records")]
+        previous_candidates = {
+            candidate.stock_code: candidate for candidate in self.storage.list_forecast_ssf_candidates()
+        }
+        current_stock_codes = {str(row[COL_STOCK_ID]) for row in current_rows}
+        all_stock_codes = current_stock_codes | set(previous_candidates)
+        listing = self.storage.load_a_stock_listing_status(sorted(all_stock_codes))
+        listing_by_code = {str(row[COL_STOCK_ID]): row for row in listing.to_dict("records")}
         summary = {
             "forecast_candidates": len(forecasts),
             "blackroom_excluded": 0,
@@ -45,31 +54,28 @@ class ForecastSSFMonitorSyncService:
             "errors": 0,
         }
         blackroom_results: dict[str, bool] = {}
-        for raw_row in forecasts.to_dict("records"):
-            row = cast(dict[str, Any], raw_row)
-            stock_code = str(row[COL_STOCK_ID])
+        for stock_code in current_stock_codes:
             result = self.blackroom_service.is_banned(stock_code, "A")
             if not result.get("success"):
                 raise RuntimeError(result.get("message", "blackroom status check failed"))
             blackroom_results[stock_code] = bool((result.get("data") or {}).get("banned"))
-
-        previous_candidates = {
-            candidate.stock_code: candidate for candidate in self.storage.list_forecast_ssf_candidates()
-        }
-        for raw_row in forecasts.to_dict("records"):
-            row = cast(dict[str, Any], raw_row)
+        for row in current_rows:
+            stock_code = str(row[COL_STOCK_ID])
             self._sync_candidate(
                 row=row,
                 as_of_date=as_of_date,
                 banned=blackroom_results[str(row[COL_STOCK_ID])],
                 previous_candidate=previous_candidates.get(str(row[COL_STOCK_ID])),
                 summary=summary,
+                listed=str(row[COL_STOCK_ID]) in listing_by_code
+                and listing_by_code[str(row[COL_STOCK_ID])].get(COL_LIST_STATUS) == "L",
             )
         self._retire_absent_candidates(
-            current_stock_codes={str(row[COL_STOCK_ID]) for row in forecasts.to_dict("records")},
+            current_stock_codes=current_stock_codes,
             previous_candidates=previous_candidates,
             as_of_date=as_of_date,
             summary=summary,
+            listing_by_code=listing_by_code,
         )
         return {"success": True, "code": "OK", "message": "forecast SSF monitor targets synchronized", "data": summary}
 
@@ -79,24 +85,28 @@ class ForecastSSFMonitorSyncService:
         previous_candidates: dict[str, Any],
         as_of_date: date,
         summary: dict[str, int],
+        listing_by_code: dict[str, Any],
     ) -> None:
         for stock_code, candidate in previous_candidates.items():
             if stock_code in current_stock_codes:
                 continue
-            evidence = dict(getattr(candidate, "evidence", None) or {})
-            evidence["lifecycle"] = {
-                "as_of_date": as_of_date.isoformat(),
-                "reason": "forecast_no_longer_qualified",
-            }
+            reason = (
+                "delisted_or_unlisted"
+                if stock_code not in listing_by_code or listing_by_code[stock_code].get(COL_LIST_STATUS) != "L"
+                else "forecast_no_longer_qualified"
+            )
+            evidence = self._with_lifecycle(candidate, {}, as_of_date, "ineligible", reason)
             target_id = getattr(candidate, "monitor_target_id", None)
             if target_id is None:
                 self._persist(
                     stock_code,
                     candidate.report_end_date,
                     "ineligible",
-                    "forecast_no_longer_qualified",
+                    reason,
                     evidence,
                     None,
+                    candidate,
+                    as_of_date,
                 )
                 continue
             target = self.storage.find_workflow_monitor_target(stock_code, "A", "daily", WORKFLOW_NAME)
@@ -105,21 +115,25 @@ class ForecastSSFMonitorSyncService:
                     stock_code,
                     candidate.report_end_date,
                     "ineligible",
-                    "forecast_no_longer_qualified",
+                    reason,
                     evidence,
                     None,
+                    candidate,
+                    as_of_date,
                 )
                 continue
             self._persist_with_target(
                 stock_code,
                 candidate.report_end_date,
                 "ineligible",
-                "forecast_no_longer_qualified",
+                reason,
                 evidence,
                 target,
                 False,
                 False,
                 summary,
+                candidate,
+                as_of_date,
             )
 
     def _sync_candidate(
@@ -129,6 +143,7 @@ class ForecastSSFMonitorSyncService:
         banned: bool,
         previous_candidate: Any | None,
         summary: dict[str, int],
+        listed: bool,
     ) -> None:
         stock_code = str(row[COL_STOCK_ID])
         report_end_date = self._as_date(row[COL_END_DATE])
@@ -144,10 +159,52 @@ class ForecastSSFMonitorSyncService:
         }
         target = self.storage.find_workflow_monitor_target(stock_code, "A", "daily", WORKFLOW_NAME)
         target_id = getattr(target, "id", None)
+        if not listed:
+            self._persist_with_target(
+                stock_code,
+                report_end_date,
+                "ineligible",
+                "delisted_or_unlisted",
+                evidence,
+                target,
+                False,
+                False,
+                summary,
+                previous_candidate,
+                as_of_date,
+            )
+            return
+        if previous_candidate is not None and report_end_date > getattr(
+            previous_candidate, "report_end_date", report_end_date
+        ):
+            self._persist_with_target(
+                stock_code,
+                report_end_date,
+                "ineligible",
+                "reporting_period_superseded",
+                evidence,
+                target,
+                False,
+                True,
+                summary,
+                previous_candidate,
+                as_of_date,
+            )
+            return
         if banned:
             summary["blackroom_excluded"] += 1
             self._persist_with_target(
-                stock_code, report_end_date, "blackroom", "active_blackroom", evidence, target, False, False, summary
+                stock_code,
+                report_end_date,
+                "blackroom",
+                "active_blackroom",
+                evidence,
+                target,
+                False,
+                False,
+                summary,
+                previous_candidate,
+                as_of_date,
             )
             return
 
@@ -156,18 +213,45 @@ class ForecastSSFMonitorSyncService:
         except Exception:  # noqa: BLE001
             summary["errors"] += 1
             summary["deferred"] += 1
-            self._persist(stock_code, report_end_date, "deferred", "holder_query_failed", evidence, target_id)
+            self._persist(
+                stock_code,
+                report_end_date,
+                "deferred",
+                "holder_query_failed",
+                evidence,
+                target_id,
+                previous_candidate,
+                as_of_date,
+            )
             return
 
         if holders.empty:
             summary["deferred"] += 1
-            self._persist(stock_code, report_end_date, "deferred", "holder_disclosure_missing", evidence, target_id)
+            self._persist(
+                stock_code,
+                report_end_date,
+                "deferred",
+                "holder_disclosure_missing",
+                evidence,
+                target_id,
+                previous_candidate,
+                as_of_date,
+            )
             return
         disclosure_date = self._as_date(holders.iloc[0][COL_ANN_DATE])
         evidence["shareholder"]["ann_date"] = disclosure_date.isoformat()
         if disclosure_date < self._two_months_before(as_of_date):
             summary["deferred"] += 1
-            self._persist(stock_code, report_end_date, "deferred", "holder_disclosure_stale", evidence, target_id)
+            self._persist(
+                stock_code,
+                report_end_date,
+                "deferred",
+                "holder_disclosure_stale",
+                evidence,
+                target_id,
+                previous_candidate,
+                as_of_date,
+            )
             return
 
         matched_holder = next(
@@ -185,26 +269,38 @@ class ForecastSSFMonitorSyncService:
                 False,
                 False,
                 summary,
+                previous_candidate,
+                as_of_date,
             )
             return
 
         summary["ssf_matched"] += 1
+        effective_state = "paused" if getattr(target, "paused", False) else "eligible"
         reset_last_state = target is None or not (
-            getattr(previous_candidate, "state", None) == "eligible"
+            getattr(previous_candidate, "state", None) == effective_state
             and getattr(previous_candidate, "monitor_target_id", None) == target_id
         )
+        automatic_state = "eligible"
+        if getattr(target, "paused", False):
+            evidence["evaluation"] = {"state": automatic_state, "reason": "ssf_holder_match"}
         updated_target = self.storage.upsert_forecast_ssf_candidate_with_workflow_target(
             stock_code=stock_code,
             market="A",
             report_end_date=report_end_date,
-            state="eligible",
-            state_reason="ssf_holder_match",
-            evidence=evidence,
+            state="paused" if getattr(target, "paused", False) else automatic_state,
+            state_reason="manual_pause" if getattr(target, "paused", False) else "ssf_holder_match",
+            evidence=self._with_lifecycle(
+                previous_candidate,
+                evidence,
+                as_of_date,
+                "paused" if getattr(target, "paused", False) else automatic_state,
+                "manual_pause" if getattr(target, "paused", False) else "ssf_holder_match",
+            ),
             workflow=WORKFLOW_NAME,
             frequency="daily",
             condition=_CONDITION,
             note=_NOTE,
-            target_enabled=True,
+            target_enabled=False if getattr(target, "paused", False) else True,
             reset_last_state=reset_last_state,
         )
         target_id = updated_target.id
@@ -226,10 +322,27 @@ class ForecastSSFMonitorSyncService:
         target_enabled: bool,
         reset_last_state: bool,
         summary: dict[str, int],
+        previous_candidate: Any | None = None,
+        as_of_date: date | None = None,
     ) -> None:
         if target is None:
-            self._persist(stock_code, report_end_date, state, state_reason, evidence, None)
+            self._persist(
+                stock_code, report_end_date, state, state_reason, evidence, None, previous_candidate, as_of_date
+            )
             return
+        evidence = self._with_lifecycle(previous_candidate, evidence, as_of_date or date.today(), state, state_reason)
+        if state_reason == "reporting_period_superseded" and previous_candidate is not None:
+            evidence["lifecycle"].update(
+                {
+                    "old_report_end_date": self._as_date(previous_candidate.report_end_date).isoformat(),
+                    "new_report_end_date": report_end_date.isoformat(),
+                }
+            )
+        automatic_state, automatic_reason = state, state_reason
+        if getattr(target, "paused", False):
+            evidence = dict(evidence)
+            evidence["evaluation"] = {"state": automatic_state, "reason": automatic_reason}
+            state, state_reason, target_enabled = "paused", "manual_pause", False
         self.storage.upsert_forecast_ssf_candidate_with_workflow_target(
             stock_code=stock_code,
             market="A",
@@ -244,7 +357,7 @@ class ForecastSSFMonitorSyncService:
             target_enabled=target_enabled,
             reset_last_state=reset_last_state,
         )
-        if target.enabled and not target_enabled:
+        if target.enabled is True and not target_enabled:
             summary["disabled"] += 1
 
     def _persist(
@@ -255,7 +368,11 @@ class ForecastSSFMonitorSyncService:
         state_reason: str,
         evidence: dict[str, Any],
         monitor_target_id: int | None,
+        previous_candidate: Any | None = None,
+        as_of_date: date | None = None,
     ) -> None:
+        if as_of_date is not None:
+            evidence = self._with_lifecycle(previous_candidate, evidence, as_of_date, state, state_reason)
         self.storage.upsert_forecast_ssf_candidate(
             stock_code=stock_code,
             market="A",
@@ -265,6 +382,18 @@ class ForecastSSFMonitorSyncService:
             evidence=evidence,
             monitor_target_id=monitor_target_id,
         )
+
+    def _with_lifecycle(
+        self, previous_candidate: Any | None, evidence: dict[str, Any], as_of_date: date, state: str, reason: str
+    ) -> dict[str, Any]:
+        result = dict(getattr(previous_candidate, "evidence", None) or {})
+        result.update(evidence)
+        lifecycle = {"as_of_date": as_of_date.isoformat(), "state": state, "reason": reason}
+        previous_state = getattr(previous_candidate, "state", None)
+        if previous_state is not None and previous_state != state:
+            lifecycle["previous_state"] = previous_state
+        result["lifecycle"] = lifecycle
+        return result
 
     @staticmethod
     def _as_date(value: Any) -> date:

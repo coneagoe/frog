@@ -5,8 +5,8 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
-from common.const import COL_ANN_DATE, COL_FLOAT_HOLDER_NAME
-from storage.model import Base, ForecastSSFCandidate
+from common.const import COL_ANN_DATE, COL_DELISTING_DATE, COL_FLOAT_HOLDER_NAME, COL_LIST_STATUS, COL_STOCK_ID
+from storage.model import AStockBasic, Base, ForecastSSFCandidate
 from storage.storage_db import StorageDb
 
 
@@ -102,6 +102,44 @@ def test_load_latest_top10_floatholders_returns_all_holders_for_latest_announcem
         (pd.Timestamp(latest_date), "最新股东甲"),
         (pd.Timestamp(latest_date), "最新股东乙"),
     }
+
+
+def test_load_a_stock_listing_status_returns_requested_rows_and_omits_absent_codes(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    session = db.Session()
+    try:
+        session.add_all(
+            [
+                AStockBasic(**{COL_STOCK_ID: "600001", "股票名称": "active", COL_LIST_STATUS: "L"}),
+                AStockBasic(
+                    **{
+                        COL_STOCK_ID: "600002",
+                        "股票名称": "delisted",
+                        COL_LIST_STATUS: "D",
+                        COL_DELISTING_DATE: date(2026, 1, 1),
+                    }
+                ),
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    result = db.load_a_stock_listing_status(["600001", "600002", "600003"])
+
+    assert list(result.columns) == [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
+    assert result[COL_STOCK_ID].tolist() == ["600001", "600002"]
+    assert result.loc[result[COL_STOCK_ID] == "600001", COL_LIST_STATUS].item() == "L"
+    assert str(result.loc[result[COL_STOCK_ID] == "600002", COL_DELISTING_DATE].item()) == "2026-01-01"
+
+
+def test_load_a_stock_listing_status_empty_input_returns_schema_only(tmp_path):
+    db = _sqlite_storage(tmp_path)
+
+    result = db.load_a_stock_listing_status([])
+
+    assert list(result.columns) == [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
+    assert result.empty
 
 
 def test_workflow_monitor_target_uses_only_matching_marker_and_preserves_id(tmp_path):
@@ -494,6 +532,59 @@ def test_atomic_workflow_target_transition_rolls_back_when_candidate_persistence
         assert target.enabled is True
     else:
         assert target is None
+
+
+def test_atomic_paused_workflow_transition_rolls_back_candidate_and_target_on_failure(tmp_path, monkeypatch):
+    db = _sqlite_storage(tmp_path)
+    original_target = db.upsert_workflow_monitor_target(
+        "600001",
+        "A",
+        "daily",
+        "forecast_ssf_ma20",
+        {"workflow": "forecast_ssf_ma20"},
+        "workflow",
+        enabled=True,
+        reset_last_state=False,
+    )
+    db.set_workflow_monitor_target_paused(original_target.id, paused=True)
+    original_candidate = db.upsert_forecast_ssf_candidate(
+        "600001",
+        "A",
+        date(2025, 12, 31),
+        "eligible",
+        "ssf_holder_match",
+        {"before": True},
+        original_target.id,
+    )
+
+    def fail_candidate(*args, **kwargs):
+        raise RuntimeError("candidate persistence failed")
+
+    monkeypatch.setattr(db, "_upsert_forecast_ssf_candidate_in_transaction", fail_candidate)
+
+    with pytest.raises(RuntimeError, match="candidate persistence failed"):
+        db.upsert_forecast_ssf_candidate_with_workflow_target(
+            stock_code="600001",
+            market="A",
+            report_end_date=date(2025, 12, 31),
+            state="paused",
+            state_reason="manual_pause",
+            evidence={"after": True},
+            workflow="forecast_ssf_ma20",
+            frequency="daily",
+            condition={"workflow": "forecast_ssf_ma20", "version": 2},
+            note="updated workflow",
+            target_enabled=False,
+            reset_last_state=False,
+        )
+
+    target = db.find_workflow_monitor_target("600001", "A", "daily", "forecast_ssf_ma20")
+    candidate = db.list_forecast_ssf_candidates()[0]
+    assert target.id == original_target.id
+    assert target.paused is True
+    assert target.enabled is False
+    assert candidate.stock_code == original_candidate.stock_code
+    assert candidate.evidence == {"before": True}
 
 
 def test_workflow_target_conflict_safe_upsert_preserves_one_durable_owner(tmp_path):
