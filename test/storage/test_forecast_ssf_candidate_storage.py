@@ -159,6 +159,51 @@ def test_workflow_owned_monitor_target_rejects_condition_marker_replacement(tmp_
         assert persisted.workflow == "forecast_ssf"
 
 
+def test_empty_workflow_owned_monitor_target_rejects_unmarked_condition_replacement(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_monitor_target(
+        "600001",
+        "A",
+        {"workflow": "", "price": {"above": 10}},
+        note="empty workflow",
+    )
+
+    with pytest.raises(ValueError, match="workflow marker"):
+        db.update_monitor_target(target.id, condition={"price": {"above": 11}})
+
+    persisted = db.get_monitor_target(target.id)
+    assert persisted.condition == {"workflow": "", "price": {"above": 10}}
+    assert persisted.workflow == ""
+
+
+def test_workflow_owned_monitor_target_accepts_matching_condition_marker(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_monitor_target(
+        "600001",
+        "A",
+        {"workflow": "forecast_ssf", "price": {"above": 10}},
+        note="workflow",
+    )
+
+    updated = db.update_monitor_target(
+        target.id,
+        condition={"workflow": "forecast_ssf", "price": {"above": 11}},
+    )
+
+    assert updated.condition == {"workflow": "forecast_ssf", "price": {"above": 11}}
+    assert updated.workflow == "forecast_ssf"
+
+
+def test_manual_monitor_target_accepts_unmarked_condition_replacement(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_monitor_target("600001", "A", {"price": {"above": 10}}, note="manual")
+
+    updated = db.update_monitor_target(target.id, condition={"price": {"above": 11}})
+
+    assert updated.condition == {"price": {"above": 11}}
+    assert updated.workflow is None
+
+
 def test_workflow_monitor_target_scope_does_not_mutate_intraday_target(tmp_path):
     db = _sqlite_storage(tmp_path)
     intraday = db.create_monitor_target(
