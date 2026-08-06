@@ -74,3 +74,37 @@ exit 0
 
 - The required focused suite passed. Full repository `pytest test` and `mypy` were not run because this task requires the focused storage/monitor/DAG regression suite.
 - SQLite returns the selected delisting `DATE` through `pandas.read_sql` as an ISO string; production classification only depends on listing status, and the storage test asserts that observed boundary representation.
+
+## Fix Round 1
+
+### Status
+
+Completed reviewer findings 1-3. Paused target-linked outcomes now persist `paused/manual_pause` lifecycle state and retain the automatic result under `evidence["evaluation"]` for listing, blackroom, ineligibility, deferral, and eligibility outcomes. Active blackroom classification now precedes reporting-period supersession; promotion remains before shareholder qualification for non-blackroom candidates.
+
+### Tests Added
+
+- Parameterized paused listing, blackroom, and ineligibility lifecycle evidence regression.
+- Active blackroom plus newer reporting-period regression.
+
+### Exact Commands And Outputs
+
+```text
+uv run pytest test/monitor/test_forecast_ssf_monitor_sync.py -k 'paused or promotion or blackroom' -v
+11 passed, 19 deselected in 1.43s
+
+uv run pytest test/monitor/test_forecast_ssf_monitor_sync.py -k 'lifecycle or paused or promotion or blackroom' -v
+13 passed, 17 deselected in 2.40s
+
+uv run pytest test/monitor/test_forecast_ssf_monitor_sync.py test/storage/test_forecast_ssf_candidate_storage.py test/monitor/test_monitor_target_service.py test/dags/test_monitor_stock_daily.py -v
+90 passed in 12.14s
+
+uv run ruff check storage/storage_db.py monitor/forecast_ssf_monitor_sync.py test/storage/test_forecast_ssf_candidate_storage.py test/monitor/test_forecast_ssf_monitor_sync.py
+All checks passed!
+
+git diff --check
+exit 0
+```
+
+### Concerns
+
+- Full repository `pytest test` and `mypy` remain outside this fix-round verification scope.

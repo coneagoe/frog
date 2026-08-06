@@ -174,6 +174,22 @@ class ForecastSSFMonitorSyncService:
                 as_of_date,
             )
             return
+        if banned:
+            summary["blackroom_excluded"] += 1
+            self._persist_with_target(
+                stock_code,
+                report_end_date,
+                "blackroom",
+                "active_blackroom",
+                evidence,
+                target,
+                False,
+                False,
+                summary,
+                previous_candidate,
+                as_of_date,
+            )
+            return
         if previous_candidate is not None and report_end_date > getattr(
             previous_candidate, "report_end_date", report_end_date
         ):
@@ -191,67 +207,96 @@ class ForecastSSFMonitorSyncService:
                 as_of_date,
             )
             return
-        if banned:
-            summary["blackroom_excluded"] += 1
-            self._persist_with_target(
-                stock_code,
-                report_end_date,
-                "blackroom",
-                "active_blackroom",
-                evidence,
-                target,
-                False,
-                False,
-                summary,
-                previous_candidate,
-                as_of_date,
-            )
-            return
 
         try:
             holders = self.storage.load_latest_top10_floatholders(stock_code)
         except Exception:  # noqa: BLE001
             summary["errors"] += 1
             summary["deferred"] += 1
-            self._persist(
-                stock_code,
-                report_end_date,
-                "deferred",
-                "holder_query_failed",
-                evidence,
-                target_id,
-                previous_candidate,
-                as_of_date,
-            )
+            if getattr(target, "paused", False):
+                self._persist_with_target(
+                    stock_code,
+                    report_end_date,
+                    "deferred",
+                    "holder_query_failed",
+                    evidence,
+                    target,
+                    False,
+                    False,
+                    summary,
+                    previous_candidate,
+                    as_of_date,
+                )
+            else:
+                self._persist(
+                    stock_code,
+                    report_end_date,
+                    "deferred",
+                    "holder_query_failed",
+                    evidence,
+                    target_id,
+                    previous_candidate,
+                    as_of_date,
+                )
             return
 
         if holders.empty:
             summary["deferred"] += 1
-            self._persist(
-                stock_code,
-                report_end_date,
-                "deferred",
-                "holder_disclosure_missing",
-                evidence,
-                target_id,
-                previous_candidate,
-                as_of_date,
-            )
+            if getattr(target, "paused", False):
+                self._persist_with_target(
+                    stock_code,
+                    report_end_date,
+                    "deferred",
+                    "holder_disclosure_missing",
+                    evidence,
+                    target,
+                    False,
+                    False,
+                    summary,
+                    previous_candidate,
+                    as_of_date,
+                )
+            else:
+                self._persist(
+                    stock_code,
+                    report_end_date,
+                    "deferred",
+                    "holder_disclosure_missing",
+                    evidence,
+                    target_id,
+                    previous_candidate,
+                    as_of_date,
+                )
             return
         disclosure_date = self._as_date(holders.iloc[0][COL_ANN_DATE])
         evidence["shareholder"]["ann_date"] = disclosure_date.isoformat()
         if disclosure_date < self._two_months_before(as_of_date):
             summary["deferred"] += 1
-            self._persist(
-                stock_code,
-                report_end_date,
-                "deferred",
-                "holder_disclosure_stale",
-                evidence,
-                target_id,
-                previous_candidate,
-                as_of_date,
-            )
+            if getattr(target, "paused", False):
+                self._persist_with_target(
+                    stock_code,
+                    report_end_date,
+                    "deferred",
+                    "holder_disclosure_stale",
+                    evidence,
+                    target,
+                    False,
+                    False,
+                    summary,
+                    previous_candidate,
+                    as_of_date,
+                )
+            else:
+                self._persist(
+                    stock_code,
+                    report_end_date,
+                    "deferred",
+                    "holder_disclosure_stale",
+                    evidence,
+                    target_id,
+                    previous_candidate,
+                    as_of_date,
+                )
             return
 
         matched_holder = next(
@@ -330,19 +375,19 @@ class ForecastSSFMonitorSyncService:
                 stock_code, report_end_date, state, state_reason, evidence, None, previous_candidate, as_of_date
             )
             return
+        automatic_state, automatic_reason = state, state_reason
+        if getattr(target, "paused", False):
+            evidence = dict(evidence)
+            evidence["evaluation"] = {"state": automatic_state, "reason": automatic_reason}
+            state, state_reason, target_enabled = "paused", "manual_pause", False
         evidence = self._with_lifecycle(previous_candidate, evidence, as_of_date or date.today(), state, state_reason)
-        if state_reason == "reporting_period_superseded" and previous_candidate is not None:
+        if automatic_reason == "reporting_period_superseded" and previous_candidate is not None:
             evidence["lifecycle"].update(
                 {
                     "old_report_end_date": self._as_date(previous_candidate.report_end_date).isoformat(),
                     "new_report_end_date": report_end_date.isoformat(),
                 }
             )
-        automatic_state, automatic_reason = state, state_reason
-        if getattr(target, "paused", False):
-            evidence = dict(evidence)
-            evidence["evaluation"] = {"state": automatic_state, "reason": automatic_reason}
-            state, state_reason, target_enabled = "paused", "manual_pause", False
         self.storage.upsert_forecast_ssf_candidate_with_workflow_target(
             stock_code=stock_code,
             market="A",
