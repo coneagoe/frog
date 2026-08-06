@@ -16,11 +16,15 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dags.common_dags import get_default_args  # noqa: E402, I001
+from dags.common_dags import LOCAL_TZ, get_default_args  # noqa: E402, I001
 from stock.market import is_a_share_trade_date  # noqa: E402
 
 
 def _as_of_date(context: dict[str, Any]) -> date:
+    data_interval_end = context.get("data_interval_end")
+    if data_interval_end is not None:
+        return data_interval_end.in_timezone(LOCAL_TZ).date()
+
     logical_date = context.get("logical_date") or context.get("execution_date")
     if isinstance(logical_date, datetime):
         return logical_date.date()

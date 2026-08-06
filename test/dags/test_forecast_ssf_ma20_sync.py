@@ -2,7 +2,7 @@ import importlib
 import json
 import sys
 import types
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
@@ -11,6 +11,18 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DAGS_DIR = ROOT / "dags"
+
+
+class FakeAirflowDateTime(datetime):
+    def in_timezone(self, tz):
+        return self.astimezone(tz)
+
+
+def monday_sync_context() -> dict[str, Any]:
+    return {
+        "data_interval_end": FakeAirflowDateTime(2026, 8, 10, 7, 5, tzinfo=timezone.utc),
+        "logical_date": FakeAirflowDateTime(2026, 8, 9, 7, 5, tzinfo=timezone.utc),
+    }
 
 
 class FakeAirflowSkipException(Exception):
@@ -72,21 +84,32 @@ def test_sync_task_skips_non_trading_day(monkeypatch, sync_module):
     monkeypatch.setattr("monitor.forecast_ssf_monitor_sync.ForecastSSFMonitorSyncService", service)
 
     with pytest.raises(FakeAirflowSkipException):
-        sync_module.sync_forecast_ssf_targets(logical_date=datetime(2026, 8, 8, 15, 5))
+        sync_module.sync_forecast_ssf_targets(**monday_sync_context())
 
     service.assert_not_called()
 
 
-def test_sync_task_uses_logical_date_and_returns_json(monkeypatch, sync_module):
+def test_sync_task_uses_interval_end_local_date_and_returns_json(monkeypatch, sync_module):
     monkeypatch.setattr(sync_module, "is_a_share_trade_date", lambda _: True)
     service = MagicMock()
     service.return_value.sync.return_value = {"success": True, "data": {"created": 1}}
     monkeypatch.setattr("monitor.forecast_ssf_monitor_sync.ForecastSSFMonitorSyncService", service)
 
-    result = sync_module.sync_forecast_ssf_targets(logical_date=datetime(2026, 8, 7, 15, 5))
+    result = sync_module.sync_forecast_ssf_targets(**monday_sync_context())
+
+    service.return_value.sync.assert_called_once_with(as_of_date=datetime(2026, 8, 10).date())
+    assert json.loads(result) == {"success": True, "data": {"created": 1}}
+
+
+def test_sync_task_falls_back_to_logical_date_without_interval_end(monkeypatch, sync_module):
+    monkeypatch.setattr(sync_module, "is_a_share_trade_date", lambda _: True)
+    service = MagicMock()
+    service.return_value.sync.return_value = {"success": True}
+    monkeypatch.setattr("monitor.forecast_ssf_monitor_sync.ForecastSSFMonitorSyncService", service)
+
+    sync_module.sync_forecast_ssf_targets(logical_date=datetime(2026, 8, 7, 15, 5))
 
     service.return_value.sync.assert_called_once_with(as_of_date=datetime(2026, 8, 7).date())
-    assert json.loads(result) == {"success": True, "data": {"created": 1}}
 
 
 def test_sync_task_raises_when_service_fails(monkeypatch, sync_module):
@@ -100,4 +123,4 @@ def test_sync_task_raises_when_service_fails(monkeypatch, sync_module):
     monkeypatch.setattr("monitor.forecast_ssf_monitor_sync.ForecastSSFMonitorSyncService", service)
 
     with pytest.raises(RuntimeError, match="STORAGE_ERROR: boom"):
-        sync_module.sync_forecast_ssf_targets(logical_date=datetime(2026, 8, 7, 15, 5))
+        sync_module.sync_forecast_ssf_targets(**monday_sync_context())
