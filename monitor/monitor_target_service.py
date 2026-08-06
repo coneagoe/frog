@@ -387,7 +387,7 @@ class MonitorTargetService:
             "frequency": getattr(target, "frequency", None),
             "reset_mode": getattr(target, "reset_mode", None),
             "enabled": getattr(target, "enabled", None),
-            "paused": getattr(target, "paused", False),
+            "paused": getattr(target, "paused", False) is True,
             "last_state": getattr(target, "last_state", None),
             "triggered_at": MonitorTargetService._to_iso(getattr(target, "triggered_at", None)),
             "created_at": MonitorTargetService._to_iso(getattr(target, "created_at", None)),

@@ -91,6 +91,29 @@ def test_get_target_returns_not_found_result():
     }
 
 
+def test_get_target_serializes_missing_paused_attribute_as_false():
+    target = MagicMock()
+    target.id = 1
+    target.stock_code = "600519"
+    target.market = "A"
+    target.condition = {"type": "price_threshold", "direction": "below", "value": 1500}
+    target.note = None
+    target.frequency = "daily"
+    target.reset_mode = "auto"
+    target.enabled = True
+    target.last_state = False
+    target.triggered_at = None
+    target.created_at = None
+    storage = MagicMock()
+    storage.get_monitor_target.return_value = target
+
+    result = MonitorTargetService(storage=storage).get_target(1)
+
+    assert result["success"] is True
+    assert result["data"]["paused"] is False
+    assert type(result["data"]["paused"]) is bool
+
+
 def test_list_targets_returns_serialized_targets():
     storage = MagicMock()
     storage.list_monitor_targets.return_value = [
