@@ -193,8 +193,11 @@ def test_sync_forecast_load_failure_mutates_nothing():
     with pytest.raises(RuntimeError, match="database unavailable"):
         ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
+    storage.list_forecast_ssf_candidates.assert_not_called()
+    storage.find_workflow_monitor_target.assert_not_called()
     storage.upsert_workflow_monitor_target.assert_not_called()
     storage.upsert_forecast_ssf_candidate.assert_not_called()
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -237,3 +240,86 @@ def test_sync_holder_failure_defers_one_stock_and_enables_another():
     assert result["data"]["errors"] == 1
     assert storage.upsert_forecast_ssf_candidate.call_args_list[0].kwargs["state"] == "deferred"
     assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["state"] == "eligible"
+
+
+def test_sync_retires_absent_daily_workflow_candidate_with_lifecycle_evidence():
+    storage = _storage(_forecasts("600002"))
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(
+            stock_code="600001",
+            report_end_date=date(2025, 12, 31),
+            monitor_target_id=17,
+            evidence={"forecast": {"ann_date": "2026-01-15"}},
+        )
+    ]
+    storage.find_workflow_monitor_target.side_effect = [None, _target(17, enabled=True)]
+    storage.load_latest_top10_floatholders.return_value = pd.DataFrame()
+    blackroom = MagicMock()
+    blackroom.is_banned.return_value = _blackroom()
+
+    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
+
+    assert result["data"]["disabled"] == 1
+    assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs == {
+        "stock_code": "600001",
+        "market": "A",
+        "report_end_date": date(2025, 12, 31),
+        "state": "ineligible",
+        "state_reason": "forecast_no_longer_qualified",
+        "evidence": {
+            "forecast": {"ann_date": "2026-01-15"},
+            "lifecycle": {"as_of_date": "2026-01-20", "reason": "forecast_no_longer_qualified"},
+        },
+        "workflow": "forecast_ssf_ma20",
+        "frequency": "daily",
+        "condition": {"type": "price_vs_ma", "direction": "above", "period": 20, "workflow": "forecast_ssf_ma20"},
+        "note": "业绩预增+社保基金+MA20",
+        "target_enabled": False,
+        "reset_last_state": False,
+    }
+
+
+def test_sync_empty_universe_retires_only_matching_daily_workflow_targets():
+    storage = _storage(_forecasts())
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(stock_code="600001", report_end_date=date(2025, 12, 31), monitor_target_id=17, evidence={}),
+        SimpleNamespace(stock_code="600002", report_end_date=date(2025, 12, 31), monitor_target_id=18, evidence={}),
+        SimpleNamespace(stock_code="600003", report_end_date=date(2025, 12, 31), monitor_target_id=19, evidence={}),
+    ]
+    storage.find_workflow_monitor_target.side_effect = [_target(17, enabled=True), None, None]
+
+    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+
+    assert result["data"]["disabled"] == 1
+    assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_count == 1
+    assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["stock_code"] == "600001"
+    storage.upsert_forecast_ssf_candidate.assert_not_called()
+
+
+def test_sync_retires_unlinked_absent_candidate_without_creating_target():
+    storage = _storage(_forecasts())
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(
+            stock_code="600001",
+            report_end_date=date(2025, 12, 31),
+            monitor_target_id=None,
+            evidence={"shareholder": {"matched_holder": "全国社保基金一一八组合"}},
+        )
+    ]
+
+    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+
+    storage.find_workflow_monitor_target.assert_not_called()
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
+    assert storage.upsert_forecast_ssf_candidate.call_args.kwargs == {
+        "stock_code": "600001",
+        "market": "A",
+        "report_end_date": date(2025, 12, 31),
+        "state": "ineligible",
+        "state_reason": "forecast_no_longer_qualified",
+        "evidence": {
+            "shareholder": {"matched_holder": "全国社保基金一一八组合"},
+            "lifecycle": {"as_of_date": "2026-01-20", "reason": "forecast_no_longer_qualified"},
+        },
+        "monitor_target_id": None,
+    }

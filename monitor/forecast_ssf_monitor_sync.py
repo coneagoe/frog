@@ -65,7 +65,54 @@ class ForecastSSFMonitorSyncService:
                 previous_candidate=previous_candidates.get(str(row[COL_STOCK_ID])),
                 summary=summary,
             )
+        self._retire_absent_candidates(
+            current_stock_codes={str(row[COL_STOCK_ID]) for row in forecasts.to_dict("records")},
+            previous_candidates=previous_candidates,
+            as_of_date=as_of_date,
+            summary=summary,
+        )
         return {"success": True, "code": "OK", "message": "forecast SSF monitor targets synchronized", "data": summary}
+
+    def _retire_absent_candidates(
+        self,
+        current_stock_codes: set[str],
+        previous_candidates: dict[str, Any],
+        as_of_date: date,
+        summary: dict[str, int],
+    ) -> None:
+        for stock_code, candidate in previous_candidates.items():
+            if stock_code in current_stock_codes:
+                continue
+            evidence = dict(getattr(candidate, "evidence", None) or {})
+            evidence["lifecycle"] = {
+                "as_of_date": as_of_date.isoformat(),
+                "reason": "forecast_no_longer_qualified",
+            }
+            target_id = getattr(candidate, "monitor_target_id", None)
+            if target_id is None:
+                self._persist(
+                    stock_code,
+                    candidate.report_end_date,
+                    "ineligible",
+                    "forecast_no_longer_qualified",
+                    evidence,
+                    None,
+                )
+                continue
+            target = self.storage.find_workflow_monitor_target(stock_code, "A", "daily", WORKFLOW_NAME)
+            if target is None or target.id != target_id:
+                continue
+            self._persist_with_target(
+                stock_code,
+                candidate.report_end_date,
+                "ineligible",
+                "forecast_no_longer_qualified",
+                evidence,
+                target,
+                False,
+                False,
+                summary,
+            )
 
     def _sync_candidate(
         self,
