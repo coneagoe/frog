@@ -2247,6 +2247,8 @@ class StorageDb:
             target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
             if target is None:
                 return None
+            if "condition" in updates and target.workflow and updates["condition"].get("workflow") != target.workflow:
+                raise ValueError(f"condition workflow marker must match {target.workflow!r}")
             for key, value in updates.items():
                 setattr(target, key, value)
             session.commit()
