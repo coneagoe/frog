@@ -2196,7 +2196,7 @@ class StorageDb:
         """创建监控目标。"""
         from .model.stock_monitor_target import StockMonitorTarget
 
-        if condition.get("workflow"):
+        if condition.get("workflow") is not None:
             self._ensure_workflow_monitor_target_identity()
         assert self.Session is not None
         session = self.Session()

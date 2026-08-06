@@ -191,6 +191,19 @@ def test_legacy_monitor_target_migration_reports_duplicate_workflow_owners_befor
     assert "uq_stock_monitor_targets_workflow_owner" not in index_names
 
 
+def test_empty_workflow_marker_enforces_unique_owner_and_manual_targets_remain_unrestricted(tmp_path):
+    db = _sqlite_storage(tmp_path)
+
+    db.create_monitor_target("600001", "A", {"workflow": ""}, note="empty workflow target")
+
+    with pytest.raises(IntegrityError):
+        db.create_monitor_target("600001", "A", {"workflow": ""}, note="duplicate empty workflow target")
+
+    manual = db.create_monitor_target("600001", "A", {"price": {"above": 10}}, note="manual target")
+
+    assert manual.workflow is None
+
+
 def test_workflow_monitor_target_rejects_duplicate_markers(tmp_path):
     db = _sqlite_storage(tmp_path)
     db.create_monitor_target("600001", "A", {"workflow": "forecast_ssf", "price": {"above": 10}}, note="first")
