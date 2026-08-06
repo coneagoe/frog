@@ -95,13 +95,14 @@ class ForecastSSFMonitorSyncService:
                 if stock_code not in listing_by_code or listing_by_code[stock_code].get(COL_LIST_STATUS) != "L"
                 else "forecast_no_longer_qualified"
             )
-            evidence = self._with_lifecycle(candidate, {}, as_of_date, "ineligible", reason)
+            state = "delisted_or_unlisted" if reason == "delisted_or_unlisted" else "ineligible"
+            evidence = self._with_lifecycle(candidate, {}, as_of_date, state, reason)
             target_id = getattr(candidate, "monitor_target_id", None)
             if target_id is None:
                 self._persist(
                     stock_code,
                     candidate.report_end_date,
-                    "ineligible",
+                    state,
                     reason,
                     evidence,
                     None,
@@ -114,7 +115,7 @@ class ForecastSSFMonitorSyncService:
                 self._persist(
                     stock_code,
                     candidate.report_end_date,
-                    "ineligible",
+                    state,
                     reason,
                     evidence,
                     None,
@@ -125,7 +126,7 @@ class ForecastSSFMonitorSyncService:
             self._persist_with_target(
                 stock_code,
                 candidate.report_end_date,
-                "ineligible",
+                state,
                 reason,
                 evidence,
                 target,
@@ -159,11 +160,14 @@ class ForecastSSFMonitorSyncService:
         }
         target = self.storage.find_workflow_monitor_target(stock_code, "A", "daily", WORKFLOW_NAME)
         target_id = getattr(target, "id", None)
+        if previous_candidate is not None and getattr(previous_candidate, "monitor_target_id", None) != target_id:
+            target = None
+            target_id = None
         if not listed:
             self._persist_with_target(
                 stock_code,
                 report_end_date,
-                "ineligible",
+                "delisted_or_unlisted",
                 "delisted_or_unlisted",
                 evidence,
                 target,
@@ -320,6 +324,18 @@ class ForecastSSFMonitorSyncService:
             return
 
         summary["ssf_matched"] += 1
+        if previous_candidate is not None and target is None:
+            self._persist(
+                stock_code,
+                report_end_date,
+                "eligible",
+                "ssf_holder_match",
+                evidence,
+                None,
+                previous_candidate,
+                as_of_date,
+            )
+            return
         effective_state = "paused" if getattr(target, "paused", False) else "eligible"
         reset_last_state = target is None or not (
             getattr(previous_candidate, "state", None) == effective_state

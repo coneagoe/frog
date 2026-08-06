@@ -1567,7 +1567,7 @@ class StorageDb:
             f'SELECT "{COL_STOCK_ID}", "{COL_LIST_STATUS}", "{COL_DELISTING_DATE}" '
             f'FROM {tb_name_a_stock_basic} WHERE "{COL_STOCK_ID}" IN :stock_codes'
         ).bindparams(bindparam("stock_codes", expanding=True))
-        return pd.read_sql(stmt, self.engine, params={"stock_codes": stock_codes})
+        return pd.read_sql(stmt, self.engine, params={"stock_codes": stock_codes})  # type: ignore[arg-type]
 
     def save_forecasts(self, df: pd.DataFrame) -> bool:
         prepared = df.rename(columns=COL_MAP_FORECAST).copy()
