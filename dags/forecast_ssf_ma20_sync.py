@@ -4,7 +4,7 @@ import json
 import os
 import sys
 from datetime import date, datetime
-from typing import Any
+from typing import Any, cast
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -23,7 +23,7 @@ from stock.market import is_a_share_trade_date  # noqa: E402
 def _as_of_date(context: dict[str, Any]) -> date:
     data_interval_end = context.get("data_interval_end")
     if data_interval_end is not None:
-        return data_interval_end.in_timezone(LOCAL_TZ).date()
+        return cast(date, data_interval_end.in_timezone(LOCAL_TZ).date())
 
     logical_date = context.get("logical_date") or context.get("execution_date")
     if isinstance(logical_date, datetime):
@@ -44,8 +44,7 @@ def sync_forecast_ssf_targets(**context: Any) -> str:
     result = ForecastSSFMonitorSyncService().sync(as_of_date=as_of_date)
     if not result.get("success"):
         raise RuntimeError(
-            f"forecast SSF target synchronization failed: {result.get('code', 'UNKNOWN')}: "
-            f"{result.get('message', '')}"
+            f"forecast SSF target synchronization failed: {result.get('code', 'UNKNOWN')}: {result.get('message', '')}"
         )
     return json.dumps(result, ensure_ascii=False)
 
