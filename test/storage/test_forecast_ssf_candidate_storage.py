@@ -137,6 +137,75 @@ def test_workflow_monitor_target_uses_only_matching_marker_and_preserves_id(tmp_
     assert len(db.list_monitor_targets()) == 3
 
 
+def test_pause_resume_migrates_legacy_targets_and_preserves_disabled_resume(tmp_path):
+    db = _legacy_monitor_target_storage(tmp_path)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO stock_monitor_targets (stock_code, market, condition, note)
+                VALUES ('600001', 'A', :condition, 'workflow target')
+                """
+            ),
+            {"condition": '{"workflow": "forecast_ssf"}'},
+        )
+
+    db.ensure_monitor_targets_table()
+
+    target = db.get_monitor_target(1)
+    assert target.paused is False
+    paused = db.set_workflow_monitor_target_paused(target.id, paused=True)
+    resumed = db.set_workflow_monitor_target_paused(target.id, paused=False)
+
+    assert (paused.paused, paused.enabled) == (True, False)
+    assert (resumed.paused, resumed.enabled) == (False, False)
+
+
+def test_pause_rejects_manual_target_without_mutation(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    manual = db.create_monitor_target("600001", "A", {"price": {"above": 10}})
+
+    with pytest.raises(ValueError, match="workflow"):
+        db.set_workflow_monitor_target_paused(manual.id, paused=True)
+
+    assert db.get_monitor_target(manual.id).enabled is True
+
+
+def test_pause_returns_none_for_missing_target(tmp_path):
+    db = _sqlite_storage(tmp_path)
+
+    assert db.set_workflow_monitor_target_paused(1, paused=True) is None
+
+
+def test_paused_workflow_target_stays_disabled_on_automatic_upsert(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = db.upsert_workflow_monitor_target(
+        "600001",
+        "A",
+        "daily",
+        "forecast_ssf",
+        {"workflow": "forecast_ssf"},
+        "workflow",
+        enabled=True,
+        reset_last_state=False,
+    )
+    db.set_workflow_monitor_target_paused(target.id, paused=True)
+
+    updated = db.upsert_workflow_monitor_target(
+        "600001",
+        "A",
+        "daily",
+        "forecast_ssf",
+        {"workflow": "forecast_ssf", "version": 2},
+        "updated workflow",
+        enabled=True,
+        reset_last_state=False,
+    )
+
+    assert updated.paused is True
+    assert updated.enabled is False
+
+
 def test_legacy_monitor_target_migration_backfills_empty_workflow_before_orm_access(tmp_path):
     db = _legacy_monitor_target_storage(tmp_path)
     with db.engine.begin() as conn:

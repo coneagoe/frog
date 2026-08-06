@@ -46,6 +46,13 @@ class StockMonitorTarget(Base):
         server_default=text("true"),
         comment="是否启用",
     )
+    paused: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        comment="是否由操作员暂停自动启用",
+    )
     last_state: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
