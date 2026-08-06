@@ -159,8 +159,9 @@ class ForecastSSFMonitorSyncService:
             "blackroom": {"banned": banned},
         }
         target = self.storage.find_workflow_monitor_target(stock_code, "A", "daily", WORKFLOW_NAME)
+        target_found = target is not None
         target_id = getattr(target, "id", None)
-        if previous_candidate is not None and getattr(previous_candidate, "monitor_target_id", None) != target_id:
+        if previous_candidate is None or getattr(previous_candidate, "monitor_target_id", None) != target_id:
             target = None
             target_id = None
         if not listed:
@@ -324,7 +325,7 @@ class ForecastSSFMonitorSyncService:
             return
 
         summary["ssf_matched"] += 1
-        if previous_candidate is not None and target is None:
+        if target is None and (previous_candidate is not None or target_found):
             self._persist(
                 stock_code,
                 report_end_date,

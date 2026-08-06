@@ -47,7 +47,7 @@ For each current candidate:
 3. A fresh disclosure without an SSF match persists `ineligible` and disables only the matching workflow target.
 4. A fresh SSF match persists `eligible` and enables the matching workflow target unless it is paused. A paused target instead persists `paused`, updates evidence with the evaluated eligible result, and remains disabled.
 
-After current candidates are processed, the synchronizer retires persisted workflow candidates not represented by the current qualified universe. It also compares reporting periods: when a current stock has a newer report end date, the older candidate is persisted as `ineligible` with `reporting_period_superseded` and its matching daily workflow target is disabled. The current period is then evaluated normally. Retirement never deletes target or candidate rows.
+After current candidates are processed, the synchronizer retires persisted workflow candidates not represented by the current qualified universe. It also compares reporting periods: when a current stock has a newer report end date, the older candidate is persisted as `ineligible` with `reporting_period_superseded` and its matching daily workflow target is disabled. The new period is evaluated on the next successful synchronization, not the same run. Retirement never deletes target or candidate rows.
 
 Before changing an existing workflow target, the synchronizer verifies its durable workflow identity, stock, market, frequency, and candidate linkage. Missing or mismatched links transition only the candidate without creating or modifying a target.
 
