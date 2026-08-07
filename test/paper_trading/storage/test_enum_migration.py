@@ -184,12 +184,11 @@ def test_apply_leaves_preconverted_group_columns_defaults_and_indexes_untouched(
             connection.execute(text(f"DROP INDEX {index_name}"))
             connection.execute(text(f"ALTER TABLE {table_name} ALTER COLUMN market DROP DEFAULT"))
             connection.execute(
-                text(
-                    f"ALTER TABLE {table_name} ALTER COLUMN market TYPE paper_market "
-                    "USING market::text::paper_market"
-                )
+                text(f"ALTER TABLE {table_name} ALTER COLUMN market TYPE paper_market USING market::text::paper_market")
             )
-            connection.execute(text(f"ALTER TABLE {table_name} ALTER COLUMN market SET DEFAULT 'a_share'::paper_market"))
+            connection.execute(
+                text(f"ALTER TABLE {table_name} ALTER COLUMN market SET DEFAULT 'a_share'::paper_market")
+            )
             connection.execute(text(f"CREATE INDEX {index_name} ON {table_name} (market)"))
 
         @event.listens_for(connection, "before_cursor_execute")
