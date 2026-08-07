@@ -200,10 +200,11 @@ def test_direct_storage_create_rejects_invalid_condition_before_commit(tmp_path)
 @pytest.mark.parametrize("field,value", [("market", "US"), ("frequency", "weekly"), ("reset_mode", "never")])
 def test_direct_monitor_storage_rejects_unknown_finite_values(tmp_path, field, value):
     db = _sqlite_storage(tmp_path)
-    kwargs = {field: value}
+    kwargs = {"market": "A", "frequency": "daily", "reset_mode": "auto"}
+    kwargs[field] = value
 
     with pytest.raises(ValueError):
-        db.create_monitor_target("600001", "A", _typed_condition(), **kwargs)
+        db.create_monitor_target("600001", condition=_typed_condition(), **kwargs)
 
 
 def test_forecast_candidate_storage_rejects_unknown_state(tmp_path):
