@@ -83,6 +83,23 @@ paper_trading_enum_is_needed() {
   esac
 }
 
+paper_trading_enum_can_be_dropped() {
+  local type_name="$1"
+  local table_name="$2"
+
+  [[ -z "$table_name" ]] && return 0
+  paper_trading_enum_is_needed "$type_name" "$table_name" || return 1
+
+  case "$type_name" in
+    paper_order_side|paper_trade_validity_status|paper_market|paper_position_source)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
 # Common database configuration defaults
 DEFAULT_MODE="docker"
 DEFAULT_SERVICE="db"

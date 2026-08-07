@@ -126,9 +126,13 @@ if [[ -z "$OUT_FILE" ]]; then
 fi
 
 SELECTED_ENUM_TYPES=()
+CLEAN_ENUM_TYPES=()
 for type_name in "${PAPER_TRADING_ENUM_TYPES[@]}"; do
   if paper_trading_enum_is_needed "$type_name" "$TABLE_NAME"; then
     SELECTED_ENUM_TYPES+=("$type_name")
+  fi
+  if paper_trading_enum_can_be_dropped "$type_name" "$TABLE_NAME"; then
+    CLEAN_ENUM_TYPES+=("$type_name")
   fi
 done
 
@@ -188,11 +192,14 @@ run_export_docker() {
           printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "${BUSINESS_TABLES[index]}" >>"$ENUM_DDL_FILE"
         done
       fi
-      for ((index=${#SELECTED_ENUM_TYPES[@]} - 1; index >= 0; index--)); do
-        printf 'DROP TYPE IF EXISTS "%s"."%s";\n' "$SCHEMA" "${SELECTED_ENUM_TYPES[index]}" >>"$ENUM_DDL_FILE"
+      for ((index=${#CLEAN_ENUM_TYPES[@]} - 1; index >= 0; index--)); do
+        printf 'DROP TYPE IF EXISTS "%s"."%s";\n' "$SCHEMA" "${CLEAN_ENUM_TYPES[index]}" >>"$ENUM_DDL_FILE"
       done
     fi
     for type_name in "${SELECTED_ENUM_TYPES[@]}"; do
+      if [[ $CLEAN -eq 1 ]] && ! paper_trading_enum_can_be_dropped "$type_name" "$TABLE_NAME"; then
+        continue
+      fi
       local enum_labels_file
       enum_labels_file="$(mktemp)"
       # shellcheck disable=SC2086

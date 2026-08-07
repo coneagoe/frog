@@ -101,7 +101,7 @@ DROP_SQL=""
 if [[ $CLEAN -eq 1 ]]; then
   SELECTED_ENUM_TYPES=()
   for type_name in "${PAPER_TRADING_ENUM_TYPES[@]}"; do
-    if paper_trading_enum_is_needed "$type_name" "$TABLE_NAME"; then
+    if paper_trading_enum_can_be_dropped "$type_name" "$TABLE_NAME"; then
       SELECTED_ENUM_TYPES+=("$type_name")
     fi
   done

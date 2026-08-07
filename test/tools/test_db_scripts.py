@@ -22,7 +22,7 @@ PAPER_ENUM_TYPES = (
 
 def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str, str]:
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     log_file = tmp_path / "commands.log"
     docker = bin_dir / "docker"
     docker.write_text(
@@ -117,6 +117,25 @@ def test_clean_matching_export_drops_before_recreating_enum(tmp_path: Path):
     command = (tmp_path / "commands.log").read_text(encoding="utf-8")
     assert "--table=public.paper_matching_runs" in command
     assert "--clean" not in command
+
+
+def test_clean_paper_orders_preserves_shared_enum_types(tmp_path: Path):
+    output_file = tmp_path / "orders.sql"
+    input_file = tmp_path / "orders-input.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    _run_script(
+        "db_export.sh",
+        ["--no-gzip", "--clean", "--table", "paper_orders", "--out", str(output_file)],
+        tmp_path,
+    )
+    _run_script("db_import.sh", ["--clean", "--table", "paper_orders", "--in", str(input_file)], tmp_path)
+
+    dump = output_file.read_text(encoding="utf-8")
+    drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
+    assert 'DROP TYPE IF EXISTS "public"."paper_market"' not in dump
+    assert 'CREATE TYPE "public"."paper_market"' not in dump
+    assert 'DROP TYPE IF EXISTS "public"."paper_market"' not in drop_sql
 
 
 def test_clean_full_matching_export_retains_business_table_selection(tmp_path: Path):
