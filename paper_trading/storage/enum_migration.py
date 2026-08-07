@@ -324,6 +324,7 @@ def _migrate(
             _create_type(connection, group)
             _alter_group(connection, group, rollback=False)
     _verify(connection, groups, rollback=False)
+    _create_missing_tables(connection, set())
     return result(converted=changed)
 
 
@@ -366,6 +367,8 @@ def _create_missing_tables(connection: Connection, missing_tables: set[str]) -> 
         for table in _GOVERNED_TABLES
         if table.name in missing_tables or (table in _OPERATIONAL_TABLES and not _table_exists(connection, table.name))
     ]
+    if not tables:
+        return
     # Metadata creates the mapped native types and respects foreign-key order.
     tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
 

@@ -564,9 +564,11 @@ replacing an existing shared type.
 
 On a fresh PostgreSQL schema, the migration creates the governed Paper Trading
 tables and the dependent operational `paper_account_snapshots` and
-`paper_valuation_gaps` tables. Normal PostgreSQL storage startup intentionally
-does not create or convert those governed tables; use the migration command for
-that explicit schema change.
+`paper_valuation_gaps` tables. A successful non-rollback migration also
+restores either missing dependent operational table after converting or
+verifying an otherwise complete governed schema. Normal PostgreSQL storage
+startup intentionally does not create or convert those governed tables; use the
+migration command for that explicit schema change.
 
 `db_export.sh --clean --table NAME` is unsupported. To recover a selected table
 into a clean destination, use `db_import.sh --clean --table NAME`; it refuses
