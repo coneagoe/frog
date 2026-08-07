@@ -552,6 +552,17 @@ The unified Paper Trading enum migration follows the enum evolution policy in
 window with every business writer stopped while PostgreSQL remains running. Keep
 the verified backup and all command output together in the maintenance record.
 
+The governed types are `paper_account_status`, `paper_fee_preset`,
+`paper_cash_event_type`, `paper_order_side`, `paper_order_status`,
+`paper_trade_validity_status`, `paper_market`, `paper_position_source`,
+`paper_round_trip_status`, `paper_trade_validity_granularity`,
+`paper_pending_settlement_source`, `paper_ledger_rebuild_status`, and
+`paper_matching_run_status`. Full backups include their definitions before the
+dependent table dumps. A selected-table clean backup retains types shared by
+unselected tables, but includes duplicate-safe type creation so the dump can
+also restore into a blank schema. Selected-table clean restore therefore does
+not replace an existing shared type.
+
 1. Preview the conversion without changing the database:
 
    ```bash

@@ -9,7 +9,6 @@ from paper_trading.storage.enum_migration import (
     PAPER_TRADING_ENUM_GROUPS,
     PaperTradingEnumMigrationError,
     _migrate,
-    migrate_paper_trading_enums,
 )
 
 MATCHING_STATUS_LABELS = ("running", "completed", "completed_with_warnings", "failed")
@@ -71,7 +70,7 @@ def bootstrap_paper_matching_run_status(
                 observed_legacy_values=(),
                 index_verified=False,
             )
-        migration = migrate_paper_trading_enums(connection)
+        migrate_paper_matching_status_enum(connection)
         return MatchingStatusBootstrapResult(
             dry_run=False,
             table_exists=False,

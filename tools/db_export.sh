@@ -197,17 +197,14 @@ run_export_docker() {
       done
     fi
     for type_name in "${SELECTED_ENUM_TYPES[@]}"; do
-      if [[ $CLEAN -eq 1 ]] && ! paper_trading_enum_can_be_dropped "$type_name" "$TABLE_NAME"; then
-        continue
-      fi
       local enum_labels_file
       enum_labels_file="$(mktemp)"
       # shellcheck disable=SC2086
       $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -v "schema=$SCHEMA" -v "type=$type_name" -At -c "$enum_query" >"$enum_labels_file"
       if [[ -s "$enum_labels_file" ]]; then
-        printf 'CREATE TYPE "%s"."%s" AS ENUM (' "$SCHEMA" "$type_name" >>"$ENUM_DDL_FILE"
+        printf 'DO $$ BEGIN CREATE TYPE "%s"."%s" AS ENUM (' "$SCHEMA" "$type_name" >>"$ENUM_DDL_FILE"
         paste -sd, "$enum_labels_file" >>"$ENUM_DDL_FILE"
-        printf ');\n' >>"$ENUM_DDL_FILE"
+        printf '); EXCEPTION WHEN duplicate_object THEN NULL; END $$;\n' >>"$ENUM_DDL_FILE"
       fi
       rm -f "$enum_labels_file"
     done

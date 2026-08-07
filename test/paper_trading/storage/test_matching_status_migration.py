@@ -119,6 +119,18 @@ def test_postgresql_bootstrap_creates_fresh_enum_table_and_index(empty_postgres_
         assert (
             connection.execute(text("SELECT to_regclass('paper_matching_runs')")).scalar_one() == "paper_matching_runs"
         )
+        assert connection.execute(text("SELECT to_regclass('paper_orders')")).scalar_one() is None
+        enum_names = (
+            connection.execute(
+                text(
+                    "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+                    "WHERE n.nspname = current_schema() AND t.typname LIKE 'paper_%' ORDER BY t.typname"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert enum_names == ["paper_matching_run_status"]
 
 
 def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_schema):
@@ -167,12 +179,16 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
         reset_storage()
         StorageDb(config)
         with _connection(engine, schema) as connection:
-            enum_names = connection.execute(
-                text(
-                    "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
-                    "WHERE n.nspname = current_schema() AND t.typname LIKE 'paper_%'"
+            enum_names = (
+                connection.execute(
+                    text(
+                        "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+                        "WHERE n.nspname = current_schema() AND t.typname LIKE 'paper_%'"
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             status_type = connection.execute(
                 text(
                     "SELECT a.atttypid::regtype::text FROM pg_attribute a "
@@ -186,9 +202,7 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
                 text("SELECT to_regclass('paper_account_snapshots')")
             ).scalar_one()
             paper_valuation_gaps = connection.execute(text("SELECT to_regclass('paper_valuation_gaps')")).scalar_one()
-            daily_bar_diagnostics = connection.execute(
-                text("SELECT to_regclass('daily_bar_diagnostics')")
-            ).scalar_one()
+            daily_bar_diagnostics = connection.execute(text("SELECT to_regclass('daily_bar_diagnostics')")).scalar_one()
     finally:
         reset_storage()
         storage_db_module._metadata_initialized_pids.discard(os.getpid())

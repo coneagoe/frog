@@ -29,10 +29,10 @@ def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str,
         "#!/usr/bin/env bash\n"
         'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"\n'
         "if [[ \"$*\" == *' psql '* && \"$*\" == *' -c '* ]]; then\n"
-        "  for argument in \"$@\"; do\n"
-        "    [[ \"$argument\" == type=* ]] && type_name=\"${argument#type=}\"\n"
+        '  for argument in "$@"; do\n'
+        '    [[ "$argument" == type=* ]] && type_name="${argument#type=}"\n'
         "  done\n"
-        "  printf \"'%s_label'\\n\" \"$type_name\"\n"
+        '  printf "\'%s_label\'\\n" "$type_name"\n'
         "else\n"
         "  printf '%s\\n' '-- dump output'\n"
         "fi\n",
@@ -134,8 +134,10 @@ def test_clean_paper_orders_preserves_shared_enum_types(tmp_path: Path):
     dump = output_file.read_text(encoding="utf-8")
     drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
     assert 'DROP TYPE IF EXISTS "public"."paper_market"' not in dump
-    assert 'CREATE TYPE "public"."paper_market"' not in dump
     assert 'DROP TYPE IF EXISTS "public"."paper_market"' not in drop_sql
+    for type_name in ("paper_order_side", "paper_trade_validity_status", "paper_market"):
+        assert f'CREATE TYPE "public"."{type_name}" AS ENUM' in dump
+    assert "EXCEPTION WHEN duplicate_object THEN NULL" in dump
 
 
 def test_clean_full_matching_export_retains_business_table_selection(tmp_path: Path):
