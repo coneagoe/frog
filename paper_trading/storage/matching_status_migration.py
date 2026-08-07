@@ -41,6 +41,7 @@ class MatchingStatusBootstrapResult:
     dry_run: bool
     table_exists: bool
     table_created: bool
+    status_column_type: str | None
     converted: bool
     labels: tuple[str, ...]
     observed_legacy_values: tuple[str | None, ...]
@@ -55,6 +56,7 @@ def bootstrap_paper_matching_run_status(
             dry_run=dry_run,
             table_exists=False,
             table_created=False,
+            status_column_type=None,
             converted=False,
             labels=MATCHING_STATUS_LABELS,
             observed_legacy_values=(),
@@ -68,6 +70,7 @@ def bootstrap_paper_matching_run_status(
                 dry_run=True,
                 table_exists=False,
                 table_created=False,
+                status_column_type=None,
                 converted=False,
                 labels=MATCHING_STATUS_LABELS,
                 observed_legacy_values=(),
@@ -79,6 +82,7 @@ def bootstrap_paper_matching_run_status(
             dry_run=False,
             table_exists=False,
             table_created=True,
+            status_column_type=_status_column_type(connection),
             converted=migration.converted,
             labels=migration.labels,
             observed_legacy_values=(),
@@ -91,16 +95,31 @@ def bootstrap_paper_matching_run_status(
             text(f"SELECT DISTINCT status FROM {_TABLE_NAME} ORDER BY status NULLS FIRST")
         ).all()
     )
+    status_column_type = _status_column_type(connection)
     migration = migrate_paper_matching_status_enum(connection, dry_run=dry_run)
     return MatchingStatusBootstrapResult(
         dry_run=dry_run,
         table_exists=True,
         table_created=False,
+        status_column_type=status_column_type,
         converted=migration.converted,
         labels=migration.labels,
         observed_legacy_values=observed_legacy_values,
         index_verified=migration.index_verified,
     )
+
+
+def _status_column_type(connection: Connection) -> str | None:
+    return connection.execute(
+        text(
+            "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = current_schema() AND c.relname = :table_name "
+            "AND a.attname = 'status' AND a.attnum > 0 AND NOT a.attisdropped"
+        ),
+        {"table_name": _TABLE_NAME},
+    ).scalar_one_or_none()
 
 
 def migrate_paper_matching_status_enum(

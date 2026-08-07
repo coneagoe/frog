@@ -49,6 +49,7 @@ def _result(*, dry_run: bool) -> MatchingStatusBootstrapResult:
         dry_run=dry_run,
         table_exists=True,
         table_created=False,
+        status_column_type="character varying",
         converted=not dry_run,
         labels=("running", "completed", "completed_with_warnings", "failed"),
         observed_legacy_values=("completed", "running"),
@@ -88,7 +89,8 @@ def test_main_emits_stable_human_result(monkeypatch, capsys):
 
     assert capsys.readouterr().out == (
         "dry_run=false table_exists=true table_created=false converted=true index_verified=true "
-        "labels=running,completed,completed_with_warnings,failed observed_legacy_values=completed,running\n"
+        "status_column_type=character varying labels=running,completed,completed_with_warnings,failed "
+        "observed_legacy_values=completed,running\n"
     )
 
 
@@ -115,6 +117,7 @@ def test_main_emits_json_and_forwards_dry_run(monkeypatch, capsys):
         "observed_legacy_values": ["completed", "running"],
         "table_created": False,
         "table_exists": True,
+        "status_column_type": "character varying",
     }
 
 

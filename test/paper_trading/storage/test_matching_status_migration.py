@@ -97,6 +97,7 @@ def test_postgresql_bootstrap_dry_run_reports_missing_table_without_ddl(empty_po
 
         assert result.table_exists is False
         assert result.table_created is False
+        assert result.status_column_type is None
         assert result.labels == LABELS
         assert result.observed_legacy_values == ()
         assert result.index_verified is False
@@ -110,6 +111,7 @@ def test_postgresql_bootstrap_creates_fresh_enum_table_and_index(empty_postgres_
 
         assert result.table_exists is False
         assert result.table_created is True
+        assert result.status_column_type == "paper_matching_run_status"
         assert result.converted is False
         assert result.labels == LABELS
         assert result.observed_legacy_values == ()
@@ -134,6 +136,7 @@ def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_s
 
     assert dry_run.table_exists is True
     assert dry_run.table_created is False
+    assert dry_run.status_column_type == "character varying(32)"
     assert dry_run.converted is True
     assert dry_run.observed_legacy_values == ("completed", "running")
     assert first.converted is True

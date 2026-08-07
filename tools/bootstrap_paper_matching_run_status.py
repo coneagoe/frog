@@ -41,6 +41,7 @@ def _print_result(result: MatchingStatusBootstrapResult, *, json_output: bool) -
         f"table_created={str(result.table_created).lower()} "
         f"converted={str(result.converted).lower()} "
         f"index_verified={str(result.index_verified).lower()} "
+        f"status_column_type={result.status_column_type or 'none'} "
         f"labels={','.join(result.labels)} "
         f"observed_legacy_values={','.join(value or 'NULL' for value in result.observed_legacy_values)}"
     )
