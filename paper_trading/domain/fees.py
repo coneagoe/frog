@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from paper_trading.domain.enums import OrderSide
+from paper_trading.domain.enums import FeePreset, OrderSide
 
 CENT = Decimal("0.01")
 
@@ -36,17 +36,17 @@ def quantize_money(value: Decimal) -> Decimal:
     return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
-DEFAULT_FEE_PRESET = "a_share"
-FEE_PRESETS: dict[str, FeeConfig] = {
+DEFAULT_FEE_PRESET = FeePreset.A_SHARE
+FEE_PRESETS: dict[FeePreset, FeeConfig] = {
     DEFAULT_FEE_PRESET: FeeConfig(),
 }
 
 
-def get_fee_preset(name: str | None = None) -> FeeConfig:
+def get_fee_preset(name: str | FeePreset | None = None) -> FeeConfig:
     preset_name = name or DEFAULT_FEE_PRESET
     try:
-        return FEE_PRESETS[preset_name]
-    except KeyError as exc:
+        return FEE_PRESETS[FeePreset(preset_name)]
+    except (KeyError, ValueError) as exc:
         raise ValueError(f"unknown fee preset: {preset_name}") from exc
 
 

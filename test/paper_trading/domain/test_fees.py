@@ -2,8 +2,25 @@ from decimal import Decimal
 
 import pytest
 
-from paper_trading.domain.enums import OrderSide
+from paper_trading.domain.enums import (
+    FeePreset,
+    LedgerRebuildStatus,
+    OrderSide,
+    PendingSettlementSource,
+    PositionSource,
+    RoundTripStatus,
+    TradeValidityGranularity,
+)
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, FEE_PRESETS, FeeConfig, calculate_a_share_fees
+
+
+def test_paper_trading_new_enum_values_are_canonical():
+    assert [item.value for item in FeePreset] == ["a_share"]
+    assert [item.value for item in PositionSource] == ["trade", "imported"]
+    assert [item.value for item in PendingSettlementSource] == ["hk_sell"]
+    assert [item.value for item in RoundTripStatus] == ["open", "closed"]
+    assert [item.value for item in TradeValidityGranularity] == ["daily"]
+    assert [item.value for item in LedgerRebuildStatus] == ["completed"]
 
 
 def test_buy_fee_uses_minimum_commission_and_transfer_fee():

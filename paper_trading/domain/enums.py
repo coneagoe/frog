@@ -48,6 +48,32 @@ class TradeValidityStatus(StrEnum):
     UNCHECKED = "unchecked"
 
 
+class FeePreset(StrEnum):
+    A_SHARE = "a_share"
+
+
+class PositionSource(StrEnum):
+    TRADE = "trade"
+    IMPORTED = "imported"
+
+
+class PendingSettlementSource(StrEnum):
+    HK_SELL = "hk_sell"
+
+
+class RoundTripStatus(StrEnum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
+class TradeValidityGranularity(StrEnum):
+    DAILY = "daily"
+
+
+class LedgerRebuildStatus(StrEnum):
+    COMPLETED = "completed"
+
+
 # Marker prefix for rejection reasons set by OrderDeleteService replay.
 # reset_orders_for_replay uses this to distinguish replay-induced rejections
 # (which may become resolvable after a later delete) from original/business
