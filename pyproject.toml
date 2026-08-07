@@ -92,16 +92,6 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 
-# Exclude app directory
-[[tool.mypy.overrides]]
-module = "app.*"
-ignore_errors = true
-
-# Exclude frog_server.py
-[[tool.mypy.overrides]]
-module = "frog_server"
-ignore_errors = true
-
 # Exclude tools directory
 [[tool.mypy.overrides]]
 module = "tools.*"
@@ -144,12 +134,7 @@ ignore_missing_imports = true
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["tqsdk.*"]
-ignore_missing_imports = true
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = ["pandas_market_calendars", "pandas_market_calendars.*"]
+module = ["pandas_market_calendars"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

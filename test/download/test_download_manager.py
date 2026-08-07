@@ -48,6 +48,7 @@ class TestDownloadManager:
         downloader.dl_forecast.assert_called_once_with(ann_date="2025-01-01")
         storage.save_forecasts.assert_called_once_with(forecast)
         assert result is True
+
     def test_all_empty_providers_create_missing_market_data_outcome(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         storage.get_last_record.return_value = None

@@ -54,6 +54,7 @@ from storage.model import (  # noqa: E402
     tb_name_ingredient_500,
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
+    tb_name_paper_matching_runs,
     tb_name_paper_orders,
     tb_name_paper_positions,
     tb_name_paper_trade_validity_checks,
@@ -370,6 +371,22 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
 
     with Session(storage.engine) as session:
         assert session.query(PaperAccount).order_by(PaperAccount.id).one().hk_commission_rate is None
+
+
+def test_ensure_paper_trading_schema_runs_matching_status_migration(storage, monkeypatch, paper_trading_schema_upgrade):
+    migration = Mock()
+    monkeypatch.setattr(
+        "paper_trading.storage.matching_status_migration.migrate_paper_matching_status_enum",
+        migration,
+    )
+    monkeypatch.setattr(storage.engine.dialect, "name", "postgresql")
+    inspector = Mock()
+    inspector.has_table.side_effect = lambda table_name: table_name == tb_name_paper_matching_runs
+    monkeypatch.setattr("storage.storage_db.inspect", Mock(return_value=inspector))
+
+    storage.ensure_paper_trading_schema()
+
+    migration.assert_called_once()
 
 
 def test_ensure_a_stock_basic_schema_widens_legacy_controller_name(storage, monkeypatch, a_stock_basic_schema_upgrade):

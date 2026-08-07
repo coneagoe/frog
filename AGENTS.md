@@ -64,6 +64,7 @@ uv run pytest test/monitor/test_monitor_runner.py
 - Prefer storage helpers exported by `storage` over imports from its internal modules.
 - `DOWNLOAD_PROCESS_COUNT` controls DAG partition fan-out and defaults to `4` in `dags/common_dags.py`.
 - Preserve script-style entrypoints in `tools/`, `task/`, and `backtest/`; other modules may invoke them.
+- Fields representing finite, closed sets of business values must use enums rather than string types. See `docs/database_design.md` for enum, JSON, migration, rollback, and verification requirements.
 
 ## Testing Patterns
 - Mock external providers (`akshare`, `baostock`, `tushare`) instead of live calls.
