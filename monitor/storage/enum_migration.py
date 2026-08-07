@@ -82,11 +82,12 @@ MONITOR_ENUM_GROUPS = (
 _GOVERNED_TABLES = (StockMonitorTarget.__table__, ForecastSSFCandidate.__table__)
 _CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
 _CONDITION_CHECK_SQL = (
-    "CHECK (jsonb_typeof(condition) = 'object' AND condition->>'type' IN "
+    "CHECK (jsonb_typeof(condition) = 'object' AND condition ? 'type' "
+    "AND condition->>'type' IS NOT NULL AND condition->>'type' IN "
     "('price_threshold', 'price_cross_ma', 'price_vs_ma', 'ma_cross', 'change_pct', 'rsi'))"
 )
 _NORMALIZED_CONDITION_CHECK = (
-    "checkjsonb_typeofcondition='object'andcondition->>'type'=anyarray["
+    "checkjsonb_typeofcondition='object'andcondition?'type'andcondition->>'type'isnotnullandcondition->>'type'=anyarray["
     "'price_threshold','price_cross_ma','price_vs_ma','ma_cross','change_pct','rsi']"
 )
 
@@ -156,6 +157,7 @@ def _preflight(connection: Connection, *, rollback: bool) -> None:
             _validate_default(connection, group, column, rollback=type_name != group.type_name)
             if not rollback and type_name != group.type_name:
                 _validate_values(connection, group, column)
+    _validate_legacy_conditions(connection)
     if rollback:
         check_required = any(
             _column_has_type(connection, column, group.type_name)
@@ -164,7 +166,6 @@ def _preflight(connection: Connection, *, rollback: bool) -> None:
         )
         _validate_condition_check(connection, required=check_required)
     else:
-        _validate_legacy_conditions(connection)
         _validate_condition_check(connection, required=False)
 
 

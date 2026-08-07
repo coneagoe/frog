@@ -228,6 +228,16 @@ def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schem
             "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
             "VALUES (1, '600001', 'A', '{\"type\": \"unknown\"}'::jsonb, 'daily', 'auto')",
         )
+        _assert_insert_rejected(
+            connection,
+            "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
+            "VALUES (1, '600001', 'A', '{\"direction\": \"above\", \"value\": 10}'::jsonb, 'daily', 'auto')",
+        )
+        _assert_insert_rejected(
+            connection,
+            "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
+            "VALUES (1, '600001', 'A', '{\"type\": null}'::jsonb, 'daily', 'auto')",
+        )
 
 
 def test_second_apply_is_idempotent(postgres_schema):
@@ -251,6 +261,25 @@ def test_rollback_rejects_non_column_enum_dependency_before_drop(postgres_schema
         with pytest.raises(MonitorEnumMigrationError, match="monitor_market: dependencies remain"):
             migrate_monitor_enums(connection, rollback=True)
 
+        assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+        assert _check_exists(connection)
+
+
+def test_rollback_rejects_invalid_condition_before_altering_columns(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_monitor_enums(connection)
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
+                'VALUES (1, \'600001\', \'A\', \'{"type": "ma_cross", "direction": "golden", "fast": 20, "slow": 10}\'::jsonb, \'daily\', \'auto\')'
+            )
+        )
+
+        with pytest.raises(MonitorEnumMigrationError, match="condition for"):
+            migrate_monitor_enums(connection, rollback=True)
+
+        assert _column_type(connection, "stock_monitor_targets", "market") == "monitor_market"
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         assert _check_exists(connection)
 
