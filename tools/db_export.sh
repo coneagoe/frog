@@ -8,8 +8,8 @@ usage() {
   cat <<'USAGE'
 Export business tables from PostgreSQL as plain SQL using pg_dump.
 
-Exports of paper_matching_runs include the matching-run status enum definition
-before the table dump.
+Exports include required Paper Trading enum definitions before dependent table
+dumps.
 
 Uses Docker (docker compose exec db). Output is plain SQL suitable for psql restore.
 
@@ -125,10 +125,12 @@ if [[ -z "$OUT_FILE" ]]; then
   fi
 fi
 
-EXPORTS_MATCHING_RUNS=0
-if [[ -z "$TABLE_NAME" || "$TABLE_NAME" == "$PAPER_MATCHING_RUNS_TABLE" ]]; then
-  EXPORTS_MATCHING_RUNS=1
-fi
+SELECTED_ENUM_TYPES=()
+for type_name in "${PAPER_TRADING_ENUM_TYPES[@]}"; do
+  if paper_trading_enum_is_needed "$type_name" "$TABLE_NAME"; then
+    SELECTED_ENUM_TYPES+=("$type_name")
+  fi
+done
 
 # Build pg_dump args
 DUMP_ARGS=(
@@ -138,7 +140,7 @@ DUMP_ARGS=(
   --verbose
 )
 
-if [[ $CLEAN -eq 1 && $EXPORTS_MATCHING_RUNS -eq 0 ]]; then
+if [[ $CLEAN -eq 1 && ${#SELECTED_ENUM_TYPES[@]} -eq 0 ]]; then
   DUMP_ARGS+=(--clean --if-exists)
 fi
 
@@ -152,7 +154,7 @@ else
 fi
 
 ENUM_DDL_FILE=""
-if [[ $EXPORTS_MATCHING_RUNS -eq 1 ]]; then
+if [[ ${#SELECTED_ENUM_TYPES[@]} -gt 0 ]]; then
   ENUM_DDL_FILE="$(mktemp)"
   trap 'rm -f "$ENUM_DDL_FILE"' EXIT
 fi
@@ -175,29 +177,33 @@ run_export_docker() {
     export PGPASSWORD="$DB_PASSWORD"
   fi
 
-  if [[ $EXPORTS_MATCHING_RUNS -eq 1 ]]; then
+  if [[ ${#SELECTED_ENUM_TYPES[@]} -gt 0 ]]; then
     local enum_query
     enum_query="SELECT quote_literal(e.enumlabel) FROM pg_enum AS e JOIN pg_type AS t ON t.oid = e.enumtypid JOIN pg_namespace AS n ON n.oid = t.typnamespace WHERE n.nspname = :'schema' AND t.typname = :'type' ORDER BY e.enumsortorder;"
-    # shellcheck disable=SC2086
-    $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -v "schema=$SCHEMA" -v "type=$PAPER_MATCHING_RUN_STATUS_TYPE" -At -c "$enum_query" >"$ENUM_DDL_FILE"
-    if [[ -s "$ENUM_DDL_FILE" ]]; then
-      {
-        if [[ $CLEAN -eq 1 ]]; then
-          if [[ -n "$TABLE_NAME" ]]; then
-            printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "$TABLE_NAME"
-          else
-            for ((index=${#BUSINESS_TABLES[@]} - 1; index >= 0; index--)); do
-              printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "${BUSINESS_TABLES[index]}"
-            done
-          fi
-          printf 'DROP TYPE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "$PAPER_MATCHING_RUN_STATUS_TYPE"
-        fi
-        printf 'CREATE TYPE "%s"."%s" AS ENUM (' "$SCHEMA" "$PAPER_MATCHING_RUN_STATUS_TYPE"
-        paste -sd, "$ENUM_DDL_FILE"
-        printf ');\n'
-      } >"${ENUM_DDL_FILE}.sql"
-      mv "${ENUM_DDL_FILE}.sql" "$ENUM_DDL_FILE"
+    if [[ $CLEAN -eq 1 ]]; then
+      if [[ -n "$TABLE_NAME" ]]; then
+        printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "$TABLE_NAME" >"$ENUM_DDL_FILE"
+      else
+        for ((index=${#BUSINESS_TABLES[@]} - 1; index >= 0; index--)); do
+          printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "${BUSINESS_TABLES[index]}" >>"$ENUM_DDL_FILE"
+        done
+      fi
+      for ((index=${#SELECTED_ENUM_TYPES[@]} - 1; index >= 0; index--)); do
+        printf 'DROP TYPE IF EXISTS "%s"."%s";\n' "$SCHEMA" "${SELECTED_ENUM_TYPES[index]}" >>"$ENUM_DDL_FILE"
+      done
     fi
+    for type_name in "${SELECTED_ENUM_TYPES[@]}"; do
+      local enum_labels_file
+      enum_labels_file="$(mktemp)"
+      # shellcheck disable=SC2086
+      $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -v "schema=$SCHEMA" -v "type=$type_name" -At -c "$enum_query" >"$enum_labels_file"
+      if [[ -s "$enum_labels_file" ]]; then
+        printf 'CREATE TYPE "%s"."%s" AS ENUM (' "$SCHEMA" "$type_name" >>"$ENUM_DDL_FILE"
+        paste -sd, "$enum_labels_file" >>"$ENUM_DDL_FILE"
+        printf ');\n' >>"$ENUM_DDL_FILE"
+      fi
+      rm -f "$enum_labels_file"
+    done
   fi
 
   if [[ $GZIP -eq 1 ]]; then

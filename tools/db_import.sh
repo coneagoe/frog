@@ -8,8 +8,8 @@ usage() {
   cat <<'USAGE'
 Import business tables into PostgreSQL using psql.
 
-Matching-run dumps restore the status enum before the table definition and
-rows. Clean imports drop the dependent table before dropping that enum.
+Paper Trading dumps restore enum definitions before dependent table definitions
+and rows. Clean imports drop dependent tables before those enum types.
 
 Uses Docker (docker compose exec db). Input should be a plain SQL dump (optionally .gz).
 
@@ -99,17 +99,23 @@ fi
 # Build a single drop statement (only if --clean)
 DROP_SQL=""
 if [[ $CLEAN -eq 1 ]]; then
+  SELECTED_ENUM_TYPES=()
+  for type_name in "${PAPER_TRADING_ENUM_TYPES[@]}"; do
+    if paper_trading_enum_is_needed "$type_name" "$TABLE_NAME"; then
+      SELECTED_ENUM_TYPES+=("$type_name")
+    fi
+  done
   DROP_SQL="BEGIN;"
   if [[ -n "$TABLE_NAME" ]]; then
     DROP_SQL+=" DROP TABLE IF EXISTS \"${SCHEMA}\".\"${TABLE_NAME}\" CASCADE;"
   else
-    for t in "${BUSINESS_TABLES[@]}"; do
-      DROP_SQL+=" DROP TABLE IF EXISTS \"${SCHEMA}\".\"${t}\" CASCADE;"
+    for ((index=${#BUSINESS_TABLES[@]} - 1; index >= 0; index--)); do
+      DROP_SQL+=" DROP TABLE IF EXISTS \"${SCHEMA}\".\"${BUSINESS_TABLES[index]}\" CASCADE;"
     done
   fi
-  if [[ -z "$TABLE_NAME" || "$TABLE_NAME" == "$PAPER_MATCHING_RUNS_TABLE" ]]; then
-    DROP_SQL+=" DROP TYPE IF EXISTS \"${SCHEMA}\".\"${PAPER_MATCHING_RUN_STATUS_TYPE}\" CASCADE;"
-  fi
+  for ((index=${#SELECTED_ENUM_TYPES[@]} - 1; index >= 0; index--)); do
+    DROP_SQL+=" DROP TYPE IF EXISTS \"${SCHEMA}\".\"${SELECTED_ENUM_TYPES[index]}\";"
+  done
   DROP_SQL+=" COMMIT;"
 fi
 

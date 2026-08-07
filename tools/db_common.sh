@@ -51,8 +51,37 @@ BUSINESS_TABLES=(
   paper_valuation_gaps
 )
 
-PAPER_MATCHING_RUNS_TABLE="paper_matching_runs"
-PAPER_MATCHING_RUN_STATUS_TYPE="paper_matching_run_status"
+PAPER_TRADING_ENUM_TYPES=(
+  paper_account_status
+  paper_fee_preset
+  paper_cash_event_type
+  paper_order_side
+  paper_order_status
+  paper_trade_validity_status
+  paper_market
+  paper_position_source
+  paper_round_trip_status
+  paper_trade_validity_granularity
+  paper_pending_settlement_source
+  paper_ledger_rebuild_status
+  paper_matching_run_status
+)
+
+paper_trading_enum_is_needed() {
+  local type_name="$1"
+  local table_name="$2"
+
+  [[ -z "$table_name" ]] && return 0
+
+  case "$type_name:$table_name" in
+    paper_account_status:paper_accounts|paper_fee_preset:paper_accounts|paper_cash_event_type:paper_cash_ledger|paper_order_side:paper_orders|paper_order_side:paper_trades|paper_order_side:paper_trade_validity_checks|paper_order_status:paper_orders|paper_trade_validity_status:paper_orders|paper_trade_validity_status:paper_trade_validity_checks|paper_market:paper_orders|paper_market:paper_positions|paper_market:paper_position_lots|paper_market:paper_trades|paper_market:paper_trade_validity_checks|paper_position_source:paper_positions|paper_position_source:paper_position_lots|paper_round_trip_status:paper_position_round_trips|paper_trade_validity_granularity:paper_trade_validity_checks|paper_pending_settlement_source:paper_pending_settlement|paper_ledger_rebuild_status:paper_ledger_rebuilds|paper_matching_run_status:paper_matching_runs)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 # Common database configuration defaults
 DEFAULT_MODE="docker"

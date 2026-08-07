@@ -3,6 +3,21 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+PAPER_ENUM_TYPES = (
+    "paper_account_status",
+    "paper_fee_preset",
+    "paper_cash_event_type",
+    "paper_order_side",
+    "paper_order_status",
+    "paper_trade_validity_status",
+    "paper_market",
+    "paper_position_source",
+    "paper_round_trip_status",
+    "paper_trade_validity_granularity",
+    "paper_pending_settlement_source",
+    "paper_ledger_rebuild_status",
+    "paper_matching_run_status",
+)
 
 
 def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str, str]:
@@ -14,7 +29,10 @@ def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str,
         "#!/usr/bin/env bash\n"
         'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"\n'
         "if [[ \"$*\" == *' psql '* && \"$*\" == *' -c '* ]]; then\n"
-        "  printf \"'running'\\n'completed'\\n'completed_with_warnings'\\n'failed'\\n\"\n"
+        "  for argument in \"$@\"; do\n"
+        "    [[ \"$argument\" == type=* ]] && type_name=\"${argument#type=}\"\n"
+        "  done\n"
+        "  printf \"'%s_label'\\n\" \"$type_name\"\n"
         "else\n"
         "  printf '%s\\n' '-- dump output'\n"
         "fi\n",
@@ -41,7 +59,7 @@ def test_export_places_enum_before_matching_table_dump(tmp_path: Path):
 
     dump = output_file.read_text(encoding="utf-8")
     assert dump.index("CREATE TYPE") < dump.index("-- dump output")
-    assert "'running','completed','completed_with_warnings','failed'" in dump
+    assert "'paper_matching_run_status_label'" in dump
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     database_commands = [command for command in commands if " psql " in command or " pg_dump " in command]
     assert database_commands[0].endswith("ORDER BY e.enumsortorder;")
@@ -59,6 +77,31 @@ def test_clean_import_drops_matching_table_before_enum(tmp_path: Path):
     assert drop_sql.index('DROP TABLE IF EXISTS "public"."paper_matching_runs"') < drop_sql.index(
         'DROP TYPE IF EXISTS "public"."paper_matching_run_status"'
     )
+
+
+def test_full_export_places_every_paper_enum_before_table_dump(tmp_path: Path):
+    output_file = tmp_path / "paper.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--out", str(output_file)], tmp_path)
+
+    dump = output_file.read_text(encoding="utf-8")
+    for type_name in PAPER_ENUM_TYPES:
+        assert f'CREATE TYPE "public"."{type_name}"' in dump
+        assert dump.index(f'CREATE TYPE "public"."{type_name}"') < dump.index("-- dump output")
+
+
+def test_clean_full_import_drops_tables_before_every_paper_enum(tmp_path: Path):
+    input_file = tmp_path / "paper.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    _run_script("db_import.sh", ["--clean", "--in", str(input_file)], tmp_path)
+
+    drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
+    for type_name in PAPER_ENUM_TYPES:
+        assert drop_sql.index('DROP TABLE IF EXISTS "public"."paper_orders"') < drop_sql.index(
+            f'DROP TYPE IF EXISTS "public"."{type_name}"'
+        )
+    drop_positions = [drop_sql.index(f'DROP TYPE IF EXISTS "public"."{type_name}"') for type_name in PAPER_ENUM_TYPES]
+    assert drop_positions == sorted(drop_positions, reverse=True)
 
 
 def test_clean_matching_export_drops_before_recreating_enum(tmp_path: Path):
@@ -94,3 +137,13 @@ def test_unrelated_export_does_not_query_enum(tmp_path: Path):
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
     assert "psql" not in commands
     assert "pg_dump" in commands
+
+
+def test_paper_accounts_export_queries_only_its_enum_types(tmp_path: Path):
+    output_file = tmp_path / "accounts.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--table", "paper_accounts", "--out", str(output_file)], tmp_path)
+
+    commands = (tmp_path / "commands.log").read_text(encoding="utf-8")
+    assert "type=paper_account_status" in commands
+    assert "type=paper_fee_preset" in commands
+    assert "type=paper_matching_run_status" not in commands
