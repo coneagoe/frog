@@ -219,6 +219,19 @@ run_export_docker() {
   fi
 }
 
+run_catalog_query_docker() {
+  local query="$1"
+  local dc
+  dc="$(pick_docker_compose)" || { err "docker compose (or docker-compose) not found"; exit 127; }
+  # shellcheck disable=SC2086
+  $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -v "schema=$SCHEMA" -v "table=$TABLE_NAME" -At -c "$query"
+}
+
+if [[ $CLEAN -eq 1 && -n "$TABLE_NAME" ]]; then
+  : >>"$OUT_FILE"
+  reject_selected_table_clean_with_inbound_foreign_keys "$TABLE_NAME" "$SCHEMA" run_catalog_query_docker
+fi
+
 run_export_docker
 
 echo "[db_export] Wrote: $OUT_FILE"

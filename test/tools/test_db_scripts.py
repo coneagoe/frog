@@ -20,7 +20,13 @@ PAPER_ENUM_TYPES = (
 )
 
 
-def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str, str]:
+def _run_script_result(
+    script: str,
+    arguments: list[str],
+    tmp_path: Path,
+    *,
+    inbound_foreign_key: str = "",
+) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     log_file = tmp_path / "commands.log"
@@ -29,6 +35,10 @@ def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str,
         "#!/usr/bin/env bash\n"
         'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"\n'
         "if [[ \"$*\" == *' psql '* && \"$*\" == *' -c '* ]]; then\n"
+        "  if [[ \"$*\" == *'pg_constraint'* ]]; then\n"
+        '    [[ -n "$INBOUND_FOREIGN_KEY" ]] && printf \'%s\\n\' "$INBOUND_FOREIGN_KEY"\n'
+        "    exit 0\n"
+        "  fi\n"
         '  for argument in "$@"; do\n'
         '    [[ "$argument" == type=* ]] && type_name="${argument#type=}"\n'
         "  done\n"
@@ -42,15 +52,20 @@ def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str,
     environment = os.environ.copy()
     environment["PATH"] = f"{bin_dir}:{environment['PATH']}"
     environment["COMMAND_LOG"] = str(log_file)
-    result = subprocess.run(
+    environment["INBOUND_FOREIGN_KEY"] = inbound_foreign_key
+    return subprocess.run(
         ["bash", str(ROOT / "tools" / script), *arguments],
         cwd=ROOT,
         env=environment,
-        check=True,
         capture_output=True,
         text=True,
     )
-    return result.stdout, log_file.read_text(encoding="utf-8")
+
+
+def _run_script(script: str, arguments: list[str], tmp_path: Path) -> tuple[str, str]:
+    result = _run_script_result(script, arguments, tmp_path)
+    result.check_returncode()
+    return result.stdout, (tmp_path / "commands.log").read_text(encoding="utf-8")
 
 
 def test_export_places_enum_before_matching_table_dump(tmp_path: Path):
@@ -138,6 +153,36 @@ def test_clean_paper_orders_preserves_shared_enum_types(tmp_path: Path):
     for type_name in ("paper_order_side", "paper_trade_validity_status", "paper_market"):
         assert f'CREATE TYPE "public"."{type_name}" AS ENUM' in dump
     assert "EXCEPTION WHEN duplicate_object THEN NULL" in dump
+
+
+def test_clean_paper_orders_export_rejects_unselected_inbound_foreign_key(tmp_path: Path):
+    output_file = tmp_path / "orders.sql"
+    result = _run_script_result(
+        "db_export.sh",
+        ["--no-gzip", "--clean", "--table", "paper_orders", "--out", str(output_file)],
+        tmp_path,
+        inbound_foreign_key="paper_trades.paper_trades_order_id_fkey",
+    )
+
+    assert result.returncode != 0
+    assert "unselected inbound foreign key" in result.stderr
+    assert "DROP TABLE" not in output_file.read_text(encoding="utf-8")
+
+
+def test_clean_paper_orders_import_rejects_unselected_inbound_foreign_key(tmp_path: Path):
+    input_file = tmp_path / "orders.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    result = _run_script_result(
+        "db_import.sh",
+        ["--clean", "--table", "paper_orders", "--in", str(input_file)],
+        tmp_path,
+        inbound_foreign_key="paper_trades.paper_trades_order_id_fkey",
+    )
+
+    assert result.returncode != 0
+    assert "unselected inbound foreign key" in result.stderr
+    assert "DROP TABLE" not in (tmp_path / "commands.log").read_text(encoding="utf-8")
 
 
 def test_clean_full_matching_export_retains_business_table_selection(tmp_path: Path):
