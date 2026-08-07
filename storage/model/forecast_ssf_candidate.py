@@ -29,11 +29,14 @@ class ForecastSSFCandidate(Base):
 
     stock_code: Mapped[str] = mapped_column(String(6), primary_key=True, comment="股票代码")
     market: Mapped[str] = mapped_column(
-        _value_enum(MonitorMarket, "monitor_market"), nullable=False, default="A", server_default="A"
+        _value_enum(MonitorMarket, "monitor_market"), nullable=False, default="A", server_default="A", index=True
     )
     report_end_date: Mapped[date] = mapped_column(Date, nullable=False, comment="业绩预告报告期")
     state: Mapped[str] = mapped_column(
-        _value_enum(ForecastSSFCandidateState, "forecast_ssf_candidate_state"), nullable=False, comment="候选状态"
+        _value_enum(ForecastSSFCandidateState, "forecast_ssf_candidate_state"),
+        nullable=False,
+        index=True,
+        comment="候选状态",
     )
     state_reason: Mapped[str] = mapped_column(String(128), nullable=False, comment="状态原因")
     evidence: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="审计证据")

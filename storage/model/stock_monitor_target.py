@@ -3,6 +3,7 @@ from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, Enum, Integer, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
 from monitor.domain_enums import MonitorFrequency, MonitorMarket, MonitorResetMode
@@ -34,15 +35,19 @@ class StockMonitorTarget(Base):
         nullable=False,
         default="A",
         server_default="A",
+        index=True,
         comment="市场: A / HK / ETF",
     )
-    condition: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, comment="触发条件JSON")
+    condition: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False, comment="触发条件JSON"
+    )
     note: Mapped[str | None] = mapped_column(Text, nullable=True, comment="用户备注")
     frequency: Mapped[str] = mapped_column(
         _value_enum(MonitorFrequency, "monitor_frequency"),
         nullable=False,
         default="daily",
         server_default="daily",
+        index=True,
         comment="监控频率: daily / intraday",
     )
     workflow: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="工作流所有者；手工目标为空")
@@ -51,6 +56,7 @@ class StockMonitorTarget(Base):
         nullable=False,
         default="auto",
         server_default="auto",
+        index=True,
         comment="重置模式: auto / manual",
     )
     enabled: Mapped[bool] = mapped_column(

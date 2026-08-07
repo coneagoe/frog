@@ -23,6 +23,7 @@ class MonitorEnumColumn:
     legacy_type_sql: str
     default_sql: str | None
     nullable: bool = False
+    indexes: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -45,12 +46,22 @@ def _labels(enum_type: type[StrEnum]) -> tuple[str, ...]:
     return tuple(member.value for member in enum_type)
 
 
+def _index(name: str, table_name: str, column_name: str) -> tuple[str, str]:
+    return name, f"CREATE INDEX {name} ON {table_name} ({column_name})"
+
+
 def _column(
-    table_name: str, column_name: str, legacy_type_sql: str, default_sql: str | None = None, *, nullable: bool = False
+    table_name: str,
+    column_name: str,
+    legacy_type_sql: str,
+    default_sql: str | None = None,
+    *,
+    nullable: bool = False,
+    indexes: tuple[tuple[str, str], ...] = (),
 ) -> MonitorEnumColumn:
     if default_sql is not None and "::" not in default_sql:
         default_sql = f"{default_sql}::character varying"
-    return MonitorEnumColumn(table_name, column_name, legacy_type_sql, default_sql, nullable)
+    return MonitorEnumColumn(table_name, column_name, legacy_type_sql, default_sql, nullable, indexes)
 
 
 MONITOR_ENUM_GROUPS = (
@@ -58,24 +69,59 @@ MONITOR_ENUM_GROUPS = (
         "monitor_market",
         _labels(MonitorMarket),
         (
-            _column("stock_monitor_targets", "market", "VARCHAR(5)", "'A'"),
-            _column("forecast_ssf_candidates", "market", "VARCHAR(5)", "'A'"),
+            _column(
+                "stock_monitor_targets",
+                "market",
+                "VARCHAR(5)",
+                "'A'",
+                indexes=(_index("ix_stock_monitor_targets_market", "stock_monitor_targets", "market"),),
+            ),
+            _column(
+                "forecast_ssf_candidates",
+                "market",
+                "VARCHAR(5)",
+                "'A'",
+                indexes=(_index("ix_forecast_ssf_candidates_market", "forecast_ssf_candidates", "market"),),
+            ),
         ),
     ),
     MonitorEnumGroup(
         "monitor_frequency",
         _labels(MonitorFrequency),
-        (_column("stock_monitor_targets", "frequency", "VARCHAR(10)", "'daily'"),),
+        (
+            _column(
+                "stock_monitor_targets",
+                "frequency",
+                "VARCHAR(10)",
+                "'daily'",
+                indexes=(_index("ix_stock_monitor_targets_frequency", "stock_monitor_targets", "frequency"),),
+            ),
+        ),
     ),
     MonitorEnumGroup(
         "monitor_reset_mode",
         _labels(MonitorResetMode),
-        (_column("stock_monitor_targets", "reset_mode", "VARCHAR(10)", "'auto'"),),
+        (
+            _column(
+                "stock_monitor_targets",
+                "reset_mode",
+                "VARCHAR(10)",
+                "'auto'",
+                indexes=(_index("ix_stock_monitor_targets_reset_mode", "stock_monitor_targets", "reset_mode"),),
+            ),
+        ),
     ),
     MonitorEnumGroup(
         "forecast_ssf_candidate_state",
         _labels(ForecastSSFCandidateState),
-        (_column("forecast_ssf_candidates", "state", "VARCHAR(32)"),),
+        (
+            _column(
+                "forecast_ssf_candidates",
+                "state",
+                "VARCHAR(32)",
+                indexes=(_index("ix_forecast_ssf_candidates_state", "forecast_ssf_candidates", "state"),),
+            ),
+        ),
     ),
 )
 
@@ -113,7 +159,9 @@ def migrate_monitor_enums(
     if connection.dialect.name != "postgresql":
         return result()
 
-    _preflight(connection, rollback=rollback)
+    missing_tables = _preflight(connection, rollback=rollback)
+    if missing_tables and len(missing_tables) != len(_GOVERNED_TABLES):
+        raise MonitorEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
     changed = any(
         not _column_has_type(connection, column, group.type_name)
         for group in MONITOR_ENUM_GROUPS
@@ -122,9 +170,20 @@ def migrate_monitor_enums(
     if dry_run:
         return result()
     if rollback:
+        if missing_tables:
+            return result()
         rolled_back = _rollback(connection)
         _verify(connection, rollback=True)
         return result(rolled_back=rolled_back)
+
+    if missing_tables:
+        for group in MONITOR_ENUM_GROUPS:
+            _create_type(connection, group)
+        _create_missing_tables(connection, missing_tables)
+        _preflight(connection, rollback=False)
+        _add_condition_check(connection)
+        _verify(connection, rollback=False)
+        return result(converted=True)
 
     for group in MONITOR_ENUM_GROUPS:
         _create_type(connection, group)
@@ -135,15 +194,15 @@ def migrate_monitor_enums(
     return result(converted=changed)
 
 
-def _preflight(connection: Connection, *, rollback: bool) -> None:
-    for table in _GOVERNED_TABLES:
-        if not _table_exists(connection, table.name):
-            raise MonitorEnumMigrationError(f"missing governed table: {table.name}")
+def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
+    missing_tables = {table.name for table in _GOVERNED_TABLES if not _table_exists(connection, table.name)}
     for group in MONITOR_ENUM_GROUPS:
         labels = _enum_labels(connection, group.type_name)
         if labels and labels != group.labels:
             raise MonitorEnumMigrationError(f"{group.type_name}: unexpected enum labels {labels}")
         for column in group.columns:
+            if column.table_name in missing_tables:
+                continue
             facts = _column_facts(connection, column)
             if facts is None:
                 raise MonitorEnumMigrationError(f"{group.type_name}: missing {column.table_name}.{column.column_name}")
@@ -155,9 +214,11 @@ def _preflight(connection: Connection, *, rollback: bool) -> None:
                     f"{group.type_name}: incompatible {column.table_name}.{column.column_name}"
                 )
             _validate_default(connection, group, column, rollback=type_name != group.type_name)
+            _validate_indexes(connection, column)
             if not rollback and type_name != group.type_name:
                 _validate_values(connection, group, column)
-    _validate_legacy_conditions(connection)
+    if "stock_monitor_targets" not in missing_tables:
+        _validate_legacy_conditions(connection)
     if rollback:
         check_required = any(
             _column_has_type(connection, column, group.type_name)
@@ -167,6 +228,13 @@ def _preflight(connection: Connection, *, rollback: bool) -> None:
         _validate_condition_check(connection, required=check_required)
     else:
         _validate_condition_check(connection, required=False)
+    return missing_tables
+
+
+def _create_missing_tables(connection: Connection, missing_tables: set[str]) -> None:
+    tables = [table for table in _GOVERNED_TABLES if table.name in missing_tables]
+    if tables:
+        tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
 
 
 def _validate_legacy_conditions(connection: Connection) -> None:
@@ -205,6 +273,8 @@ def _alter_group(connection: Connection, group: MonitorEnumGroup, *, rollback: b
     for column in group.columns:
         if not rollback and _column_has_type(connection, column, group.type_name):
             continue
+        for index_name, _ in column.indexes:
+            connection.execute(text(f"DROP INDEX {index_name}"))
         if column.default_sql is not None:
             connection.execute(text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} DROP DEFAULT"))
         target = column.legacy_type_sql if rollback else group.type_name
@@ -219,6 +289,8 @@ def _alter_group(connection: Connection, group: MonitorEnumGroup, *, rollback: b
             connection.execute(
                 text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} SET DEFAULT {default}")
             )
+        for _, index_sql in column.indexes:
+            connection.execute(text(index_sql))
 
 
 def _add_condition_check(connection: Connection) -> None:
@@ -232,14 +304,14 @@ def _add_condition_check(connection: Connection) -> None:
 def _rollback(connection: Connection) -> bool:
     changed = False
     for group in MONITOR_ENUM_GROUPS:
-        if any(_column_has_type(connection, column, group.type_name) for column in group.columns):
-            _alter_group(connection, group, rollback=True)
-            changed = True
-    for group in MONITOR_ENUM_GROUPS:
         if _enum_labels(connection, group.type_name):
             dependencies = _type_dependencies(connection, group.type_name)
             if dependencies:
                 raise MonitorEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
+    for group in MONITOR_ENUM_GROUPS:
+        if any(_column_has_type(connection, column, group.type_name) for column in group.columns):
+            _alter_group(connection, group, rollback=True)
+            changed = True
     _drop_condition_check(connection)
     for group in MONITOR_ENUM_GROUPS:
         if _enum_labels(connection, group.type_name):
@@ -264,6 +336,7 @@ def _verify(connection: Connection, *, rollback: bool) -> None:
                     f"{group.type_name}: verification failed for {column.table_name}.{column.column_name}"
                 )
             _validate_default(connection, group, column, rollback=rollback)
+            _validate_indexes(connection, column)
     _validate_condition_check(connection, required=not rollback)
 
 
@@ -372,6 +445,23 @@ def _validate_condition_check(connection: Connection, *, required: bool) -> None
     normalized = _normalize_expression(definition).replace("::text", "").replace("(", "").replace(")", "")
     if normalized != _NORMALIZED_CONDITION_CHECK:
         raise MonitorEnumMigrationError(f"conflicting condition constraint: {_CONDITION_CHECK_NAME}")
+
+
+def _validate_indexes(connection: Connection, column: MonitorEnumColumn) -> None:
+    for index_name, _ in column.indexes:
+        facts = connection.execute(
+            text(
+                "SELECT i.indisunique, array_agg(a.attname ORDER BY k.ordinality), pg_get_expr(i.indpred, i.indrelid) "
+                "FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+                "JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinality) ON true "
+                "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum "
+                "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :index_name "
+                "GROUP BY i.indisunique, i.indpred, i.indrelid"
+            ),
+            {"index_name": index_name},
+        ).one_or_none()
+        if facts is None or facts[0] or tuple(facts[1]) != (column.column_name,) or facts[2] is not None:
+            raise MonitorEnumMigrationError(f"missing or invalid index {index_name}")
 
 
 def _type_dependencies(connection: Connection, type_name: str) -> tuple[str, ...]:

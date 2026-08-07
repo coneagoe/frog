@@ -98,6 +98,18 @@ def test_forecast_candidate_storage_rejects_unknown_state(tmp_path):
         db.upsert_forecast_ssf_candidate("600001", "A", date(2025, 12, 31), "unknown", "reason", {}, None)
 
 
+def test_delete_transition_rejects_unknown_state_before_opening_session(tmp_path, monkeypatch):
+    db = _sqlite_storage(tmp_path)
+    db.ensure_monitor_targets_table = MagicMock()
+    db.Session = MagicMock()
+
+    with pytest.raises(ValueError, match="state"):
+        db._delete_forecast_ssf_target_with_candidate_transition(1, "unknown", "reason", lambda _candidate: {})
+
+    db.ensure_monitor_targets_table.assert_not_called()
+    db.Session.assert_not_called()
+
+
 def test_candidate_upsert_preserves_one_auditable_record(tmp_path):
     db = _sqlite_storage(tmp_path)
     first = db.upsert_forecast_ssf_candidate(

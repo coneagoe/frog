@@ -2403,6 +2403,7 @@ class StorageDb:
         from .model.forecast_ssf_candidate import ForecastSSFCandidate
         from .model.stock_monitor_target import StockMonitorTarget
 
+        self._validate_monitor_enum_value(state, "state", ForecastSSFCandidateState)
         self.ensure_monitor_targets_table()
         assert self.Session is not None
         session = self.Session()
