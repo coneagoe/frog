@@ -187,6 +187,8 @@ def test_fresh_bootstrap_creates_all_enum_types(empty_postgres_schema):
             for column in group.columns:
                 assert _table_exists(connection, column.table_name)
                 assert _column_type(connection, column.table_name, column.column_name) == group.type_name
+        assert _table_exists(connection, "paper_account_snapshots")
+        assert _table_exists(connection, "paper_valuation_gaps")
 
 
 def test_exact_default_mismatch_rejects_without_mutation(postgres_schema):

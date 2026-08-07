@@ -8,7 +8,7 @@ from sqlalchemy.engine import Connection
 from paper_trading.storage.enum_migration import (
     PAPER_TRADING_ENUM_GROUPS,
     PaperTradingEnumMigrationError,
-    _migrate,
+    migrate_paper_trading_enums,
 )
 
 MATCHING_STATUS_LABELS = ("running", "completed", "completed_with_warnings", "failed")
@@ -121,13 +121,9 @@ def migrate_paper_matching_status_enum(
     if connection.dialect.name != "postgresql":
         return MatchingStatusEnumMigrationResult(dry_run, False, MATCHING_STATUS_LABELS, False)
     try:
-        result = _migrate(
-            connection,
-            tuple(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == _TYPE_NAME),
-            dry_run=dry_run,
-            dry_run_reports_conversion=True,
-        )
+        result = migrate_paper_trading_enums(connection, dry_run=dry_run)
     except PaperTradingEnumMigrationError as error:
         raise MatchingStatusEnumMigrationError(str(error)) from error
     matching_group = next(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == _TYPE_NAME)
-    return MatchingStatusEnumMigrationResult(dry_run, result.converted, matching_group.labels, True)
+    converted = result.converted or (dry_run and _status_column_type(connection) != _TYPE_NAME)
+    return MatchingStatusEnumMigrationResult(dry_run, converted, matching_group.labels, True)

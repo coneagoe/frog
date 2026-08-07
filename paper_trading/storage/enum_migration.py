@@ -24,6 +24,7 @@ from paper_trading.domain.enums import (
 )
 from storage.model import (
     PaperAccount,
+    PaperAccountSnapshot,
     PaperCashLedger,
     PaperLedgerRebuild,
     PaperMatchingRun,
@@ -33,6 +34,7 @@ from storage.model import (
     PaperPositionRoundTrip,
     PaperTrade,
     PaperTradeValidityCheck,
+    PaperValuationGap,
 )
 from storage.model.paper_trading import PaperPendingSettlement
 
@@ -259,6 +261,12 @@ _GOVERNED_TABLES = (
     PaperTradeValidityCheck.__table__,
     PaperPendingSettlement.__table__,
     PaperLedgerRebuild.__table__,
+    PaperAccountSnapshot.__table__,
+    PaperValuationGap.__table__,
+)
+_OPERATIONAL_TABLES = (
+    PaperAccountSnapshot.__table__,
+    PaperValuationGap.__table__,
 )
 _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_status", re.IGNORECASE)
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)
@@ -346,14 +354,18 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
                 )
             if not rollback and type_name != group.type_name:
                 _validate_values(connection, group, column)
-            enum_typed = not rollback and type_name == group.type_name
+            enum_typed = type_name == group.type_name
             _validate_indexes(connection, column, enum_typed=rollback or enum_typed)
-            _validate_default(connection, group, column, rollback=rollback or not enum_typed)
+            _validate_default(connection, group, column, rollback=not enum_typed)
     return missing_tables
 
 
 def _create_missing_tables(connection: Connection, missing_tables: set[str]) -> None:
-    tables = [table for table in _GOVERNED_TABLES if table.name in missing_tables]
+    tables = [
+        table
+        for table in _GOVERNED_TABLES
+        if table.name in missing_tables or (table in _OPERATIONAL_TABLES and not _table_exists(connection, table.name))
+    ]
     # Metadata creates the mapped native types and respects foreign-key order.
     tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
 
@@ -475,7 +487,8 @@ def _enum_default(legacy_default: str, type_name: str) -> str:
 
 
 def _normalize_expression(expression: str) -> str:
-    return re.sub(r"\s+", "", expression).lower()
+    normalized = re.sub(r"\s+", "", expression).lower()
+    return normalized.replace("::text::", "::")
 
 
 def _validate_default(

@@ -562,6 +562,12 @@ dependent table dumps. Selected-table dumps never include clean `DROP`
 statements and use duplicate-safe type creation, so they can restore without
 replacing an existing shared type.
 
+On a fresh PostgreSQL schema, the migration creates the governed Paper Trading
+tables and the dependent operational `paper_account_snapshots` and
+`paper_valuation_gaps` tables. Normal PostgreSQL storage startup intentionally
+does not create or convert those governed tables; use the migration command for
+that explicit schema change.
+
 `db_export.sh --clean --table NAME` is unsupported. To recover a selected table
 into a clean destination, use `db_import.sh --clean --table NAME`; it refuses
 to run when an unselected table has an inbound foreign key to the selected
