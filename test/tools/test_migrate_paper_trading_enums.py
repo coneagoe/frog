@@ -8,6 +8,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 import tools.migrate_paper_trading_enums as command
 
 
@@ -127,6 +129,14 @@ def test_main_forwards_rollback_and_rolls_back_transaction_on_error(monkeypatch,
 
     assert transaction.rolled_back is True
     assert "error: migration failure" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("abbreviation", ["--dry", "--roll", "--j"])
+def test_main_rejects_abbreviated_options(abbreviation: str):
+    with pytest.raises(SystemExit) as error:
+        command.main([abbreviation])
+
+    assert error.value.code == 2
 
 
 def test_script_help_works_when_invoked_outside_project_root():

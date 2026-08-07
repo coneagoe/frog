@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Migrate Paper Trading values to PostgreSQL enums")
+    parser = argparse.ArgumentParser(description="Migrate Paper Trading values to PostgreSQL enums", allow_abbrev=False)
     parser.add_argument("--dry-run", action="store_true", help="Validate migration without changing the database")
     parser.add_argument("--rollback", action="store_true", help="Restore the legacy string columns")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output JSON")
