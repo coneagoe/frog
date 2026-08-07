@@ -227,8 +227,6 @@ def migrate_paper_matching_status_enum(
         )
 
     if converted:
-        if not index_verified:
-            raise MatchingStatusEnumMigrationError("Active matching-run partial index is missing or invalid")
         if not type_exists:
             labels_sql = ", ".join(f"'{label}'" for label in MATCHING_STATUS_LABELS)
             connection.execute(text(f"CREATE TYPE {_TYPE_NAME} AS ENUM ({labels_sql})"))

@@ -287,6 +287,34 @@ def test_postgresql_migration_is_idempotent(postgres_schema):
     assert second.index_verified is True
 
 
+def test_postgresql_reuses_existing_enum_when_converting_legacy_column(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "CREATE TYPE paper_matching_run_status AS ENUM "
+                "('running', 'completed', 'completed_with_warnings', 'failed')"
+            )
+        )
+
+        result = migrate_paper_matching_status_enum(connection)
+
+        assert result.converted is True
+        assert (
+            connection.execute(
+                text(
+                    "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = :schema AND c.relname = 'paper_matching_runs' "
+                    "AND a.attname = 'status'"
+                ),
+                {"schema": schema},
+            ).scalar_one()
+            == "paper_matching_run_status"
+        )
+
+
 def test_postgresql_dry_run_reports_preflight_facts_without_ddl(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
