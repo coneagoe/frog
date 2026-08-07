@@ -563,6 +563,12 @@ unselected tables, but includes duplicate-safe type creation so the dump can
 also restore into a blank schema. Selected-table clean restore therefore does
 not replace an existing shared type.
 
+Selected-table clean export and import refuse to run when an unselected table
+has a foreign key referencing the selected table. This prevents a restore from
+silently dropping a constraint that the selected-table dump cannot recreate.
+Use a full business-database clean restore when the required tables are managed
+together, or use a separately reviewed recovery procedure.
+
 1. Preview the conversion without changing the database:
 
    ```bash
@@ -602,17 +608,6 @@ renamed or removed in place; PostgreSQL enum ordering and persisted values are
 part of the contract. A service must be able to read all labels present in the
 database before that label is introduced in production. Treat unknown labels
 as a deployment/schema mismatch, not as a value to coerce silently.
-
-### Backup restore ordering
-
-The table dump scripts are enum-aware for `paper_matching_runs`. An export that
-includes that table queries the live `paper_matching_run_status` labels and
-writes `CREATE TYPE` before the table dump, preserving their PostgreSQL sort
-order. `db_import.sh` therefore loads the type before the table definition and
-rows; dependent indexes and constraints are recreated by the dump afterward.
-For `--clean`, the importer drops `paper_matching_runs` first and then drops
-`paper_matching_run_status` before loading the dump. Unrelated table exports and
-imports retain their existing behavior.
 
 The scripts are not a point-in-time rollback mechanism. A clean import commits
 its drop phase before loading the dump, so an import failure can leave a
