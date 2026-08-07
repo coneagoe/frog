@@ -9,6 +9,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from paper_trading.storage.matching_status_migration import (
     MatchingStatusEnumMigrationError,
+    bootstrap_paper_matching_run_status,
     migrate_paper_matching_status_enum,
 )
 
@@ -66,10 +67,72 @@ def postgres_schema():
     engine.dispose()
 
 
+@pytest.fixture()
+def empty_postgres_schema():
+    engine = postgres_engine()
+    schema = "matching_run_bootstrap_test"
+    with engine.begin() as connection:
+        connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    yield engine, schema
+    with engine.begin() as connection:
+        connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+    engine.dispose()
+
+
 def _connection(engine: Engine, schema: str) -> Connection:
     connection = engine.connect()
     connection.execute(text(f'SET search_path TO "{schema}"'))
     return connection
+
+
+def test_postgresql_bootstrap_dry_run_reports_missing_table_without_ddl(empty_postgres_schema):
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        result = bootstrap_paper_matching_run_status(connection, dry_run=True)
+
+        assert result.table_exists is False
+        assert result.table_created is False
+        assert result.labels == LABELS
+        assert result.observed_legacy_values == ()
+        assert result.index_verified is False
+        assert connection.execute(text("SELECT to_regclass('paper_matching_runs')")).scalar_one() is None
+
+
+def test_postgresql_bootstrap_creates_fresh_enum_table_and_index(empty_postgres_schema):
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        result = bootstrap_paper_matching_run_status(connection)
+
+        assert result.table_exists is False
+        assert result.table_created is True
+        assert result.converted is False
+        assert result.labels == LABELS
+        assert result.observed_legacy_values == ()
+        assert result.index_verified is True
+        assert connection.execute(text("SELECT to_regclass('paper_matching_runs')")).scalar_one() == "paper_matching_runs"
+
+
+def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        for status in ("completed", "running"):
+            connection.execute(
+                text("INSERT INTO paper_matching_runs (trade_date, scope_key, status) VALUES (:date, :scope, :status)"),
+                {"date": date(2026, 7, 31), "scope": status, "status": status},
+            )
+
+        dry_run = bootstrap_paper_matching_run_status(connection, dry_run=True)
+        first = bootstrap_paper_matching_run_status(connection)
+        second = bootstrap_paper_matching_run_status(connection)
+
+    assert dry_run.table_exists is True
+    assert dry_run.table_created is False
+    assert dry_run.converted is True
+    assert dry_run.observed_legacy_values == ("completed", "running")
+    assert first.converted is True
+    assert second.table_created is False
+    assert second.converted is False
 
 
 def test_postgresql_rejects_unknown_legacy_status_without_changes(postgres_schema):

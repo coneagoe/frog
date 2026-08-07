@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
 
+from storage.model import PaperMatchingRun
+
 MATCHING_STATUS_LABELS = ("running", "completed", "completed_with_warnings", "failed")
 _TYPE_NAME = "paper_matching_run_status"
 _TABLE_NAME = "paper_matching_runs"
@@ -32,6 +34,71 @@ class MatchingStatusEnumMigrationResult:
     converted: bool
     labels: tuple[str, ...]
     index_verified: bool
+
+
+@dataclass(frozen=True)
+class MatchingStatusBootstrapResult:
+    dry_run: bool
+    table_exists: bool
+    table_created: bool
+    converted: bool
+    labels: tuple[str, ...]
+    observed_legacy_values: tuple[str | None, ...]
+    index_verified: bool
+
+
+def bootstrap_paper_matching_run_status(
+    connection: Connection, *, dry_run: bool = False
+) -> MatchingStatusBootstrapResult:
+    if connection.dialect.name != "postgresql":
+        return MatchingStatusBootstrapResult(
+            dry_run=dry_run,
+            table_exists=False,
+            table_created=False,
+            converted=False,
+            labels=MATCHING_STATUS_LABELS,
+            observed_legacy_values=(),
+            index_verified=False,
+        )
+
+    table_exists = connection.execute(text("SELECT to_regclass(:table_name)"), {"table_name": _TABLE_NAME}).scalar_one()
+    if not table_exists:
+        if dry_run:
+            return MatchingStatusBootstrapResult(
+                dry_run=True,
+                table_exists=False,
+                table_created=False,
+                converted=False,
+                labels=MATCHING_STATUS_LABELS,
+                observed_legacy_values=(),
+                index_verified=False,
+            )
+        PaperMatchingRun.__table__.create(connection, checkfirst=False)
+        migration = migrate_paper_matching_status_enum(connection)
+        return MatchingStatusBootstrapResult(
+            dry_run=False,
+            table_exists=False,
+            table_created=True,
+            converted=migration.converted,
+            labels=migration.labels,
+            observed_legacy_values=(),
+            index_verified=migration.index_verified,
+        )
+
+    observed_legacy_values = tuple(
+        row[0]
+        for row in connection.execute(text(f"SELECT DISTINCT status FROM {_TABLE_NAME} ORDER BY status NULLS FIRST")).all()
+    )
+    migration = migrate_paper_matching_status_enum(connection, dry_run=dry_run)
+    return MatchingStatusBootstrapResult(
+        dry_run=dry_run,
+        table_exists=True,
+        table_created=False,
+        converted=migration.converted,
+        labels=migration.labels,
+        observed_legacy_values=observed_legacy_values,
+        index_verified=migration.index_verified,
+    )
 
 
 def migrate_paper_matching_status_enum(
