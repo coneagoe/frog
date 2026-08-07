@@ -4,14 +4,17 @@ import os
 from datetime import date
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
+from unittest.mock import Mock
 
 from paper_trading.storage.matching_status_migration import (
     MatchingStatusEnumMigrationError,
     bootstrap_paper_matching_run_status,
     migrate_paper_matching_status_enum,
 )
+from storage.config import StorageConfig
+from storage.storage_db import StorageDb, reset_storage
 
 LABELS = ("running", "completed", "completed_with_warnings", "failed")
 
@@ -133,6 +136,56 @@ def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_s
     assert first.converted is True
     assert second.table_created is False
     assert second.converted is False
+
+
+def test_postgresql_storage_startup_does_not_create_matching_run_enum(postgres_schema, monkeypatch):
+    engine, schema = postgres_schema
+    startup_engine = create_engine(engine.url)
+
+    @event.listens_for(startup_engine, "connect")
+    def set_search_path(dbapi_connection, connection_record):
+        with dbapi_connection.cursor() as cursor:
+            cursor.execute(f'SET search_path TO "{schema}"')
+
+    config = Mock(spec=StorageConfig)
+    config.get_db_host.return_value = "localhost"
+    config.get_db_port.return_value = 5432
+    config.get_db_name.return_value = "test_db"
+    config.get_db_username.return_value = "test_user"
+    config.get_db_password.return_value = "test_pass"
+    create_all = Mock()
+    monkeypatch.setattr("storage.storage_db.create_engine", lambda *args, **kwargs: startup_engine)
+    monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", create_all)
+    monkeypatch.setattr(StorageDb, "ensure_a_stock_basic_schema", Mock())
+    monkeypatch.setattr(StorageDb, "ensure_blackroom_records_table", Mock())
+    monkeypatch.setattr(StorageDb, "ensure_paper_trading_schema", Mock())
+
+    try:
+        reset_storage()
+        StorageDb(config)
+        with _connection(engine, schema) as connection:
+            enum_count = connection.execute(
+                text(
+                    "SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+                    "WHERE n.nspname = current_schema() AND t.typname = 'paper_matching_run_status'"
+                )
+            ).scalar_one()
+            status_type = connection.execute(
+                text(
+                    "SELECT a.atttypid::regtype::text FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = current_schema() AND c.relname = 'paper_matching_runs' "
+                    "AND a.attname = 'status'"
+                )
+            ).scalar_one()
+    finally:
+        reset_storage()
+        startup_engine.dispose()
+
+    assert enum_count == 0
+    assert status_type == "character varying"
+    assert all(table.name != "paper_matching_runs" for table in create_all.call_args.kwargs["tables"])
 
 
 def test_postgresql_rejects_unknown_legacy_status_without_changes(postgres_schema):
