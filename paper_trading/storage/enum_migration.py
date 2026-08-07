@@ -427,7 +427,7 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
 
 
 def _column_facts(connection: Connection, column: PaperTradingEnumColumn) -> tuple[str, bool] | None:
-    return connection.execute(
+    row = connection.execute(
         text(
             "SELECT lower(format_type(a.atttypid, a.atttypmod)), NOT a.attnotnull "
             "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
@@ -437,6 +437,9 @@ def _column_facts(connection: Connection, column: PaperTradingEnumColumn) -> tup
         ),
         {"table_name": column.table_name, "column_name": column.column_name},
     ).one_or_none()
+    if row is None:
+        return None
+    return str(row[0]), bool(row[1])
 
 
 def _normalized_type(type_sql: str) -> str:
@@ -449,7 +452,7 @@ def _column_has_type(connection: Connection, column: PaperTradingEnumColumn, typ
 
 
 def _column_default(connection: Connection, column: PaperTradingEnumColumn) -> str | None:
-    return connection.execute(
+    default = connection.execute(
         text(
             "SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d "
             "JOIN pg_class c ON c.oid = d.adrelid JOIN pg_namespace n ON n.oid = c.relnamespace "
@@ -458,6 +461,7 @@ def _column_default(connection: Connection, column: PaperTradingEnumColumn) -> s
         ),
         {"table_name": column.table_name, "column_name": column.column_name},
     ).scalar_one_or_none()
+    return None if default is None else str(default)
 
 
 def _expected_default(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn, *, rollback: bool) -> str | None:

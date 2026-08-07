@@ -17,6 +17,7 @@ def _engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
     return create_engine(url)
 
 
@@ -70,27 +71,31 @@ def _run_script(script: str, arguments: list[str]) -> subprocess.CompletedProces
 
 
 def foreign_key_exists(connection: Connection, schema: str, table: str, constraint: str) -> bool:
-    return connection.execute(
-        text(
-            "SELECT EXISTS ("
-            "SELECT FROM pg_constraint AS foreign_key "
-            "JOIN pg_class AS source_table ON source_table.oid = foreign_key.conrelid "
-            "JOIN pg_namespace AS source_schema ON source_schema.oid = source_table.relnamespace "
-            "WHERE foreign_key.contype = 'f' "
-            "AND source_schema.nspname = :schema "
-            "AND source_table.relname = :table "
-            "AND foreign_key.conname = :constraint"
-            ")"
-        ),
-        {"schema": schema, "table": table, "constraint": constraint},
-    ).scalar_one()
+    return bool(
+        connection.execute(
+            text(
+                "SELECT EXISTS ("
+                "SELECT FROM pg_constraint AS foreign_key "
+                "JOIN pg_class AS source_table ON source_table.oid = foreign_key.conrelid "
+                "JOIN pg_namespace AS source_schema ON source_schema.oid = source_table.relnamespace "
+                "WHERE foreign_key.contype = 'f' "
+                "AND source_schema.nspname = :schema "
+                "AND source_table.relname = :table "
+                "AND foreign_key.conname = :constraint"
+                ")"
+            ),
+            {"schema": schema, "table": table, "constraint": constraint},
+        ).scalar_one()
+    )
 
 
 def table_exists(connection: Connection, schema: str, table: str) -> bool:
-    return connection.execute(
-        text("SELECT to_regclass(:table_name) IS NOT NULL"),
-        {"table_name": f'"{schema}"."{table}"'},
-    ).scalar_one()
+    return bool(
+        connection.execute(
+            text("SELECT to_regclass(:table_name) IS NOT NULL"),
+            {"table_name": f'"{schema}"."{table}"'},
+        ).scalar_one()
+    )
 
 
 def _assert_foreign_keys_and_selected_table_remain(connection: Connection, schema: str) -> None:

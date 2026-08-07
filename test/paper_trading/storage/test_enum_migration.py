@@ -22,6 +22,7 @@ def _engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
     return create_engine(url)
 
 
@@ -102,24 +103,26 @@ def _enum_types(connection: Connection) -> set[str]:
 
 
 def _column_type(connection: Connection, table_name: str, column_name: str) -> str:  # noqa: E501
-    return connection.execute(
-        text(
-            "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :table_name AND a.attname = :column_name"
-        ),
-        {"table_name": table_name, "column_name": column_name},
-    ).scalar_one()
+    return str(
+        connection.execute(
+            text(
+                "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :table_name AND a.attname = :column_name"
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).scalar_one()
+    )
 
 
 def _index_exists(connection: Connection, index_name: str) -> bool:
-    return connection.execute(
-        text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}
-    ).scalar_one()
+    return bool(
+        connection.execute(text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}).scalar_one()
+    )
 
 
 def _table_exists(connection: Connection, table_name: str) -> bool:
-    return connection.execute(
-        text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}
-    ).scalar_one()
+    return bool(
+        connection.execute(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}).scalar_one()
+    )
 
 
 def test_dry_run_reports_every_group_without_ddl(postgres_schema):
