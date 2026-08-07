@@ -545,6 +545,42 @@ and migration output. Run commands from the repository root.
    unexpected error remains `failed` and must be investigated rather than
    retried blindly.
 
+### Unified Paper Trading enum migration
+
+The unified Paper Trading enum migration follows the enum evolution policy in
+[`docs/database_design.md`](database_design.md). Run it in the same maintenance
+window with every business writer stopped while PostgreSQL remains running. Keep
+the verified backup and all command output together in the maintenance record.
+
+1. Preview the conversion without changing the database:
+
+   ```bash
+   uv run tools/migrate_paper_trading_enums.py --dry-run --json
+   ```
+
+   Review the JSON output and resolve every unknown legacy value before
+   continuing. Unknown legacy values cause the migration to abort without any
+   mutation; do not coerce or relabel them without an approved data decision.
+2. Apply the conversion only after the dry run succeeds and the backup is
+   verified:
+
+   ```bash
+   uv run tools/migrate_paper_trading_enums.py --json
+   ```
+
+   Retain the successful JSON output with the backup, and verify the reported
+   enum groups before restarting any writer.
+3. If the migration or its verification requires returning to the legacy
+   string columns, keep writers stopped and run the rollback command:
+
+   ```bash
+   uv run tools/migrate_paper_trading_enums.py --rollback --json
+   ```
+
+   Retain the rollback output with the original migration record. Restart only
+   writer versions compatible with the verified database schema after the
+   successful migration or rollback verification.
+
 ### Future label compatibility
 
 Enum labels are a compatibility contract across the database, SQLAlchemy
