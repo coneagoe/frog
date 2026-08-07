@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         parse_config()
         with get_storage().engine.begin() as connection:
             result = migrate_monitor_enums(connection, dry_run=args.dry_run, rollback=args.rollback)
-        _print_result(result, json_output=args.json_output)
+            _print_result(result, json_output=args.json_output)
         return 0
     except Exception as exc:
         logger.exception("Monitor enum migration failed: %s", exc)

@@ -157,6 +157,24 @@ def test_main_forwards_rollback_and_rolls_back_transaction_on_error(monkeypatch,
     assert "error: migration failure" in capsys.readouterr().err
 
 
+def test_main_rolls_back_transaction_when_result_output_fails(monkeypatch, capsys):
+    transaction = FakeTransaction()
+    result = FakeResult(False, False, True, False, ())
+
+    def raising_print_result(result, *, json_output: bool) -> None:
+        raise RuntimeError("output failure")
+
+    monkeypatch.setattr(command, "parse_config", lambda: None)
+    monkeypatch.setattr(command, "get_storage", lambda: FakeStorage(transaction))
+    monkeypatch.setattr(command, "migrate_monitor_enums", lambda connection, **kwargs: result)
+    monkeypatch.setattr(command, "_print_result", raising_print_result)
+
+    assert command.main([]) == 1
+
+    assert transaction.rolled_back is True
+    assert "error: output failure" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("abbreviation", ["--dry", "--roll", "--j"])
 def test_main_rejects_abbreviated_options(abbreviation: str):
     with pytest.raises(SystemExit) as error:
