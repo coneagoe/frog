@@ -116,6 +116,12 @@ def _index_exists(connection: Connection, index_name: str) -> bool:
     ).scalar_one()
 
 
+def _table_exists(connection: Connection, table_name: str) -> bool:
+    return connection.execute(
+        text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}
+    ).scalar_one()
+
+
 def test_dry_run_reports_every_group_without_ddl(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -174,6 +180,34 @@ def test_fresh_bootstrap_creates_all_enum_types(empty_postgres_schema):
     with _connection(empty_engine, empty_schema) as connection:
         assert migrate_paper_trading_enums(connection).converted is True
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+        for group in PAPER_TRADING_ENUM_GROUPS:
+            for column in group.columns:
+                assert _table_exists(connection, column.table_name)
+                assert _column_type(connection, column.table_name, column.column_name) == group.type_name
+
+
+def test_exact_default_mismatch_rejects_without_mutation(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("ALTER TABLE paper_accounts ALTER COLUMN status SET DEFAULT 'disabled'"))
+        with pytest.raises(PaperTradingEnumMigrationError, match="default mismatch"):
+            migrate_paper_trading_enums(connection)
+        assert _column_type(connection, "paper_accounts", "status") == "character varying(20)"
+        assert _enum_types(connection) == set()
+
+
+def test_rollback_rejects_non_column_enum_dependency_before_drop(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_paper_trading_enums(connection)
+        connection.execute(text("CREATE VIEW paper_order_side_dependency AS SELECT 'buy'::paper_order_side AS side"))
+        with pytest.raises(PaperTradingEnumMigrationError, match="paper_order_side: dependencies remain"):
+            migrate_paper_trading_enums(connection, rollback=True)
+        assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+        assert (
+            connection.execute(text("SELECT to_regclass('paper_order_side_dependency')")).scalar_one()
+            == "paper_order_side_dependency"
+        )
 
 
 def test_rollback_restores_exact_varchar_types_and_indexes(postgres_schema):

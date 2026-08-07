@@ -396,8 +396,11 @@ def _rollback(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...])
     _verify(connection, groups, rollback=True)
     for group in groups:
         if _enum_labels(connection, group.type_name):
-            if _type_is_referenced(connection, group.type_name):
-                raise PaperTradingEnumMigrationError(f"{group.type_name}: selected column still references enum type")
+            dependencies = _type_dependencies(connection, group.type_name)
+            if dependencies:
+                raise PaperTradingEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
+    for group in groups:
+        if _enum_labels(connection, group.type_name):
             connection.execute(text(f"DROP TYPE {group.type_name}"))
     return changed
 
@@ -560,13 +563,16 @@ def _validate_indexes(connection: Connection, column: PaperTradingEnumColumn, *,
             raise PaperTradingEnumMigrationError(f"missing or invalid index {index_name}")
 
 
-def _type_is_referenced(connection: Connection, type_name: str) -> bool:
-    return connection.execute(
-        text(
-            "SELECT EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
-            "JOIN pg_type t ON t.oid = a.atttypid "
-            "WHERE c.relnamespace = current_schema()::regnamespace AND t.typnamespace = current_schema()::regnamespace "
-            "AND t.typname = :type_name AND a.attnum > 0 AND NOT a.attisdropped)"
-        ),
-        {"type_name": type_name},
-    ).scalar_one()
+def _type_dependencies(connection: Connection, type_name: str) -> tuple[str, ...]:
+    return tuple(
+        connection.execute(
+            text(
+                "SELECT pg_describe_object(d.classid, d.objid, d.objsubid) "
+                "FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid "
+                "WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace "
+                "AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') "
+                "ORDER BY 1"
+            ),
+            {"type_name": type_name},
+        ).scalars()
+    )
