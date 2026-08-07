@@ -62,6 +62,7 @@ def _value_enum(enum_type: type[StrEnum], name: str) -> Enum:
         values_callable=lambda enum_type: [member.value for member in enum_type],
         native_enum=True,
         validate_strings=True,
+        _create_events=False,
     )
 
 

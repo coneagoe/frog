@@ -6,7 +6,7 @@ import os
 import uuid
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 
 from paper_trading.storage.enum_migration import (
@@ -167,6 +167,56 @@ def test_apply_preserves_cataloged_defaults_and_ordinary_indexes(postgres_schema
         finally:
             savepoint.rollback()
         assert migrate_paper_trading_enums(connection).converted is False
+
+
+def test_apply_leaves_preconverted_group_columns_defaults_and_indexes_untouched(postgres_schema):
+    engine, schema = postgres_schema
+    statements: list[str] = []
+    with _connection(engine, schema) as connection:
+        connection.execute(text("CREATE TYPE paper_market AS ENUM ('a_share', 'hk_connect')"))
+        for table_name, index_name in (
+            ("paper_orders", "ix_paper_orders_market"),
+            ("paper_positions", "ix_paper_positions_market"),
+            ("paper_position_lots", "ix_paper_position_lots_market"),
+            ("paper_trades", "ix_paper_trades_market"),
+            ("paper_trade_validity_checks", "ix_paper_trade_validity_checks_market"),
+        ):
+            connection.execute(text(f"DROP INDEX {index_name}"))
+            connection.execute(text(f"ALTER TABLE {table_name} ALTER COLUMN market DROP DEFAULT"))
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table_name} ALTER COLUMN market TYPE paper_market "
+                    "USING market::text::paper_market"
+                )
+            )
+            connection.execute(text(f"ALTER TABLE {table_name} ALTER COLUMN market SET DEFAULT 'a_share'::paper_market"))
+            connection.execute(text(f"CREATE INDEX {index_name} ON {table_name} (market)"))
+
+        @event.listens_for(connection, "before_cursor_execute")
+        def capture_ddl(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        assert _column_type(connection, "paper_orders", "market") == "paper_market"
+        assert _index_exists(connection, "ix_paper_orders_market")
+        assert (
+            connection.execute(
+                text(
+                    "SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d "
+                    "JOIN pg_class c ON c.oid = d.adrelid "
+                    "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.adnum "
+                    "WHERE c.relnamespace = current_schema()::regnamespace "
+                    "AND c.relname = 'paper_orders' AND a.attname = 'market'"
+                )
+            ).scalar_one()
+            == "'a_share'::paper_market"
+        )
+
+    emitted_ddl = "\n".join(statements).lower()
+    assert "alter table paper_orders alter column market" not in emitted_ddl
+    assert "drop index ix_paper_orders_market" not in emitted_ddl
 
 
 def test_apply_creates_missing_dependent_operational_tables_after_enum_conversion(postgres_schema):

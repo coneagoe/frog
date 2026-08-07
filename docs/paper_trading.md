@@ -568,7 +568,8 @@ tables and the dependent operational `paper_account_snapshots` and
 restores either missing dependent operational table after converting or
 verifying an otherwise complete governed schema. Normal PostgreSQL storage
 startup intentionally does not create or convert those governed tables; use the
-migration command for that explicit schema change.
+migration command for that explicit schema change. It also does not create or
+alter governed PostgreSQL enum types or legacy varchar columns.
 
 `db_export.sh --clean --table NAME` is unsupported. To recover a selected table
 into a clean destination, use `db_import.sh --clean --table NAME`; it refuses

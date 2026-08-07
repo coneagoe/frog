@@ -311,6 +311,8 @@ def _migrate(
     if missing_tables:
         if rollback:
             return result()
+        for group in groups:
+            _create_type(connection, group)
         _create_missing_tables(connection, missing_tables)
         _preflight(connection, groups, rollback=False)
         return result(converted=True)
@@ -383,6 +385,8 @@ def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
 
 def _alter_group(connection: Connection, group: PaperTradingEnumGroup, *, rollback: bool) -> None:
     for column in group.columns:
+        if not rollback and _column_has_type(connection, column, group.type_name):
+            continue
         for index_name, _ in column.indexes:
             connection.execute(text(f"DROP INDEX {index_name}"))
         if column.default_sql is not None:

@@ -231,15 +231,20 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
                 .scalars()
                 .all()
             )
-            status_type = connection.execute(
-                text(
-                    "SELECT a.atttypid::regtype::text FROM pg_attribute a "
-                    "JOIN pg_class c ON c.oid = a.attrelid "
-                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
-                    "WHERE n.nspname = current_schema() AND c.relname = 'paper_matching_runs' "
-                    "AND a.attname = 'status'"
-                )
-            ).scalar_one()
+            column_types = {
+                (column.table_name, column.column_name): connection.execute(
+                    text(
+                        "SELECT lower(format_type(a.atttypid, a.atttypmod)) FROM pg_attribute a "
+                        "JOIN pg_class c ON c.oid = a.attrelid "
+                        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                        "WHERE n.nspname = current_schema() AND c.relname = :table_name "
+                        "AND a.attname = :column_name"
+                    ),
+                    {"table_name": column.table_name, "column_name": column.column_name},
+                ).scalar_one()
+                for group in PAPER_TRADING_ENUM_GROUPS
+                for column in group.columns
+            }
             paper_account_snapshots = connection.execute(
                 text("SELECT to_regclass('paper_account_snapshots')")
             ).scalar_one()
@@ -250,8 +255,8 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
         storage_db_module._metadata_initialized_pids.discard(os.getpid())
         startup_engine.dispose()
 
-    assert sorted(enum_names) == EXPECTED_TYPE_NAMES
-    assert status_type == "character varying"
+    assert enum_names == []
+    assert all(column_type.startswith("character varying") for column_type in column_types.values())
     assert paper_account_snapshots is None
     assert paper_valuation_gaps is None
     assert daily_bar_diagnostics == "daily_bar_diagnostics"
