@@ -288,6 +288,15 @@ def test_bool_numeric_condition_value_is_rejected():
     assert "condition.value" in result["message"]
 
 
+def test_add_target_rejects_untyped_workflow_condition():
+    result = MonitorTargetService(storage=MagicMock()).add_target(
+        stock_code="600519", market="A", condition={"workflow": "forecast_ssf_ma20"}
+    )
+
+    assert result["code"] == "VALIDATION_ERROR"
+    assert "condition.type" in result["message"]
+
+
 def test_add_target_accepts_price_vs_ma_condition():
     storage = MagicMock()
     storage.create_monitor_target.return_value = MagicMock(

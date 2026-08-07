@@ -2,6 +2,7 @@ import logging
 import os
 import textwrap
 from datetime import date, datetime, timedelta, timezone
+from enum import StrEnum
 from functools import wraps
 from typing import Any, Callable, Dict, List, Literal, Optional, Set, cast
 
@@ -89,6 +90,8 @@ from common.const import (
     PeriodType,
     SecurityType,
 )
+from monitor.condition_validation import validate_condition
+from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
 
 from .config import StorageConfig
 from .model import (
@@ -1514,6 +1517,8 @@ class StorageDb:
     ) -> Any:
         from .model.forecast_ssf_candidate import ForecastSSFCandidate
 
+        self._validate_monitor_enum_value(market, "market", MonitorMarket)
+        self._validate_monitor_enum_value(state, "state", ForecastSSFCandidateState)
         assert self.engine is not None
         with self.engine.begin() as conn:
             self._upsert_forecast_ssf_candidate_in_transaction(
@@ -2257,6 +2262,10 @@ class StorageDb:
         last_state: bool = False,
     ) -> Any:
         """创建监控目标。"""
+        self._validate_monitor_enum_value(market, "market", MonitorMarket)
+        self._validate_monitor_enum_value(frequency, "frequency", MonitorFrequency)
+        self._validate_monitor_enum_value(reset_mode, "reset_mode", MonitorResetMode)
+        condition = validate_condition(condition)
         self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
@@ -2286,9 +2295,6 @@ class StorageDb:
 
     def update_monitor_target(self, target_id: int, **updates: Any) -> Optional[Any]:
         """更新监控目标。目标不存在时返回 None。"""
-        self.ensure_monitor_targets_table()
-        from .model.stock_monitor_target import StockMonitorTarget
-
         allowed_fields = {
             "stock_code",
             "market",
@@ -2303,6 +2309,18 @@ class StorageDb:
         invalid_fields = set(updates) - allowed_fields
         if invalid_fields:
             raise ValueError(f"不支持更新字段: {sorted(invalid_fields)}")
+        for field, enum_type in (
+            ("market", MonitorMarket),
+            ("frequency", MonitorFrequency),
+            ("reset_mode", MonitorResetMode),
+        ):
+            if field in updates:
+                self._validate_monitor_enum_value(updates[field], field, enum_type)
+        if "condition" in updates:
+            updates["condition"] = validate_condition(updates["condition"])
+
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
 
         assert self.Session is not None
         session = self.Session()
@@ -2494,6 +2512,9 @@ class StorageDb:
         enabled: bool,
         reset_last_state: bool,
     ) -> Any:
+        self._validate_monitor_enum_value(market, "market", MonitorMarket)
+        self._validate_monitor_enum_value(frequency, "frequency", MonitorFrequency)
+        condition = validate_condition(condition)
         if condition.get("workflow") != workflow:
             raise ValueError(f"condition workflow marker must match {workflow!r}")
         self._ensure_workflow_monitor_target_identity()
@@ -2599,6 +2620,10 @@ class StorageDb:
     ) -> Any:
         from .model.forecast_ssf_candidate import ForecastSSFCandidate
 
+        self._validate_monitor_enum_value(market, "market", MonitorMarket)
+        self._validate_monitor_enum_value(frequency, "frequency", MonitorFrequency)
+        self._validate_monitor_enum_value(state, "state", ForecastSSFCandidateState)
+        condition = validate_condition(condition)
         if condition.get("workflow") != workflow:
             raise ValueError(f"condition workflow marker must match {workflow!r}")
         self._ensure_workflow_monitor_target_identity()
@@ -2635,6 +2660,11 @@ class StorageDb:
             raise
         finally:
             session.close()
+
+    @staticmethod
+    def _validate_monitor_enum_value(value: Any, field_name: str, enum_type: type[StrEnum]) -> None:
+        if not isinstance(value, str) or value not in enum_type:
+            raise ValueError(f"{field_name} must be one of {sorted(enum_type)}")
 
     def _ensure_workflow_monitor_target_identity(self) -> None:
         from .model.stock_monitor_target import StockMonitorTarget

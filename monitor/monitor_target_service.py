@@ -6,6 +6,8 @@ import json
 from datetime import datetime
 from typing import Any, Optional
 
+from monitor.condition_validation import validate_condition
+from monitor.domain_enums import MonitorFrequency, MonitorMarket, MonitorResetMode
 from storage import get_storage
 
 
@@ -80,9 +82,6 @@ class TargetNotFoundError(LookupError):
 
 
 class MonitorTargetService:
-    _ALLOWED_MARKETS = {"A", "HK", "ETF"}
-    _ALLOWED_FREQUENCY = {"daily", "intraday"}
-    _ALLOWED_RESET_MODE = {"auto", "manual"}
     _ALLOWED_UPDATE_FIELDS = {
         "stock_code",
         "market",
@@ -287,16 +286,16 @@ class MonitorTargetService:
             raise TargetValidationError("stock_code 不能为空")
 
     def _validate_market(self, market: Any) -> None:
-        if not isinstance(market, str) or market not in self._ALLOWED_MARKETS:
-            raise TargetValidationError(f"market 必须是 {sorted(self._ALLOWED_MARKETS)} 之一")
+        if not isinstance(market, str) or market not in MonitorMarket:
+            raise TargetValidationError(f"market 必须是 {sorted(MonitorMarket)} 之一")
 
     def _validate_frequency(self, frequency: Any) -> None:
-        if not isinstance(frequency, str) or frequency not in self._ALLOWED_FREQUENCY:
-            raise TargetValidationError(f"frequency 必须是 {sorted(self._ALLOWED_FREQUENCY)} 之一")
+        if not isinstance(frequency, str) or frequency not in MonitorFrequency:
+            raise TargetValidationError(f"frequency 必须是 {sorted(MonitorFrequency)} 之一")
 
     def _validate_reset_mode(self, reset_mode: Any) -> None:
-        if not isinstance(reset_mode, str) or reset_mode not in self._ALLOWED_RESET_MODE:
-            raise TargetValidationError(f"reset_mode 必须是 {sorted(self._ALLOWED_RESET_MODE)} 之一")
+        if not isinstance(reset_mode, str) or reset_mode not in MonitorResetMode:
+            raise TargetValidationError(f"reset_mode 必须是 {sorted(MonitorResetMode)} 之一")
 
     def _parse_and_validate_condition(self, condition: dict[str, Any] | str) -> dict[str, Any]:
         parsed = condition
@@ -309,72 +308,10 @@ class MonitorTargetService:
         if not isinstance(parsed, dict):
             raise TargetValidationError("condition 必须是JSON对象")
 
-        self._validate_condition_rules(parsed)
-        return parsed
-
-    @staticmethod
-    def _expect_numeric(condition: dict[str, Any], field_name: str) -> float:
-        value = condition.get(field_name)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise TargetValidationError(f"condition.{field_name} 必须是数字")
-        return float(value)
-
-    @staticmethod
-    def _expect_int(condition: dict[str, Any], field_name: str) -> int:
-        value = condition.get(field_name)
-        if type(value) is not int or value <= 0:
-            raise TargetValidationError(f"condition.{field_name} 必须是正整数")
-        return value
-
-    def _validate_condition_rules(self, condition: dict[str, Any]) -> None:
-        ctype = condition.get("type")
-        if not isinstance(ctype, str):
-            raise TargetValidationError("condition.type 必须是字符串")
-
-        if ctype == "price_threshold":
-            self._validate_direction(condition.get("direction"), {"above", "below"})
-            self._expect_numeric(condition, "value")
-            return
-
-        if ctype == "change_pct":
-            self._validate_direction(condition.get("direction"), {"above", "below"})
-            self._expect_numeric(condition, "value")
-            return
-
-        if ctype == "price_cross_ma":
-            self._validate_direction(condition.get("direction"), {"above", "below"})
-            self._expect_int(condition, "period")
-            return
-
-        if ctype == "price_vs_ma":
-            self._validate_direction(condition.get("direction"), {"above", "below"})
-            self._expect_int(condition, "period")
-            return
-
-        if ctype == "ma_cross":
-            self._validate_direction(condition.get("direction"), {"golden", "death"})
-            fast = self._expect_int(condition, "fast")
-            slow = self._expect_int(condition, "slow")
-            if fast >= slow:
-                raise TargetValidationError("condition.fast 必须小于 condition.slow")
-            return
-
-        if ctype == "rsi":
-            self._validate_direction(condition.get("direction"), {"above", "below"})
-            period = condition.get("period", 14)
-            if type(period) is not int or period <= 0:
-                raise TargetValidationError("condition.period 必须是正整数")
-            value = self._expect_numeric(condition, "value")
-            if value < 0 or value > 100:
-                raise TargetValidationError("condition.value 必须在 0 到 100 之间")
-            return
-
-        raise TargetValidationError(f"condition.type 不支持: {ctype}")
-
-    @staticmethod
-    def _validate_direction(direction: Any, allowed: set[str]) -> None:
-        if not isinstance(direction, str) or direction not in allowed:
-            raise TargetValidationError(f"condition.direction 必须是 {sorted(allowed)} 之一")
+        try:
+            return validate_condition(parsed)
+        except ValueError as exc:
+            raise TargetValidationError(str(exc)) from exc
 
     @staticmethod
     def _serialize_target(target: Any) -> dict[str, Any]:

@@ -49,8 +49,12 @@ def _legacy_monitor_target_storage(tmp_path):
     return db
 
 
+def _typed_condition(**extra: Any) -> dict[str, Any]:
+    return {"type": "price_threshold", "direction": "above", "value": 10} | extra
+
+
 def _create_target(db, *, workflow: str | None, enabled: bool = True):
-    condition: dict[str, Any] = {"price": {"above": 10}}
+    condition = _typed_condition()
     if workflow is not None:
         condition["workflow"] = workflow
     return db.create_monitor_target("600001", "A", condition, workflow or "manual", enabled=enabled)
@@ -68,6 +72,30 @@ def _create_linked_forecast_ssf_target(db, *, enabled: bool, state: str):
         monitor_target_id=target.id,
     )
     return target, candidate
+
+
+def test_direct_storage_create_rejects_invalid_condition_before_commit(tmp_path):
+    db = _sqlite_storage(tmp_path)
+
+    with pytest.raises(ValueError, match="condition.type"):
+        db.create_monitor_target("600001", "A", {"workflow": "forecast_ssf_ma20"})
+
+
+@pytest.mark.parametrize("field,value", [("market", "US"), ("frequency", "weekly"), ("reset_mode", "never")])
+def test_direct_monitor_storage_rejects_unknown_finite_values(tmp_path, field, value):
+    db = _sqlite_storage(tmp_path)
+    kwargs = {"market": "A", "frequency": "daily", "reset_mode": "auto"}
+    kwargs[field] = value
+
+    with pytest.raises(ValueError):
+        db.create_monitor_target("600001", condition=_typed_condition(), **kwargs)
+
+
+def test_forecast_candidate_storage_rejects_unknown_state(tmp_path):
+    db = _sqlite_storage(tmp_path)
+
+    with pytest.raises(ValueError, match="state"):
+        db.upsert_forecast_ssf_candidate("600001", "A", date(2025, 12, 31), "unknown", "reason", {}, None)
 
 
 def test_candidate_upsert_preserves_one_auditable_record(tmp_path):
@@ -295,7 +323,7 @@ def test_delete_transition_leaves_owned_non_daily_target_unchanged(tmp_path):
     target = db.create_monitor_target(
         "600001",
         "A",
-        {"workflow": "forecast_ssf_ma20", "price": {"above": 10}},
+        _typed_condition(workflow="forecast_ssf_ma20"),
         frequency="intraday",
     )
     db.upsert_forecast_ssf_candidate(
@@ -385,12 +413,12 @@ def test_load_a_stock_listing_status_empty_input_returns_schema_only(tmp_path):
 
 def test_workflow_monitor_target_uses_only_matching_marker_and_preserves_id(tmp_path):
     db = _sqlite_storage(tmp_path)
-    db.create_monitor_target("600001", "A", {"price": {"above": 10}}, note="manual one")
-    db.create_monitor_target("600001", "A", {"price": {"below": 8}}, note="manual two")
+    db.create_monitor_target("600001", "A", _typed_condition(), note="manual one")
+    db.create_monitor_target("600001", "A", _typed_condition(direction="below", value=8), note="manual two")
     workflow_target = db.create_monitor_target(
         "600001",
         "A",
-        {"workflow": "forecast_ssf", "price": {"above": 11}},
+        _typed_condition(workflow="forecast_ssf", value=11),
         note="workflow",
         last_state=True,
     )
@@ -401,7 +429,7 @@ def test_workflow_monitor_target_uses_only_matching_marker_and_preserves_id(tmp_
         "A",
         "daily",
         "forecast_ssf",
-        {"workflow": "forecast_ssf", "price": {"above": 12}},
+        _typed_condition(workflow="forecast_ssf", value=12),
         "updated workflow",
         enabled=False,
         reset_last_state=True,
@@ -409,7 +437,7 @@ def test_workflow_monitor_target_uses_only_matching_marker_and_preserves_id(tmp_
 
     assert found.id == workflow_target.id
     assert updated.id == workflow_target.id
-    assert updated.condition == {"workflow": "forecast_ssf", "price": {"above": 12}}
+    assert updated.condition == _typed_condition(workflow="forecast_ssf", value=12)
     assert updated.note == "updated workflow"
     assert not updated.enabled
     assert not updated.last_state
@@ -442,7 +470,7 @@ def test_pause_resume_migrates_legacy_targets_and_preserves_disabled_resume(tmp_
 
 def test_pause_rejects_manual_target_without_mutation(tmp_path):
     db = _sqlite_storage(tmp_path)
-    manual = db.create_monitor_target("600001", "A", {"price": {"above": 10}})
+    manual = db.create_monitor_target("600001", "A", _typed_condition())
 
     with pytest.raises(ValueError, match="workflow"):
         db.set_workflow_monitor_target_paused(manual.id, paused=True)
@@ -463,7 +491,7 @@ def test_paused_workflow_target_stays_disabled_on_automatic_upsert(tmp_path):
         "A",
         "daily",
         "forecast_ssf",
-        {"workflow": "forecast_ssf"},
+        _typed_condition(workflow="forecast_ssf"),
         "workflow",
         enabled=True,
         reset_last_state=False,
@@ -475,7 +503,7 @@ def test_paused_workflow_target_stays_disabled_on_automatic_upsert(tmp_path):
         "A",
         "daily",
         "forecast_ssf",
-        {"workflow": "forecast_ssf", "version": 2},
+        _typed_condition(workflow="forecast_ssf", version=2),
         "updated workflow",
         enabled=True,
         reset_last_state=False,
@@ -505,7 +533,7 @@ def test_legacy_monitor_target_migration_backfills_empty_workflow_before_orm_acc
 
     db.ensure_monitor_targets_table()
     targets = db.list_monitor_targets()
-    created = db.create_monitor_target("600003", "A", {"price": {"above": 11}}, note="new manual target")
+    created = db.create_monitor_target("600003", "A", _typed_condition(value=11), note="new manual target")
 
     assert [(target.stock_code, target.workflow) for target in targets] == [("600001", ""), ("600002", None)]
     assert created.stock_code == "600003"
@@ -533,7 +561,7 @@ def test_generic_monitor_target_operations_migrate_legacy_schema_before_orm_acce
     elif operation == "get":
         assert db.get_monitor_target(1).stock_code == "600001"
     elif operation == "create":
-        assert db.create_monitor_target("600002", "A", {"price": {"below": 8}}).id == 2
+        assert db.create_monitor_target("600002", "A", _typed_condition(direction="below", value=8)).id == 2
     elif operation == "update":
         assert db.update_monitor_target(1, note="updated legacy target").note == "updated legacy target"
     elif operation == "delete":
@@ -574,29 +602,29 @@ def test_legacy_monitor_target_migration_reports_duplicate_workflow_owners_befor
 def test_empty_workflow_marker_enforces_unique_owner_and_manual_targets_remain_unrestricted(tmp_path):
     db = _sqlite_storage(tmp_path)
 
-    db.create_monitor_target("600001", "A", {"workflow": ""}, note="empty workflow target")
+    db.create_monitor_target("600001", "A", _typed_condition(workflow=""), note="empty workflow target")
 
     with pytest.raises(IntegrityError):
-        db.create_monitor_target("600001", "A", {"workflow": ""}, note="duplicate empty workflow target")
+        db.create_monitor_target("600001", "A", _typed_condition(workflow=""), note="duplicate empty workflow target")
 
-    manual = db.create_monitor_target("600001", "A", {"price": {"above": 10}}, note="manual target")
+    manual = db.create_monitor_target("600001", "A", _typed_condition(), note="manual target")
 
     assert manual.workflow is None
 
 
 def test_workflow_monitor_target_rejects_duplicate_markers(tmp_path):
     db = _sqlite_storage(tmp_path)
-    db.create_monitor_target("600001", "A", {"workflow": "forecast_ssf", "price": {"above": 10}}, note="first")
+    db.create_monitor_target("600001", "A", _typed_condition(workflow="forecast_ssf"), note="first")
 
     with pytest.raises(IntegrityError):
-        db.create_monitor_target("600001", "A", {"workflow": "forecast_ssf", "price": {"above": 10}}, note="second")
+        db.create_monitor_target("600001", "A", _typed_condition(workflow="forecast_ssf"), note="second")
 
 
 @pytest.mark.parametrize(
     "condition",
     [
-        {"price": {"above": 10}},
-        {"workflow": "other_workflow", "price": {"above": 10}},
+        _typed_condition(),
+        _typed_condition(workflow="other_workflow"),
     ],
 )
 def test_workflow_monitor_target_rejects_missing_or_conflicting_marker(tmp_path, condition):
@@ -622,16 +650,16 @@ def test_workflow_owned_monitor_target_rejects_condition_marker_replacement(tmp_
     target = db.create_monitor_target(
         "600001",
         "A",
-        {"workflow": "forecast_ssf", "price": {"above": 10}},
+        _typed_condition(workflow="forecast_ssf"),
         note="workflow",
     )
 
-    for condition in ({"price": {"above": 11}}, {"workflow": "other_workflow", "price": {"above": 11}}):
+    for condition in (_typed_condition(value=11), _typed_condition(workflow="other_workflow", value=11)):
         with pytest.raises(ValueError, match="workflow marker"):
             db.update_monitor_target(target.id, condition=condition)
 
         persisted = db.get_monitor_target(target.id)
-        assert persisted.condition == {"workflow": "forecast_ssf", "price": {"above": 10}}
+        assert persisted.condition == _typed_condition(workflow="forecast_ssf")
         assert persisted.workflow == "forecast_ssf"
 
 
@@ -640,15 +668,15 @@ def test_empty_workflow_owned_monitor_target_rejects_unmarked_condition_replacem
     target = db.create_monitor_target(
         "600001",
         "A",
-        {"workflow": "", "price": {"above": 10}},
+        _typed_condition(workflow=""),
         note="empty workflow",
     )
 
     with pytest.raises(ValueError, match="workflow marker"):
-        db.update_monitor_target(target.id, condition={"price": {"above": 11}})
+        db.update_monitor_target(target.id, condition=_typed_condition(value=11))
 
     persisted = db.get_monitor_target(target.id)
-    assert persisted.condition == {"workflow": "", "price": {"above": 10}}
+    assert persisted.condition == _typed_condition(workflow="")
     assert persisted.workflow == ""
 
 
@@ -657,38 +685,38 @@ def test_workflow_owned_monitor_target_accepts_matching_condition_marker(tmp_pat
     target = db.create_monitor_target(
         "600001",
         "A",
-        {"workflow": "forecast_ssf", "price": {"above": 10}},
+        _typed_condition(workflow="forecast_ssf"),
         note="workflow",
     )
 
     updated = db.update_monitor_target(
         target.id,
-        condition={"workflow": "forecast_ssf", "price": {"above": 11}},
+        condition=_typed_condition(workflow="forecast_ssf", value=11),
     )
 
-    assert updated.condition == {"workflow": "forecast_ssf", "price": {"above": 11}}
+    assert updated.condition == _typed_condition(workflow="forecast_ssf", value=11)
     assert updated.workflow == "forecast_ssf"
 
 
 def test_manual_monitor_target_accepts_unmarked_condition_replacement(tmp_path):
     db = _sqlite_storage(tmp_path)
-    target = db.create_monitor_target("600001", "A", {"price": {"above": 10}}, note="manual")
+    target = db.create_monitor_target("600001", "A", _typed_condition(), note="manual")
 
-    updated = db.update_monitor_target(target.id, condition={"price": {"above": 11}})
+    updated = db.update_monitor_target(target.id, condition=_typed_condition(value=11))
 
-    assert updated.condition == {"price": {"above": 11}}
+    assert updated.condition == _typed_condition(value=11)
     assert updated.workflow is None
 
 
 def test_manual_monitor_target_rejects_condition_workflow_marker(tmp_path):
     db = _sqlite_storage(tmp_path)
-    target = db.create_monitor_target("600001", "A", {"price": {"above": 10}}, note="manual")
+    target = db.create_monitor_target("600001", "A", _typed_condition(), note="manual")
 
     with pytest.raises(ValueError, match="manual.*workflow marker"):
-        db.update_monitor_target(target.id, condition={"workflow": "forecast_ssf", "price": {"above": 11}})
+        db.update_monitor_target(target.id, condition=_typed_condition(workflow="forecast_ssf", value=11))
 
     persisted = db.get_monitor_target(target.id)
-    assert persisted.condition == {"price": {"above": 10}}
+    assert persisted.condition == _typed_condition()
     assert persisted.workflow is None
 
 
@@ -697,7 +725,7 @@ def test_workflow_monitor_target_scope_does_not_mutate_intraday_target(tmp_path)
     intraday = db.create_monitor_target(
         "600001",
         "A",
-        {"workflow": "forecast_ssf", "price": {"above": 11}},
+        _typed_condition(workflow="forecast_ssf", value=11),
         note="intraday workflow",
         frequency="intraday",
         last_state=True,
@@ -709,7 +737,7 @@ def test_workflow_monitor_target_scope_does_not_mutate_intraday_target(tmp_path)
         "A",
         "daily",
         "forecast_ssf",
-        {"workflow": "forecast_ssf", "price": {"above": 12}},
+        _typed_condition(workflow="forecast_ssf", value=12),
         "daily workflow",
         enabled=True,
         reset_last_state=True,
@@ -739,7 +767,7 @@ def test_atomic_workflow_target_transition_rolls_back_when_candidate_persistence
             "A",
             "daily",
             "forecast_ssf_ma20",
-            {"workflow": "forecast_ssf_ma20"},
+            _typed_condition(workflow="forecast_ssf_ma20"),
             "workflow",
             enabled=True,
             reset_last_state=False,
@@ -760,7 +788,7 @@ def test_atomic_workflow_target_transition_rolls_back_when_candidate_persistence
             evidence={"test": True},
             workflow="forecast_ssf_ma20",
             frequency="daily",
-            condition={"workflow": "forecast_ssf_ma20"},
+            condition=_typed_condition(workflow="forecast_ssf_ma20"),
             note="workflow",
             target_enabled=enabled,
             reset_last_state=enabled,
@@ -782,7 +810,7 @@ def test_atomic_paused_workflow_transition_rolls_back_candidate_and_target_on_fa
         "A",
         "daily",
         "forecast_ssf_ma20",
-        {"workflow": "forecast_ssf_ma20"},
+        _typed_condition(workflow="forecast_ssf_ma20"),
         "workflow",
         enabled=True,
         reset_last_state=False,
@@ -813,7 +841,7 @@ def test_atomic_paused_workflow_transition_rolls_back_candidate_and_target_on_fa
             evidence={"after": True},
             workflow="forecast_ssf_ma20",
             frequency="daily",
-            condition={"workflow": "forecast_ssf_ma20", "version": 2},
+            condition=_typed_condition(workflow="forecast_ssf_ma20", version=2),
             note="updated workflow",
             target_enabled=False,
             reset_last_state=False,
@@ -836,7 +864,7 @@ def test_workflow_target_conflict_safe_upsert_preserves_one_durable_owner(tmp_pa
         "A",
         "daily",
         "forecast_ssf_ma20",
-        {"workflow": "forecast_ssf_ma20", "version": 1},
+        _typed_condition(workflow="forecast_ssf_ma20", version=1),
         "first",
         enabled=True,
         reset_last_state=False,
@@ -846,7 +874,7 @@ def test_workflow_target_conflict_safe_upsert_preserves_one_durable_owner(tmp_pa
         "A",
         "daily",
         "forecast_ssf_ma20",
-        {"workflow": "forecast_ssf_ma20", "version": 2},
+        _typed_condition(workflow="forecast_ssf_ma20", version=2),
         "second",
         enabled=True,
         reset_last_state=False,
