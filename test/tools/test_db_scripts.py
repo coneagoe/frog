@@ -119,29 +119,30 @@ def test_clean_full_import_drops_tables_before_every_paper_enum(tmp_path: Path):
     assert drop_positions == sorted(drop_positions, reverse=True)
 
 
-def test_clean_matching_export_drops_before_recreating_enum(tmp_path: Path):
-    output_file = tmp_path / "matching.sql"
-    _run_script(
+def test_clean_selected_table_export_is_rejected_before_output_or_database_access(tmp_path: Path):
+    output_file = tmp_path / "orders.sql"
+    output_file.write_text("existing dump\n", encoding="utf-8")
+
+    result = _run_script_result(
         "db_export.sh",
-        ["--no-gzip", "--clean", "--table", "paper_matching_runs", "--out", str(output_file)],
+        ["--no-gzip", "--clean", "--table", "paper_orders", "--out", str(output_file)],
         tmp_path,
     )
 
-    dump = output_file.read_text(encoding="utf-8")
-    assert dump.index("DROP TABLE") < dump.index("DROP TYPE") < dump.index("CREATE TYPE")
-    command = (tmp_path / "commands.log").read_text(encoding="utf-8")
-    assert "--table=public.paper_matching_runs" in command
-    assert "--clean" not in command
+    assert result.returncode != 0
+    assert "cannot be combined with --table" in result.stderr
+    assert output_file.read_text(encoding="utf-8") == "existing dump\n"
+    assert not (tmp_path / "commands.log").exists()
 
 
-def test_clean_paper_orders_preserves_shared_enum_types(tmp_path: Path):
+def test_paper_orders_export_preserves_shared_enum_types(tmp_path: Path):
     output_file = tmp_path / "orders.sql"
     input_file = tmp_path / "orders-input.sql"
     input_file.write_text("SELECT 1;\n", encoding="utf-8")
 
     _run_script(
         "db_export.sh",
-        ["--no-gzip", "--clean", "--table", "paper_orders", "--out", str(output_file)],
+        ["--no-gzip", "--table", "paper_orders", "--out", str(output_file)],
         tmp_path,
     )
     _run_script("db_import.sh", ["--clean", "--table", "paper_orders", "--in", str(input_file)], tmp_path)
@@ -153,20 +154,6 @@ def test_clean_paper_orders_preserves_shared_enum_types(tmp_path: Path):
     for type_name in ("paper_order_side", "paper_trade_validity_status", "paper_market"):
         assert f'CREATE TYPE "public"."{type_name}" AS ENUM' in dump
     assert "EXCEPTION WHEN duplicate_object THEN NULL" in dump
-
-
-def test_clean_paper_orders_export_rejects_unselected_inbound_foreign_key(tmp_path: Path):
-    output_file = tmp_path / "orders.sql"
-    result = _run_script_result(
-        "db_export.sh",
-        ["--no-gzip", "--clean", "--table", "paper_orders", "--out", str(output_file)],
-        tmp_path,
-        inbound_foreign_key="paper_trades.paper_trades_order_id_fkey",
-    )
-
-    assert result.returncode != 0
-    assert "unselected inbound foreign key" in result.stderr
-    assert "DROP TABLE" not in output_file.read_text(encoding="utf-8")
 
 
 def test_clean_paper_orders_import_rejects_unselected_inbound_foreign_key(tmp_path: Path):

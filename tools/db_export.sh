@@ -23,7 +23,7 @@ Options:
   --schema NAME       Schema for business tables (default: public)
   --no-gzip           Do not gzip output (default: gzip on)
   --gzip              Gzip output (default)
-  --clean             Include DROP statements for selected tables (pg_dump --clean --if-exists)
+  --clean             Include DROP statements for the full business-database export only; cannot be combined with --table
 
   --service NAME      Docker compose service name (default: db)
 
@@ -109,6 +109,11 @@ while [[ $# -gt 0 ]]; do
   esac
  done
 
+if [[ $CLEAN -eq 1 && -n "$TABLE_NAME" ]]; then
+  err "--clean cannot be combined with --table; selected-table clean exports are unsupported."
+  exit 2
+fi
+
 mkdir -p "$OUT_DIR"
 
 if [[ -z "$OUT_FILE" ]]; then
@@ -185,13 +190,9 @@ run_export_docker() {
     local enum_query
     enum_query="SELECT quote_literal(e.enumlabel) FROM pg_enum AS e JOIN pg_type AS t ON t.oid = e.enumtypid JOIN pg_namespace AS n ON n.oid = t.typnamespace WHERE n.nspname = :'schema' AND t.typname = :'type' ORDER BY e.enumsortorder;"
     if [[ $CLEAN -eq 1 ]]; then
-      if [[ -n "$TABLE_NAME" ]]; then
-        printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "$TABLE_NAME" >"$ENUM_DDL_FILE"
-      else
-        for ((index=${#BUSINESS_TABLES[@]} - 1; index >= 0; index--)); do
-          printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "${BUSINESS_TABLES[index]}" >>"$ENUM_DDL_FILE"
-        done
-      fi
+      for ((index=${#BUSINESS_TABLES[@]} - 1; index >= 0; index--)); do
+        printf 'DROP TABLE IF EXISTS "%s"."%s" CASCADE;\n' "$SCHEMA" "${BUSINESS_TABLES[index]}" >>"$ENUM_DDL_FILE"
+      done
       for ((index=${#CLEAN_ENUM_TYPES[@]} - 1; index >= 0; index--)); do
         printf 'DROP TYPE IF EXISTS "%s"."%s";\n' "$SCHEMA" "${CLEAN_ENUM_TYPES[index]}" >>"$ENUM_DDL_FILE"
       done
@@ -218,19 +219,6 @@ run_export_docker() {
     { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; } >"$OUT_FILE"
   fi
 }
-
-run_catalog_query_docker() {
-  local query="$1"
-  local dc
-  dc="$(pick_docker_compose)" || { err "docker compose (or docker-compose) not found"; exit 127; }
-  # shellcheck disable=SC2086
-  $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -v "schema=$SCHEMA" -v "table=$TABLE_NAME" -At -c "$query"
-}
-
-if [[ $CLEAN -eq 1 && -n "$TABLE_NAME" ]]; then
-  : >>"$OUT_FILE"
-  reject_selected_table_clean_with_inbound_foreign_keys "$TABLE_NAME" "$SCHEMA" run_catalog_query_docker
-fi
 
 run_export_docker
 

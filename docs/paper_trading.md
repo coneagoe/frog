@@ -558,16 +558,15 @@ The governed types are `paper_account_status`, `paper_fee_preset`,
 `paper_round_trip_status`, `paper_trade_validity_granularity`,
 `paper_pending_settlement_source`, `paper_ledger_rebuild_status`, and
 `paper_matching_run_status`. Full backups include their definitions before the
-dependent table dumps. A selected-table clean backup retains types shared by
-unselected tables, but includes duplicate-safe type creation so the dump can
-also restore into a blank schema. Selected-table clean restore therefore does
-not replace an existing shared type.
+dependent table dumps. Selected-table dumps never include clean `DROP`
+statements and use duplicate-safe type creation, so they can restore without
+replacing an existing shared type.
 
-Selected-table clean export and import refuse to run when an unselected table
-has a foreign key referencing the selected table. This prevents a restore from
-silently dropping a constraint that the selected-table dump cannot recreate.
-Use a full business-database clean restore when the required tables are managed
-together, or use a separately reviewed recovery procedure.
+`db_export.sh --clean --table NAME` is unsupported. To recover a selected table
+into a clean destination, use `db_import.sh --clean --table NAME`; it refuses
+to run when an unselected table has an inbound foreign key to the selected
+table. Use a full business-database clean restore only when every FK-owning
+dependent table is included in the managed restore set.
 
 1. Preview the conversion without changing the database:
 

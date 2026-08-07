@@ -104,11 +104,13 @@ def _assert_foreign_keys_and_selected_table_remain(connection: Connection, schem
     assert table_exists(connection, schema, "paper_orders")
 
 
-def test_clean_selected_table_export_rejects_inbound_foreign_keys_before_mutation(
+def test_clean_selected_table_export_is_rejected_before_mutation(
     postgres_schema: tuple[Engine, str], tmp_path: Path
 ) -> None:
     engine, schema = postgres_schema
 
+    output_file = tmp_path / "orders.sql"
+    output_file.write_text("existing dump\n", encoding="utf-8")
     result = _run_script(
         "db_export.sh",
         [
@@ -119,12 +121,13 @@ def test_clean_selected_table_export_rejects_inbound_foreign_keys_before_mutatio
             "--schema",
             schema,
             "--out",
-            str(tmp_path / "orders.sql"),
+            str(output_file),
         ],
     )
 
     assert result.returncode != 0
-    assert "unselected inbound foreign key" in result.stderr
+    assert "cannot be combined with --table" in result.stderr
+    assert output_file.read_text(encoding="utf-8") == "existing dump\n"
     with engine.connect() as connection:
         _assert_foreign_keys_and_selected_table_remain(connection, schema)
 
