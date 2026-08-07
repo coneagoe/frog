@@ -26,6 +26,7 @@ def _run_script_result(
     tmp_path: Path,
     *,
     inbound_foreign_key: str = "",
+    unmanaged_inbound_foreign_key: str = "",
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -36,7 +37,11 @@ def _run_script_result(
         'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"\n'
         "if [[ \"$*\" == *' psql '* && \"$*\" == *' -c '* ]]; then\n"
         "  if [[ \"$*\" == *'pg_constraint'* ]]; then\n"
-        '    [[ -n "$INBOUND_FOREIGN_KEY" ]] && printf \'%s\\n\' "$INBOUND_FOREIGN_KEY"\n'
+        "    if [[ \"$*\" == *'source_table.relname NOT IN'* ]]; then\n"
+        '      [[ -n "$UNMANAGED_INBOUND_FOREIGN_KEY" ]] && printf \'%s\\n\' "$UNMANAGED_INBOUND_FOREIGN_KEY"\n'
+        "    else\n"
+        '      [[ -n "$INBOUND_FOREIGN_KEY" ]] && printf \'%s\\n\' "$INBOUND_FOREIGN_KEY"\n'
+        "    fi\n"
         "    exit 0\n"
         "  fi\n"
         '  for argument in "$@"; do\n'
@@ -53,6 +58,7 @@ def _run_script_result(
     environment["PATH"] = f"{bin_dir}:{environment['PATH']}"
     environment["COMMAND_LOG"] = str(log_file)
     environment["INBOUND_FOREIGN_KEY"] = inbound_foreign_key
+    environment["UNMANAGED_INBOUND_FOREIGN_KEY"] = unmanaged_inbound_foreign_key
     return subprocess.run(
         ["bash", str(ROOT / "tools" / script), *arguments],
         cwd=ROOT,
@@ -117,6 +123,38 @@ def test_clean_full_import_drops_tables_before_every_paper_enum(tmp_path: Path):
         )
     drop_positions = [drop_sql.index(f'DROP TYPE IF EXISTS "public"."{type_name}"') for type_name in PAPER_ENUM_TYPES]
     assert drop_positions == sorted(drop_positions, reverse=True)
+
+
+def test_clean_full_import_rejects_unmanaged_inbound_foreign_key_before_drop(tmp_path: Path):
+    input_file = tmp_path / "paper.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    result = _run_script_result(
+        "db_import.sh",
+        ["--clean", "--in", str(input_file)],
+        tmp_path,
+        unmanaged_inbound_foreign_key="external_audit.paper_orders_audit_order_id_fkey",
+    )
+
+    assert result.returncode != 0
+    assert "unmanaged inbound foreign key" in result.stderr
+    assert "DROP TABLE" not in (tmp_path / "commands.log").read_text(encoding="utf-8")
+
+
+def test_clean_full_export_rejects_unmanaged_inbound_foreign_key_before_drop(tmp_path: Path):
+    output_file = tmp_path / "paper.sql"
+    output_file.write_text("existing dump\n", encoding="utf-8")
+
+    result = _run_script_result(
+        "db_export.sh",
+        ["--clean", "--no-gzip", "--out", str(output_file)],
+        tmp_path,
+        unmanaged_inbound_foreign_key="external_audit.paper_orders_audit_order_id_fkey",
+    )
+
+    assert result.returncode != 0
+    assert "unmanaged inbound foreign key" in result.stderr
+    assert output_file.read_text(encoding="utf-8") == "existing dump\n"
 
 
 def test_clean_selected_table_export_is_rejected_before_output_or_database_access(tmp_path: Path):

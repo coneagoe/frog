@@ -8,6 +8,7 @@ from sqlalchemy.engine import Connection
 from paper_trading.storage.enum_migration import (
     PAPER_TRADING_ENUM_GROUPS,
     PaperTradingEnumMigrationError,
+    _migrate,
     migrate_paper_trading_enums,
 )
 
@@ -70,7 +71,7 @@ def bootstrap_paper_matching_run_status(
                 observed_legacy_values=(),
                 index_verified=False,
             )
-        migrate_paper_matching_status_enum(connection)
+        migrate_paper_trading_enums(connection)
         return MatchingStatusBootstrapResult(
             dry_run=False,
             table_exists=False,
@@ -120,10 +121,10 @@ def migrate_paper_matching_status_enum(
 ) -> MatchingStatusEnumMigrationResult:
     if connection.dialect.name != "postgresql":
         return MatchingStatusEnumMigrationResult(dry_run, False, MATCHING_STATUS_LABELS, False)
+    matching_group = next(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == _TYPE_NAME)
     try:
-        result = migrate_paper_trading_enums(connection, dry_run=dry_run)
+        result = _migrate(connection, (matching_group,), dry_run=dry_run)
     except PaperTradingEnumMigrationError as error:
         raise MatchingStatusEnumMigrationError(str(error)) from error
-    matching_group = next(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == _TYPE_NAME)
     converted = result.converted or (dry_run and _status_column_type(connection) != _TYPE_NAME)
     return MatchingStatusEnumMigrationResult(dry_run, converted, matching_group.labels, True)

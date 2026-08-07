@@ -151,6 +151,10 @@ if [[ $CLEAN -eq 1 && -n "$TABLE_NAME" ]]; then
   reject_selected_table_clean_with_inbound_foreign_keys "$TABLE_NAME" "$SCHEMA" run_catalog_query_docker
 fi
 
+if [[ $CLEAN -eq 1 && -z "$TABLE_NAME" ]]; then
+  reject_full_clean_with_unmanaged_inbound_foreign_keys "$SCHEMA" run_catalog_query_docker
+fi
+
 if [[ $CLEAN -eq 1 ]]; then
   run_drop_docker
 fi

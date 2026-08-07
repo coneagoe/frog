@@ -174,6 +174,14 @@ psql_args_common=(
   -d "$DB_NAME"
 )
 
+run_catalog_query_docker() {
+  local query="$1"
+  local dc
+  dc="$(pick_docker_compose)" || { err "docker compose (or docker-compose) not found"; exit 127; }
+  # shellcheck disable=SC2086
+  $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -At -c "$query"
+}
+
 run_export_docker() {
   local dc
   dc="$(pick_docker_compose)" || { err "docker compose (or docker-compose) not found"; exit 127; }
@@ -184,6 +192,10 @@ run_export_docker() {
   exec_args=(exec -T)
   if [[ -n "$DB_PASSWORD" && -z "${PGPASSWORD:-}" ]]; then
     export PGPASSWORD="$DB_PASSWORD"
+  fi
+
+  if [[ $CLEAN -eq 1 ]]; then
+    reject_full_clean_with_unmanaged_inbound_foreign_keys "$SCHEMA" run_catalog_query_docker
   fi
 
   if [[ ${#SELECTED_ENUM_TYPES[@]} -gt 0 ]]; then
