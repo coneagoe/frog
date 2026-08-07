@@ -144,7 +144,7 @@ def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_s
     assert second.converted is False
 
 
-def test_postgresql_storage_startup_does_not_create_paper_trading_enums(postgres_schema, monkeypatch):
+def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(postgres_schema, monkeypatch):
     engine, schema = postgres_schema
     startup_engine = create_engine(engine.url)
 
@@ -159,12 +159,9 @@ def test_postgresql_storage_startup_does_not_create_paper_trading_enums(postgres
     config.get_db_name.return_value = "test_db"
     config.get_db_username.return_value = "test_user"
     config.get_db_password.return_value = "test_pass"
-    create_all = Mock()
     monkeypatch.setattr("storage.storage_db.create_engine", lambda *args, **kwargs: startup_engine)
-    monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", create_all)
     monkeypatch.setattr(StorageDb, "ensure_a_stock_basic_schema", Mock())
     monkeypatch.setattr(StorageDb, "ensure_blackroom_records_table", Mock())
-    monkeypatch.setattr(StorageDb, "ensure_paper_trading_schema", Mock())
 
     try:
         reset_storage()
@@ -185,6 +182,13 @@ def test_postgresql_storage_startup_does_not_create_paper_trading_enums(postgres
                     "AND a.attname = 'status'"
                 )
             ).scalar_one()
+            paper_account_snapshots = connection.execute(
+                text("SELECT to_regclass('paper_account_snapshots')")
+            ).scalar_one()
+            paper_valuation_gaps = connection.execute(text("SELECT to_regclass('paper_valuation_gaps')")).scalar_one()
+            daily_bar_diagnostics = connection.execute(
+                text("SELECT to_regclass('daily_bar_diagnostics')")
+            ).scalar_one()
     finally:
         reset_storage()
         storage_db_module._metadata_initialized_pids.discard(os.getpid())
@@ -192,7 +196,9 @@ def test_postgresql_storage_startup_does_not_create_paper_trading_enums(postgres
 
     assert enum_names == []
     assert status_type == "character varying"
-    assert all(table.name != "paper_matching_runs" for table in create_all.call_args.kwargs["tables"])
+    assert paper_account_snapshots is None
+    assert paper_valuation_gaps is None
+    assert daily_bar_diagnostics == "daily_bar_diagnostics"
 
 
 def test_postgresql_rejects_unknown_legacy_status_without_changes(postgres_schema):

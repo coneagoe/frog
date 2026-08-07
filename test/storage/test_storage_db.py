@@ -64,6 +64,7 @@ from storage.model import (  # noqa: E402
     tb_name_paper_positions,
     tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
+    tb_name_paper_valuation_gaps,
     tb_name_stk_holdernumber,
     tb_name_top10_floatholders,
 )
@@ -126,6 +127,8 @@ def test_postgresql_storage_startup_excludes_all_enum_governed_paper_tables(monk
             tb_name_paper_trade_validity_checks,
             tb_name_paper_pending_settlement,
             tb_name_paper_ledger_rebuilds,
+            tb_name_paper_account_snapshots,
+            tb_name_paper_valuation_gaps,
         }
     )
     reset_storage()

@@ -129,6 +129,7 @@ from .model import (
     tb_name_paper_positions,
     tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
+    tb_name_paper_valuation_gaps,
     tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
     tb_name_stk_limit_a_stock,
@@ -299,12 +300,18 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_paper_ledger_rebuilds,
 }
 
+_PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
+    tb_name_paper_account_snapshots,
+    tb_name_paper_valuation_gaps,
+}
+
 
 def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
     if dialect.name != "postgresql":
         return list(Base.metadata.sorted_tables)
 
-    return [table for table in Base.metadata.sorted_tables if table.name not in _ENUM_GOVERNED_PAPER_TRADING_TABLES]
+    excluded_tables = _ENUM_GOVERNED_PAPER_TRADING_TABLES | _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS
+    return [table for table in Base.metadata.sorted_tables if table.name not in excluded_tables]
 
 
 # Tables keyed by ETF/fund code instead of stock code.
@@ -3034,8 +3041,8 @@ class StorageDb:
         if self.engine.dialect.name != "postgresql":
             PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
             PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
+            PaperValuationGap.__table__.create(self.engine, checkfirst=True)
         DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
-        PaperValuationGap.__table__.create(self.engine, checkfirst=True)
 
         # Bail out if the paper_orders table does not exist yet --- fresh
         # installs rely on Base.metadata.create_all in __init__.
