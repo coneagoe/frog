@@ -1,4 +1,4 @@
-"""Run the paper matching run status enum migration explicitly."""
+"""Explicitly bootstrap paper matching-run status storage."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from conf import parse_config  # noqa: E402
 from paper_trading.storage.matching_status_migration import (  # noqa: E402
-    MatchingStatusEnumMigrationResult,
-    migrate_paper_matching_status_enum,
+    MatchingStatusBootstrapResult,
+    bootstrap_paper_matching_run_status,
 )
 from storage import get_storage  # noqa: E402
 
@@ -24,41 +24,39 @@ logger = logging.getLogger(__name__)
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Migrate paper matching run statuses to an enum")
-    parser.add_argument("--dry-run", action="store_true", help="Validate the migration without changing the database")
+    parser = argparse.ArgumentParser(description="Bootstrap paper matching run status storage")
+    parser.add_argument("--dry-run", action="store_true", help="Validate bootstrap without changing the database")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output JSON")
     return parser
 
 
-def _payload(result: MatchingStatusEnumMigrationResult) -> dict[str, object]:
-    return asdict(result)
-
-
-def _print_result(result: MatchingStatusEnumMigrationResult, *, json_output: bool) -> None:
-    payload = _payload(result)
+def _print_result(result: MatchingStatusBootstrapResult, *, json_output: bool) -> None:
+    payload = asdict(result)
     if json_output:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return
-    labels = ",".join(result.labels)
     print(
         f"dry_run={str(result.dry_run).lower()} "
+        f"table_exists={str(result.table_exists).lower()} "
+        f"table_created={str(result.table_created).lower()} "
         f"converted={str(result.converted).lower()} "
-        f"index_verified={str(result.index_verified).lower()} labels={labels}"
+        f"index_verified={str(result.index_verified).lower()} "
+        f"status_column_type={result.status_column_type or 'none'} "
+        f"labels={','.join(result.labels)} "
+        f"observed_legacy_values={','.join(value or 'NULL' for value in result.observed_legacy_values)}"
     )
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _parser()
-    args = parser.parse_args(argv)
+    args = _parser().parse_args(argv)
     try:
         parse_config()
-        storage = get_storage()
-        with storage.engine.begin() as connection:
-            result = migrate_paper_matching_status_enum(connection, dry_run=args.dry_run)
+        with get_storage().engine.begin() as connection:
+            result = bootstrap_paper_matching_run_status(connection, dry_run=args.dry_run)
         _print_result(result, json_output=args.json_output)
         return 0
     except Exception as exc:
-        logger.exception("Paper matching status enum migration failed: %s", exc)
+        logger.exception("Paper matching run bootstrap failed: %s", exc)
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

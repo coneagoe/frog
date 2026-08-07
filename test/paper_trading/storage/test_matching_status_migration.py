@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import os
 from datetime import date
+from unittest.mock import Mock
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 
+import storage.storage_db as storage_db_module
 from paper_trading.storage.matching_status_migration import (
     MatchingStatusEnumMigrationError,
+    bootstrap_paper_matching_run_status,
     migrate_paper_matching_status_enum,
 )
+from storage.config import StorageConfig
+from storage.storage_db import StorageDb, reset_storage
 
 LABELS = ("running", "completed", "completed_with_warnings", "failed")
 
@@ -66,10 +71,128 @@ def postgres_schema():
     engine.dispose()
 
 
+@pytest.fixture()
+def empty_postgres_schema():
+    engine = postgres_engine()
+    schema = "matching_run_bootstrap_test"
+    with engine.begin() as connection:
+        connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    yield engine, schema
+    with engine.begin() as connection:
+        connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+    engine.dispose()
+
+
 def _connection(engine: Engine, schema: str) -> Connection:
     connection = engine.connect()
     connection.execute(text(f'SET search_path TO "{schema}"'))
     return connection
+
+
+def test_postgresql_bootstrap_dry_run_reports_missing_table_without_ddl(empty_postgres_schema):
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        result = bootstrap_paper_matching_run_status(connection, dry_run=True)
+
+        assert result.table_exists is False
+        assert result.table_created is False
+        assert result.status_column_type is None
+        assert result.labels == LABELS
+        assert result.observed_legacy_values == ()
+        assert result.index_verified is False
+        assert connection.execute(text("SELECT to_regclass('paper_matching_runs')")).scalar_one() is None
+
+
+def test_postgresql_bootstrap_creates_fresh_enum_table_and_index(empty_postgres_schema):
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        result = bootstrap_paper_matching_run_status(connection)
+
+        assert result.table_exists is False
+        assert result.table_created is True
+        assert result.status_column_type == "paper_matching_run_status"
+        assert result.converted is False
+        assert result.labels == LABELS
+        assert result.observed_legacy_values == ()
+        assert result.index_verified is True
+        assert (
+            connection.execute(text("SELECT to_regclass('paper_matching_runs')")).scalar_one() == "paper_matching_runs"
+        )
+
+
+def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        for status in ("completed", "running"):
+            connection.execute(
+                text("INSERT INTO paper_matching_runs (trade_date, scope_key, status) VALUES (:date, :scope, :status)"),
+                {"date": date(2026, 7, 31), "scope": status, "status": status},
+            )
+
+        dry_run = bootstrap_paper_matching_run_status(connection, dry_run=True)
+        first = bootstrap_paper_matching_run_status(connection)
+        second = bootstrap_paper_matching_run_status(connection)
+
+    assert dry_run.table_exists is True
+    assert dry_run.table_created is False
+    assert dry_run.status_column_type == "character varying(32)"
+    assert dry_run.converted is True
+    assert dry_run.observed_legacy_values == ("completed", "running")
+    assert first.converted is True
+    assert second.table_created is False
+    assert second.converted is False
+
+
+def test_postgresql_storage_startup_does_not_create_matching_run_enum(postgres_schema, monkeypatch):
+    engine, schema = postgres_schema
+    startup_engine = create_engine(engine.url)
+
+    @event.listens_for(startup_engine, "connect")
+    def set_search_path(dbapi_connection, connection_record):
+        with dbapi_connection.cursor() as cursor:
+            cursor.execute(f'SET search_path TO "{schema}"')
+
+    config = Mock(spec=StorageConfig)
+    config.get_db_host.return_value = "localhost"
+    config.get_db_port.return_value = 5432
+    config.get_db_name.return_value = "test_db"
+    config.get_db_username.return_value = "test_user"
+    config.get_db_password.return_value = "test_pass"
+    create_all = Mock()
+    monkeypatch.setattr("storage.storage_db.create_engine", lambda *args, **kwargs: startup_engine)
+    monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", create_all)
+    monkeypatch.setattr(StorageDb, "ensure_a_stock_basic_schema", Mock())
+    monkeypatch.setattr(StorageDb, "ensure_blackroom_records_table", Mock())
+    monkeypatch.setattr(StorageDb, "ensure_paper_trading_schema", Mock())
+
+    try:
+        reset_storage()
+        StorageDb(config)
+        with _connection(engine, schema) as connection:
+            enum_count = connection.execute(
+                text(
+                    "SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+                    "WHERE n.nspname = current_schema() AND t.typname = 'paper_matching_run_status'"
+                )
+            ).scalar_one()
+            status_type = connection.execute(
+                text(
+                    "SELECT a.atttypid::regtype::text FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = current_schema() AND c.relname = 'paper_matching_runs' "
+                    "AND a.attname = 'status'"
+                )
+            ).scalar_one()
+    finally:
+        reset_storage()
+        storage_db_module._metadata_initialized_pids.discard(os.getpid())
+        startup_engine.dispose()
+
+    assert enum_count == 0
+    assert status_type == "character varying"
+    assert all(table.name != "paper_matching_runs" for table in create_all.call_args.kwargs["tables"])
 
 
 def test_postgresql_rejects_unknown_legacy_status_without_changes(postgres_schema):
@@ -162,6 +285,34 @@ def test_postgresql_migration_is_idempotent(postgres_schema):
     assert second.converted is False
     assert second.labels == LABELS
     assert second.index_verified is True
+
+
+def test_postgresql_reuses_existing_enum_when_converting_legacy_column(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "CREATE TYPE paper_matching_run_status AS ENUM "
+                "('running', 'completed', 'completed_with_warnings', 'failed')"
+            )
+        )
+
+        result = migrate_paper_matching_status_enum(connection)
+
+        assert result.converted is True
+        assert (
+            connection.execute(
+                text(
+                    "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE n.nspname = :schema AND c.relname = 'paper_matching_runs' "
+                    "AND a.attname = 'status'"
+                ),
+                {"schema": schema},
+            ).scalar_one()
+            == "paper_matching_run_status"
+        )
 
 
 def test_postgresql_dry_run_reports_preflight_facts_without_ddl(postgres_schema):
