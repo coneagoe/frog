@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 from paper_trading.storage.matching_status_migration import MatchingStatusBootstrapResult
 from tools import bootstrap_paper_matching_run_status as command
@@ -49,6 +53,42 @@ def _result(*, dry_run: bool) -> MatchingStatusBootstrapResult:
         labels=("running", "completed", "completed_with_warnings", "failed"),
         observed_legacy_values=("completed", "running"),
         index_verified=True,
+    )
+
+
+def test_script_entrypoint_bootstraps_repository_root():
+    script = Path(__file__).parents[2] / "tools" / "bootstrap_paper_matching_run_status.py"
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+
+    completed = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=script.parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Bootstrap paper matching run status storage" in completed.stdout
+
+
+def test_main_emits_stable_human_result(monkeypatch, capsys):
+    transaction = FakeTransaction(object())
+    monkeypatch.setattr(command, "parse_config", lambda: None)
+    monkeypatch.setattr(command, "get_storage", lambda: FakeStorage(transaction))
+    monkeypatch.setattr(
+        command,
+        "bootstrap_paper_matching_run_status",
+        lambda connection, *, dry_run: _result(dry_run=dry_run),
+    )
+
+    assert command.main([]) == 0
+
+    assert capsys.readouterr().out == (
+        "dry_run=false table_exists=true table_created=false converted=true index_verified=true "
+        "labels=running,completed,completed_with_warnings,failed observed_legacy_values=completed,running\n"
     )
 
 
