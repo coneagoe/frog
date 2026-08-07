@@ -3003,8 +3003,6 @@ class StorageDb:
 
         Called once per process from ``__init__``.
         """
-        from paper_trading.storage import matching_status_migration
-
         from .model.paper_trading import (  # noqa: F401
             DailyBarDiagnostic,
             PaperLedgerRebuild,
@@ -3016,10 +3014,6 @@ class StorageDb:
         DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
         PaperValuationGap.__table__.create(self.engine, checkfirst=True)
         PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
-
-        if self.engine.dialect.name == "postgresql" and inspect(self.engine).has_table(tb_name_paper_matching_runs):
-            with self.engine.begin() as conn:
-                matching_status_migration.migrate_paper_matching_status_enum(conn)
 
         # Bail out if the paper_orders table does not exist yet --- fresh
         # installs rely on Base.metadata.create_all in __init__.
