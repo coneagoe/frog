@@ -313,7 +313,11 @@ def _migrate(
             return result()
         for group in groups:
             _create_type(connection, group)
-        _create_missing_tables(connection, missing_tables)
+        _create_missing_tables(
+            connection,
+            missing_tables,
+            create_operational_tables=groups is PAPER_TRADING_ENUM_GROUPS,
+        )
         _preflight(connection, groups, rollback=False)
         return result(converted=True)
     if rollback:
@@ -327,7 +331,7 @@ def _migrate(
             _alter_group(connection, group, rollback=False)
     _verify(connection, groups, rollback=False)
     if groups is PAPER_TRADING_ENUM_GROUPS:
-        _create_missing_tables(connection, set())
+        _create_missing_tables(connection, set(), create_operational_tables=True)
     return result(converted=changed)
 
 
@@ -364,11 +368,14 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
     return missing_tables
 
 
-def _create_missing_tables(connection: Connection, missing_tables: set[str]) -> None:
+def _create_missing_tables(
+    connection: Connection, missing_tables: set[str], *, create_operational_tables: bool = False
+) -> None:
     tables = [
         table
         for table in _GOVERNED_TABLES
-        if table.name in missing_tables or (table in _OPERATIONAL_TABLES and not _table_exists(connection, table.name))
+        if table.name in missing_tables
+        or (create_operational_tables and table in _OPERATIONAL_TABLES and not _table_exists(connection, table.name))
     ]
     if not tables:
         return

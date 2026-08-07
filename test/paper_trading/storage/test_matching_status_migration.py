@@ -160,7 +160,8 @@ def test_postgresql_bootstrap_creates_fresh_enum_table_and_index(empty_postgres_
         assert (
             connection.execute(text("SELECT to_regclass('paper_matching_runs')")).scalar_one() == "paper_matching_runs"
         )
-        assert connection.execute(text("SELECT to_regclass('paper_orders')")).scalar_one() == "paper_orders"
+        assert connection.execute(text("SELECT to_regclass('paper_account_snapshots')")).scalar_one() is None
+        assert connection.execute(text("SELECT to_regclass('paper_valuation_gaps')")).scalar_one() is None
         enum_names = (
             connection.execute(
                 text(
@@ -171,7 +172,7 @@ def test_postgresql_bootstrap_creates_fresh_enum_table_and_index(empty_postgres_
             .scalars()
             .all()
         )
-        assert enum_names == EXPECTED_TYPE_NAMES
+        assert enum_names == ["paper_matching_run_status"]
 
 
 def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_schema):
