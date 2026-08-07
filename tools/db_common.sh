@@ -106,8 +106,10 @@ reject_selected_table_clean_with_inbound_foreign_keys() {
   local query_executor="$3"
   local inbound_foreign_keys
   local inbound_foreign_key_query
+  local schema_literal="${schema//\'/\'\'}"
+  local table_literal="${table_name//\'/\'\'}"
 
-  inbound_foreign_key_query="SELECT source_namespace.nspname || '.' || source_table.relname || '.' || constraint.conname FROM pg_constraint AS constraint JOIN pg_class AS source_table ON source_table.oid = constraint.conrelid JOIN pg_namespace AS source_namespace ON source_namespace.oid = source_table.relnamespace JOIN pg_class AS selected_table ON selected_table.oid = constraint.confrelid JOIN pg_namespace AS selected_namespace ON selected_namespace.oid = selected_table.relnamespace WHERE constraint.contype = 'f' AND selected_namespace.nspname = :'schema' AND selected_table.relname = :'table' AND constraint.conrelid <> constraint.confrelid;"
+  inbound_foreign_key_query="SELECT source_namespace.nspname || '.' || source_table.relname || '.' || foreign_key.conname FROM pg_constraint AS foreign_key JOIN pg_class AS source_table ON source_table.oid = foreign_key.conrelid JOIN pg_namespace AS source_namespace ON source_namespace.oid = source_table.relnamespace JOIN pg_class AS selected_table ON selected_table.oid = foreign_key.confrelid JOIN pg_namespace AS selected_namespace ON selected_namespace.oid = selected_table.relnamespace WHERE foreign_key.contype = 'f' AND selected_namespace.nspname = '${schema_literal}' AND selected_table.relname = '${table_literal}' AND foreign_key.conrelid <> foreign_key.confrelid;"
   inbound_foreign_keys="$($query_executor "$inbound_foreign_key_query")"
 
   if [[ -n "$inbound_foreign_keys" ]]; then
