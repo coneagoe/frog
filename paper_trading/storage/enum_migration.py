@@ -48,8 +48,7 @@ class PaperTradingEnumColumn:
     legacy_type_sql: str
     default_sql: str | None
     nullable: bool
-    index_name: str | None = None
-    index_sql: str | None = None
+    indexes: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -79,18 +78,24 @@ def _column(
     default_sql: str | None = None,
     *,
     nullable: bool = False,
-    index_name: str | None = None,
-    index_sql: str | None = None,
+    indexes: tuple[tuple[str, str], ...] = (),
 ) -> PaperTradingEnumColumn:
-    return PaperTradingEnumColumn(
-        table_name, column_name, legacy_type_sql, default_sql, nullable, index_name, index_sql
-    )
+    if default_sql is not None and "::" not in default_sql:
+        default_sql = f"{default_sql}::character varying"
+    return PaperTradingEnumColumn(table_name, column_name, legacy_type_sql, default_sql, nullable, indexes)
 
 
 _MATCHING_INDEX_SQL = (
     "CREATE UNIQUE INDEX uq_matching_active_scope ON paper_matching_runs "
     "(trade_date, scope_key) WHERE status = 'running'"
 )
+
+
+def _index(name: str, table_name: str, column_name: str) -> tuple[str, str]:
+    return name, f"CREATE INDEX {name} ON {table_name} ({column_name})"
+
+
+_MATCHING_INDEX = ("uq_matching_active_scope", _MATCHING_INDEX_SQL)
 
 PAPER_TRADING_ENUM_GROUPS = (
     PaperTradingEnumGroup(
@@ -114,25 +119,75 @@ PAPER_TRADING_ENUM_GROUPS = (
         ),
     ),
     PaperTradingEnumGroup(
-        "paper_order_status", _labels(OrderStatus), (_column("paper_orders", "status", "VARCHAR(30)"),)
+        "paper_order_status",
+        _labels(OrderStatus),
+        (
+            _column(
+                "paper_orders",
+                "status",
+                "VARCHAR(30)",
+                indexes=(_index("ix_paper_orders_status", "paper_orders", "status"),),
+            ),
+        ),
     ),
     PaperTradingEnumGroup(
         "paper_trade_validity_status",
         _labels(TradeValidityStatus),
         (
-            _column("paper_orders", "validity_status", "VARCHAR(20)", nullable=True),
-            _column("paper_trade_validity_checks", "status", "VARCHAR(20)"),
+            _column(
+                "paper_orders",
+                "validity_status",
+                "VARCHAR(20)",
+                nullable=True,
+                indexes=(_index("ix_paper_orders_validity_status", "paper_orders", "validity_status"),),
+            ),
+            _column(
+                "paper_trade_validity_checks",
+                "status",
+                "VARCHAR(20)",
+                indexes=(_index("ix_paper_trade_validity_checks_status", "paper_trade_validity_checks", "status"),),
+            ),
         ),
     ),
     PaperTradingEnumGroup(
         "paper_market",
         _labels(Market),
         (
-            _column("paper_orders", "market", "VARCHAR(20)", "'a_share'"),
-            _column("paper_positions", "market", "VARCHAR(20)", "'a_share'"),
-            _column("paper_position_lots", "market", "VARCHAR(20)", "'a_share'"),
-            _column("paper_trades", "market", "VARCHAR(20)", "'a_share'"),
-            _column("paper_trade_validity_checks", "market", "VARCHAR(20)", "'a_share'"),
+            _column(
+                "paper_orders",
+                "market",
+                "VARCHAR(20)",
+                "'a_share'",
+                indexes=(_index("ix_paper_orders_market", "paper_orders", "market"),),
+            ),
+            _column(
+                "paper_positions",
+                "market",
+                "VARCHAR(20)",
+                "'a_share'",
+                indexes=(_index("ix_paper_positions_market", "paper_positions", "market"),),
+            ),
+            _column(
+                "paper_position_lots",
+                "market",
+                "VARCHAR(20)",
+                "'a_share'",
+                indexes=(_index("ix_paper_position_lots_market", "paper_position_lots", "market"),),
+            ),
+            _column(
+                "paper_trades",
+                "market",
+                "VARCHAR(20)",
+                "'a_share'",
+                indexes=(_index("ix_paper_trades_market", "paper_trades", "market"),),
+            ),
+            _column(
+                "paper_trade_validity_checks",
+                "market",
+                "VARCHAR(20)",
+                "'a_share'",
+                indexes=(_index("ix_paper_trade_validity_checks_market", "paper_trade_validity_checks", "market"),),
+            ),
         ),
     ),
     PaperTradingEnumGroup(
@@ -146,7 +201,15 @@ PAPER_TRADING_ENUM_GROUPS = (
     PaperTradingEnumGroup(
         "paper_round_trip_status",
         _labels(RoundTripStatus),
-        (_column("paper_position_round_trips", "status", "VARCHAR(20)", "'open'"),),
+        (
+            _column(
+                "paper_position_round_trips",
+                "status",
+                "VARCHAR(20)",
+                "'open'",
+                indexes=(_index("ix_paper_position_round_trips_status", "paper_position_round_trips", "status"),),
+            ),
+        ),
     ),
     PaperTradingEnumGroup(
         "paper_trade_validity_granularity",
@@ -161,7 +224,14 @@ PAPER_TRADING_ENUM_GROUPS = (
     PaperTradingEnumGroup(
         "paper_ledger_rebuild_status",
         _labels(LedgerRebuildStatus),
-        (_column("paper_ledger_rebuilds", "status", "VARCHAR(20)"),),
+        (
+            _column(
+                "paper_ledger_rebuilds",
+                "status",
+                "VARCHAR(20)",
+                indexes=(_index("ix_paper_ledger_rebuilds_status", "paper_ledger_rebuilds", "status"),),
+            ),
+        ),
     ),
     PaperTradingEnumGroup(
         "paper_matching_run_status",
@@ -171,8 +241,7 @@ PAPER_TRADING_ENUM_GROUPS = (
                 "paper_matching_runs",
                 "status",
                 "VARCHAR(32)",
-                index_name="uq_matching_active_scope",
-                index_sql=_MATCHING_INDEX_SQL,
+                indexes=(_MATCHING_INDEX,),
             ),
         ),
     ),
@@ -207,6 +276,7 @@ def _migrate(
     *,
     dry_run: bool = False,
     rollback: bool = False,
+    dry_run_reports_conversion: bool = False,
 ) -> PaperTradingEnumMigrationResult:
     def result(converted: bool = False, rolled_back: bool = False) -> PaperTradingEnumMigrationResult:
         return PaperTradingEnumMigrationResult(
@@ -225,8 +295,11 @@ def _migrate(
         {column.table_name for group in groups for column in group.columns}
     ):
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
+    changed = any(
+        not _column_has_type(connection, column, group.type_name) for group in groups for column in group.columns
+    )
     if dry_run:
-        return result()
+        return result(converted=changed if dry_run_reports_conversion else False)
     if missing_tables:
         if rollback:
             return result()
@@ -238,9 +311,6 @@ def _migrate(
         _verify(connection, groups, rollback=True)
         return result(rolled_back=changed)
 
-    changed = any(
-        not _column_has_type(connection, column, group.type_name) for group in groups for column in group.columns
-    )
     if changed:
         for group in groups:
             _create_type(connection, group)
@@ -276,10 +346,9 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
                 )
             if not rollback and type_name != group.type_name:
                 _validate_values(connection, group, column)
-            if column.index_name:
-                _validate_matching_index(
-                    connection, column.index_name, enum_typed=rollback or type_name == group.type_name
-                )
+            enum_typed = not rollback and type_name == group.type_name
+            _validate_indexes(connection, column, enum_typed=rollback or enum_typed)
+            _validate_default(connection, group, column, rollback=rollback or not enum_typed)
     return missing_tables
 
 
@@ -298,8 +367,8 @@ def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
 
 def _alter_group(connection: Connection, group: PaperTradingEnumGroup, *, rollback: bool) -> None:
     for column in group.columns:
-        if column.index_name:
-            connection.execute(text(f"DROP INDEX {column.index_name}"))
+        for index_name, _ in column.indexes:
+            connection.execute(text(f"DROP INDEX {index_name}"))
         if column.default_sql is not None:
             connection.execute(text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} DROP DEFAULT"))
         target = column.legacy_type_sql if rollback else group.type_name
@@ -310,12 +379,12 @@ def _alter_group(connection: Connection, group: PaperTradingEnumGroup, *, rollba
             )
         )
         if column.default_sql is not None:
-            default = column.default_sql if rollback else f"{column.default_sql}::{group.type_name}"
+            default = column.default_sql if rollback else _enum_default(column.default_sql, group.type_name)
             connection.execute(
                 text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} SET DEFAULT {default}")
             )
-        if column.index_sql:
-            connection.execute(text(column.index_sql))
+        for _, index_sql in column.indexes:
+            connection.execute(text(index_sql))
 
 
 def _rollback(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]) -> bool:
@@ -324,8 +393,11 @@ def _rollback(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...])
         if any(_column_has_type(connection, column, group.type_name) for column in group.columns):
             _alter_group(connection, group, rollback=True)
             changed = True
+    _verify(connection, groups, rollback=True)
     for group in groups:
         if _enum_labels(connection, group.type_name):
+            if _type_is_referenced(connection, group.type_name):
+                raise PaperTradingEnumMigrationError(f"{group.type_name}: selected column still references enum type")
             connection.execute(text(f"DROP TYPE {group.type_name}"))
     return changed
 
@@ -341,13 +413,8 @@ def _verify(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...], *
                 raise PaperTradingEnumMigrationError(
                     f"{group.type_name}: verification failed for {column.table_name}.{column.column_name}"
                 )
-            if column.default_sql is not None:
-                default = _column_default(connection, column)
-                expected_label = column.default_sql.strip("'")
-                if default is None or expected_label not in default:
-                    raise PaperTradingEnumMigrationError(f"{group.type_name}: default was not preserved")
-            if column.index_name:
-                _validate_matching_index(connection, column.index_name, enum_typed=not rollback)
+            _validate_default(connection, group, column, rollback=rollback)
+            _validate_indexes(connection, column, enum_typed=not rollback)
 
 
 def _table_exists(connection: Connection, table_name: str) -> bool:
@@ -388,6 +455,37 @@ def _column_default(connection: Connection, column: PaperTradingEnumColumn) -> s
         ),
         {"table_name": column.table_name, "column_name": column.column_name},
     ).scalar_one_or_none()
+
+
+def _expected_default(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn, *, rollback: bool) -> str | None:
+    if column.default_sql is None:
+        return None
+    return column.default_sql if rollback else _enum_default(column.default_sql, group.type_name)
+
+
+def _enum_default(legacy_default: str, type_name: str) -> str:
+    return f"{legacy_default.partition('::')[0]}::{type_name}"
+
+
+def _normalize_expression(expression: str) -> str:
+    return re.sub(r"\s+", "", expression).lower()
+
+
+def _validate_default(
+    connection: Connection, group: PaperTradingEnumGroup, column: PaperTradingEnumColumn, *, rollback: bool
+) -> None:
+    actual = _column_default(connection, column)
+    expected = _expected_default(group, column, rollback=rollback)
+    if expected is None:
+        if actual is not None:
+            raise PaperTradingEnumMigrationError(
+                f"{group.type_name}: unexpected default for {column.table_name}.{column.column_name}"
+            )
+        return
+    if actual is None or _normalize_expression(actual) != _normalize_expression(expected):
+        raise PaperTradingEnumMigrationError(
+            f"{group.type_name}: default mismatch for {column.table_name}.{column.column_name}"
+        )
 
 
 def _enum_labels(connection: Connection, type_name: str) -> tuple[str, ...]:
@@ -438,3 +536,37 @@ def _validate_matching_index(connection: Connection, index_name: str, *, enum_ty
         raise PaperTradingEnumMigrationError(
             "paper_matching_run_status: active matching-run partial index is missing or invalid"
         )
+
+
+def _validate_indexes(connection: Connection, column: PaperTradingEnumColumn, *, enum_typed: bool) -> None:
+    for index_name, index_sql in column.indexes:
+        if index_name == "uq_matching_active_scope":
+            _validate_matching_index(connection, index_name, enum_typed=enum_typed)
+            continue
+        facts = connection.execute(
+            text(
+                "SELECT i.indisunique, array_agg(a.attname ORDER BY k.ordinality), pg_get_expr(i.indpred, i.indrelid) "
+                "FROM pg_index i "
+                "JOIN pg_class c ON c.oid = i.indexrelid "
+                "JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinality) ON true "
+                "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum "
+                "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :index_name "
+                "GROUP BY i.indisunique, i.indpred, i.indrelid"
+            ),
+            {"index_name": index_name},
+        ).one_or_none()
+        expected_column = column.column_name
+        if facts is None or facts[0] or tuple(facts[1]) != (expected_column,) or facts[2] is not None:
+            raise PaperTradingEnumMigrationError(f"missing or invalid index {index_name}")
+
+
+def _type_is_referenced(connection: Connection, type_name: str) -> bool:
+    return connection.execute(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_type t ON t.oid = a.atttypid "
+            "WHERE c.relnamespace = current_schema()::regnamespace AND t.typnamespace = current_schema()::regnamespace "
+            "AND t.typname = :type_name AND a.attnum > 0 AND NOT a.attisdropped)"
+        ),
+        {"type_name": type_name},
+    ).scalar_one()

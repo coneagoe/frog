@@ -1,31 +1,188 @@
+# ruff: noqa: E501
+
 from __future__ import annotations
 
-from sqlalchemy import create_engine
+import os
+import uuid
 
-from paper_trading.storage.enum_migration import migrate_paper_trading_enums
+import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection, Engine
+
+from paper_trading.storage.enum_migration import (
+    PAPER_TRADING_ENUM_GROUPS,
+    PaperTradingEnumMigrationError,
+    migrate_paper_trading_enums,
+)
+
+EXPECTED_TYPE_NAMES = {group.type_name for group in PAPER_TRADING_ENUM_GROUPS}
 
 
-def test_non_postgresql_migration_is_a_noop_with_the_complete_catalog():
-    engine = create_engine("sqlite://")
+def _engine() -> Engine:
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    return create_engine(url)
 
+
+@pytest.fixture()
+def postgres_schema():
+    engine = _engine()
+    schema = f"enum_migration_{uuid.uuid4().hex}"
     with engine.begin() as connection:
-        result = migrate_paper_trading_enums(connection, dry_run=True)
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        _create_legacy_schema(connection)
+    try:
+        yield engine, schema
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
 
-    assert result.dry_run is True
-    assert result.converted is False
-    assert result.rolled_back is False
-    assert {group.type_name for group in result.groups} == {
-        "paper_account_status",
-        "paper_fee_preset",
-        "paper_cash_event_type",
-        "paper_order_side",
-        "paper_order_status",
-        "paper_trade_validity_status",
-        "paper_market",
-        "paper_position_source",
-        "paper_round_trip_status",
-        "paper_trade_validity_granularity",
-        "paper_pending_settlement_source",
-        "paper_ledger_rebuild_status",
-        "paper_matching_run_status",
-    }
+
+@pytest.fixture()
+def empty_postgres_schema():
+    engine = _engine()
+    schema = f"enum_migration_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    try:
+        yield engine, schema
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
+
+
+def _connection(engine: Engine, schema: str) -> Connection:
+    connection = engine.connect()
+    connection.execute(text(f'SET search_path TO "{schema}"'))
+    return connection
+
+
+def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
+    statements = (
+        "CREATE TABLE paper_accounts (id integer primary key, status varchar(20) NOT NULL DEFAULT 'active', fee_preset varchar(30) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_cash_ledger (id integer primary key, event_type varchar(20) NOT NULL)",
+        "CREATE TABLE paper_positions (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_position_lots (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_orders (id integer primary key, side varchar(10) NOT NULL, status varchar(30) NOT NULL, validity_status varchar(20), market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_trades (id integer primary key, side varchar(10) NOT NULL, market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_position_round_trips (id integer primary key, status varchar(20) NOT NULL DEFAULT 'open')",
+        "CREATE TABLE paper_trade_validity_checks (id integer primary key, side varchar(10) NOT NULL, status varchar(20) NOT NULL, data_granularity varchar(20) NOT NULL DEFAULT 'daily', market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_pending_settlement (id integer primary key, source varchar(20) NOT NULL)",
+        "CREATE TABLE paper_ledger_rebuilds (id integer primary key, status varchar(20) NOT NULL)",
+        "CREATE TABLE paper_matching_runs (id integer primary key, trade_date date NOT NULL, scope_key varchar(40) NOT NULL, status varchar(32) NOT NULL)",
+        "CREATE INDEX ix_paper_positions_market ON paper_positions (market)",
+        "CREATE INDEX ix_paper_position_lots_market ON paper_position_lots (market)",
+        "CREATE INDEX ix_paper_orders_status ON paper_orders (status)",
+        "CREATE INDEX ix_paper_orders_validity_status ON paper_orders (validity_status)",
+        "CREATE INDEX ix_paper_orders_market ON paper_orders (market)",
+        "CREATE INDEX ix_paper_trades_market ON paper_trades (market)",
+        "CREATE INDEX ix_paper_trade_validity_checks_status ON paper_trade_validity_checks (status)",
+        "CREATE INDEX ix_paper_trade_validity_checks_market ON paper_trade_validity_checks (market)",
+        "CREATE INDEX ix_paper_position_round_trips_status ON paper_position_round_trips (status)",
+        "CREATE INDEX ix_paper_ledger_rebuilds_status ON paper_ledger_rebuilds (status)",
+        "CREATE UNIQUE INDEX uq_matching_active_scope ON paper_matching_runs (trade_date, scope_key) WHERE status = 'running'",
+    )
+    for statement in statements:
+        connection.execute(text(statement))
+
+
+def _enum_types(connection: Connection) -> set[str]:
+    return (
+        set(
+            connection.execute(
+                text("SELECT typname FROM pg_type WHERE typnamespace = current_schema()::regnamespace")
+            ).scalars()
+        )
+        & EXPECTED_TYPE_NAMES
+    )
+
+
+def _column_type(connection: Connection, table_name: str, column_name: str) -> str:  # noqa: E501
+    return connection.execute(
+        text(
+            "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :table_name AND a.attname = :column_name"
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    ).scalar_one()
+
+
+def _index_exists(connection: Connection, index_name: str) -> bool:
+    return connection.execute(
+        text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}
+    ).scalar_one()
+
+
+def test_dry_run_reports_every_group_without_ddl(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        result = migrate_paper_trading_enums(connection, dry_run=True)
+        assert result.dry_run is True
+        assert result.converted is False
+        assert {group.type_name for group in result.groups} == EXPECTED_TYPE_NAMES
+        assert _enum_types(connection) == set()
+
+
+def test_unknown_legacy_value_aborts_all_groups_without_conversion(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text("INSERT INTO paper_orders (id, side, status, market) VALUES (1, 'borrow', 'new', 'a_share')")
+        )
+        with pytest.raises(PaperTradingEnumMigrationError, match="paper_order_side"):
+            migrate_paper_trading_enums(connection)
+        assert _column_type(connection, "paper_accounts", "status") == "character varying(20)"
+        assert _enum_types(connection) == set()
+
+
+def test_apply_preserves_cataloged_defaults_and_ordinary_indexes(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        result = migrate_paper_trading_enums(connection)
+        assert result.converted is True
+        assert _column_type(connection, "paper_orders", "side") == "paper_order_side"
+        assert _column_type(connection, "paper_trades", "side") == "paper_order_side"
+        assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+        assert _index_exists(connection, "ix_paper_orders_status")
+        assert _index_exists(connection, "ix_paper_position_round_trips_status")
+        assert _index_exists(connection, "uq_matching_active_scope")
+        savepoint = connection.begin_nested()
+        try:
+            with pytest.raises(Exception):
+                connection.execute(
+                    text("INSERT INTO paper_orders (id, side, status, market) VALUES (2, 'borrow', 'new', 'a_share')")
+                )
+        finally:
+            savepoint.rollback()
+        assert migrate_paper_trading_enums(connection).converted is False
+
+
+def test_type_label_mismatch_does_not_modify_existing_type(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("CREATE TYPE paper_order_side AS ENUM ('buy')"))
+        with pytest.raises(PaperTradingEnumMigrationError, match="paper_order_side"):
+            migrate_paper_trading_enums(connection)
+        assert _enum_types(connection) == {"paper_order_side"}
+
+
+def test_fresh_bootstrap_creates_all_enum_types(empty_postgres_schema):
+    empty_engine, empty_schema = empty_postgres_schema
+    with _connection(empty_engine, empty_schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+
+
+def test_rollback_restores_exact_varchar_types_and_indexes(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_paper_trading_enums(connection)
+        result = migrate_paper_trading_enums(connection, rollback=True)
+        assert result.rolled_back is True
+        assert _column_type(connection, "paper_orders", "side") == "character varying(10)"
+        assert _enum_types(connection) == set()
+        assert _index_exists(connection, "ix_paper_orders_status")
+        assert _index_exists(connection, "uq_matching_active_scope")
