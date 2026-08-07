@@ -281,6 +281,11 @@ _storage_instances: Dict[int, "StorageDb"] = {}
 # Track which PIDs have already run metadata.create_all() to avoid repeated DDL checks
 _metadata_initialized_pids: Set[int] = set()
 
+
+def _non_matching_run_tables() -> list[Any]:
+    return [table for table in Base.metadata.sorted_tables if table.name != tb_name_paper_matching_runs]
+
+
 # Tables keyed by ETF/fund code instead of stock code.
 ETF_ID_TABLES: Set[str] = {
     tb_name_etf_daily,
@@ -421,7 +426,7 @@ class StorageDb:
         # Run DDL/table creation only once per process to avoid repeated checks
         pid = os.getpid()
         if pid not in _metadata_initialized_pids:
-            Base.metadata.create_all(self.engine)
+            Base.metadata.create_all(self.engine, tables=_non_matching_run_tables())
             self.ensure_a_stock_basic_schema()
             self.ensure_blackroom_records_table()
             self.ensure_paper_trading_schema()

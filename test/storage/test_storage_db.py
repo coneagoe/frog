@@ -90,6 +90,26 @@ def a_stock_basic_schema_upgrade():
     """Opt in to exercising the real A-stock basic schema migration."""
 
 
+def test_storage_startup_excludes_matching_runs_from_metadata_ddl(monkeypatch):
+    reset_storage()
+    config = Mock(spec=StorageConfig)
+    config.get_db_host.return_value = "localhost"
+    config.get_db_port.return_value = 5432
+    config.get_db_name.return_value = "test_db"
+    config.get_db_username.return_value = "test_user"
+    config.get_db_password.return_value = "test_pass"
+    engine = Mock()
+    create_all = Mock()
+    monkeypatch.setattr("storage.storage_db.create_engine", lambda *args, **kwargs: engine)
+    monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", create_all)
+
+    get_storage(config)
+
+    tables = create_all.call_args.kwargs["tables"]
+    assert all(table.name != "paper_matching_runs" for table in tables)
+    reset_storage()
+
+
 @pytest.fixture
 def storage(tmp_path, monkeypatch):
     from sqlalchemy import create_engine as real_create_engine
