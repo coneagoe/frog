@@ -16,7 +16,7 @@ The implementation governs these finite column values:
 - Stock Monitor target `reset_mode`: `auto`, `manual`.
 - Forecast SSF candidate `market`: `A`, `HK`, `ETF`.
 - Forecast SSF candidate lifecycle `state`: `eligible`, `ineligible`,
-  `deferred`, `paused`, `blackroom`.
+  `deferred`, `paused`, `blackroom`, `delisted_or_unlisted`.
 
 Supported monitor condition types are `price_threshold`, `price_cross_ma`,
 `price_vs_ma`, `ma_cross`, `change_pct`, and `rsi`. Comparison conditions use
