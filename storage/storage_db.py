@@ -120,9 +120,12 @@ from .model import (
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
+    tb_name_paper_ledger_rebuilds,
     tb_name_paper_matching_runs,
     tb_name_paper_orders,
+    tb_name_paper_pending_settlement,
     tb_name_paper_position_lots,
+    tb_name_paper_position_round_trips,
     tb_name_paper_positions,
     tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
@@ -282,8 +285,26 @@ _storage_instances: Dict[int, "StorageDb"] = {}
 _metadata_initialized_pids: Set[int] = set()
 
 
-def _non_matching_run_tables() -> list[Any]:
-    return [table for table in Base.metadata.sorted_tables if table.name != tb_name_paper_matching_runs]
+_ENUM_GOVERNED_PAPER_TRADING_TABLES = {
+    tb_name_paper_accounts,
+    tb_name_paper_cash_ledger,
+    tb_name_paper_positions,
+    tb_name_paper_position_lots,
+    tb_name_paper_orders,
+    tb_name_paper_trades,
+    tb_name_paper_position_round_trips,
+    tb_name_paper_matching_runs,
+    tb_name_paper_trade_validity_checks,
+    tb_name_paper_pending_settlement,
+    tb_name_paper_ledger_rebuilds,
+}
+
+
+def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
+    if dialect.name != "postgresql":
+        return list(Base.metadata.sorted_tables)
+
+    return [table for table in Base.metadata.sorted_tables if table.name not in _ENUM_GOVERNED_PAPER_TRADING_TABLES]
 
 
 # Tables keyed by ETF/fund code instead of stock code.
@@ -426,7 +447,7 @@ class StorageDb:
         # Run DDL/table creation only once per process to avoid repeated checks
         pid = os.getpid()
         if pid not in _metadata_initialized_pids:
-            Base.metadata.create_all(self.engine, tables=_non_matching_run_tables())
+            Base.metadata.create_all(self.engine, tables=_non_enum_governed_paper_trading_tables(self.engine.dialect))
             self.ensure_a_stock_basic_schema()
             self.ensure_blackroom_records_table()
             self.ensure_paper_trading_schema()
@@ -3010,10 +3031,11 @@ class StorageDb:
             PaperValuationGap,
         )
 
-        PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
+        if self.engine.dialect.name != "postgresql":
+            PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
+            PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
         DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
         PaperValuationGap.__table__.create(self.engine, checkfirst=True)
-        PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
 
         # Bail out if the paper_orders table does not exist yet --- fresh
         # installs rely on Base.metadata.create_all in __init__.

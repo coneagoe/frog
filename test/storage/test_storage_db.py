@@ -54,7 +54,13 @@ from storage.model import (  # noqa: E402
     tb_name_ingredient_500,
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
+    tb_name_paper_cash_ledger,
+    tb_name_paper_ledger_rebuilds,
+    tb_name_paper_matching_runs,
     tb_name_paper_orders,
+    tb_name_paper_pending_settlement,
+    tb_name_paper_position_lots,
+    tb_name_paper_position_round_trips,
     tb_name_paper_positions,
     tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
@@ -90,7 +96,7 @@ def a_stock_basic_schema_upgrade():
     """Opt in to exercising the real A-stock basic schema migration."""
 
 
-def test_storage_startup_excludes_matching_runs_from_metadata_ddl(monkeypatch):
+def test_postgresql_storage_startup_excludes_all_enum_governed_paper_tables(monkeypatch):
     reset_storage()
     config = Mock(spec=StorageConfig)
     config.get_db_host.return_value = "localhost"
@@ -99,6 +105,7 @@ def test_storage_startup_excludes_matching_runs_from_metadata_ddl(monkeypatch):
     config.get_db_username.return_value = "test_user"
     config.get_db_password.return_value = "test_pass"
     engine = Mock()
+    engine.dialect.name = "postgresql"
     create_all = Mock()
     monkeypatch.setattr("storage.storage_db.create_engine", lambda *args, **kwargs: engine)
     monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", create_all)
@@ -106,7 +113,21 @@ def test_storage_startup_excludes_matching_runs_from_metadata_ddl(monkeypatch):
     get_storage(config)
 
     tables = create_all.call_args.kwargs["tables"]
-    assert all(table.name != "paper_matching_runs" for table in tables)
+    assert {table.name for table in tables}.isdisjoint(
+        {
+            tb_name_paper_accounts,
+            tb_name_paper_cash_ledger,
+            tb_name_paper_positions,
+            tb_name_paper_position_lots,
+            tb_name_paper_orders,
+            tb_name_paper_trades,
+            tb_name_paper_position_round_trips,
+            tb_name_paper_matching_runs,
+            tb_name_paper_trade_validity_checks,
+            tb_name_paper_pending_settlement,
+            tb_name_paper_ledger_rebuilds,
+        }
+    )
     reset_storage()
 
 

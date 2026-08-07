@@ -144,7 +144,7 @@ def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_s
     assert second.converted is False
 
 
-def test_postgresql_storage_startup_does_not_create_matching_run_enum(postgres_schema, monkeypatch):
+def test_postgresql_storage_startup_does_not_create_paper_trading_enums(postgres_schema, monkeypatch):
     engine, schema = postgres_schema
     startup_engine = create_engine(engine.url)
 
@@ -170,12 +170,12 @@ def test_postgresql_storage_startup_does_not_create_matching_run_enum(postgres_s
         reset_storage()
         StorageDb(config)
         with _connection(engine, schema) as connection:
-            enum_count = connection.execute(
+            enum_names = connection.execute(
                 text(
-                    "SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
-                    "WHERE n.nspname = current_schema() AND t.typname = 'paper_matching_run_status'"
+                    "SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+                    "WHERE n.nspname = current_schema() AND t.typname LIKE 'paper_%'"
                 )
-            ).scalar_one()
+            ).scalars().all()
             status_type = connection.execute(
                 text(
                     "SELECT a.atttypid::regtype::text FROM pg_attribute a "
@@ -190,7 +190,7 @@ def test_postgresql_storage_startup_does_not_create_matching_run_enum(postgres_s
         storage_db_module._metadata_initialized_pids.discard(os.getpid())
         startup_engine.dispose()
 
-    assert enum_count == 0
+    assert enum_names == []
     assert status_type == "character varying"
     assert all(table.name != "paper_matching_runs" for table in create_all.call_args.kwargs["tables"])
 
