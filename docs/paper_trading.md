@@ -454,13 +454,14 @@ uv run tools/cleanup_zero_paper_positions.py
 
 Record the reported account and position counts, confirm the Accounts Positions card no longer lists cleaned symbols, then remove the temporary command from the deployment branch.
 
-## Matching Run Status Enum Migration
+## Matching Run Status Bootstrap
 
 The `paper_matching_runs.status` column uses the PostgreSQL enum
 `paper_matching_run_status` with these labels, in this order:
-`running`, `completed`, `completed_with_warnings`, and `failed`. The migration
+`running`, `completed`, `completed_with_warnings`, and `failed`. The bootstrap
 command is explicit and must be run as an operator-controlled maintenance
-procedure. It does not run automatically at API startup.
+procedure. API, Celery, Airflow, and `StorageDb` startup do not create or alter
+the matching-run table or enum.
 
 ### Rollout sequence
 
@@ -483,32 +484,35 @@ and migration output. Run commands from the repository root.
    Verify that the file exists and is readable, and retain the exact command
    output with the maintenance record. For a non-Docker database, use the
    equivalent `pg_dump --format=plain --no-owner --no-privileges` command.
-3. Run the migration preflight without changing the database:
+3. Run the bootstrap preflight without changing the database:
 
-   ```bash
-   uv run tools/migrate_paper_matching_run_status_enum.py --dry-run --json
-   ```
+    ```bash
+    uv run tools/bootstrap_paper_matching_run_status.py --dry-run --json
+    ```
 
-   Require exit code zero, `labels` equal to
-   `['running', 'completed', 'completed_with_warnings', 'failed']`, and
-   `index_verified` equal to `true`. A non-empty unknown-status error must be
-   resolved before the actual migration. Do not bypass it by deleting or
-   relabeling rows without an approved data decision.
+    Require exit code zero, `labels` equal to
+    `['running', 'completed', 'completed_with_warnings', 'failed']`, and
+    `index_verified` equal to `true` for an existing table. For a fresh
+    database, preflight reports `table_exists: false` and does not create the
+    table or enum. A non-empty unknown-status error must be resolved before the
+    actual bootstrap. Do not bypass it by deleting or
+    relabeling rows without an approved data decision.
 4. Resolve invalid statuses while writes remain isolated. Inspect the affected
    rows, decide the correct lifecycle state from the matching and order audit
    trail, update only approved rows in a transaction, and rerun the dry-run
    until it succeeds. Do not invent a new enum label during this migration.
-5. Run the actual migration in the same isolated window:
+5. Run the actual bootstrap in the same isolated window:
 
-   ```bash
-   uv run tools/migrate_paper_matching_run_status_enum.py --json
-   ```
+    ```bash
+    uv run tools/bootstrap_paper_matching_run_status.py --json
+    ```
 
-   Require exit code zero, `converted` to reflect whether conversion occurred,
-   the four expected `labels`, and `index_verified: true`. The migration
-   creates or validates the enum, converts the column, and verifies the unique
-   active-run partial index on `(trade_date, scope_key)` for `status =
-   'running'`.
+    Require exit code zero, `converted` to reflect whether conversion occurred,
+    the four expected `labels`, and `index_verified: true`. The migration
+    creates or validates the enum, converts the column, and verifies the unique
+    active-run partial index on `(trade_date, scope_key)` for `status =
+    'running'`. On a fresh database it creates `paper_matching_runs`, the enum,
+    and the verified active-run index before matching writers start.
 6. Before deployment, independently verify the type labels and index in the
    target schema:
 

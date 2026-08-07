@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 from datetime import date
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
-from unittest.mock import Mock
 
+import storage.storage_db as storage_db_module
 from paper_trading.storage.matching_status_migration import (
     MatchingStatusEnumMigrationError,
     bootstrap_paper_matching_run_status,
@@ -113,7 +114,9 @@ def test_postgresql_bootstrap_creates_fresh_enum_table_and_index(empty_postgres_
         assert result.labels == LABELS
         assert result.observed_legacy_values == ()
         assert result.index_verified is True
-        assert connection.execute(text("SELECT to_regclass('paper_matching_runs')")).scalar_one() == "paper_matching_runs"
+        assert (
+            connection.execute(text("SELECT to_regclass('paper_matching_runs')")).scalar_one() == "paper_matching_runs"
+        )
 
 
 def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_schema):
@@ -181,6 +184,7 @@ def test_postgresql_storage_startup_does_not_create_matching_run_enum(postgres_s
             ).scalar_one()
     finally:
         reset_storage()
+        storage_db_module._metadata_initialized_pids.discard(os.getpid())
         startup_engine.dispose()
 
     assert enum_count == 0

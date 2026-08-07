@@ -87,7 +87,9 @@ def bootstrap_paper_matching_run_status(
 
     observed_legacy_values = tuple(
         row[0]
-        for row in connection.execute(text(f"SELECT DISTINCT status FROM {_TABLE_NAME} ORDER BY status NULLS FIRST")).all()
+        for row in connection.execute(
+            text(f"SELECT DISTINCT status FROM {_TABLE_NAME} ORDER BY status NULLS FIRST")
+        ).all()
     )
     migration = migrate_paper_matching_status_enum(connection, dry_run=dry_run)
     return MatchingStatusBootstrapResult(
