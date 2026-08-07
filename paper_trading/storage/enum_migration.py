@@ -324,7 +324,8 @@ def _migrate(
             _create_type(connection, group)
             _alter_group(connection, group, rollback=False)
     _verify(connection, groups, rollback=False)
-    _create_missing_tables(connection, set())
+    if groups is PAPER_TRADING_ENUM_GROUPS:
+        _create_missing_tables(connection, set())
     return result(converted=changed)
 
 
