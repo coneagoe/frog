@@ -12,9 +12,16 @@ from sqlalchemy.orm import Session
 from paper_trading.domain.enums import (
     REPLAY_REJECTION_MARKER,
     CashEventType,
+    FeePreset,
+    LedgerRebuildStatus,
+    Market,
     MatchingRunStatus,
     OrderSide,
     OrderStatus,
+    PendingSettlementSource,
+    PositionSource,
+    RoundTripStatus,
+    TradeValidityStatus,
 )
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label, canonical_stock_id
@@ -132,7 +139,7 @@ class PaperTradingRepository:
             )
             .filter(
                 PaperOrder.status == OrderStatus.ACCEPTED.value,
-                PaperOrder.market == "a_share",
+                PaperOrder.market == Market.A_SHARE.value,
                 DailyBarDiagnostic.resolved.is_(False),
                 DailyBarDiagnostic.classification == "missing_exact_date",
             )
@@ -170,7 +177,7 @@ class PaperTradingRepository:
             stamp_duty_rate=stamp_duty_rate,
             transfer_fee_rate=transfer_fee_rate,
         )
-        preset_name = fee_preset or DEFAULT_FEE_PRESET
+        preset_name = FeePreset(fee_preset or DEFAULT_FEE_PRESET)
         preset = get_fee_preset(preset_name)
         initial_nav = Decimal("1.000000")
         initial_shares = Decimal(initial_cash).quantize(Decimal("0.000001"))
@@ -351,7 +358,7 @@ class PaperTradingRepository:
     ) -> PaperCashLedger:
         event = PaperCashLedger(
             account_id=account_id,
-            event_type=str(event_type),
+            event_type=CashEventType(event_type).value,
             amount=amount,
             order_id=order_id,
             trade_id=trade_id,
@@ -437,7 +444,7 @@ class PaperTradingRepository:
             rejection_code=rejection_code,
             rejection_reason=rejection_reason,
             comment=self._normalize_comment(comment),
-            market=market or "a_share",
+            market=Market(market or Market.A_SHARE).value,
         )
         self.session.add(order)
         self.session.flush()
@@ -569,7 +576,7 @@ class PaperTradingRepository:
         return order
 
     def update_order_validity(self, order: PaperOrder, status: str, reason: str) -> PaperOrder:
-        order.validity_status = status
+        order.validity_status = TradeValidityStatus(status).value
         order.validity_reason = reason
         order.validity_checked_at = datetime.now(timezone.utc)
         order.updated_at = datetime.now(timezone.utc)
@@ -616,6 +623,7 @@ class PaperTradingRepository:
         source: str = "trade",
         market: str | None = None,
     ) -> PaperPosition:
+        source = PositionSource(source).value
         position = self.get_position(account_id, symbol)
         if position is None:
             position = PaperPosition(account_id=account_id, symbol=symbol, source=source)
@@ -625,7 +633,7 @@ class PaperTradingRepository:
         position.cost_amount = cost_amount
         position.realized_pnl = realized_pnl
         if market is not None:
-            position.market = market
+            position.market = Market(market).value
         self.session.flush()
         return position
 
@@ -647,8 +655,8 @@ class PaperTradingRepository:
             original_quantity=original_quantity,
             remaining_quantity=remaining_quantity,
             cost_price=cost_price,
-            source=source,
-            market=market,
+            source=PositionSource(source).value,
+            market=Market(market).value,
         )
         self.session.add(lot)
         self.session.flush()
@@ -796,7 +804,7 @@ class PaperTradingRepository:
             fees=fees,
             trade_date=trade_date,
             comment=self._normalize_comment(comment),
-            market=market or "a_share",
+            market=Market(market or Market.A_SHARE).value,
         )
         self.session.add(trade)
         self.session.flush()
@@ -851,7 +859,7 @@ class PaperTradingRepository:
             open_trade_date=open_trade_date,
             entry_amount=entry_amount,
             fees=fees,
-            status="open",
+            status=RoundTripStatus.OPEN.value,
         )
         self.session.add(cycle)
         self.session.flush()
@@ -863,7 +871,7 @@ class PaperTradingRepository:
             .filter(
                 PaperPositionRoundTrip.account_id == account_id,
                 PaperPositionRoundTrip.symbol == symbol,
-                PaperPositionRoundTrip.status == "open",
+                PaperPositionRoundTrip.status == RoundTripStatus.OPEN.value,
             )
             .order_by(PaperPositionRoundTrip.id.desc())
             .first()
@@ -912,7 +920,7 @@ class PaperTradingRepository:
             account_id=account_id,
             start_date=start_date,
             triggering_order_ids=triggering_order_ids,
-            status="completed",
+            status=LedgerRebuildStatus.COMPLETED.value,
             deleted_counts=deleted_counts,
             regenerated_counts=regenerated_counts,
         )
@@ -932,7 +940,7 @@ class PaperTradingRepository:
             self.session.query(PaperPositionLot)
             .filter(
                 PaperPositionLot.account_id == account_id,
-                PaperPositionLot.source == "imported",
+                PaperPositionLot.source == PositionSource.IMPORTED.value,
             )
             .all()
         )
@@ -992,14 +1000,14 @@ class PaperTradingRepository:
             self.session.query(PaperPositionLot)
             .filter(
                 PaperPositionLot.account_id == account_id,
-                PaperPositionLot.source == "trade",
+                PaperPositionLot.source == PositionSource.TRADE.value,
             )
             .delete(synchronize_session=False)
         )
         # Reset imported lots to their original quantity (undo any sell reductions).
         self.session.query(PaperPositionLot).filter(
             PaperPositionLot.account_id == account_id,
-            PaperPositionLot.source == "imported",
+            PaperPositionLot.source == PositionSource.IMPORTED.value,
         ).update(
             {PaperPositionLot.remaining_quantity: PaperPositionLot.original_quantity},
             synchronize_session="fetch",
@@ -1008,7 +1016,7 @@ class PaperTradingRepository:
             self.session.query(PaperPositionLot)
             .filter(
                 PaperPositionLot.account_id == account_id,
-                PaperPositionLot.source == "imported",
+                PaperPositionLot.source == PositionSource.IMPORTED.value,
             )
             .all()
         )
@@ -1032,7 +1040,7 @@ class PaperTradingRepository:
                 frozen_quantity=0,
                 cost_amount=total_cost[symbol].quantize(Decimal("0.0001")),
                 realized_pnl=Decimal("0"),
-                source="imported",
+                source=PositionSource.IMPORTED.value,
                 market=market_by_symbol[symbol],
             )
             self.session.add(position)
@@ -1088,14 +1096,14 @@ class PaperTradingRepository:
         amount: Decimal,
         expected_settle_date: date,
         trade_id: int | None = None,
-        source: str = "hk_sell",
+        source: str = PendingSettlementSource.HK_SELL.value,
     ) -> PaperPendingSettlement:
         pending = PaperPendingSettlement(
             account_id=account_id,
             amount=amount,
             expected_settle_date=expected_settle_date,
             trade_id=trade_id,
-            source=source,
+            source=PendingSettlementSource(source).value,
             settled=False,
         )
         self.session.add(pending)

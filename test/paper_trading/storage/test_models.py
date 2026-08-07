@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import Boolean, create_engine, inspect
+from sqlalchemy import Boolean, Enum, create_engine, inspect
 from sqlalchemy.dialects.postgresql import dialect
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
@@ -11,9 +11,17 @@ from sqlalchemy.schema import CreateTable
 from paper_trading.domain.enums import MatchingRunStatus
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
+    PaperAccount,
+    PaperCashLedger,
+    PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
+    PaperPendingSettlement,
+    PaperPosition,
     PaperPositionLot,
+    PaperPositionRoundTrip,
+    PaperTrade,
+    PaperTradeValidityCheck,
     tb_name_daily_bar_diagnostics,
     tb_name_paper_accounts,
     tb_name_paper_orders,
@@ -163,5 +171,130 @@ def test_matching_run_status_rejects_unknown_value(tmp_path):
         session.add(PaperMatchingRun(trade_date=date(2026, 7, 31), status="in_progress"))
         with pytest.raises((StatementError, ValueError)):
             session.flush()
+
+    engine.dispose()
+
+
+def test_selected_paper_columns_use_shared_value_enums():
+    assert isinstance(PaperAccount.__table__.c.status.type, Enum)
+    assert PaperAccount.__table__.c.status.type.name == "paper_account_status"
+    assert PaperAccount.__table__.c.fee_preset.type.name == "paper_fee_preset"
+    assert PaperCashLedger.__table__.c.event_type.type.name == "paper_cash_event_type"
+    assert PaperOrder.__table__.c.side.type.name == "paper_order_side"
+    assert PaperTrade.__table__.c.side.type.name == "paper_order_side"
+    assert PaperTradeValidityCheck.__table__.c.side.type.name == "paper_order_side"
+    assert PaperOrder.__table__.c.status.type.name == "paper_order_status"
+    assert PaperOrder.__table__.c.validity_status.type.name == "paper_trade_validity_status"
+    assert PaperTradeValidityCheck.__table__.c.status.type.name == "paper_trade_validity_status"
+    assert PaperOrder.__table__.c.market.type.name == "paper_market"
+    assert PaperPosition.__table__.c.market.type.name == "paper_market"
+    assert PaperPositionLot.__table__.c.market.type.name == "paper_market"
+    assert PaperTrade.__table__.c.market.type.name == "paper_market"
+    assert PaperTradeValidityCheck.__table__.c.market.type.name == "paper_market"
+    assert PaperPosition.__table__.c.source.type.name == "paper_position_source"
+    assert PaperPositionLot.__table__.c.source.type.name == "paper_position_source"
+    assert PaperPositionRoundTrip.__table__.c.status.type.name == "paper_round_trip_status"
+    assert PaperTradeValidityCheck.__table__.c.data_granularity.type.name == "paper_trade_validity_granularity"
+    assert PaperPendingSettlement.__table__.c.source.type.name == "paper_pending_settlement_source"
+    assert PaperLedgerRebuild.__table__.c.status.type.name == "paper_ledger_rebuild_status"
+    assert PaperMatchingRun.__table__.c.status.type.name == "paper_matching_run_status"
+
+
+def test_selected_paper_enum_columns_reject_unknown_values(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(
+            PaperOrder(
+                account_id=1,
+                symbol="000001",
+                side="borrow",
+                quantity=100,
+                limit_price=Decimal("10.00"),
+                trade_date=date(2026, 8, 7),
+                status="accepted",
+            )
+        )
+        with pytest.raises((StatementError, ValueError)):
+            session.flush()
+
+    engine.dispose()
+
+
+def test_selected_paper_enum_defaults_round_trip_as_readable_strings(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        account = PaperAccount(name="defaults", initial_cash=Decimal("100000.00"))
+        session.add(account)
+        session.flush()
+        position = PaperPosition(account_id=account.id, symbol="000001")
+        lot = PaperPositionLot(
+            account_id=account.id,
+            symbol="000001",
+            buy_trade_date=date(2026, 8, 7),
+            original_quantity=100,
+            remaining_quantity=100,
+            cost_price=Decimal("10.00"),
+        )
+        order = PaperOrder(
+            account_id=account.id,
+            symbol="000001",
+            side="buy",
+            quantity=100,
+            limit_price=Decimal("10.00"),
+            trade_date=date(2026, 8, 7),
+            status="accepted",
+        )
+        session.add_all([position, lot, order])
+        session.flush()
+        cycle = PaperPositionRoundTrip(
+            account_id=account.id,
+            symbol="000001",
+            open_trade_id=1,
+            open_trade_date=date(2026, 8, 7),
+        )
+        check = PaperTradeValidityCheck(
+            order_id=order.id,
+            account_id=account.id,
+            symbol="000001",
+            trade_date=date(2026, 8, 7),
+            side="buy",
+            input_price=Decimal("10.00"),
+            status="valid",
+            reason_code="VALID",
+        )
+        rebuild = PaperLedgerRebuild(
+            account_id=account.id,
+            start_date=date(2026, 8, 7),
+            triggering_order_ids=[],
+            status="completed",
+            deleted_counts={},
+            regenerated_counts={},
+        )
+        session.add_all([cycle, check, rebuild])
+        session.commit()
+        session.expire_all()
+
+        loaded_account = session.get(PaperAccount, account.id)
+        loaded_position = session.get(PaperPosition, position.id)
+        loaded_lot = session.get(PaperPositionLot, lot.id)
+        loaded_cycle = session.get(PaperPositionRoundTrip, cycle.id)
+        loaded_check = session.get(PaperTradeValidityCheck, check.id)
+        loaded_rebuild = session.get(PaperLedgerRebuild, rebuild.id)
+        assert loaded_account is not None
+        assert loaded_position is not None
+        assert loaded_lot is not None
+        assert loaded_cycle is not None
+        assert loaded_check is not None
+        assert loaded_rebuild is not None
+        assert (loaded_account.status, loaded_account.fee_preset) == ("active", "a_share")
+        assert (loaded_position.source, loaded_position.market) == ("trade", "a_share")
+        assert (loaded_lot.source, loaded_lot.market) == ("trade", "a_share")
+        assert loaded_cycle.status == "open"
+        assert loaded_check.data_granularity == "daily"
+        assert loaded_rebuild.status == "completed"
 
     engine.dispose()

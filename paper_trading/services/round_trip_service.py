@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from paper_trading.domain.enums import OrderSide
+from paper_trading.domain.enums import OrderSide, RoundTripStatus
 from paper_trading.storage.models import PaperPositionRoundTrip, PaperTrade
 from paper_trading.storage.repository import PaperTradingRepository
 
@@ -52,7 +52,7 @@ class RoundTripService:
             entry_amount = Decimal(cycle.entry_amount or 0)
             values["return_pct"] = (realized_pnl / entry_amount).quantize(Decimal("0.000001")) if entry_amount else None
             values["holding_days"] = (trade.trade_date - cycle.open_trade_date).days
-            values["status"] = "closed"
+            values["status"] = RoundTripStatus.CLOSED.value
         self.repo.update_round_trip(cycle, **values)
 
     def rebuild_account(self, account_id: int) -> list[PaperPositionRoundTrip]:
