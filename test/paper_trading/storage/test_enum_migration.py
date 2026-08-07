@@ -185,6 +185,36 @@ def test_apply_creates_missing_dependent_operational_tables_after_enum_conversio
         assert _table_exists(connection, "paper_valuation_gaps")
 
 
+def test_dry_run_leaves_missing_operational_tables_absent_after_enum_conversion(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(text("DROP TABLE paper_account_snapshots"))
+        connection.execute(text("DROP TABLE paper_valuation_gaps"))
+
+        result = migrate_paper_trading_enums(connection, dry_run=True)
+
+        assert result.dry_run is True
+        assert not _table_exists(connection, "paper_account_snapshots")
+        assert not _table_exists(connection, "paper_valuation_gaps")
+
+
+def test_rollback_leaves_missing_operational_tables_absent_after_enum_conversion(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(text("DROP TABLE paper_account_snapshots"))
+        connection.execute(text("DROP TABLE paper_valuation_gaps"))
+
+        result = migrate_paper_trading_enums(connection, rollback=True)
+
+        assert result.rolled_back is True
+        assert _column_type(connection, "paper_orders", "side") == "character varying(10)"
+        assert _enum_types(connection) == set()
+        assert not _table_exists(connection, "paper_account_snapshots")
+        assert not _table_exists(connection, "paper_valuation_gaps")
+
+
 def test_type_label_mismatch_does_not_modify_existing_type(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
