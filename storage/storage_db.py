@@ -2000,6 +2000,8 @@ class StorageDb:
         """建表（若不存在），供 SSF 变动信号流程初始化使用。"""
         assert self.engine is not None
         if self.engine.dialect.name == "postgresql":
+            if inspect(self.engine).has_table(tb_name_ssf_change_signal):
+                self._ensure_ssf_change_signals_status_column()
             return
 
         from .model.ssf_change_signal import SSFChangeSignal  # noqa: F401

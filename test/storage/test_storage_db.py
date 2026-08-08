@@ -3668,12 +3668,7 @@ def test_postgresql_ssf_startup_leaves_table_creation_to_storage_enum_adapter(mo
         admin_engine = create_engine(url)
         with admin_engine.begin() as conn:
             conn.execute(text(f'CREATE SCHEMA "{schema}"'))
-        engine = create_engine(url)
-        event.listen(
-            engine,
-            "connect",
-            lambda dbapi_connection, _: dbapi_connection.cursor().execute(f'SET search_path TO "{schema}"'),
-        )
+        engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
         db = StorageDb.__new__(StorageDb)
         db.engine = engine
 
@@ -3697,6 +3692,82 @@ def test_postgresql_ssf_startup_leaves_table_creation_to_storage_enum_adapter(mo
             engine.dispose()
         if admin_engine is not None:
             admin_engine.dispose()
+
+
+def test_postgresql_ssf_startup_upgrades_existing_legacy_table_before_storage_migration(monkeypatch):
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+
+    schema = f"ssf_legacy_{uuid.uuid4().hex}"
+    engine = create_engine(url)
+    monkeypatch_create = Mock()
+    monkeypatch.setattr("storage.model.ssf_change_signal.SSFChangeSignal.__table__.create", monkeypatch_create)
+    with engine.begin() as admin_connection:
+        admin_connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(f'SET search_path TO "{schema}"'))
+            connection.execute(
+                text(
+                    "CREATE TABLE blackroom_records ("
+                    "id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', "
+                    "source varchar(50) NOT NULL DEFAULT 'manual')"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE daily_bar_diagnostics ("
+                    "id integer primary key, adjust varchar(10) NOT NULL, "
+                    "classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL)"
+                )
+            )
+            connection.execute(
+                text("CREATE TABLE ssf_change_signals (id integer primary key, event_types jsonb NOT NULL)")
+            )
+
+        startup_engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
+        try:
+            db = StorageDb.__new__(StorageDb)
+            db.engine = startup_engine
+            db.ensure_ssf_change_signals_table()
+
+            with startup_engine.connect() as connection:
+                status_column = connection.execute(
+                    text(
+                        "SELECT format_type(a.atttypid, a.atttypmod), pg_get_expr(d.adbin, d.adrelid) "
+                        "FROM pg_attribute a "
+                        "JOIN pg_class c ON c.oid = a.attrelid "
+                        "LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum "
+                        "WHERE c.relnamespace = current_schema()::regnamespace "
+                        "AND c.relname = 'ssf_change_signals' AND a.attname = 'status'"
+                    )
+                ).one()
+                assert status_column == ("character varying(20)", "'signal'::character varying")
+                monkeypatch_create.assert_not_called()
+
+                from storage.enum_governance import migrate_enums
+                from storage.enum_migration import STORAGE_ENUM_ADAPTER
+
+                result = migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+                assert result.converted is True
+                assert (
+                    connection.execute(
+                        text(
+                            "SELECT format_type(a.atttypid, a.atttypmod) "
+                            "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+                            "WHERE c.relnamespace = current_schema()::regnamespace "
+                            "AND c.relname = 'ssf_change_signals' AND a.attname = 'status'"
+                        )
+                    ).scalar_one()
+                    == "ssf_change_signal_status"
+                )
+        finally:
+            startup_engine.dispose()
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
 
 
 if __name__ == "__main__":
