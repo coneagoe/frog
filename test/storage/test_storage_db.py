@@ -3698,6 +3698,7 @@ def test_postgresql_ssf_startup_upgrades_existing_legacy_table_before_storage_mi
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
 
     schema = f"ssf_legacy_{uuid.uuid4().hex}"
     engine = create_engine(url)
