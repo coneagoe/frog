@@ -257,6 +257,20 @@ def test_incompatible_named_index_aborts_before_any_ddl(postgres_schema):
         assert _enum_types(connection) == set()
 
 
+def test_expression_named_index_aborts_before_any_ddl(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text("CREATE INDEX ix_stock_monitor_targets_market ON stock_monitor_targets (lower(market))")
+        )
+
+        with pytest.raises(MonitorEnumMigrationError, match="missing or invalid index"):
+            migrate_monitor_enums(connection)
+
+        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
+        assert _enum_types(connection) == set()
+
+
 def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:

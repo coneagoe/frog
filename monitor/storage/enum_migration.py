@@ -466,7 +466,7 @@ def _index_facts(connection: Connection, index_name: str) -> tuple[str, bool, tu
             "FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
             "JOIN pg_class t ON t.oid = i.indrelid "
             "JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinality) ON true "
-            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum "
+            "LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum "
             "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :index_name "
             "GROUP BY t.relname, i.indisunique, i.indpred, i.indrelid"
         ),
