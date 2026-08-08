@@ -73,8 +73,8 @@ column facts, unexpected pre-existing enum labels, invalid legacy scalar
 values, invalid legacy JSON documents, and conflicting JSON-check definitions.
 It verifies expected defaults for Blackroom market and source.
 
-Normal PostgreSQL migration creates or verifies the named types, explicitly
-casts legacy strings through text to enum columns, restores defaults, installs
+Normal PostgreSQL migration creates or verifies the five named scalar types,
+explicitly casts legacy strings through text to enum columns, restores defaults, installs
 the two checks, and verifies types, labels, defaults, and checks. A successful
 rerun is idempotent. SQLite remains a no-DDL path; it uses the same
 application-level validation.
