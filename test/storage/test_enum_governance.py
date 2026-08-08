@@ -44,6 +44,7 @@ def postgres_schema():
         connection.execute(text(f'SET search_path TO "{schema}"'))
         _create_paper_legacy_schema(connection)
         _create_monitor_legacy_schema(connection)
+        _create_storage_legacy_schema(connection)
     try:
         yield engine, schema
     finally:
@@ -97,6 +98,16 @@ def _create_monitor_legacy_schema(connection: Connection) -> None:
             "report_end_date date NOT NULL, state varchar(32) NOT NULL, state_reason varchar(128) NOT NULL)"
         )
     )
+
+
+def _create_storage_legacy_schema(connection: Connection) -> None:
+    statements = (
+        "CREATE TABLE blackroom_records (id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', source varchar(50) NOT NULL DEFAULT 'manual')",
+        "CREATE TABLE daily_bar_diagnostics (id integer primary key, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL)",
+        "CREATE TABLE ssf_change_signals (id integer primary key, status varchar(20) NOT NULL DEFAULT 'signal', event_types jsonb NOT NULL)",
+    )
+    for statement in statements:
+        connection.execute(text(statement))
 
 
 def _column_type(connection: Connection, table_name: str, column_name: str) -> str:
@@ -273,6 +284,26 @@ def test_non_postgresql_connection_returns_no_change_without_adapters() -> None:
 
 def test_default_adapters_are_paper_trading_monitor_then_storage() -> None:
     assert tuple(adapter.name for adapter in ENUM_GOVERNANCE_ADAPTERS) == ("paper_trading", "monitor", "storage")
+
+
+def test_atomic_migration_prevents_all_conversion_when_storage_json_is_invalid(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics "
+                "(id, adjust, classification, provider_outcomes) VALUES "
+                "(1, 'bfq', 'downloaded', '[{\"status\": \"partial\"}]'::jsonb)"
+            )
+        )
+
+        with pytest.raises(EnumGovernanceError, match="storage"):
+            migrate_enums(connection)
+
+        assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "character varying(10)"
 
 
 def test_atomic_migration_rolls_back_paper_trading_when_monitor_condition_is_invalid(postgres_schema) -> None:
