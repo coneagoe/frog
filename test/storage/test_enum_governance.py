@@ -1,8 +1,9 @@
+# ruff: noqa: E501
+
 import os
 import uuid
 from dataclasses import dataclass
 
-# ruff: noqa: E501
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
@@ -15,6 +16,7 @@ from storage.enum_governance import (
     EnumGovernanceError,
     migrate_enums,
 )
+from storage.enum_migration import STORAGE_ENUM_GROUPS
 
 
 @dataclass
@@ -112,7 +114,7 @@ def _column_type(connection: Connection, table_name: str, column_name: str) -> s
 
 
 def _all_managed_enum_types(connection: Connection) -> set[str]:
-    expected = {group.type_name for group in PAPER_TRADING_ENUM_GROUPS + MONITOR_ENUM_GROUPS}
+    expected = {group.type_name for group in PAPER_TRADING_ENUM_GROUPS + MONITOR_ENUM_GROUPS + STORAGE_ENUM_GROUPS}
     return (
         set(
             connection.execute(
@@ -269,8 +271,8 @@ def test_non_postgresql_connection_returns_no_change_without_adapters() -> None:
     ]
 
 
-def test_default_adapters_are_paper_trading_then_monitor() -> None:
-    assert tuple(adapter.name for adapter in ENUM_GOVERNANCE_ADAPTERS) == ("paper_trading", "monitor")
+def test_default_adapters_are_paper_trading_monitor_then_storage() -> None:
+    assert tuple(adapter.name for adapter in ENUM_GOVERNANCE_ADAPTERS) == ("paper_trading", "monitor", "storage")
 
 
 def test_atomic_migration_rolls_back_paper_trading_when_monitor_condition_is_invalid(postgres_schema) -> None:
