@@ -57,16 +57,22 @@ generic reflection framework. It is the auditable contract for each conversion:
 reviewers can see exactly which columns share an enum and how a rollback restores
 each one.
 
-`tools/migrate_paper_trading_enums.py` is the operator entrypoint. It reads the
-standard configuration and uses a single database transaction. Its modes are:
+`tools/migrate_enums.py` is the operator entrypoint. It reads the standard
+configuration and uses a single database transaction. Its modes are:
 
-- `--dry_run`: inspect and report all groups without DDL or DML.
+- `--dry-run`: inspect and report all groups without DDL or DML.
 - Default execution: preflight every selected group, convert all compliant
   groups, then verify every final contract.
 - `--rollback`: convert every selected enum column back to its declared prior
   string representation, restore defaults and indexes, verify the string
   contract, then drop a type only after no dependent columns remain.
 - `--json`: produce machine-readable output in every mode.
+
+Use `uv run tools/migrate_enums.py --dry-run --json` to inspect, `uv run
+tools/migrate_enums.py --json` to apply, and `uv run tools/migrate_enums.py
+--rollback --json` to roll back. The former
+`tools/migrate_paper_trading_enums.py` command is historical and has been
+superseded by the unified entrypoint.
 
 The prior matching-run bootstrap command remains valid for fresh matching-run
 storage. The unified command detects the existing matching enum type and either

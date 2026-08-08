@@ -8,8 +8,8 @@ usage() {
   cat <<'USAGE'
 Export business tables from PostgreSQL as plain SQL using pg_dump.
 
-Exports include required Paper Trading enum definitions before dependent table
-dumps.
+Exports include required business enum definitions, including Paper Trading,
+Monitor, and Forecast SSF enums, before dependent table dumps.
 
 Uses Docker (docker compose exec db). Output is plain SQL suitable for psql restore.
 

@@ -8,8 +8,9 @@ usage() {
   cat <<'USAGE'
 Import business tables into PostgreSQL using psql.
 
-Paper Trading dumps restore enum definitions before dependent table definitions
-and rows. Clean imports drop dependent tables before those enum types.
+Business dumps restore enum definitions, including Paper Trading, Monitor, and
+Forecast SSF enums, before dependent table definitions and rows. Clean imports
+drop dependent tables before those enum types.
 
 Uses Docker (docker compose exec db). Input should be a plain SQL dump (optionally .gz).
 
