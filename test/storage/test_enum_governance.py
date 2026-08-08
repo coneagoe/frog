@@ -321,6 +321,18 @@ def test_atomic_migration_prevents_all_conversion_when_storage_json_is_invalid(p
             .all()
             == []
         )
+        assert (
+            connection.execute(
+                text(
+                    "SELECT proname FROM pg_proc "
+                    "WHERE pronamespace = current_schema()::regnamespace "
+                    "AND proname IN ('storage_provider_outcomes_are_valid', 'storage_ssf_event_types_are_valid')"
+                )
+            )
+            .scalars()
+            .all()
+            == []
+        )
 
 
 def test_atomic_migration_rolls_back_paper_trading_when_monitor_condition_is_invalid(postgres_schema) -> None:
