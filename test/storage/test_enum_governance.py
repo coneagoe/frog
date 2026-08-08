@@ -147,9 +147,7 @@ def _column_default(connection: Connection, table_name: str, column_name: str) -
 
 def _index_exists(connection: Connection, index_name: str) -> bool:
     return bool(
-        connection.execute(
-            text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}
-        ).scalar_one()
+        connection.execute(text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}).scalar_one()
     )
 
 
