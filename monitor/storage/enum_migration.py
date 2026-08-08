@@ -9,7 +9,7 @@ from sqlalchemy.engine import Connection
 
 from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
-from storage.enum_governance import EnumGovernanceAdapter
+from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import ForecastSSFCandidate, StockMonitorTarget
 
 

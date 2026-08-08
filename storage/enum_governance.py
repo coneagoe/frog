@@ -5,19 +5,11 @@ from typing import Any, Callable
 
 from sqlalchemy.engine import Connection
 
+from storage.enum_governance_adapter import EnumGovernanceAdapter
+
 
 class EnumGovernanceError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class EnumGovernanceAdapter:
-    name: str
-    preflight: Callable[..., None]
-    apply: Callable[..., bool]
-    verify: Callable[..., None]
-    rollback: Callable[..., bool]
-    result: Callable[..., object]
 
 
 @dataclass(frozen=True)
@@ -35,7 +27,10 @@ class EnumGovernanceResult:
     domains: tuple[EnumGovernanceDomainResult, ...]
 
 
-ENUM_GOVERNANCE_ADAPTERS: tuple[EnumGovernanceAdapter, ...] = ()
+from monitor.storage.enum_migration import MONITOR_ENUM_ADAPTER  # noqa: E402
+from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_ADAPTER  # noqa: E402
+
+ENUM_GOVERNANCE_ADAPTERS = (PAPER_TRADING_ENUM_ADAPTER, MONITOR_ENUM_ADAPTER)
 
 
 def migrate_enums(

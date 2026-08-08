@@ -22,7 +22,7 @@ from paper_trading.domain.enums import (
     TradeValidityGranularity,
     TradeValidityStatus,
 )
-from storage.enum_governance import EnumGovernanceAdapter
+from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import (
     PaperAccount,
     PaperAccountSnapshot,

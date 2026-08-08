@@ -1,8 +1,20 @@
+import os
+import uuid
 from dataclasses import dataclass
 
+# ruff: noqa: E501
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection, Engine
 
-from storage.enum_governance import EnumGovernanceAdapter, EnumGovernanceError, migrate_enums
+from monitor.storage.enum_migration import MONITOR_ENUM_GROUPS
+from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_GROUPS
+from storage.enum_governance import (
+    ENUM_GOVERNANCE_ADAPTERS,
+    EnumGovernanceAdapter,
+    EnumGovernanceError,
+    migrate_enums,
+)
 
 
 @dataclass
@@ -12,6 +24,103 @@ class FakeConnection:
     @property
     def dialect(self):
         return type("Dialect", (), {"name": self.dialect_name})()
+
+
+def _engine() -> Engine:
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    return create_engine(url)
+
+
+@pytest.fixture()
+def postgres_schema():
+    engine = _engine()
+    schema = f"enum_governance_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        _create_paper_legacy_schema(connection)
+        _create_monitor_legacy_schema(connection)
+    try:
+        yield engine, schema
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
+
+
+def _create_paper_legacy_schema(connection: Connection) -> None:
+    statements = (
+        "CREATE TABLE paper_accounts (id integer primary key, status varchar(20) NOT NULL DEFAULT 'active', fee_preset varchar(30) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_cash_ledger (id integer primary key, event_type varchar(20) NOT NULL)",
+        "CREATE TABLE paper_positions (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_position_lots (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_orders (id integer primary key, side varchar(10) NOT NULL, status varchar(30) NOT NULL, validity_status varchar(20), market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_trades (id integer primary key, side varchar(10) NOT NULL, market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_position_round_trips (id integer primary key, status varchar(20) NOT NULL DEFAULT 'open')",
+        "CREATE TABLE paper_trade_validity_checks (id integer primary key, side varchar(10) NOT NULL, status varchar(20) NOT NULL, data_granularity varchar(20) NOT NULL DEFAULT 'daily', market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_pending_settlement (id integer primary key, source varchar(20) NOT NULL)",
+        "CREATE TABLE paper_ledger_rebuilds (id integer primary key, status varchar(20) NOT NULL)",
+        "CREATE TABLE paper_matching_runs (id integer primary key, trade_date date NOT NULL, scope_key varchar(40) NOT NULL, status varchar(32) NOT NULL)",
+        "CREATE INDEX ix_paper_positions_market ON paper_positions (market)",
+        "CREATE INDEX ix_paper_position_lots_market ON paper_position_lots (market)",
+        "CREATE INDEX ix_paper_orders_status ON paper_orders (status)",
+        "CREATE INDEX ix_paper_orders_validity_status ON paper_orders (validity_status)",
+        "CREATE INDEX ix_paper_orders_market ON paper_orders (market)",
+        "CREATE INDEX ix_paper_trades_market ON paper_trades (market)",
+        "CREATE INDEX ix_paper_trade_validity_checks_status ON paper_trade_validity_checks (status)",
+        "CREATE INDEX ix_paper_trade_validity_checks_market ON paper_trade_validity_checks (market)",
+        "CREATE INDEX ix_paper_position_round_trips_status ON paper_position_round_trips (status)",
+        "CREATE INDEX ix_paper_ledger_rebuilds_status ON paper_ledger_rebuilds (status)",
+        "CREATE UNIQUE INDEX uq_matching_active_scope ON paper_matching_runs (trade_date, scope_key) WHERE status = 'running'",
+    )
+    for statement in statements:
+        connection.execute(text(statement))
+
+
+def _create_monitor_legacy_schema(connection: Connection) -> None:
+    connection.execute(
+        text(
+            "CREATE TABLE stock_monitor_targets ("
+            "id integer primary key, stock_code varchar(10) NOT NULL, market varchar(5) NOT NULL DEFAULT 'A', "
+            "condition jsonb NOT NULL, frequency varchar(10) NOT NULL DEFAULT 'daily', "
+            "reset_mode varchar(10) NOT NULL DEFAULT 'auto')"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE TABLE forecast_ssf_candidates ("
+            "stock_code varchar(6) primary key, market varchar(5) NOT NULL DEFAULT 'A', "
+            "report_end_date date NOT NULL, state varchar(32) NOT NULL, state_reason varchar(128) NOT NULL)"
+        )
+    )
+
+
+def _column_type(connection: Connection, table_name: str, column_name: str) -> str:
+    return str(
+        connection.execute(
+            text(
+                "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                "JOIN pg_class c ON c.oid = a.attrelid "
+                "WHERE c.relnamespace = current_schema()::regnamespace "
+                "AND c.relname = :table_name AND a.attname = :column_name"
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).scalar_one()
+    )
+
+
+def _all_managed_enum_types(connection: Connection) -> set[str]:
+    expected = {group.type_name for group in PAPER_TRADING_ENUM_GROUPS + MONITOR_ENUM_GROUPS}
+    return (
+        set(
+            connection.execute(
+                text("SELECT typname FROM pg_type WHERE typnamespace = current_schema()::regnamespace")
+            ).scalars()
+        )
+        & expected
+    )
 
 
 def _adapter(
@@ -158,3 +267,47 @@ def test_non_postgresql_connection_returns_no_change_without_adapters() -> None:
         ("paper", "paper:False:False:False:False"),
         ("monitor", "monitor:False:False:False:False"),
     ]
+
+
+def test_default_adapters_are_paper_trading_then_monitor() -> None:
+    assert tuple(adapter.name for adapter in ENUM_GOVERNANCE_ADAPTERS) == ("paper_trading", "monitor")
+
+
+def test_atomic_migration_rolls_back_paper_trading_when_monitor_condition_is_invalid(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(
+            text(
+                "INSERT INTO paper_matching_runs (id, trade_date, scope_key, status) VALUES (1, '2026-08-08', 'daily', 'running')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
+                "VALUES (1, '600001', 'A', '{\"workflow\": \"forecast_ssf_ma20\"}'::jsonb, 'daily', 'auto')"
+            )
+        )
+
+        with pytest.raises(EnumGovernanceError, match="monitor"):
+            migrate_enums(connection)
+
+        assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
+        assert _all_managed_enum_types(connection) == set()
+
+
+def test_atomic_migration_prevents_monitor_conversion_when_paper_trading_value_is_invalid(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(
+            text("INSERT INTO paper_orders (id, side, status, market) VALUES (1, 'borrow', 'new', 'a_share')")
+        )
+
+        with pytest.raises(EnumGovernanceError, match="paper_trading"):
+            migrate_enums(connection)
+
+        assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
+        assert _all_managed_enum_types(connection) == set()

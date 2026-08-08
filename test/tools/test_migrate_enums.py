@@ -110,6 +110,23 @@ def test_main_emits_stable_json_for_all_domains(monkeypatch, capsys) -> None:
     assert [domain["name"] for domain in output["domains"]] == ["paper_trading", "monitor"]
 
 
+def test_main_forwards_rollback_to_migration(monkeypatch) -> None:
+    transaction = FakeTransaction()
+    calls: list[dict[str, bool]] = []
+
+    def fake_migration(connection, *, dry_run: bool, rollback: bool) -> FakeResult:
+        calls.append({"dry_run": dry_run, "rollback": rollback})
+        return _result_with_paper_and_monitor_groups()
+
+    monkeypatch.setattr(command, "parse_config", lambda: None)
+    monkeypatch.setattr(command, "get_storage", lambda: FakeStorage(transaction))
+    monkeypatch.setattr(command, "migrate_enums", fake_migration)
+
+    assert command.main(["--rollback"]) == 0
+
+    assert calls == [{"dry_run": False, "rollback": True}]
+
+
 def test_main_prints_ordered_human_domain_groups(monkeypatch, capsys) -> None:
     transaction = FakeTransaction()
     result = _result_with_paper_and_monitor_groups()
