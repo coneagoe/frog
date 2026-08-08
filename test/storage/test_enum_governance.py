@@ -1,9 +1,10 @@
+# ruff: noqa: E501
+
 import os
 import uuid
 from dataclasses import dataclass
 from typing import cast
 
-# ruff: noqa: E501
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
@@ -16,6 +17,7 @@ from storage.enum_governance import (
     EnumGovernanceError,
     migrate_enums,
 )
+from storage.enum_migration import STORAGE_ENUM_GROUPS
 
 
 @dataclass
@@ -44,6 +46,7 @@ def postgres_schema():
         connection.execute(text(f'SET search_path TO "{schema}"'))
         _create_paper_legacy_schema(connection)
         _create_monitor_legacy_schema(connection)
+        _create_storage_legacy_schema(connection)
     try:
         yield engine, schema
     finally:
@@ -99,6 +102,16 @@ def _create_monitor_legacy_schema(connection: Connection) -> None:
     )
 
 
+def _create_storage_legacy_schema(connection: Connection) -> None:
+    statements = (
+        "CREATE TABLE blackroom_records (id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', source varchar(50) NOT NULL DEFAULT 'manual')",
+        "CREATE TABLE daily_bar_diagnostics (id integer primary key, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL)",
+        "CREATE TABLE ssf_change_signals (id integer primary key, status varchar(20) NOT NULL DEFAULT 'signal', event_types jsonb NOT NULL)",
+    )
+    for statement in statements:
+        connection.execute(text(statement))
+
+
 def _column_type(connection: Connection, table_name: str, column_name: str) -> str:
     return str(
         connection.execute(
@@ -114,7 +127,7 @@ def _column_type(connection: Connection, table_name: str, column_name: str) -> s
 
 
 def _all_managed_enum_types(connection: Connection) -> set[str]:
-    expected = {group.type_name for group in PAPER_TRADING_ENUM_GROUPS + MONITOR_ENUM_GROUPS}
+    expected = {group.type_name for group in PAPER_TRADING_ENUM_GROUPS + MONITOR_ENUM_GROUPS + STORAGE_ENUM_GROUPS}
     return (
         set(
             connection.execute(
@@ -166,22 +179,26 @@ def test_normal_migration_preflights_every_adapter_before_ddl() -> None:
 
     result = migrate_enums(
         cast(Connection, FakeConnection()),
-        adapters=(_adapter("paper", events), _adapter("monitor", events)),
+        adapters=(_adapter("paper", events), _adapter("monitor", events), _adapter("storage", events)),
     )
 
     assert events == [
         "paper.preflight",
         "monitor.preflight",
+        "storage.preflight",
         "paper.apply",
         "monitor.apply",
+        "storage.apply",
         "paper.verify",
         "monitor.verify",
+        "storage.verify",
     ]
     assert result.converted is True
     assert result.rolled_back is False
     assert [(domain.name, domain.result) for domain in result.domains] == [
         ("paper", "paper:False:False:True:False"),
         ("monitor", "monitor:False:False:True:False"),
+        ("storage", "storage:False:False:True:False"),
     ]
 
 
@@ -271,8 +288,41 @@ def test_non_postgresql_connection_returns_no_change_without_adapters() -> None:
     ]
 
 
-def test_default_adapters_are_paper_trading_then_monitor() -> None:
-    assert tuple(adapter.name for adapter in ENUM_GOVERNANCE_ADAPTERS) == ("paper_trading", "monitor")
+def test_default_adapters_are_paper_trading_monitor_then_storage() -> None:
+    assert tuple(adapter.name for adapter in ENUM_GOVERNANCE_ADAPTERS) == ("paper_trading", "monitor", "storage")
+
+
+def test_atomic_migration_prevents_all_conversion_when_storage_json_is_invalid(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics "
+                "(id, adjust, classification, provider_outcomes) VALUES "
+                "(1, 'bfq', 'downloaded', '[{\"status\": \"partial\"}]'::jsonb)"
+            )
+        )
+
+        with pytest.raises(EnumGovernanceError, match="storage"):
+            migrate_enums(connection)
+
+        assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "character varying(10)"
+        assert _all_managed_enum_types(connection) == set()
+        assert (
+            connection.execute(
+                text(
+                    "SELECT conname FROM pg_constraint "
+                    "WHERE connamespace = current_schema()::regnamespace "
+                    "AND conname IN ('ck_daily_bar_diagnostics_provider_outcome_status', 'ck_ssf_change_signals_event_types')"
+                )
+            )
+            .scalars()
+            .all()
+            == []
+        )
 
 
 def test_atomic_migration_rolls_back_paper_trading_when_monitor_condition_is_invalid(postgres_schema) -> None:

@@ -43,6 +43,7 @@ from storage.model import (  # noqa: E402
     Base,
     PaperAccount,
     PaperPositionLot,
+    tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
     tb_name_etf_daily,
     tb_name_history_data_daily_a_stock_bfq,
@@ -65,6 +66,7 @@ from storage.model import (  # noqa: E402
     tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
     tb_name_paper_valuation_gaps,
+    tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
     tb_name_top10_floatholders,
 )
@@ -129,6 +131,9 @@ def test_postgresql_storage_startup_excludes_all_enum_governed_paper_tables(monk
             tb_name_paper_ledger_rebuilds,
             tb_name_paper_account_snapshots,
             tb_name_paper_valuation_gaps,
+            tb_name_blackroom_record,
+            tb_name_daily_bar_diagnostics,
+            tb_name_ssf_change_signal,
         }
     )
     reset_storage()
@@ -3515,6 +3520,27 @@ class TestSSFChangeSignalStorage:
 
         assert len(inserted_ids) == 1
 
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"status": "unknown"},
+            {"event_types": ["split"]},
+        ],
+    )
+    def test_save_ssf_change_signals_skips_invalid_finite_values(self, sqlite_storage, overrides):
+        from sqlalchemy import text
+
+        db = sqlite_storage
+        db.ensure_ssf_change_signals_table()
+
+        inserted_ids = db.save_ssf_change_signals([self._make_signal_payload(**overrides)])
+
+        with db.engine.connect() as conn:
+            row_count = conn.execute(text("SELECT COUNT(*) FROM ssf_change_signals")).scalar_one()
+
+        assert inserted_ids == []
+        assert row_count == 0
+
     def test_save_ssf_change_signals_keeps_valid_rows_when_one_payload_is_bad(self, sqlite_storage):
         from sqlalchemy import text
 
@@ -3551,10 +3577,10 @@ class TestSSFChangeSignalStorage:
         assert pending == []
 
 
-def test_postgresql_migrates_legacy_global_idempotency_index_to_account_scope(
+def test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adapter(
     monkeypatch, paper_trading_schema_upgrade
 ):
-    """Exercise the live PostgreSQL upgrade without touching application tables."""
+    """Exercise the live legacy upgrade without creating Storage enum tables."""
     url = os.getenv("TEST_POSTGRESQL_URL", "postgresql://quant:quant@localhost:5432/quant")
     schema = f"task3_{uuid.uuid4().hex}"
     engine = None
@@ -3614,10 +3640,12 @@ def test_postgresql_migrates_legacy_global_idempotency_index_to_account_scope(
                     "WHERE schemaname = current_schema() AND tablename = 'paper_orders'"
                 )
             ).all()
+            diagnostic_table = conn.execute(text("SELECT to_regclass('daily_bar_diagnostics')")).scalar_one()
         index_names = {row[0] for row in indexes}
         index_defs = {row[1] for row in indexes}
         assert "uq_task3_legacy_idempotency" not in index_names
         assert any("(account_id, idempotency_key)" in definition for definition in index_defs)
+        assert diagnostic_table is None
     except OperationalError as exc:
         pytest.skip(f"PostgreSQL unavailable: {exc}")
     finally:
@@ -3628,6 +3656,118 @@ def test_postgresql_migrates_legacy_global_idempotency_index_to_account_scope(
             engine.dispose()
         if admin_engine is not None:
             admin_engine.dispose()
+
+
+def test_postgresql_ssf_startup_leaves_table_creation_to_storage_enum_adapter(monkeypatch):
+    """SSF startup must not create a native-enum table before enum governance runs."""
+    url = os.getenv("TEST_POSTGRESQL_URL", "postgresql://quant:quant@localhost:5432/quant")
+    schema = f"ssf_enum_{uuid.uuid4().hex}"
+    engine = None
+    admin_engine = None
+    try:
+        admin_engine = create_engine(url)
+        with admin_engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
+        db = StorageDb.__new__(StorageDb)
+        db.engine = engine
+
+        db.ensure_ssf_change_signals_table()
+
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT to_regclass('ssf_change_signals')")).scalar_one() is None
+            assert conn.execute(text("SELECT to_regtype('ssf_change_signal_status')")).scalar_one() is None
+            from storage.enum_migration import migrate_storage_enums
+
+            assert migrate_storage_enums(conn).converted is True
+            assert conn.execute(text("SELECT to_regclass('ssf_change_signals')")).scalar_one() is not None
+            assert conn.execute(text("SELECT to_regtype('ssf_change_signal_status')")).scalar_one() is not None
+    except OperationalError as exc:
+        pytest.skip(f"PostgreSQL unavailable: {exc}")
+    finally:
+        if engine is not None:
+            assert admin_engine is not None
+            with admin_engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            engine.dispose()
+        if admin_engine is not None:
+            admin_engine.dispose()
+
+
+def test_postgresql_ssf_startup_upgrades_existing_legacy_table_before_storage_migration(monkeypatch):
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+
+    schema = f"ssf_legacy_{uuid.uuid4().hex}"
+    engine = create_engine(url)
+    monkeypatch_create = Mock()
+    monkeypatch.setattr("storage.model.ssf_change_signal.SSFChangeSignal.__table__.create", monkeypatch_create)
+    with engine.begin() as admin_connection:
+        admin_connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(f'SET search_path TO "{schema}"'))
+            connection.execute(
+                text(
+                    "CREATE TABLE blackroom_records ("
+                    "id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', "
+                    "source varchar(50) NOT NULL DEFAULT 'manual')"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE daily_bar_diagnostics ("
+                    "id integer primary key, adjust varchar(10) NOT NULL, "
+                    "classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL)"
+                )
+            )
+            connection.execute(
+                text("CREATE TABLE ssf_change_signals (id integer primary key, event_types jsonb NOT NULL)")
+            )
+
+        startup_engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
+        try:
+            db = StorageDb.__new__(StorageDb)
+            db.engine = startup_engine
+            db.ensure_ssf_change_signals_table()
+
+            with startup_engine.connect() as connection:
+                status_column = connection.execute(
+                    text(
+                        "SELECT format_type(a.atttypid, a.atttypmod), pg_get_expr(d.adbin, d.adrelid) "
+                        "FROM pg_attribute a "
+                        "JOIN pg_class c ON c.oid = a.attrelid "
+                        "LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum "
+                        "WHERE c.relnamespace = current_schema()::regnamespace "
+                        "AND c.relname = 'ssf_change_signals' AND a.attname = 'status'"
+                    )
+                ).one()
+                assert status_column == ("character varying(20)", "'signal'::character varying")
+                monkeypatch_create.assert_not_called()
+
+                from storage.enum_governance import migrate_enums
+                from storage.enum_migration import STORAGE_ENUM_ADAPTER
+
+                result = migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+                assert result.converted is True
+                assert (
+                    connection.execute(
+                        text(
+                            "SELECT format_type(a.atttypid, a.atttypmod) "
+                            "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+                            "WHERE c.relnamespace = current_schema()::regnamespace "
+                            "AND c.relname = 'ssf_change_signals' AND a.attname = 'status'"
+                        )
+                    ).scalar_one()
+                    == "ssf_change_signal_status"
+                )
+        finally:
+            startup_engine.dispose()
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
 
 
 if __name__ == "__main__":

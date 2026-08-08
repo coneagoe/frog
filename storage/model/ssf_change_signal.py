@@ -1,8 +1,12 @@
+from enum import StrEnum
+from typing import Any
+
 from sqlalchemy import (
     JSON,
     Column,
     Date,
     DateTime,
+    Enum,
     Float,
     Integer,
     String,
@@ -10,9 +14,22 @@ from sqlalchemy import (
 )
 from sqlalchemy.sql import func
 
+from storage.domain_enums import SSFChangeSignalStatus
+
 from .base import Base
 
 tb_name_ssf_change_signal = "ssf_change_signals"
+
+
+def _value_enum(enum_type: type[StrEnum], name: str) -> Enum:
+    return Enum(
+        enum_type,
+        name=name,
+        values_callable=lambda enum_type: [member.value for member in enum_type],
+        native_enum=True,
+        validate_strings=True,
+        _create_events=False,
+    )
 
 
 class SSFChangeSignal(Base):
@@ -22,8 +39,8 @@ class SSFChangeSignal(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     stock_id = Column(String(6), nullable=False, comment="股票代码")
     ann_date = Column(Date, nullable=False, comment="最新公告日期")
-    status = Column(
-        String(20),
+    status: Any = Column(
+        _value_enum(SSFChangeSignalStatus, "ssf_change_signal_status"),
         nullable=False,
         default="signal",
         server_default="signal",

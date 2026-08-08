@@ -115,6 +115,7 @@ class DailyBarDiagnosticClassification(StrEnum):
     MISSING_MARKET_DATA = "missing_market_data"
     MISSING_EXACT_DATE = "missing_exact_date"
     DOWNLOADED = "downloaded"
+    RESOLVED = "resolved"
 
 
 class ProviderOutcomeStatus(StrEnum):

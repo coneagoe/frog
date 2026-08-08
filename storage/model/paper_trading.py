@@ -35,6 +35,7 @@ from paper_trading.domain.enums import (
     TradeValidityGranularity,
     TradeValidityStatus,
 )
+from storage.domain_enums import DailyBarDiagnosticAdjust, DailyBarDiagnosticClassification
 
 from .base import Base
 from .orm_compat import Mapped, mapped_column
@@ -405,8 +406,12 @@ class DailyBarDiagnostic(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     business_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     stock_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    adjust: Mapped[str] = mapped_column(String(10), nullable=False)
-    classification: Mapped[str] = mapped_column(String(50), nullable=False)
+    adjust: Mapped[str] = mapped_column(
+        _value_enum(DailyBarDiagnosticAdjust, "daily_bar_diagnostic_adjust"), nullable=False
+    )
+    classification: Mapped[str] = mapped_column(
+        _value_enum(DailyBarDiagnosticClassification, "daily_bar_diagnostic_classification"), nullable=False
+    )
     provider_outcomes: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
     first_observed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

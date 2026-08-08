@@ -29,8 +29,9 @@ class EnumGovernanceResult:
 
 from monitor.storage.enum_migration import MONITOR_ENUM_ADAPTER  # noqa: E402
 from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_ADAPTER  # noqa: E402
+from storage.enum_migration import STORAGE_ENUM_ADAPTER  # noqa: E402
 
-ENUM_GOVERNANCE_ADAPTERS = (PAPER_TRADING_ENUM_ADAPTER, MONITOR_ENUM_ADAPTER)
+ENUM_GOVERNANCE_ADAPTERS = (PAPER_TRADING_ENUM_ADAPTER, MONITOR_ENUM_ADAPTER, STORAGE_ENUM_ADAPTER)
 
 
 def migrate_enums(

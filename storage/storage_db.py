@@ -94,9 +94,12 @@ from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
 
 from .config import StorageConfig
+from .domain_enums import SSFChangeSignalStatus, validate_ssf_event_types
 from .model import (
     Base,
     tb_name_a_stock_basic,
+    tb_name_blackroom_record,
+    tb_name_daily_bar_diagnostics,
     tb_name_daily_basic_a_stock,
     tb_name_etf_basic,
     tb_name_etf_daily,
@@ -301,6 +304,9 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_paper_trade_validity_checks,
     tb_name_paper_pending_settlement,
     tb_name_paper_ledger_rebuilds,
+    tb_name_blackroom_record,
+    tb_name_daily_bar_diagnostics,
+    tb_name_ssf_change_signal,
 }
 
 _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
@@ -1992,6 +1998,12 @@ class StorageDb:
 
     def ensure_ssf_change_signals_table(self) -> None:
         """建表（若不存在），供 SSF 变动信号流程初始化使用。"""
+        assert self.engine is not None
+        if self.engine.dialect.name == "postgresql":
+            if inspect(self.engine).has_table(tb_name_ssf_change_signal):
+                self._ensure_ssf_change_signals_status_column()
+            return
+
         from .model.ssf_change_signal import SSFChangeSignal  # noqa: F401
 
         SSFChangeSignal.__table__.create(self.engine, checkfirst=True)
@@ -2092,7 +2104,7 @@ class StorageDb:
         normalized_records = []
         for payload in records:
             normalized_payload = dict(payload)
-            normalized_payload["status"] = SSF_CHANGE_SIGNAL_STATUS_SIGNAL
+            normalized_payload.setdefault("status", SSF_CHANGE_SIGNAL_STATUS_SIGNAL)
             normalized_records.append(normalized_payload)
         return self._save_ssf_change_signal_records(normalized_records)
 
@@ -2139,16 +2151,19 @@ class StorageDb:
         ]
         for payload in records:
             try:
+                status = SSFChangeSignalStatus(payload.get("status", SSF_CHANGE_SIGNAL_STATUS_SIGNAL)).value
+                event_types = validate_ssf_event_types(payload["event_types"])
                 signal_payload = {
                     "stock_id": payload["stock_id"],
                     "ann_date": pd.to_datetime(payload["ann_date"]).date(),
                     "prev_ann_date": pd.to_datetime(payload["prev_ann_date"]).date(),
-                    "event_types": payload["event_types"],
+                    "status": status,
+                    "event_types": event_types,
                     "score": payload["score"],
                     "detail_json": payload["detail_json"],
                 }
                 for field in optional_fields:
-                    if field in payload:
+                    if field in payload and field != "status":
                         signal_payload[field] = payload[field]
 
                 stmt = (
@@ -3026,7 +3041,10 @@ class StorageDb:
         """建表（若不存在）。在 DAG 启动时调用一次。"""
         from .model.blackroom_record import BlackroomRecord  # noqa: F401
 
-        BlackroomRecord.__table__.create(self.engine, checkfirst=True)
+        if self.engine.dialect.name == "postgresql" and not inspect(self.engine).has_table("blackroom_records"):
+            return
+        if self.engine.dialect.name != "postgresql":
+            BlackroomRecord.__table__.create(self.engine, checkfirst=True)
         columns = {column["name"] for column in inspect(self.engine).get_columns("blackroom_records")}
         if "remaining_days" not in columns:
             with self.engine.begin() as conn:
@@ -3073,7 +3091,7 @@ class StorageDb:
             PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
             PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
             PaperValuationGap.__table__.create(self.engine, checkfirst=True)
-        DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
+            DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
 
         # Bail out if the paper_orders table does not exist yet --- fresh
         # installs rely on Base.metadata.create_all in __init__.
