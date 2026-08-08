@@ -126,16 +126,15 @@ def _check_names(connection: Connection) -> set[str]:
 
 
 def _check_definitions(connection: Connection) -> dict[str, str]:
-    return dict(
-        connection.execute(
-            text(
-                "SELECT c.conname, pg_get_constraintdef(c.oid) FROM pg_constraint c "
-                "JOIN pg_class t ON t.oid = c.conrelid "
-                "WHERE c.connamespace = current_schema()::regnamespace "
-                "AND c.conname IN ('ck_daily_bar_diagnostics_provider_outcome_status', 'ck_ssf_change_signals_event_types')"
-            )
-        ).all()
-    )
+    rows = connection.execute(
+        text(
+            "SELECT c.conname, pg_get_constraintdef(c.oid) FROM pg_constraint c "
+            "JOIN pg_class t ON t.oid = c.conrelid "
+            "WHERE c.connamespace = current_schema()::regnamespace "
+            "AND c.conname IN ('ck_daily_bar_diagnostics_provider_outcome_status', 'ck_ssf_change_signals_event_types')"
+        )
+    ).all()
+    return {str(row[0]): str(row[1]) for row in rows}
 
 
 def _assert_rejected(connection: Connection, statement: str) -> None:

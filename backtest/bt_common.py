@@ -2,6 +2,7 @@ import os
 import sys
 import webbrowser
 from datetime import datetime
+from typing import Any, cast
 
 # Directly fix the problematic function in quantstats by monkey
 # patching only the specific issue.
@@ -31,7 +32,8 @@ from common.const import (  # noqa: E402
 from stock import drop_suspended_stocks, load_history_data  # noqa: E402
 
 # Save the original function
-original_sum = pd.core.resample.Resampler.sum
+_pandas_internal = cast(Any, pd)
+original_sum = _pandas_internal.core.resample.Resampler.sum
 
 
 # Patch the pandas resampler's sum method to handle the axis parameter correctly
@@ -43,7 +45,7 @@ def patched_sum(self, *args, **kwargs):
 
 
 # Apply the patch to the resampler's sum method
-pd.core.resample.Resampler.sum = patched_sum  # type: ignore
+_pandas_internal.core.resample.Resampler.sum = patched_sum
 
 print("Pandas Resampler sum method patched successfully!")
 
