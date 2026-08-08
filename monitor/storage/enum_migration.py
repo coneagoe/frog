@@ -186,6 +186,8 @@ def _adapter_apply(connection: Connection) -> bool:
 
 
 def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
+    if rollback and all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+        return
     _verify(connection, rollback=rollback)
 
 

@@ -46,3 +46,34 @@ Each skipped test explicitly reports `TEST_POSTGRESQL_URL is unavailable`; the P
 ## Concerns
 
 - PostgreSQL-backed behavior could not execute because `TEST_POSTGRESQL_URL` is unset. The adapter tests collect and skip as required, but a database-backed run remains necessary to establish the actual DDL and rollback outcomes.
+
+## Coordinator Rollback Fix
+
+- Updated `_adapter_verify` to treat rollback as verified when both governed tables are absent.
+- Retained `_adapter_preflight` partial-table rejection and all non-rollback verification behavior.
+- Added PostgreSQL-gated coverage for `migrate_enums(connection, rollback=True, adapters=(MONITOR_ENUM_ADAPTER,))` after dropping both governed tables.
+
+### Command And Output
+
+```text
+TEST_POSTGRESQL_URL="$TEST_POSTGRESQL_URL" uv run pytest test/monitor/storage/test_enum_migration.py -k coordinator_rollback -v
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0 -- /data/frog/.worktrees/monitor-enum-governance/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /data/frog/.worktrees/monitor-enum-governance
+configfile: pyproject.toml
+plugins: anyio-4.14.0
+collecting ... collected 17 items / 16 deselected / 1 selected
+
+test/monitor/storage/test_enum_migration.py::test_coordinator_rollback_is_noop_when_all_governed_tables_are_absent SKIPPED [100%]
+
+====================== 1 skipped, 16 deselected in 0.96s =======================
+```
+
+The test skips because `TEST_POSTGRESQL_URL` is unavailable.
+
+### Self-Review
+
+- The coordinator always calls adapter verification after rollback. The new guard prevents `_verify` from querying absent governed tables after the rollback no-op.
+- The guard requires `rollback=True` and absence of both tables, so it does not weaken apply verification or allow partially missing tables through preflight.
+- The regression test uses the actual Task 1 coordinator and Monitor adapter, asserting the observable no-op result instead of invoking the adapter callbacks directly.

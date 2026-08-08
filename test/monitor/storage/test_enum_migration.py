@@ -15,6 +15,7 @@ from monitor.storage.enum_migration import (
     MonitorEnumMigrationError,
     migrate_monitor_enums,
 )
+from storage.enum_governance import migrate_enums
 
 EXPECTED_TYPE_NAMES = {group.type_name for group in MONITOR_ENUM_GROUPS}
 CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
@@ -180,6 +181,18 @@ def test_adapter_rollback_restores_legacy_columns_and_removes_condition_check(po
         assert _column_type(connection, "forecast_ssf_candidates", "state") == "character varying(32)"
         assert _enum_types(connection) == set()
         assert not _check_exists(connection)
+
+
+def test_coordinator_rollback_is_noop_when_all_governed_tables_are_absent(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("DROP TABLE forecast_ssf_candidates, stock_monitor_targets"))
+
+        result = migrate_enums(connection, rollback=True, adapters=(MONITOR_ENUM_ADAPTER,))
+
+        assert result.rollback is True
+        assert result.rolled_back is False
+        assert _enum_types(connection) == set()
 
 
 def test_dry_run_preflights_without_ddl(postgres_schema):
