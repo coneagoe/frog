@@ -155,6 +155,22 @@ def enum_labels(connection: Connection, schema: str, type_name: str) -> tuple[st
     )
 
 
+def column_type(connection: Connection, schema: str, table: str, column: str) -> str:
+    return str(
+        connection.execute(
+            text(
+                "SELECT column_type.typname FROM pg_attribute a "
+                "JOIN pg_class table_class ON table_class.oid = a.attrelid "
+                "JOIN pg_namespace table_schema ON table_schema.oid = table_class.relnamespace "
+                "JOIN pg_type column_type ON column_type.oid = a.atttypid "
+                "WHERE table_schema.nspname = :schema AND table_class.relname = :table "
+                "AND a.attname = :column"
+            ),
+            {"schema": schema, "table": table, "column": column},
+        ).scalar_one()
+    )
+
+
 def _create_legacy_storage_tables(connection: Connection) -> None:
     statements = (
         "CREATE TABLE blackroom_records ("
@@ -185,14 +201,22 @@ def _assert_foreign_keys_and_selected_table_remain(connection: Connection, schem
 
 
 @pytest.mark.parametrize(
-    ("table", "enum_types", "check_name"),
+    ("table", "enum_types", "enum_columns", "check_name", "expected_row"),
     (
         (
             "daily_bar_diagnostics",
             ("daily_bar_diagnostic_adjust", "daily_bar_diagnostic_classification"),
+            (("adjust", "daily_bar_diagnostic_adjust"), ("classification", "daily_bar_diagnostic_classification")),
             "ck_daily_bar_diagnostics_provider_outcome_status",
+            ("bfq", "downloaded", [{"status": "downloaded"}]),
         ),
-        ("ssf_change_signals", ("ssf_change_signal_status",), "ck_ssf_change_signals_event_types"),
+        (
+            "ssf_change_signals",
+            ("ssf_change_signal_status",),
+            (("status", "ssf_change_signal_status"),),
+            "ck_ssf_change_signals_event_types",
+            ("signal", ["increase"]),
+        ),
     ),
 )
 def test_selected_storage_table_export_restores_enums_data_and_json_check(
@@ -200,7 +224,9 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
     tmp_path: Path,
     table: str,
     enum_types: tuple[str, ...],
+    enum_columns: tuple[tuple[str, str], ...],
     check_name: str,
+    expected_row: tuple[object, ...],
 ) -> None:
     engine, schema = postgres_schema
     dump_file = tmp_path / f"{table}.sql"
@@ -232,7 +258,10 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
             assert enum_type_exists(connection, schema, type_name)
             assert enum_labels(connection, schema, type_name) == STORAGE_ENUM_LABELS[type_name]
         assert table_exists(connection, schema, table)
-        assert connection.execute(text(f'SELECT count(*) FROM "{schema}"."{table}"')).scalar_one() == 1
+        for column, type_name in enum_columns:
+            assert column_type(connection, schema, table, column) == type_name
+        restored_row = connection.execute(text(f'SELECT * FROM "{schema}"."{table}"')).one()
+        assert tuple(restored_row[1:]) == expected_row
         assert constraint_exists(connection, schema, table, check_name)
 
 
