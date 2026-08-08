@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 
 from paper_trading.storage.enum_migration import (
+    PAPER_TRADING_ENUM_ADAPTER,
     PAPER_TRADING_ENUM_GROUPS,
     PaperTradingEnumMigrationError,
     migrate_paper_trading_enums,
@@ -102,6 +103,19 @@ def _enum_types(connection: Connection) -> set[str]:
     )
 
 
+def _enum_labels(connection: Connection, type_name: str) -> tuple[str, ...]:
+    return tuple(
+        connection.execute(
+            text(
+                "SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
+                "WHERE t.typnamespace = current_schema()::regnamespace AND t.typname = :type_name "
+                "ORDER BY e.enumsortorder"
+            ),
+            {"type_name": type_name},
+        ).scalars()
+    )
+
+
 def _column_type(connection: Connection, table_name: str, column_name: str) -> str:  # noqa: E501
     return str(
         connection.execute(
@@ -123,6 +137,36 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
     return bool(
         connection.execute(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}).scalar_one()
     )
+
+
+def test_adapter_preflight_does_not_convert_matching_status(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=False)
+
+        assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
+        assert _enum_types(connection) == set()
+
+
+def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=False)
+        assert PAPER_TRADING_ENUM_ADAPTER.apply(connection) is True
+        PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=False)
+
+        assert _column_type(connection, "paper_matching_runs", "status") == "paper_matching_run_status"
+        assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+        assert _index_exists(connection, "uq_matching_active_scope")
+        assert "completed_with_warnings" in _enum_labels(connection, "paper_matching_run_status")
+
+        PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=True)
+        assert PAPER_TRADING_ENUM_ADAPTER.rollback(connection) is True
+        PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=True)
+
+        assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
+        assert _enum_types(connection) == set()
+        assert _index_exists(connection, "uq_matching_active_scope")
 
 
 def test_dry_run_reports_every_group_without_ddl(postgres_schema):

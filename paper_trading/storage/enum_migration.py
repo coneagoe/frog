@@ -22,6 +22,7 @@ from paper_trading.domain.enums import (
     TradeValidityGranularity,
     TradeValidityStatus,
 )
+from storage.enum_governance import EnumGovernanceAdapter
 from storage.model import (
     PaperAccount,
     PaperAccountSnapshot,
@@ -272,45 +273,40 @@ _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)
 
 
-def migrate_paper_trading_enums(
-    connection: Connection, *, dry_run: bool = False, rollback: bool = False
-) -> PaperTradingEnumMigrationResult:
-    return _migrate(connection, PAPER_TRADING_ENUM_GROUPS, dry_run=dry_run, rollback=rollback)
-
-
-def _migrate(
-    connection: Connection,
-    groups: tuple[PaperTradingEnumGroup, ...],
+def _result(
+    groups: tuple[PaperTradingEnumGroup, ...] = PAPER_TRADING_ENUM_GROUPS,
     *,
     dry_run: bool = False,
     rollback: bool = False,
-    dry_run_reports_conversion: bool = False,
+    converted: bool = False,
+    rolled_back: bool = False,
 ) -> PaperTradingEnumMigrationResult:
-    def result(converted: bool = False, rolled_back: bool = False) -> PaperTradingEnumMigrationResult:
-        return PaperTradingEnumMigrationResult(
-            dry_run=dry_run,
-            rollback=rollback,
-            converted=converted,
-            rolled_back=rolled_back,
-            groups=groups,
-        )
+    return PaperTradingEnumMigrationResult(
+        dry_run=dry_run,
+        rollback=rollback,
+        converted=converted,
+        rolled_back=rolled_back,
+        groups=groups,
+    )
 
-    if connection.dialect.name != "postgresql":
-        return result()
 
+def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
+    groups = PAPER_TRADING_ENUM_GROUPS
     missing_tables = _preflight(connection, groups, rollback=rollback)
     if missing_tables and len(missing_tables) != len(
         {column.table_name for group in groups for column in group.columns}
     ):
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
+
+
+def _adapter_apply(connection: Connection) -> bool:
+    groups = PAPER_TRADING_ENUM_GROUPS
+    _adapter_preflight(connection, rollback=False)
+    missing_tables = _preflight(connection, groups, rollback=False)
     changed = any(
         not _column_has_type(connection, column, group.type_name) for group in groups for column in group.columns
     )
-    if dry_run:
-        return result(converted=changed if dry_run_reports_conversion else False)
     if missing_tables:
-        if rollback:
-            return result()
         for group in groups:
             _create_type(connection, group)
         _create_missing_tables(
@@ -319,20 +315,61 @@ def _migrate(
             create_operational_tables=groups is PAPER_TRADING_ENUM_GROUPS,
         )
         _preflight(connection, groups, rollback=False)
-        return result(converted=True)
-    if rollback:
-        changed = _rollback(connection, groups)
-        _verify(connection, groups, rollback=True)
-        return result(rolled_back=changed)
+        return True
 
     if changed:
         for group in groups:
             _create_type(connection, group)
             _alter_group(connection, group, rollback=False)
-    _verify(connection, groups, rollback=False)
     if groups is PAPER_TRADING_ENUM_GROUPS:
         _create_missing_tables(connection, set(), create_operational_tables=True)
-    return result(converted=changed)
+    return changed
+
+
+def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
+    if rollback and all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+        return
+    _verify(connection, PAPER_TRADING_ENUM_GROUPS, rollback=rollback)
+
+
+def _adapter_rollback(connection: Connection) -> bool:
+    _adapter_preflight(connection, rollback=True)
+    if all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+        return False
+    return _rollback(connection, PAPER_TRADING_ENUM_GROUPS)
+
+
+PAPER_TRADING_ENUM_ADAPTER = EnumGovernanceAdapter(
+    name="paper_trading",
+    preflight=_adapter_preflight,
+    apply=_adapter_apply,
+    verify=_adapter_verify,
+    rollback=_adapter_rollback,
+    result=_result,
+)
+
+
+def migrate_paper_trading_enums(
+    connection: Connection, *, dry_run: bool = False, rollback: bool = False
+) -> PaperTradingEnumMigrationResult:
+    """Compatibility wrapper for the legacy Paper Trading enum migration CLI."""
+
+    if connection.dialect.name != "postgresql":
+        return _result(dry_run=dry_run, rollback=rollback)
+
+    PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=rollback)
+    if dry_run:
+        return _result(dry_run=True, rollback=rollback)
+    if rollback:
+        if all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+            return _result(rollback=True)
+        rolled_back = PAPER_TRADING_ENUM_ADAPTER.rollback(connection)
+        PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=True)
+        return _result(rollback=True, rolled_back=rolled_back)
+
+    converted = PAPER_TRADING_ENUM_ADAPTER.apply(connection)
+    PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=False)
+    return _result(converted=converted)
 
 
 def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...], *, rollback: bool) -> set[str]:
