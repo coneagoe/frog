@@ -182,6 +182,7 @@ def migrate_monitor_enums(
         _create_missing_tables(connection, missing_tables)
         _preflight(connection, rollback=False)
         _add_condition_check(connection)
+        _ensure_indexes(connection)
         _verify(connection, rollback=False)
         return result(converted=True)
 
@@ -190,6 +191,7 @@ def migrate_monitor_enums(
     for group in MONITOR_ENUM_GROUPS:
         _alter_group(connection, group, rollback=False)
     _add_condition_check(connection)
+    _ensure_indexes(connection)
     _verify(connection, rollback=False)
     return result(converted=changed)
 
@@ -214,7 +216,7 @@ def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
                     f"{group.type_name}: incompatible {column.table_name}.{column.column_name}"
                 )
             _validate_default(connection, group, column, rollback=type_name != group.type_name)
-            _validate_indexes(connection, column)
+            _validate_indexes(connection, column, required=False)
             if not rollback and type_name != group.type_name:
                 _validate_values(connection, group, column)
     if "stock_monitor_targets" not in missing_tables:
@@ -274,7 +276,8 @@ def _alter_group(connection: Connection, group: MonitorEnumGroup, *, rollback: b
         if not rollback and _column_has_type(connection, column, group.type_name):
             continue
         for index_name, _ in column.indexes:
-            connection.execute(text(f"DROP INDEX {index_name}"))
+            if _index_facts(connection, index_name) is not None:
+                connection.execute(text(f"DROP INDEX {index_name}"))
         if column.default_sql is not None:
             connection.execute(text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} DROP DEFAULT"))
         target = column.legacy_type_sql if rollback else group.type_name
@@ -289,8 +292,6 @@ def _alter_group(connection: Connection, group: MonitorEnumGroup, *, rollback: b
             connection.execute(
                 text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} SET DEFAULT {default}")
             )
-        for _, index_sql in column.indexes:
-            connection.execute(text(index_sql))
 
 
 def _add_condition_check(connection: Connection) -> None:
@@ -313,6 +314,7 @@ def _rollback(connection: Connection) -> bool:
             _alter_group(connection, group, rollback=True)
             changed = True
     _drop_condition_check(connection)
+    _ensure_indexes(connection)
     for group in MONITOR_ENUM_GROUPS:
         if _enum_labels(connection, group.type_name):
             connection.execute(text(f"DROP TYPE {group.type_name}"))
@@ -336,7 +338,7 @@ def _verify(connection: Connection, *, rollback: bool) -> None:
                     f"{group.type_name}: verification failed for {column.table_name}.{column.column_name}"
                 )
             _validate_default(connection, group, column, rollback=rollback)
-            _validate_indexes(connection, column)
+            _validate_indexes(connection, column, required=True)
     _validate_condition_check(connection, required=not rollback)
 
 
@@ -447,20 +449,41 @@ def _validate_condition_check(connection: Connection, *, required: bool) -> None
         raise MonitorEnumMigrationError(f"conflicting condition constraint: {_CONDITION_CHECK_NAME}")
 
 
-def _validate_indexes(connection: Connection, column: MonitorEnumColumn) -> None:
+def _ensure_indexes(connection: Connection) -> None:
+    for group in MONITOR_ENUM_GROUPS:
+        for column in group.columns:
+            for index_name, index_sql in column.indexes:
+                if _index_facts(connection, index_name) is None:
+                    connection.execute(text(index_sql))
+            _validate_indexes(connection, column, required=True)
+
+
+def _index_facts(connection: Connection, index_name: str) -> tuple[str, bool, tuple[str, ...], str | None] | None:
+    facts = connection.execute(
+        text(
+            "SELECT t.relname, i.indisunique, array_agg(a.attname ORDER BY k.ordinality), "
+            "pg_get_expr(i.indpred, i.indrelid) "
+            "FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
+            "JOIN pg_class t ON t.oid = i.indrelid "
+            "JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinality) ON true "
+            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum "
+            "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :index_name "
+            "GROUP BY t.relname, i.indisunique, i.indpred, i.indrelid"
+        ),
+        {"index_name": index_name},
+    ).one_or_none()
+    return None if facts is None else (str(facts[0]), bool(facts[1]), tuple(facts[2]), facts[3])
+
+
+def _validate_indexes(connection: Connection, column: MonitorEnumColumn, *, required: bool) -> None:
     for index_name, _ in column.indexes:
-        facts = connection.execute(
-            text(
-                "SELECT i.indisunique, array_agg(a.attname ORDER BY k.ordinality), pg_get_expr(i.indpred, i.indrelid) "
-                "FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid "
-                "JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ordinality) ON true "
-                "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum "
-                "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :index_name "
-                "GROUP BY i.indisunique, i.indpred, i.indrelid"
-            ),
-            {"index_name": index_name},
-        ).one_or_none()
-        if facts is None or facts[0] or tuple(facts[1]) != (column.column_name,) or facts[2] is not None:
+        facts = _index_facts(connection, index_name)
+        if facts is None:
+            if not required:
+                continue
+            raise MonitorEnumMigrationError(f"missing or invalid index {index_name}")
+        table_name, unique, columns, predicate = facts
+        if table_name != column.table_name or unique or columns != (column.column_name,) or predicate is not None:
             raise MonitorEnumMigrationError(f"missing or invalid index {index_name}")
 
 

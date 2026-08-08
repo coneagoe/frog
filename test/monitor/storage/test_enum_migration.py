@@ -17,6 +17,13 @@ from monitor.storage.enum_migration import (
 
 EXPECTED_TYPE_NAMES = {group.type_name for group in MONITOR_ENUM_GROUPS}
 CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
+MANAGED_INDEX_NAMES = (
+    "ix_stock_monitor_targets_market",
+    "ix_stock_monitor_targets_frequency",
+    "ix_stock_monitor_targets_reset_mode",
+    "ix_forecast_ssf_candidates_market",
+    "ix_forecast_ssf_candidates_state",
+)
 
 
 def _engine() -> Engine:
@@ -64,11 +71,6 @@ def _create_legacy_schema(connection: Connection) -> None:
             "report_end_date date NOT NULL, state varchar(32) NOT NULL, state_reason varchar(128) NOT NULL)"
         )
     )
-    connection.execute(text("CREATE INDEX ix_stock_monitor_targets_market ON stock_monitor_targets (market)"))
-    connection.execute(text("CREATE INDEX ix_stock_monitor_targets_frequency ON stock_monitor_targets (frequency)"))
-    connection.execute(text("CREATE INDEX ix_stock_monitor_targets_reset_mode ON stock_monitor_targets (reset_mode)"))
-    connection.execute(text("CREATE INDEX ix_forecast_ssf_candidates_market ON forecast_ssf_candidates (market)"))
-    connection.execute(text("CREATE INDEX ix_forecast_ssf_candidates_state ON forecast_ssf_candidates (state)"))
 
 
 def _enum_types(connection: Connection) -> set[str]:
@@ -152,6 +154,7 @@ def test_dry_run_preflights_without_ddl(postgres_schema):
         assert result.converted is False
         assert _enum_types(connection) == set()
         assert not _check_exists(connection)
+        assert not any(_index_exists(connection, index_name) for index_name in MANAGED_INDEX_NAMES)
 
 
 def test_apply_bootstraps_missing_governed_tables_after_creating_types(postgres_schema):
@@ -240,9 +243,25 @@ def test_conflicting_named_condition_check_aborts_before_any_ddl(postgres_schema
         assert _enum_types(connection) == set()
 
 
+def test_incompatible_named_index_aborts_before_any_ddl(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text("CREATE UNIQUE INDEX ix_stock_monitor_targets_market ON stock_monitor_targets (market)")
+        )
+
+        with pytest.raises(MonitorEnumMigrationError, match="missing or invalid index"):
+            migrate_monitor_enums(connection)
+
+        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
+        assert _enum_types(connection) == set()
+
+
 def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
+        assert not any(_index_exists(connection, index_name) for index_name in MANAGED_INDEX_NAMES)
+
         result = migrate_monitor_enums(connection)
 
         assert result.converted is True
@@ -250,13 +269,7 @@ def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schem
         assert _column_type(connection, "forecast_ssf_candidates", "state") == "forecast_ssf_candidate_state"
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         assert _check_exists(connection)
-        for index_name in (
-            "ix_stock_monitor_targets_market",
-            "ix_stock_monitor_targets_frequency",
-            "ix_stock_monitor_targets_reset_mode",
-            "ix_forecast_ssf_candidates_market",
-            "ix_forecast_ssf_candidates_state",
-        ):
+        for index_name in MANAGED_INDEX_NAMES:
             assert _index_exists(connection, index_name)
         _assert_insert_rejected(
             connection,
@@ -290,6 +303,7 @@ def test_second_apply_is_idempotent(postgres_schema):
         assert result.converted is False
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         assert _check_exists(connection)
+        assert all(_index_exists(connection, index_name) for index_name in MANAGED_INDEX_NAMES)
 
 
 def test_rollback_rejects_non_column_enum_dependency_before_drop(postgres_schema):
@@ -348,11 +362,5 @@ def test_rollback_restores_exact_legacy_types_defaults_and_removes_governance(po
         assert _column_default(connection, "forecast_ssf_candidates", "market") == "'A'::character varying"
         assert _enum_types(connection) == set()
         assert not _check_exists(connection)
-        for index_name in (
-            "ix_stock_monitor_targets_market",
-            "ix_stock_monitor_targets_frequency",
-            "ix_stock_monitor_targets_reset_mode",
-            "ix_forecast_ssf_candidates_market",
-            "ix_forecast_ssf_candidates_state",
-        ):
+        for index_name in MANAGED_INDEX_NAMES:
             assert _index_exists(connection, index_name)
