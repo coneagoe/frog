@@ -41,6 +41,11 @@ from paper_trading.storage.models import (
     PaperTradeValidityCheck,
     PaperValuationGap,
 )
+from storage.domain_enums import (
+    DailyBarDiagnosticAdjust,
+    DailyBarDiagnosticClassification,
+    validate_provider_outcomes,
+)
 
 
 def _validate_fee_values(**values: Decimal | None) -> None:
@@ -68,7 +73,9 @@ class PaperTradingRepository:
         resolved: bool,
     ) -> DailyBarDiagnostic:
         normalized_stock_id = canonical_stock_id(stock_id)
-        adjust = canonical_adjust_label(adjust)
+        adjust = DailyBarDiagnosticAdjust(canonical_adjust_label(adjust)).value
+        classification = DailyBarDiagnosticClassification(classification).value
+        provider_outcomes = validate_provider_outcomes(provider_outcomes)
         now = datetime.now(timezone.utc)
         values = {
             "business_date": business_date,

@@ -120,6 +120,24 @@ def test_upsert_daily_bar_diagnostic_reuses_business_date_symbol_adjustment(sqli
     assert repo.list_daily_bar_diagnostics() == [second]
 
 
+@pytest.mark.parametrize(
+    ("adjust", "classification", "outcomes"),
+    [
+        ("raw", "downloaded", []),
+        ("bfq", "partial", []),
+        ("bfq", "downloaded", [{"provider": "tushare", "status": "partial"}]),
+        ("bfq", "downloaded", {"provider": "tushare", "status": "downloaded"}),
+    ],
+)
+def test_upsert_daily_bar_diagnostic_rejects_invalid_finite_values(sqlite_session, adjust, classification, outcomes):
+    Base.metadata.create_all(sqlite_session.get_bind())
+
+    with pytest.raises(ValueError):
+        PaperTradingRepository(sqlite_session).upsert_daily_bar_diagnostic(
+            date(2026, 8, 8), "000001", adjust, classification, outcomes, resolved=False
+        )
+
+
 def test_bfq_diagnostic_label_is_found_by_default_lookup(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

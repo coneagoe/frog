@@ -94,6 +94,7 @@ from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
 
 from .config import StorageConfig
+from .domain_enums import SSFChangeSignalStatus, validate_ssf_event_types
 from .model import (
     Base,
     tb_name_a_stock_basic,
@@ -2092,7 +2093,7 @@ class StorageDb:
         normalized_records = []
         for payload in records:
             normalized_payload = dict(payload)
-            normalized_payload["status"] = SSF_CHANGE_SIGNAL_STATUS_SIGNAL
+            normalized_payload.setdefault("status", SSF_CHANGE_SIGNAL_STATUS_SIGNAL)
             normalized_records.append(normalized_payload)
         return self._save_ssf_change_signal_records(normalized_records)
 
@@ -2139,16 +2140,19 @@ class StorageDb:
         ]
         for payload in records:
             try:
+                status = SSFChangeSignalStatus(payload.get("status", SSF_CHANGE_SIGNAL_STATUS_SIGNAL)).value
+                event_types = validate_ssf_event_types(payload["event_types"])
                 signal_payload = {
                     "stock_id": payload["stock_id"],
                     "ann_date": pd.to_datetime(payload["ann_date"]).date(),
                     "prev_ann_date": pd.to_datetime(payload["prev_ann_date"]).date(),
-                    "event_types": payload["event_types"],
+                    "status": status,
+                    "event_types": event_types,
                     "score": payload["score"],
                     "detail_json": payload["detail_json"],
                 }
                 for field in optional_fields:
-                    if field in payload:
+                    if field in payload and field != "status":
                         signal_payload[field] = payload[field]
 
                 stmt = (

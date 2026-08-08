@@ -3515,6 +3515,27 @@ class TestSSFChangeSignalStorage:
 
         assert len(inserted_ids) == 1
 
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"status": "unknown"},
+            {"event_types": ["split"]},
+        ],
+    )
+    def test_save_ssf_change_signals_skips_invalid_finite_values(self, sqlite_storage, overrides):
+        from sqlalchemy import text
+
+        db = sqlite_storage
+        db.ensure_ssf_change_signals_table()
+
+        inserted_ids = db.save_ssf_change_signals([self._make_signal_payload(**overrides)])
+
+        with db.engine.connect() as conn:
+            row_count = conn.execute(text("SELECT COUNT(*) FROM ssf_change_signals")).scalar_one()
+
+        assert inserted_ids == []
+        assert row_count == 0
+
     def test_save_ssf_change_signals_keeps_valid_rows_when_one_payload_is_bad(self, sqlite_storage):
         from sqlalchemy import text
 
