@@ -175,7 +175,7 @@ class MatchingService:
                 order.trade_date,
                 order.symbol,
                 "bfq",
-                "resolved",
+                "downloaded",
                 [{"provider": "market_data", "status": "downloaded"}],
                 True,
             )

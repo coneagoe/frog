@@ -93,6 +93,9 @@ def test_matching_fills_buy_order_and_creates_lot(tmp_path):
     assert filled.filled_quantity == 100
     assert repo.get_cash_available(account.id) == Decimal("98994.9900")
     assert lots[0].remaining_quantity == 100
+    diagnostic = repo.list_daily_bar_diagnostics()[0]
+    assert diagnostic.classification == "downloaded"
+    assert diagnostic.resolved is True
     engine.dispose()
 
 
