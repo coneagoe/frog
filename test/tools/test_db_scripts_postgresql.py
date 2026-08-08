@@ -155,20 +155,20 @@ def enum_labels(connection: Connection, schema: str, type_name: str) -> tuple[st
     )
 
 
-def column_type(connection: Connection, schema: str, table: str, column: str) -> str:
-    return str(
-        connection.execute(
-            text(
-                "SELECT column_type.typname FROM pg_attribute a "
-                "JOIN pg_class table_class ON table_class.oid = a.attrelid "
-                "JOIN pg_namespace table_schema ON table_schema.oid = table_class.relnamespace "
-                "JOIN pg_type column_type ON column_type.oid = a.atttypid "
-                "WHERE table_schema.nspname = :schema AND table_class.relname = :table "
-                "AND a.attname = :column"
-            ),
-            {"schema": schema, "table": table, "column": column},
-        ).scalar_one()
-    )
+def column_type(connection: Connection, schema: str, table: str, column: str) -> tuple[str, str]:
+    type_schema, type_name = connection.execute(
+        text(
+            "SELECT type_schema.nspname, column_type.typname FROM pg_attribute a "
+            "JOIN pg_class table_class ON table_class.oid = a.attrelid "
+            "JOIN pg_namespace table_schema ON table_schema.oid = table_class.relnamespace "
+            "JOIN pg_type column_type ON column_type.oid = a.atttypid "
+            "JOIN pg_namespace type_schema ON type_schema.oid = column_type.typnamespace "
+            "WHERE table_schema.nspname = :schema AND table_class.relname = :table "
+            "AND a.attname = :column"
+        ),
+        {"schema": schema, "table": table, "column": column},
+    ).one()
+    return str(type_schema), str(type_name)
 
 
 def _create_legacy_storage_tables(connection: Connection) -> None:
@@ -259,7 +259,7 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
             assert enum_labels(connection, schema, type_name) == STORAGE_ENUM_LABELS[type_name]
         assert table_exists(connection, schema, table)
         for column, type_name in enum_columns:
-            assert column_type(connection, schema, table, column) == type_name
+            assert column_type(connection, schema, table, column) == (schema, type_name)
         restored_row = connection.execute(text(f'SELECT * FROM "{schema}"."{table}"')).one()
         assert tuple(restored_row[1:]) == expected_row
         assert constraint_exists(connection, schema, table, check_name)
