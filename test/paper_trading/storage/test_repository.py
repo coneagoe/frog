@@ -27,6 +27,7 @@ def test_daily_bar_diagnostic_scalar_columns_use_value_enums():
         "missing_market_data",
         "missing_exact_date",
         "downloaded",
+        "resolved",
     )
     assert DailyBarDiagnostic.__table__.c.adjust.type.enums == [member.value for member in DailyBarDiagnosticAdjust]
     assert DailyBarDiagnostic.__table__.c.classification.type.enums == [

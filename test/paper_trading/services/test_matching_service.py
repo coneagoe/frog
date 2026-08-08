@@ -94,7 +94,7 @@ def test_matching_fills_buy_order_and_creates_lot(tmp_path):
     assert repo.get_cash_available(account.id) == Decimal("98994.9900")
     assert lots[0].remaining_quantity == 100
     diagnostic = repo.list_daily_bar_diagnostics()[0]
-    assert diagnostic.classification == "downloaded"
+    assert diagnostic.classification == "resolved"
     assert diagnostic.resolved is True
     engine.dispose()
 
@@ -638,6 +638,7 @@ def test_matching_fill_resolves_historical_retry_diagnostic(tmp_path):
     assert result == "filled"
     diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "000001")
     assert diagnostic.resolved is True
+    assert diagnostic.classification == "resolved"
 
     retry = order_service.place_order(
         account.id,

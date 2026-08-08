@@ -125,6 +125,19 @@ def _check_names(connection: Connection) -> set[str]:
     )
 
 
+def _check_definitions(connection: Connection) -> dict[str, str]:
+    return dict(
+        connection.execute(
+            text(
+                "SELECT c.conname, pg_get_constraintdef(c.oid) FROM pg_constraint c "
+                "JOIN pg_class t ON t.oid = c.conrelid "
+                "WHERE c.connamespace = current_schema()::regnamespace "
+                "AND c.conname IN ('ck_daily_bar_diagnostics_provider_outcome_status', 'ck_ssf_change_signals_event_types')"
+            )
+        ).all()
+    )
+
+
 def _assert_rejected(connection: Connection, statement: str) -> None:
     savepoint = connection.begin_nested()
     try:
@@ -145,6 +158,7 @@ def test_apply_converts_storage_values_and_enforces_json_contracts(postgres_sche
                 assert _column_type(connection, column.table_name, column.column_name) == group.type_name
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         assert _check_names(connection) == CHECK_NAMES
+        assert all("storage_" not in definition for definition in _check_definitions(connection).values())
         assert _column_default(connection, "blackroom_records", "market") == "'A'::blackroom_market"
         assert _column_default(connection, "blackroom_records", "source") == "'manual'::blackroom_source"
         assert _column_default(connection, "ssf_change_signals", "status") == "'signal'::ssf_change_signal_status"
@@ -212,9 +226,10 @@ def test_preflight_rejects_conflicting_named_json_constraint_before_creating_typ
         assert _enum_types(connection) == set()
 
 
-def test_preflight_rejects_permissive_named_validator_function_before_creating_types(postgres_schema) -> None:
+def test_json_checks_remain_enforced_after_legacy_validator_functions_are_replaced(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
+        assert STORAGE_ENUM_ADAPTER.apply(connection) is True
         connection.execute(
             text(
                 "CREATE FUNCTION storage_provider_outcomes_are_valid(value jsonb) RETURNS boolean "
@@ -223,16 +238,16 @@ def test_preflight_rejects_permissive_named_validator_function_before_creating_t
         )
         connection.execute(
             text(
-                "ALTER TABLE daily_bar_diagnostics ADD CONSTRAINT "
-                "ck_daily_bar_diagnostics_provider_outcome_status "
-                "CHECK (storage_provider_outcomes_are_valid(provider_outcomes))"
+                "CREATE FUNCTION storage_ssf_event_types_are_valid(value jsonb) RETURNS boolean "
+                "LANGUAGE sql IMMUTABLE AS $$ SELECT true $$"
             )
         )
 
-        with pytest.raises(StorageEnumMigrationError, match="conflicting validator function"):
-            STORAGE_ENUM_ADAPTER.preflight(connection, rollback=False)
-
-        assert _enum_types(connection) == set()
+        _assert_rejected(
+            connection,
+            'INSERT INTO daily_bar_diagnostics VALUES (1, \'bfq\', \'downloaded\', \'[{"provider": "x", "status": "partial"}]\'::jsonb)',
+        )
+        _assert_rejected(connection, "INSERT INTO ssf_change_signals VALUES (1, 'signal', '[\"split\"]'::jsonb)")
 
 
 @pytest.mark.parametrize(
@@ -276,6 +291,7 @@ def test_second_apply_is_idempotent_and_rollback_restores_legacy_schema(postgres
         assert _column_default(connection, "ssf_change_signals", "status") == "'signal'::character varying"
         assert _enum_types(connection) == set()
         assert _check_names(connection) == set()
+        assert _check_definitions(connection) == {}
 
 
 def test_rollback_rejects_unmanaged_storage_enum_dependency(postgres_schema) -> None:

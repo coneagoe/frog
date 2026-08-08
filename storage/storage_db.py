@@ -1998,6 +1998,10 @@ class StorageDb:
 
     def ensure_ssf_change_signals_table(self) -> None:
         """建表（若不存在），供 SSF 变动信号流程初始化使用。"""
+        assert self.engine is not None
+        if self.engine.dialect.name == "postgresql":
+            return
+
         from .model.ssf_change_signal import SSFChangeSignal  # noqa: F401
 
         SSFChangeSignal.__table__.create(self.engine, checkfirst=True)

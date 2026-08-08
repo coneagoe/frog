@@ -96,39 +96,21 @@ STORAGE_ENUM_GROUPS = (
 
 _GOVERNED_TABLES = (BlackroomRecord.__table__, DailyBarDiagnostic.__table__, SSFChangeSignal.__table__)
 _PROVIDER_CHECK_NAME = "ck_daily_bar_diagnostics_provider_outcome_status"
-_PROVIDER_VALIDATOR_NAME = "storage_provider_outcomes_are_valid"
-_PROVIDER_VALIDATOR_SQL = (
-    "CREATE FUNCTION storage_provider_outcomes_are_valid(value jsonb) RETURNS boolean "
-    "LANGUAGE sql IMMUTABLE AS $$ SELECT jsonb_typeof(value) = 'array' AND NOT EXISTS ("
-    "SELECT 1 FROM jsonb_array_elements(value) AS item WHERE jsonb_typeof(item) <> 'object' "
-    "OR NOT item ? 'status' OR item->>'status' IS NULL OR item->>'status' NOT IN ('downloaded', 'empty', 'error')) $$"
+_PROVIDER_CHECK_SQL = (
+    "CHECK (((jsonb_typeof((provider_outcomes)::jsonb) = 'array'::text) AND "
+    '(NOT jsonb_path_exists((provider_outcomes)::jsonb, \'$[*]?(((@.type() != "object" || '
+    '!(exists (@."status"))) || @."status".type() != "string") || !((@."status" == "downloaded" || '
+    '@."status" == "empty") || @."status" == "error"))\'::jsonpath))))'
 )
-_PROVIDER_VALIDATOR_BODY = (
-    "SELECT jsonb_typeof(value) = 'array' AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(value) AS item "
-    "WHERE jsonb_typeof(item) <> 'object' OR NOT item ? 'status' OR item->>'status' IS NULL "
-    "OR item->>'status' NOT IN ('downloaded', 'empty', 'error'))"
-)
-_PROVIDER_CHECK_SQL = "CHECK (storage_provider_outcomes_are_valid(provider_outcomes::jsonb))"
 _SSF_CHECK_NAME = "ck_ssf_change_signals_event_types"
-_SSF_VALIDATOR_NAME = "storage_ssf_event_types_are_valid"
-_SSF_VALIDATOR_SQL = (
-    "CREATE FUNCTION storage_ssf_event_types_are_valid(value jsonb) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ "
-    "SELECT jsonb_typeof(value) = 'array' AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(value) AS item "
-    "WHERE jsonb_typeof(item) <> 'string' OR trim(both '\"' from item::text) NOT IN ('increase', 'decrease', 'new_entry', 'exit')) $$"
+_SSF_CHECK_SQL = (
+    "CHECK (((jsonb_typeof((event_types)::jsonb) = 'array'::text) AND "
+    '(NOT jsonb_path_exists((event_types)::jsonb, \'$[*]?(@.type() != "string" || !(((@ == "increase" || '
+    '@ == "decrease") || @ == "new_entry") || @ == "exit"))\'::jsonpath))))'
 )
-_SSF_VALIDATOR_BODY = (
-    "SELECT jsonb_typeof(value) = 'array' AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(value) AS item "
-    "WHERE jsonb_typeof(item) <> 'string' OR trim(both '\"' from item::text) "
-    "NOT IN ('increase', 'decrease', 'new_entry', 'exit'))"
-)
-_SSF_CHECK_SQL = "CHECK (storage_ssf_event_types_are_valid(event_types::jsonb))"
 _CHECKS = (
     ("daily_bar_diagnostics", _PROVIDER_CHECK_NAME, _PROVIDER_CHECK_SQL),
     ("ssf_change_signals", _SSF_CHECK_NAME, _SSF_CHECK_SQL),
-)
-_VALIDATORS = (
-    (_PROVIDER_VALIDATOR_NAME, _PROVIDER_VALIDATOR_SQL, _PROVIDER_VALIDATOR_BODY),
-    (_SSF_VALIDATOR_NAME, _SSF_VALIDATOR_SQL, _SSF_VALIDATOR_BODY),
 )
 
 
@@ -220,8 +202,6 @@ def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
         _validate_json(connection, "daily_bar_diagnostics", "provider_outcomes", validate_provider_outcomes)
     if "ssf_change_signals" not in missing:
         _validate_json(connection, "ssf_change_signals", "event_types", validate_ssf_event_types)
-    for name, _, body in _VALIDATORS:
-        _validate_validator_function(connection, name, body, required=False)
     checks_required = rollback and any(
         _column_has_type(connection, column, group.type_name)
         for group in STORAGE_ENUM_GROUPS
@@ -289,7 +269,6 @@ def _alter_group(connection: Connection, group: StorageEnumGroup, *, rollback: b
 
 
 def _add_checks(connection: Connection) -> None:
-    _create_validator_functions(connection)
     for table_name, name, definition in _CHECKS:
         if _check_definition(connection, table_name, name) is None:
             connection.execute(text(f"ALTER TABLE {table_name} ADD CONSTRAINT {name} {definition}"))
@@ -309,8 +288,6 @@ def _rollback(connection: Connection) -> bool:
     for table_name, name, _ in _CHECKS:
         if _check_definition(connection, table_name, name) is not None:
             connection.execute(text(f"ALTER TABLE {table_name} DROP CONSTRAINT {name}"))
-    for name in (_PROVIDER_VALIDATOR_NAME, _SSF_VALIDATOR_NAME):
-        connection.execute(text(f"DROP FUNCTION IF EXISTS {name}(jsonb)"))
     for group in STORAGE_ENUM_GROUPS:
         if _enum_labels(connection, group.type_name):
             connection.execute(text(f"DROP TYPE {group.type_name}"))
@@ -415,43 +392,6 @@ def _check_definition(connection: Connection, table_name: str, name: str) -> str
         {"table_name": table_name, "name": name},
     ).scalar_one_or_none()
     return None if definition is None else str(definition)
-
-
-def _create_validator_functions(connection: Connection) -> None:
-    for name, definition, body in _VALIDATORS:
-        if _validator_function_definition(connection, name) is None:
-            connection.execute(text(definition))
-        _validate_validator_function(connection, name, body, required=True)
-
-
-def _validator_function_definition(connection: Connection, name: str) -> tuple[str, str, str] | None:
-    row = connection.execute(
-        text(
-            "SELECT p.provolatile, format_type(p.prorettype, NULL), pg_get_functiondef(p.oid) "
-            "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-            "WHERE n.nspname = current_schema() AND p.proname = :name "
-            "AND p.proargtypes = ARRAY['jsonb'::regtype]::oidvector"
-        ),
-        {"name": name},
-    ).one_or_none()
-    return None if row is None else (str(row[0]), str(row[1]), str(row[2]))
-
-
-def _validate_validator_function(connection: Connection, name: str, expected_body: str, *, required: bool) -> None:
-    definition = _validator_function_definition(connection, name)
-    if definition is None:
-        if required:
-            raise StorageEnumMigrationError(f"missing validator function: {name}")
-        return
-    volatility, return_type, function_sql = definition
-    body_match = re.search(r"\bAS\s+(\$[^$]*\$)(.*)\1\s*;?\s*$", function_sql, flags=re.IGNORECASE | re.DOTALL)
-    if (
-        volatility != "i"
-        or return_type != "boolean"
-        or body_match is None
-        or _normalize_expression(body_match.group(2)) != _normalize_expression(expected_body)
-    ):
-        raise StorageEnumMigrationError(f"conflicting validator function: {name}")
 
 
 def _validate_check(connection: Connection, table_name: str, name: str, definition: str, *, required: bool) -> None:

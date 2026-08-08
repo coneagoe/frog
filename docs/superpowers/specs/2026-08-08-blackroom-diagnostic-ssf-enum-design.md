@@ -17,7 +17,7 @@ for these readable persisted labels:
 - `BlackroomSource`: `manual`, `shareholder_selling`, `shareholder_reduction`.
 - `DailyBarDiagnosticAdjust`: `bfq`, `qfq`, `hfq`.
 - `DailyBarDiagnosticClassification`: `missing_market_data`,
-  `missing_exact_date`, `downloaded`.
+  `missing_exact_date`, `downloaded`, `resolved`.
 - `ProviderOutcomeStatus`: `downloaded`, `empty`, `error`.
 - `SSFChangeSignalStatus`: `signal`, `no_signal`.
 - `SSFEventType`: `increase`, `decrease`, `new_entry`, `exit`.

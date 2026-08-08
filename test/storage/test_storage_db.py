@@ -3658,5 +3658,46 @@ def test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adap
             admin_engine.dispose()
 
 
+def test_postgresql_ssf_startup_leaves_table_creation_to_storage_enum_adapter(monkeypatch):
+    """SSF startup must not create a native-enum table before enum governance runs."""
+    url = os.getenv("TEST_POSTGRESQL_URL", "postgresql://quant:quant@localhost:5432/quant")
+    schema = f"ssf_enum_{uuid.uuid4().hex}"
+    engine = None
+    admin_engine = None
+    try:
+        admin_engine = create_engine(url)
+        with admin_engine.begin() as conn:
+            conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_engine(url)
+        event.listen(
+            engine,
+            "connect",
+            lambda dbapi_connection, _: dbapi_connection.cursor().execute(f'SET search_path TO "{schema}"'),
+        )
+        db = StorageDb.__new__(StorageDb)
+        db.engine = engine
+
+        db.ensure_ssf_change_signals_table()
+
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT to_regclass('ssf_change_signals')")).scalar_one() is None
+            assert conn.execute(text("SELECT to_regtype('ssf_change_signal_status')")).scalar_one() is None
+            from storage.enum_migration import migrate_storage_enums
+
+            assert migrate_storage_enums(conn).converted is True
+            assert conn.execute(text("SELECT to_regclass('ssf_change_signals')")).scalar_one() is not None
+            assert conn.execute(text("SELECT to_regtype('ssf_change_signal_status')")).scalar_one() is not None
+    except OperationalError as exc:
+        pytest.skip(f"PostgreSQL unavailable: {exc}")
+    finally:
+        if engine is not None:
+            assert admin_engine is not None
+            with admin_engine.begin() as conn:
+                conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+            engine.dispose()
+        if admin_engine is not None:
+            admin_engine.dispose()
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
