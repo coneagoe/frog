@@ -158,6 +158,24 @@ def test_apply_converts_storage_values_and_enforces_json_contracts(postgres_sche
             connection,
             'INSERT INTO daily_bar_diagnostics VALUES (1, \'bfq\', \'downloaded\', \'[{"provider": "x", "status": "partial"}]\'::jsonb)',
         )
+        _assert_rejected(
+            connection,
+            "INSERT INTO daily_bar_diagnostics VALUES (1, 'bfq', 'downloaded', '{}'::jsonb)",
+        )
+        _assert_rejected(
+            connection,
+            "INSERT INTO daily_bar_diagnostics VALUES (1, 'bfq', 'downloaded', '[1]'::jsonb)",
+        )
+        _assert_rejected(
+            connection,
+            "INSERT INTO daily_bar_diagnostics VALUES (1, 'bfq', 'downloaded', '[{}]'::jsonb)",
+        )
+        _assert_rejected(
+            connection,
+            "INSERT INTO daily_bar_diagnostics VALUES (1, 'bfq', 'downloaded', '[{\"status\": null}]'::jsonb)",
+        )
+        _assert_rejected(connection, "INSERT INTO ssf_change_signals VALUES (1, 'signal', '{}'::jsonb)")
+        _assert_rejected(connection, "INSERT INTO ssf_change_signals VALUES (1, 'signal', '[1]'::jsonb)")
         _assert_rejected(connection, "INSERT INTO ssf_change_signals VALUES (1, 'signal', '[\"split\"]'::jsonb)")
 
 
@@ -194,6 +212,51 @@ def test_preflight_rejects_conflicting_named_json_constraint_before_creating_typ
         assert _enum_types(connection) == set()
 
 
+def test_preflight_rejects_permissive_named_validator_function_before_creating_types(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "CREATE FUNCTION storage_provider_outcomes_are_valid(value jsonb) RETURNS boolean "
+                "LANGUAGE sql IMMUTABLE AS $$ SELECT true $$"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE daily_bar_diagnostics ADD CONSTRAINT "
+                "ck_daily_bar_diagnostics_provider_outcome_status "
+                "CHECK (storage_provider_outcomes_are_valid(provider_outcomes))"
+            )
+        )
+
+        with pytest.raises(StorageEnumMigrationError, match="conflicting validator function"):
+            STORAGE_ENUM_ADAPTER.preflight(connection, rollback=False)
+
+        assert _enum_types(connection) == set()
+
+
+@pytest.mark.parametrize(
+    ("statement", "error"),
+    (
+        ("ALTER TABLE blackroom_records ALTER COLUMN market TYPE varchar(6)", "incompatible blackroom_records.market"),
+        ("DROP TABLE ssf_change_signals", "partially missing governed tables"),
+        (
+            "INSERT INTO blackroom_records (id, market, source) VALUES (1, 'US', 'manual')",
+            "blackroom_market: unknown legacy values",
+        ),
+    ),
+)
+def test_preflight_rejects_incompatible_legacy_schema_before_creating_types(postgres_schema, statement, error) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text(statement))
+
+        with pytest.raises(StorageEnumMigrationError, match=error):
+            STORAGE_ENUM_ADAPTER.preflight(connection, rollback=False)
+
+        assert _enum_types(connection) == set()
+
+
 def test_second_apply_is_idempotent_and_rollback_restores_legacy_schema(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -213,3 +276,16 @@ def test_second_apply_is_idempotent_and_rollback_restores_legacy_schema(postgres
         assert _column_default(connection, "ssf_change_signals", "status") == "'signal'::character varying"
         assert _enum_types(connection) == set()
         assert _check_names(connection) == set()
+
+
+def test_rollback_rejects_unmanaged_storage_enum_dependency(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_storage_enums(connection)
+        connection.execute(text("CREATE VIEW blackroom_market_dependency AS SELECT 'A'::blackroom_market AS market"))
+
+        with pytest.raises(StorageEnumMigrationError, match="blackroom_market: dependencies remain"):
+            migrate_storage_enums(connection, rollback=True)
+
+        assert _column_type(connection, "blackroom_records", "market") == "blackroom_market"
+        assert _enum_types(connection) == EXPECTED_TYPE_NAMES
