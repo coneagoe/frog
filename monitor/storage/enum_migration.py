@@ -9,6 +9,7 @@ from sqlalchemy.engine import Connection
 
 from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
+from storage.enum_governance import EnumGovernanceAdapter
 from storage.model import ForecastSSFCandidate, StockMonitorTarget
 
 
@@ -138,62 +139,94 @@ _NORMALIZED_CONDITION_CHECK = (
 )
 
 
-def migrate_monitor_enums(
-    connection: Connection, *, dry_run: bool = False, rollback: bool = False
+def _result(
+    *,
+    dry_run: bool = False,
+    rollback: bool = False,
+    converted: bool = False,
+    rolled_back: bool = False,
 ) -> MonitorEnumMigrationResult:
-    """Convert legacy Monitor and Forecast SSF strings to native PostgreSQL enums.
+    return MonitorEnumMigrationResult(
+        dry_run=dry_run,
+        rollback=rollback,
+        converted=converted,
+        rolled_back=rolled_back,
+        groups=MONITOR_ENUM_GROUPS,
+    )
 
-    The caller owns transaction boundaries and must deliberately invoke this
-    operator migration against a PostgreSQL connection.
-    """
 
-    def result(converted: bool = False, rolled_back: bool = False) -> MonitorEnumMigrationResult:
-        return MonitorEnumMigrationResult(
-            dry_run=dry_run,
-            rollback=rollback,
-            converted=converted,
-            rolled_back=rolled_back,
-            groups=MONITOR_ENUM_GROUPS,
-        )
-
-    if connection.dialect.name != "postgresql":
-        return result()
-
+def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     missing_tables = _preflight(connection, rollback=rollback)
     if missing_tables and len(missing_tables) != len(_GOVERNED_TABLES):
         raise MonitorEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
+
+
+def _adapter_apply(connection: Connection) -> bool:
+    _adapter_preflight(connection, rollback=False)
+    missing_tables = _preflight(connection, rollback=False)
     changed = any(
         not _column_has_type(connection, column, group.type_name)
         for group in MONITOR_ENUM_GROUPS
         for column in group.columns
     )
-    if dry_run:
-        return result()
-    if rollback:
-        if missing_tables:
-            return result()
-        rolled_back = _rollback(connection)
-        _verify(connection, rollback=True)
-        return result(rolled_back=rolled_back)
-
+    changed = changed or bool(missing_tables)
     if missing_tables:
         for group in MONITOR_ENUM_GROUPS:
             _create_type(connection, group)
         _create_missing_tables(connection, missing_tables)
         _preflight(connection, rollback=False)
-        _add_condition_check(connection)
-        _ensure_indexes(connection)
-        _verify(connection, rollback=False)
-        return result(converted=True)
-
-    for group in MONITOR_ENUM_GROUPS:
-        _create_type(connection, group)
-    for group in MONITOR_ENUM_GROUPS:
-        _alter_group(connection, group, rollback=False)
+    else:
+        for group in MONITOR_ENUM_GROUPS:
+            _create_type(connection, group)
+        for group in MONITOR_ENUM_GROUPS:
+            _alter_group(connection, group, rollback=False)
     _add_condition_check(connection)
     _ensure_indexes(connection)
-    _verify(connection, rollback=False)
-    return result(converted=changed)
+    return changed
+
+
+def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
+    _verify(connection, rollback=rollback)
+
+
+def _adapter_rollback(connection: Connection) -> bool:
+    _adapter_preflight(connection, rollback=True)
+    if all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+        return False
+    return _rollback(connection)
+
+
+MONITOR_ENUM_ADAPTER = EnumGovernanceAdapter(
+    name="monitor",
+    preflight=_adapter_preflight,
+    apply=_adapter_apply,
+    verify=_adapter_verify,
+    rollback=_adapter_rollback,
+    result=_result,
+)
+
+
+def migrate_monitor_enums(
+    connection: Connection, *, dry_run: bool = False, rollback: bool = False
+) -> MonitorEnumMigrationResult:
+    """Compatibility wrapper for the legacy Monitor enum migration CLI."""
+
+    if connection.dialect.name != "postgresql":
+        return _result(dry_run=dry_run, rollback=rollback)
+
+    MONITOR_ENUM_ADAPTER.preflight(connection, rollback=rollback)
+    if dry_run:
+        return _result(dry_run=True, rollback=rollback)
+    if rollback:
+        if all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+            return _result(rollback=True)
+        rolled_back = MONITOR_ENUM_ADAPTER.rollback(connection)
+        MONITOR_ENUM_ADAPTER.verify(connection, rollback=True)
+        return _result(rollback=True, rolled_back=rolled_back)
+
+    converted = MONITOR_ENUM_ADAPTER.apply(connection)
+    MONITOR_ENUM_ADAPTER.verify(connection, rollback=False)
+    return _result(converted=converted)
 
 
 def _preflight(connection: Connection, *, rollback: bool) -> set[str]:

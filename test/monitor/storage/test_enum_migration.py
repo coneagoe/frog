@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
 from monitor.storage.enum_migration import (
+    MONITOR_ENUM_ADAPTER,
     MONITOR_ENUM_GROUPS,
     MonitorEnumMigrationError,
     migrate_monitor_enums,
@@ -144,6 +145,41 @@ def _assert_insert_rejected(connection: Connection, statement: str) -> None:
             connection.execute(text(statement))
     finally:
         savepoint.rollback()
+
+
+def test_adapter_preflight_validates_legacy_condition_without_ddl(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        MONITOR_ENUM_ADAPTER.preflight(connection, rollback=False)
+
+        assert _enum_types(connection) == set()
+        assert not _check_exists(connection)
+
+
+def test_adapter_apply_creates_types_and_condition_check_after_preflight(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        MONITOR_ENUM_ADAPTER.preflight(connection, rollback=False)
+        changed = MONITOR_ENUM_ADAPTER.apply(connection)
+
+        assert changed is True
+        assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+        assert _check_exists(connection)
+
+
+def test_adapter_rollback_restores_legacy_columns_and_removes_condition_check(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        MONITOR_ENUM_ADAPTER.preflight(connection, rollback=False)
+        MONITOR_ENUM_ADAPTER.apply(connection)
+        MONITOR_ENUM_ADAPTER.preflight(connection, rollback=True)
+        changed = MONITOR_ENUM_ADAPTER.rollback(connection)
+
+        assert changed is True
+        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
+        assert _column_type(connection, "forecast_ssf_candidates", "state") == "character varying(32)"
+        assert _enum_types(connection) == set()
+        assert not _check_exists(connection)
 
 
 def test_dry_run_preflights_without_ddl(postgres_schema):
