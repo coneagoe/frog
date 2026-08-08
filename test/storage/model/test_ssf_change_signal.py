@@ -30,6 +30,7 @@ def test_ssf_change_signal_table_name():
 def test_ssf_status_uses_value_enum():
     assert SSFChangeSignal.__table__.c.status.type.name == "ssf_change_signal_status"
     assert tuple(member.value for member in SSFChangeSignalStatus) == ("signal", "no_signal")
+    assert SSFChangeSignal.__table__.c.status.type.enums == [member.value for member in SSFChangeSignalStatus]
 
 
 def test_validate_ssf_event_types_normalizes_valid_values():

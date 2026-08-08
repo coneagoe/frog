@@ -23,7 +23,7 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from storage.config import StorageConfig  # noqa: E402
-from storage.domain_enums import BlackroomMarket  # noqa: E402
+from storage.domain_enums import BlackroomMarket, BlackroomSource  # noqa: E402
 from storage.model import BlackroomRecord  # noqa: E402
 from storage.model.base import Base  # noqa: E402
 from storage.model.paper_trading import PaperOrder  # noqa: E402
@@ -39,6 +39,8 @@ class TestExportContract:
         assert BlackroomRecord.__table__.c.market.type.name == "blackroom_market"
         assert BlackroomRecord.__table__.c.source.type.name == "blackroom_source"
         assert tuple(member.value for member in BlackroomMarket) == ("A", "HK", "ETF")
+        assert BlackroomRecord.__table__.c.market.type.enums == [member.value for member in BlackroomMarket]
+        assert BlackroomRecord.__table__.c.source.type.enums == [member.value for member in BlackroomSource]
 
     def test_blackroom_record_exported_from_storage(self):
         import storage

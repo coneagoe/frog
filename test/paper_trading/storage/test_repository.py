@@ -28,6 +28,10 @@ def test_daily_bar_diagnostic_scalar_columns_use_value_enums():
         "missing_exact_date",
         "downloaded",
     )
+    assert DailyBarDiagnostic.__table__.c.adjust.type.enums == [member.value for member in DailyBarDiagnosticAdjust]
+    assert DailyBarDiagnostic.__table__.c.classification.type.enums == [
+        member.value for member in DailyBarDiagnosticClassification
+    ]
 
 
 def test_validate_provider_outcomes_normalizes_valid_values():
