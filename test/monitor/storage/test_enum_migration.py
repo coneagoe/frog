@@ -30,6 +30,7 @@ def _engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
     return create_engine(url)
 
 
@@ -357,7 +358,7 @@ def test_rollback_rejects_invalid_condition_before_altering_columns(postgres_sch
         assert _check_exists(connection)
 
 
-def test_rollback_restores_exact_legacy_types_defaults_and_removes_governance(postgres_schema):
+def test_rollback_after_normal_apply_restores_legacy_types_defaults_and_removes_governance(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
         migrate_monitor_enums(connection)
