@@ -98,6 +98,8 @@ from .domain_enums import SSFChangeSignalStatus, validate_ssf_event_types
 from .model import (
     Base,
     tb_name_a_stock_basic,
+    tb_name_blackroom_record,
+    tb_name_daily_bar_diagnostics,
     tb_name_daily_basic_a_stock,
     tb_name_etf_basic,
     tb_name_etf_daily,
@@ -302,6 +304,9 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_paper_trade_validity_checks,
     tb_name_paper_pending_settlement,
     tb_name_paper_ledger_rebuilds,
+    tb_name_blackroom_record,
+    tb_name_daily_bar_diagnostics,
+    tb_name_ssf_change_signal,
 }
 
 _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
@@ -3030,7 +3035,10 @@ class StorageDb:
         """建表（若不存在）。在 DAG 启动时调用一次。"""
         from .model.blackroom_record import BlackroomRecord  # noqa: F401
 
-        BlackroomRecord.__table__.create(self.engine, checkfirst=True)
+        if self.engine.dialect.name == "postgresql" and not inspect(self.engine).has_table("blackroom_records"):
+            return
+        if self.engine.dialect.name != "postgresql":
+            BlackroomRecord.__table__.create(self.engine, checkfirst=True)
         columns = {column["name"] for column in inspect(self.engine).get_columns("blackroom_records")}
         if "remaining_days" not in columns:
             with self.engine.begin() as conn:
@@ -3077,7 +3085,7 @@ class StorageDb:
             PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
             PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
             PaperValuationGap.__table__.create(self.engine, checkfirst=True)
-        DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
+            DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
 
         # Bail out if the paper_orders table does not exist yet --- fresh
         # installs rely on Base.metadata.create_all in __init__.

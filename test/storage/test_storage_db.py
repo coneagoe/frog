@@ -43,6 +43,7 @@ from storage.model import (  # noqa: E402
     Base,
     PaperAccount,
     PaperPositionLot,
+    tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
     tb_name_etf_daily,
     tb_name_history_data_daily_a_stock_bfq,
@@ -65,6 +66,7 @@ from storage.model import (  # noqa: E402
     tb_name_paper_trade_validity_checks,
     tb_name_paper_trades,
     tb_name_paper_valuation_gaps,
+    tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
     tb_name_top10_floatholders,
 )
@@ -129,6 +131,9 @@ def test_postgresql_storage_startup_excludes_all_enum_governed_paper_tables(monk
             tb_name_paper_ledger_rebuilds,
             tb_name_paper_account_snapshots,
             tb_name_paper_valuation_gaps,
+            tb_name_blackroom_record,
+            tb_name_daily_bar_diagnostics,
+            tb_name_ssf_change_signal,
         }
     )
     reset_storage()
@@ -3572,10 +3577,10 @@ class TestSSFChangeSignalStorage:
         assert pending == []
 
 
-def test_postgresql_migrates_legacy_global_idempotency_index_to_account_scope(
+def test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adapter(
     monkeypatch, paper_trading_schema_upgrade
 ):
-    """Exercise the live PostgreSQL upgrade without touching application tables."""
+    """Exercise the live legacy upgrade without creating Storage enum tables."""
     url = os.getenv("TEST_POSTGRESQL_URL", "postgresql://quant:quant@localhost:5432/quant")
     schema = f"task3_{uuid.uuid4().hex}"
     engine = None
@@ -3635,10 +3640,12 @@ def test_postgresql_migrates_legacy_global_idempotency_index_to_account_scope(
                     "WHERE schemaname = current_schema() AND tablename = 'paper_orders'"
                 )
             ).all()
+            diagnostic_table = conn.execute(text("SELECT to_regclass('daily_bar_diagnostics')")).scalar_one()
         index_names = {row[0] for row in indexes}
         index_defs = {row[1] for row in indexes}
         assert "uq_task3_legacy_idempotency" not in index_names
         assert any("(account_id, idempotency_key)" in definition for definition in index_defs)
+        assert diagnostic_table is None
     except OperationalError as exc:
         pytest.skip(f"PostgreSQL unavailable: {exc}")
     finally:

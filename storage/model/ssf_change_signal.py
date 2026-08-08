@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -38,7 +39,7 @@ class SSFChangeSignal(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     stock_id = Column(String(6), nullable=False, comment="股票代码")
     ann_date = Column(Date, nullable=False, comment="最新公告日期")
-    status = Column(
+    status: Any = Column(
         _value_enum(SSFChangeSignalStatus, "ssf_change_signal_status"),
         nullable=False,
         default="signal",

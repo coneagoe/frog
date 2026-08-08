@@ -177,22 +177,26 @@ def test_normal_migration_preflights_every_adapter_before_ddl() -> None:
 
     result = migrate_enums(
         FakeConnection(),
-        adapters=(_adapter("paper", events), _adapter("monitor", events)),
+        adapters=(_adapter("paper", events), _adapter("monitor", events), _adapter("storage", events)),
     )
 
     assert events == [
         "paper.preflight",
         "monitor.preflight",
+        "storage.preflight",
         "paper.apply",
         "monitor.apply",
+        "storage.apply",
         "paper.verify",
         "monitor.verify",
+        "storage.verify",
     ]
     assert result.converted is True
     assert result.rolled_back is False
     assert [(domain.name, domain.result) for domain in result.domains] == [
         ("paper", "paper:False:False:True:False"),
         ("monitor", "monitor:False:False:True:False"),
+        ("storage", "storage:False:False:True:False"),
     ]
 
 
@@ -304,6 +308,19 @@ def test_atomic_migration_prevents_all_conversion_when_storage_json_is_invalid(p
         assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
         assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
         assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "character varying(10)"
+        assert _all_managed_enum_types(connection) == set()
+        assert (
+            connection.execute(
+                text(
+                    "SELECT conname FROM pg_constraint "
+                    "WHERE connamespace = current_schema()::regnamespace "
+                    "AND conname IN ('ck_daily_bar_diagnostics_provider_outcome_status', 'ck_ssf_change_signals_event_types')"
+                )
+            )
+            .scalars()
+            .all()
+            == []
+        )
 
 
 def test_atomic_migration_rolls_back_paper_trading_when_monitor_condition_is_invalid(postgres_schema) -> None:
