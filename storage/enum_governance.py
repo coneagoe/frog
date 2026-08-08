@@ -67,8 +67,6 @@ def _run_phase(
     try:
         return callback(*args, **kwargs)
     except Exception as error:
-        if adapter.name in str(error):
-            raise
         raise EnumGovernanceError(f"{adapter.name} {phase} failed: {error}") from error
 
 

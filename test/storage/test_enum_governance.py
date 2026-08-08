@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import cast
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
 from monitor.storage.enum_migration import MONITOR_ENUM_GROUPS
@@ -18,6 +18,12 @@ from storage.enum_governance import (
     migrate_enums,
 )
 from storage.enum_migration import STORAGE_ENUM_GROUPS
+
+MANAGED_CHECK_NAMES = {
+    "ck_stock_monitor_targets_condition_type",
+    "ck_daily_bar_diagnostics_provider_outcome_status",
+    "ck_ssf_change_signals_event_types",
+}
 
 
 @dataclass
@@ -135,6 +141,19 @@ def _all_managed_enum_types(connection: Connection) -> set[str]:
             ).scalars()
         )
         & expected
+    )
+
+
+def _managed_check_names(connection: Connection) -> set[str]:
+    return set(
+        connection.execute(
+            text(
+                "SELECT conname FROM pg_constraint "
+                "WHERE connamespace = current_schema()::regnamespace "
+                "AND conname IN :names"
+            ).bindparams(bindparam("names", expanding=True)),
+            {"names": tuple(sorted(MANAGED_CHECK_NAMES))},
+        ).scalars()
     )
 
 
@@ -363,3 +382,21 @@ def test_atomic_migration_prevents_monitor_conversion_when_paper_trading_value_i
         assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
         assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
         assert _all_managed_enum_types(connection) == set()
+
+
+def test_unified_rollback_restores_all_domains_and_removes_checks(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+
+        assert migrate_enums(connection).converted is True
+        result = migrate_enums(connection, rollback=True)
+
+        assert result.rolled_back is True
+        assert _all_managed_enum_types(connection) == set()
+        assert _managed_check_names(connection) == set()
+        assert _column_type(connection, "paper_orders", "side") == "character varying(10)"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
+        assert _column_type(connection, "blackroom_records", "market") == "character varying(5)"
+        assert _column_type(connection, "daily_bar_diagnostics", "classification") == "character varying(50)"
+        assert _column_type(connection, "ssf_change_signals", "status") == "character varying(20)"
