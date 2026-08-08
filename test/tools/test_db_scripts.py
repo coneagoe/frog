@@ -42,6 +42,7 @@ def _run_script_result(
         "#!/usr/bin/env bash\n"
         'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"\n'
         "if [[ \"$*\" == *' psql '* ]]; then\n"
+        "  cat >/dev/null\n"
         "  if [[ \"$*\" == *'pg_constraint'* ]]; then\n"
         "    if [[ \"$*\" == *'source_table.relname NOT IN'* ]]; then\n"
         '      [[ -n "$UNMANAGED_INBOUND_FOREIGN_KEY" ]] && printf \'%s\\n\' "$UNMANAGED_INBOUND_FOREIGN_KEY"\n'
