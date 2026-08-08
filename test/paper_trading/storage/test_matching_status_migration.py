@@ -288,16 +288,18 @@ def test_postgresql_wrapper_converts_matching_run_without_other_governed_tables(
 
 
 def _status_column_type_for_schema(connection: Connection, schema: str) -> str:
-    return connection.execute(
-        text(
-            "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
-            "JOIN pg_class c ON c.oid = a.attrelid "
-            "JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE n.nspname = :schema AND c.relname = 'paper_matching_runs' "
-            "AND a.attname = 'status'"
-        ),
-        {"schema": schema},
-    ).scalar_one()
+    return str(
+        connection.execute(
+            text(
+                "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a "
+                "JOIN pg_class c ON c.oid = a.attrelid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = :schema AND c.relname = 'paper_matching_runs' "
+                "AND a.attname = 'status'"
+            ),
+            {"schema": schema},
+        ).scalar_one()
+    )
 
 
 def test_postgresql_converts_labels_and_verifies_active_partial_index(postgres_schema):

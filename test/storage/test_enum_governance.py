@@ -1,6 +1,7 @@
 import os
 import uuid
 from dataclasses import dataclass
+from typing import cast
 
 # ruff: noqa: E501
 import pytest
@@ -30,6 +31,7 @@ def _engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
     return create_engine(url)
 
 
@@ -163,7 +165,7 @@ def test_normal_migration_preflights_every_adapter_before_ddl() -> None:
     events: list[str] = []
 
     result = migrate_enums(
-        FakeConnection(),
+        cast(Connection, FakeConnection()),
         adapters=(_adapter("paper", events), _adapter("monitor", events)),
     )
 
@@ -187,7 +189,7 @@ def test_dry_run_only_preflights_adapters() -> None:
     events: list[str] = []
 
     result = migrate_enums(
-        FakeConnection(),
+        cast(Connection, FakeConnection()),
         dry_run=True,
         adapters=(_adapter("paper", events), _adapter("monitor", events)),
     )
@@ -206,7 +208,7 @@ def test_rollback_verifies_each_adapter_legacy_form() -> None:
     events: list[str] = []
 
     result = migrate_enums(
-        FakeConnection(),
+        cast(Connection, FakeConnection()),
         rollback=True,
         adapters=(_adapter("paper", events), _adapter("monitor", events, changed=False)),
     )
@@ -232,7 +234,7 @@ def test_preflight_failure_prevents_every_apply() -> None:
 
     with pytest.raises(EnumGovernanceError, match="monitor preflight failed"):
         migrate_enums(
-            FakeConnection(),
+            cast(Connection, FakeConnection()),
             adapters=(_adapter("paper", events), _adapter("monitor", events, fail_preflight=True)),
         )
 
@@ -244,7 +246,7 @@ def test_domain_failure_names_adapter_and_preserves_cause() -> None:
 
     with pytest.raises(EnumGovernanceError, match="monitor apply failed") as caught:
         migrate_enums(
-            FakeConnection(),
+            cast(Connection, FakeConnection()),
             adapters=(_adapter("paper", events), _adapter("monitor", events, fail_apply=True)),
         )
 
@@ -256,7 +258,7 @@ def test_non_postgresql_connection_returns_no_change_without_adapters() -> None:
     events: list[str] = []
 
     result = migrate_enums(
-        FakeConnection(dialect_name="sqlite"),
+        cast(Connection, FakeConnection(dialect_name="sqlite")),
         adapters=(_adapter("paper", events), _adapter("monitor", events)),
     )
 
