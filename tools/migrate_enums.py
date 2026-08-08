@@ -1,4 +1,4 @@
-"""Apply or roll back the Paper Trading PostgreSQL enum migration."""
+"""Apply or roll back the PostgreSQL enum migrations."""
 
 from __future__ import annotations
 
@@ -14,37 +14,39 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from conf import parse_config  # noqa: E402
-from paper_trading.storage.enum_migration import (  # noqa: E402
-    PaperTradingEnumMigrationResult,
-    migrate_paper_trading_enums,
-)
 from storage import get_storage  # noqa: E402
+from storage.enum_governance import EnumGovernanceResult, migrate_enums  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Migrate Paper Trading values to PostgreSQL enums", allow_abbrev=False)
+    parser = argparse.ArgumentParser(description="Migrate values to PostgreSQL enums", allow_abbrev=False)
     parser.add_argument("--dry-run", action="store_true", help="Validate migration without changing the database")
     parser.add_argument("--rollback", action="store_true", help="Restore the legacy string columns")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output JSON")
     return parser
 
 
-def _print_result(result: PaperTradingEnumMigrationResult, *, json_output: bool) -> None:
+def _print_result(result: EnumGovernanceResult, *, json_output: bool) -> None:
     if json_output:
         print(json.dumps(asdict(result), ensure_ascii=False, sort_keys=True))
         return
-    groups = ",".join(
-        f"{group.type_name}:{','.join(f'{column.table_name}.{column.column_name}' for column in group.columns)}"
-        for group in result.groups
+    domains = ";".join(
+        f"{domain.name}["
+        + ",".join(
+            f"{group.type_name}:{','.join(f'{column.table_name}.{column.column_name}' for column in group.columns)}"
+            for group in getattr(domain.result, "groups")
+        )
+        + "]"
+        for domain in result.domains
     )
     print(
         f"dry_run={str(result.dry_run).lower()} "
         f"rollback={str(result.rollback).lower()} "
         f"converted={str(result.converted).lower()} "
         f"rolled_back={str(result.rolled_back).lower()} "
-        f"groups={groups}"
+        f"domains={domains}"
     )
 
 
@@ -53,11 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parse_config()
         with get_storage().engine.begin() as connection:
-            result = migrate_paper_trading_enums(connection, dry_run=args.dry_run, rollback=args.rollback)
-        _print_result(result, json_output=args.json_output)
+            result = migrate_enums(connection, dry_run=args.dry_run, rollback=args.rollback)
+            _print_result(result, json_output=args.json_output)
         return 0
     except Exception as exc:
-        logger.exception("Paper Trading enum migration failed: %s", exc)
+        logger.exception("Enum migration failed: %s", exc)
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

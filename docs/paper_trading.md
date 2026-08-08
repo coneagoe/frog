@@ -580,7 +580,7 @@ dependent table is included in the managed restore set.
 1. Preview the conversion without changing the database:
 
    ```bash
-   uv run tools/migrate_paper_trading_enums.py --dry-run --json
+   uv run tools/migrate_enums.py --dry-run --json
    ```
 
    Review the JSON output and resolve every unknown legacy value before
@@ -590,7 +590,7 @@ dependent table is included in the managed restore set.
    verified:
 
    ```bash
-   uv run tools/migrate_paper_trading_enums.py --json
+   uv run tools/migrate_enums.py --json
    ```
 
    Retain the successful JSON output with the backup, and verify the reported
@@ -599,7 +599,7 @@ dependent table is included in the managed restore set.
    string columns, keep writers stopped and run the rollback command:
 
    ```bash
-   uv run tools/migrate_paper_trading_enums.py --rollback --json
+   uv run tools/migrate_enums.py --rollback --json
    ```
 
    Retain the rollback output with the original migration record. Restart only
