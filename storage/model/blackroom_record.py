@@ -1,12 +1,26 @@
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, text
+from sqlalchemy import Boolean, DateTime, Enum, Integer, String, Text, text
 from sqlalchemy.sql import func
+
+from storage.domain_enums import BlackroomMarket, BlackroomSource
 
 from .base import Base
 from .orm_compat import Mapped, mapped_column
 
 tb_name_blackroom_record = "blackroom_records"
+
+
+def _value_enum(enum_type: type[StrEnum], name: str) -> Enum:
+    return Enum(
+        enum_type,
+        name=name,
+        values_callable=lambda enum_type: [member.value for member in enum_type],
+        native_enum=True,
+        validate_strings=True,
+        _create_events=False,
+    )
 
 
 class BlackroomRecord(Base):
@@ -15,7 +29,7 @@ class BlackroomRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="主键")
     stock_code: Mapped[str] = mapped_column(String(10), nullable=False, comment="股票/ETF/港股代码")
     market: Mapped[str] = mapped_column(
-        String(5),
+        _value_enum(BlackroomMarket, "blackroom_market"),
         nullable=False,
         default="A",
         server_default="A",
@@ -38,7 +52,7 @@ class BlackroomRecord(Base):
         comment="到期时间，由 start_at + ban_days 计算；NULL 表示无有效到期时间（active 查询不含此类记录）",
     )
     source: Mapped[str] = mapped_column(
-        String(50),
+        _value_enum(BlackroomSource, "blackroom_source"),
         nullable=False,
         default="manual",
         server_default="manual",

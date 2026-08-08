@@ -23,6 +23,8 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from storage.config import StorageConfig  # noqa: E402
+from storage.domain_enums import BlackroomMarket  # noqa: E402
+from storage.model import BlackroomRecord  # noqa: E402
 from storage.model.base import Base  # noqa: E402
 from storage.model.paper_trading import PaperOrder  # noqa: E402
 from storage.storage_db import get_storage, reset_storage  # noqa: E402
@@ -33,6 +35,11 @@ from storage.storage_db import get_storage, reset_storage  # noqa: E402
 
 
 class TestExportContract:
+    def test_blackroom_scalar_columns_use_value_enums(self):
+        assert BlackroomRecord.__table__.c.market.type.name == "blackroom_market"
+        assert BlackroomRecord.__table__.c.source.type.name == "blackroom_source"
+        assert tuple(member.value for member in BlackroomMarket) == ("A", "HK", "ETF")
+
     def test_blackroom_record_exported_from_storage(self):
         import storage
 

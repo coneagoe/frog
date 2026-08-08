@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, inspect
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
+from storage.domain_enums import SSFChangeSignalStatus, SSFEventType, validate_ssf_event_types  # noqa: E402
 from storage.model.base import Base  # noqa: E402
 from storage.model.ssf_change_signal import (  # noqa: E402
     SSFChangeSignal,
@@ -24,6 +25,27 @@ def sqlite_engine(tmp_path):
 def test_ssf_change_signal_table_name():
     assert tb_name_ssf_change_signal == "ssf_change_signals"
     assert SSFChangeSignal.__tablename__ == "ssf_change_signals"
+
+
+def test_ssf_status_uses_value_enum():
+    assert SSFChangeSignal.__table__.c.status.type.name == "ssf_change_signal_status"
+    assert tuple(member.value for member in SSFChangeSignalStatus) == ("signal", "no_signal")
+
+
+def test_validate_ssf_event_types_normalizes_valid_values():
+    event_types = ["increase", "new_entry"]
+
+    normalized = validate_ssf_event_types(event_types)
+
+    assert normalized == event_types
+    assert normalized is not event_types
+    assert tuple(member.value for member in SSFEventType) == ("increase", "decrease", "new_entry", "exit")
+
+
+@pytest.mark.parametrize("value", [None, {}, [1], ["unknown"]])
+def test_validate_ssf_event_types_rejects_invalid_contract(value):
+    with pytest.raises(ValueError, match="event_types"):
+        validate_ssf_event_types(value)
 
 
 def test_ssf_change_signal_schema(sqlite_engine):

@@ -9,7 +9,42 @@ from sqlalchemy.orm import Session, sessionmaker
 from paper_trading.domain.enums import CashEventType, MatchingRunStatus, OrderSide, OrderStatus
 from paper_trading.storage.models import PaperTradeValidityCheck
 from paper_trading.storage.repository import PaperTradingRepository
+from storage.domain_enums import (
+    DailyBarDiagnosticAdjust,
+    DailyBarDiagnosticClassification,
+    ProviderOutcomeStatus,
+    validate_provider_outcomes,
+)
 from storage.model.base import Base
+from storage.model.paper_trading import DailyBarDiagnostic
+
+
+def test_daily_bar_diagnostic_scalar_columns_use_value_enums():
+    assert DailyBarDiagnostic.__table__.c.adjust.type.name == "daily_bar_diagnostic_adjust"
+    assert DailyBarDiagnostic.__table__.c.classification.type.name == "daily_bar_diagnostic_classification"
+    assert tuple(member.value for member in DailyBarDiagnosticAdjust) == ("bfq", "qfq", "hfq")
+    assert tuple(member.value for member in DailyBarDiagnosticClassification) == (
+        "missing_market_data",
+        "missing_exact_date",
+        "downloaded",
+    )
+
+
+def test_validate_provider_outcomes_normalizes_valid_values():
+    outcomes = [{"provider": "tushare", "status": "empty", "detail": None}]
+
+    normalized = validate_provider_outcomes(outcomes)
+
+    assert normalized == outcomes
+    assert normalized is not outcomes
+    assert normalized[0] is not outcomes[0]
+    assert tuple(member.value for member in ProviderOutcomeStatus) == ("downloaded", "empty", "error")
+
+
+@pytest.mark.parametrize("value", [None, {}, ["empty"], [{"provider": "tushare"}], [{"status": "partial"}]])
+def test_validate_provider_outcomes_rejects_invalid_contract(value):
+    with pytest.raises(ValueError, match="provider_outcomes"):
+        validate_provider_outcomes(value)
 
 
 def test_create_account_initializes_nav_share_state(sqlite_session):
