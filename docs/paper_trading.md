@@ -549,10 +549,10 @@ and migration output. Run commands from the repository root.
 
 The unified enum governance migration follows the enum evolution policy in
 [`docs/database_design.md`](database_design.md). It is the only supported
-production operator interface for the governed Paper Trading, Monitor, and
-Forecast SSF schemas. Run it in a maintenance window with every business writer
-stopped while PostgreSQL remains running. Keep the verified backup and all
-command output together in the maintenance record.
+production operator interface for the governed Paper Trading, Monitor, Forecast
+SSF, and Storage schemas. Run it in a maintenance window with every business
+writer stopped while PostgreSQL remains running. Keep the verified backup and
+all command output together in the maintenance record.
 
 The governed types are the 13 Paper Trading types:
 `paper_account_status`, `paper_fee_preset`, `paper_cash_event_type`,
