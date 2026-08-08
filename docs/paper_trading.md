@@ -545,12 +545,14 @@ and migration output. Run commands from the repository root.
    unexpected error remains `failed` and must be investigated rather than
    retried blindly.
 
-### Unified Paper Trading enum migration
+### Unified enum governance migration
 
-The unified Paper Trading enum migration follows the enum evolution policy in
-[`docs/database_design.md`](database_design.md). Run it in the same maintenance
-window with every business writer stopped while PostgreSQL remains running. Keep
-the verified backup and all command output together in the maintenance record.
+The unified enum governance migration follows the enum evolution policy in
+[`docs/database_design.md`](database_design.md). It is the only supported
+production operator interface for the governed Paper Trading, Monitor, and
+Forecast SSF schemas. Run it in a maintenance window with every business writer
+stopped while PostgreSQL remains running. Keep the verified backup and all
+command output together in the maintenance record.
 
 The governed types are `paper_account_status`, `paper_fee_preset`,
 `paper_cash_event_type`, `paper_order_side`, `paper_order_status`,
@@ -561,6 +563,24 @@ The governed types are `paper_account_status`, `paper_fee_preset`,
 dependent table dumps. Selected-table dumps never include clean `DROP`
 statements and use duplicate-safe type creation, so they can restore without
 replacing an existing shared type.
+
+The Monitor and Forecast SSF types are `monitor_market`,
+`monitor_frequency`, `monitor_reset_mode`, and
+`forecast_ssf_candidate_state`. `monitor_market` is shared by
+`stock_monitor_targets` and `forecast_ssf_candidates`; `monitor_frequency` and
+`monitor_reset_mode` belong to `stock_monitor_targets`; and
+`forecast_ssf_candidate_state` belongs to `forecast_ssf_candidates`. A full
+backup creates every enum type before its dependent tables, and a full clean
+restore drops dependent tables before their types. A selected-table clean
+restore must retain `monitor_market` whenever its other dependent table is not
+selected.
+
+Monitor `condition` remains JSON because it carries structured rule
+configuration. Application write paths validate the complete conditional-rule
+contract, including supported condition-specific direction and field rules.
+For direct SQL, PostgreSQL enforces only the minimal stable boundary: the value
+must be a JSON object with a supported `type`. Direct SQL does not replace
+application validation for conditional rule details.
 
 On a fresh PostgreSQL schema, the migration creates the governed Paper Trading
 tables and the dependent operational `paper_account_snapshots` and
@@ -577,26 +597,30 @@ to run when an unselected table has an inbound foreign key to the selected
 table. Use a full business-database clean restore only when every FK-owning
 dependent table is included in the managed restore set.
 
-1. Preview the conversion without changing the database:
+1. Stop every business writer while leaving PostgreSQL running and retain a
+   verified backup.
+2. Run the full preflight without changing the database:
 
    ```bash
    uv run tools/migrate_enums.py --dry-run --json
    ```
 
-   Review the JSON output and resolve every unknown legacy value before
-   continuing. Unknown legacy values cause the migration to abort without any
-   mutation; do not coerce or relabel them without an approved data decision.
-2. Apply the conversion only after the dry run succeeds and the backup is
-   verified:
+   Resolve every reported preflight error before continuing. Unknown legacy
+   values cause the migration to abort without mutation; do not coerce or
+   relabel them without an approved data decision.
+3. Run the conversion during the maintenance window:
 
    ```bash
    uv run tools/migrate_enums.py --json
    ```
 
    Retain the successful JSON output with the backup, and verify the reported
-   enum groups before restarting any writer.
-3. If the migration or its verification requires returning to the legacy
-   string columns, keep writers stopped and run the rollback command:
+   enum groups. Run focused Monitor and Paper Trading write-path smoke tests
+   before restarting workers.
+4. Restart compatible writers only after the migration result and smoke tests
+   pass.
+5. Use the tested schema rollback procedure only if required. Keep writers
+   stopped and run:
 
    ```bash
    uv run tools/migrate_enums.py --rollback --json
