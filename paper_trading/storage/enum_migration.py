@@ -448,6 +448,10 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
             enum_typed = type_name == group.type_name
             _validate_indexes(connection, column, enum_typed=rollback or enum_typed)
             _validate_default(connection, group, column, rollback=not enum_typed)
+        if rollback and labels:
+            dependencies = _type_dependencies(connection, group)
+            if dependencies:
+                raise PaperTradingEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
     return missing_tables
 
 
@@ -504,11 +508,6 @@ def _rollback(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...])
             _alter_group(connection, group, rollback=True)
             changed = True
     _verify(connection, groups, rollback=True)
-    for group in groups:
-        if _enum_labels(connection, group.type_name):
-            dependencies = _type_dependencies(connection, group.type_name)
-            if dependencies:
-                raise PaperTradingEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
     for group in groups:
         if _enum_labels(connection, group.type_name):
             connection.execute(text(f"DROP TYPE {group.type_name}"))
@@ -678,16 +677,38 @@ def _validate_indexes(connection: Connection, column: PaperTradingEnumColumn, *,
             raise PaperTradingEnumMigrationError(f"missing or invalid index {index_name}")
 
 
-def _type_dependencies(connection: Connection, type_name: str) -> tuple[str, ...]:
+def _type_dependencies(connection: Connection, group: PaperTradingEnumGroup) -> tuple[str, ...]:
+    managed_columns = ", ".join(f"(:table_name_{index}, :column_name_{index})" for index, _ in enumerate(group.columns))
+    parameters = {"type_name": group.type_name}
+    parameters.update(
+        {
+            f"{field}_{index}": getattr(column, field)
+            for index, column in enumerate(group.columns)
+            for field in ("table_name", "column_name")
+        }
+    )
     return tuple(
         connection.execute(
             text(
+                "WITH managed_columns(table_name, column_name) AS "
+                f"(VALUES {managed_columns}) "
                 "SELECT pg_describe_object(d.classid, d.objid, d.objsubid) "
                 "FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid "
                 "WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace "
                 "AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') "
+                "AND NOT EXISTS ("
+                "SELECT 1 FROM managed_columns m "
+                "JOIN pg_class c ON c.relname = m.table_name "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = m.column_name "
+                "LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum "
+                "WHERE n.nspname = current_schema() AND ("
+                "(d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.objsubid = a.attnum) "
+                "OR (d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid)"
+                ")"
+                ") "
                 "ORDER BY 1"
             ),
-            {"type_name": type_name},
+            parameters,
         ).scalars()
     )

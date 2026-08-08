@@ -244,12 +244,19 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
     assert check_name in dump
 
     with engine.begin() as connection:
-        connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        if table == "daily_bar_diagnostics":
+            connection.execute(
+                text(
+                    f'INSERT INTO "{schema}"."{table}" VALUES '
+                    "(2, 'qfq', 'empty', '[{\"status\": \"empty\"}]'::jsonb)"
+                )
+            )
+        else:
+            connection.execute(text(f'INSERT INTO "{schema}"."{table}" VALUES (2, \'none\', \'["exit"]\'::jsonb)'))
 
     imported = _run_script(
         "db_import.sh",
-        ["--schema", schema, "--table", table, "--in", str(dump_file)],
+        ["--clean", "--schema", schema, "--table", table, "--in", str(dump_file)],
     )
 
     assert imported.returncode == 0, imported.stderr
@@ -260,7 +267,9 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
         assert table_exists(connection, schema, table)
         for column, type_name in enum_columns:
             assert column_type(connection, schema, table, column) == (schema, type_name)
-        restored_row = connection.execute(text(f'SELECT * FROM "{schema}"."{table}"')).one()
+        restored_rows = connection.execute(text(f'SELECT * FROM "{schema}"."{table}" ORDER BY id')).all()
+        assert len(restored_rows) == 1
+        restored_row = restored_rows[0]
         assert tuple(restored_row[1:]) == expected_row
         assert constraint_exists(connection, schema, table, check_name)
 

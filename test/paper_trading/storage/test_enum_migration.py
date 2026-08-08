@@ -352,6 +352,9 @@ def test_rollback_rejects_non_column_enum_dependency_before_drop(postgres_schema
             connection.execute(text("SELECT to_regclass('paper_order_side_dependency')")).scalar_one()
             == "paper_order_side_dependency"
         )
+        assert _column_type(connection, "paper_orders", "side") == "paper_order_side"
+        assert _column_type(connection, "paper_trades", "side") == "paper_order_side"
+        assert _column_type(connection, "paper_matching_runs", "status") == "paper_matching_run_status"
 
 
 def test_rollback_restores_exact_varchar_types_and_indexes(postgres_schema):

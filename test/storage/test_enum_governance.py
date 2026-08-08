@@ -454,3 +454,37 @@ def test_unified_rollback_wraps_storage_enum_dependency_failure(postgres_schema)
         assert "blackroom_market: dependencies remain" in str(caught.value.__cause__)
         assert _column_type(connection, "blackroom_records", "market") == "blackroom_market"
         assert _all_managed_enum_types(connection) == {group.type_name for group in _all_enum_groups()}
+
+
+def test_unified_rollback_rejects_paper_dependency_before_any_adapter_mutates(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        assert migrate_enums(connection).converted is True
+        connection.execute(text("CREATE VIEW paper_order_side_dependency AS SELECT 'buy'::paper_order_side AS side"))
+
+        with pytest.raises(EnumGovernanceError, match="paper_trading preflight failed") as caught:
+            migrate_enums(connection, rollback=True)
+
+        assert caught.value.__cause__ is not None
+        assert "paper_order_side: dependencies remain" in str(caught.value.__cause__)
+        assert _column_type(connection, "paper_orders", "side") == "paper_order_side"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "monitor_market"
+        assert _all_managed_enum_types(connection) == {group.type_name for group in _all_enum_groups()}
+
+
+def test_unified_rollback_rejects_later_monitor_dependency_before_paper_mutates(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        assert migrate_enums(connection).converted is True
+        connection.execute(text("CREATE VIEW monitor_market_dependency AS SELECT 'A'::monitor_market AS market"))
+
+        with pytest.raises(EnumGovernanceError, match="monitor preflight failed") as caught:
+            migrate_enums(connection, rollback=True)
+
+        assert caught.value.__cause__ is not None
+        assert "monitor_market: dependencies remain" in str(caught.value.__cause__)
+        assert _column_type(connection, "paper_orders", "side") == "paper_order_side"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "monitor_market"
+        assert _all_managed_enum_types(connection) == {group.type_name for group in _all_enum_groups()}
