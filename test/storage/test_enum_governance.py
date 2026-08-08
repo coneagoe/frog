@@ -132,8 +132,37 @@ def _column_type(connection: Connection, table_name: str, column_name: str) -> s
     )
 
 
+def _column_default(connection: Connection, table_name: str, column_name: str) -> str | None:
+    return connection.execute(
+        text(
+            "SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d "
+            "JOIN pg_class c ON c.oid = d.adrelid "
+            "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.adnum "
+            "WHERE c.relnamespace = current_schema()::regnamespace "
+            "AND c.relname = :table_name AND a.attname = :column_name"
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    ).scalar_one_or_none()
+
+
+def _index_exists(connection: Connection, index_name: str) -> bool:
+    return bool(
+        connection.execute(
+            text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}
+        ).scalar_one()
+    )
+
+
+def _normalized_legacy_type(type_sql: str) -> str:
+    return type_sql.lower().replace("varchar", "character varying")
+
+
+def _all_enum_groups():
+    return PAPER_TRADING_ENUM_GROUPS + MONITOR_ENUM_GROUPS + STORAGE_ENUM_GROUPS
+
+
 def _all_managed_enum_types(connection: Connection) -> set[str]:
-    expected = {group.type_name for group in PAPER_TRADING_ENUM_GROUPS + MONITOR_ENUM_GROUPS + STORAGE_ENUM_GROUPS}
+    expected = {group.type_name for group in _all_enum_groups()}
     return (
         set(
             connection.execute(
@@ -240,28 +269,36 @@ def test_dry_run_only_preflights_adapters() -> None:
     ]
 
 
-def test_rollback_verifies_each_adapter_legacy_form() -> None:
+def test_rollback_preflights_then_rolls_back_then_verifies_each_adapter() -> None:
     events: list[str] = []
 
     result = migrate_enums(
         cast(Connection, FakeConnection()),
         rollback=True,
-        adapters=(_adapter("paper", events), _adapter("monitor", events, changed=False)),
+        adapters=(
+            _adapter("paper", events),
+            _adapter("monitor", events, changed=False),
+            _adapter("storage", events),
+        ),
     )
 
     assert events == [
         "paper.preflight",
         "monitor.preflight",
+        "storage.preflight",
         "paper.rollback",
         "monitor.rollback",
+        "storage.rollback",
         "paper.verify_rollback",
         "monitor.verify_rollback",
+        "storage.verify_rollback",
     ]
     assert result.converted is False
     assert result.rolled_back is True
     assert [(domain.name, domain.result) for domain in result.domains] == [
         ("paper", "paper:False:True:False:True"),
         ("monitor", "monitor:False:True:False:True"),
+        ("storage", "storage:False:True:False:True"),
     ]
 
 
@@ -395,8 +432,27 @@ def test_unified_rollback_restores_all_domains_and_removes_checks(postgres_schem
         assert result.rolled_back is True
         assert _all_managed_enum_types(connection) == set()
         assert _managed_check_names(connection) == set()
-        assert _column_type(connection, "paper_orders", "side") == "character varying(10)"
-        assert _column_type(connection, "stock_monitor_targets", "market") == "character varying(5)"
-        assert _column_type(connection, "blackroom_records", "market") == "character varying(5)"
-        assert _column_type(connection, "daily_bar_diagnostics", "classification") == "character varying(50)"
-        assert _column_type(connection, "ssf_change_signals", "status") == "character varying(20)"
+        for group in _all_enum_groups():
+            for column in group.columns:
+                assert _column_type(connection, column.table_name, column.column_name) == _normalized_legacy_type(
+                    column.legacy_type_sql
+                )
+                assert _column_default(connection, column.table_name, column.column_name) == column.default_sql
+                for index_name, _ in getattr(column, "indexes", ()):
+                    assert _index_exists(connection, index_name)
+
+
+def test_unified_rollback_wraps_storage_enum_dependency_failure(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        assert migrate_enums(connection).converted is True
+        connection.execute(text("CREATE VIEW blackroom_market_dependency AS SELECT 'A'::blackroom_market AS market"))
+
+        with pytest.raises(EnumGovernanceError, match="storage preflight failed") as caught:
+            migrate_enums(connection, rollback=True)
+
+        assert caught.value.__cause__ is not None
+        assert "blackroom_market: dependencies remain" in str(caught.value.__cause__)
+        assert _column_type(connection, "blackroom_records", "market") == "blackroom_market"
+        assert _all_managed_enum_types(connection) == {group.type_name for group in _all_enum_groups()}

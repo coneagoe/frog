@@ -305,3 +305,6 @@ def test_rollback_rejects_unmanaged_storage_enum_dependency(postgres_schema) -> 
 
         assert _column_type(connection, "blackroom_records", "market") == "blackroom_market"
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+        for group in STORAGE_ENUM_GROUPS:
+            for column in group.columns:
+                assert _column_type(connection, column.table_name, column.column_name) == group.type_name

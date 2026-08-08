@@ -210,6 +210,12 @@ def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
     for table_name, name, definition in _CHECKS:
         if table_name not in missing:
             _validate_check(connection, table_name, name, definition, required=checks_required)
+    if rollback:
+        for group in STORAGE_ENUM_GROUPS:
+            if _enum_labels(connection, group.type_name):
+                dependencies = _type_dependencies(connection, group)
+                if dependencies:
+                    raise StorageEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
     return missing
 
 
@@ -275,11 +281,6 @@ def _add_checks(connection: Connection) -> None:
 
 
 def _rollback(connection: Connection) -> bool:
-    for group in STORAGE_ENUM_GROUPS:
-        if _enum_labels(connection, group.type_name):
-            dependencies = _type_dependencies(connection, group)
-            if dependencies:
-                raise StorageEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
     changed = False
     for group in STORAGE_ENUM_GROUPS:
         if any(_column_has_type(connection, column, group.type_name) for column in group.columns):
