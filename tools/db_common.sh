@@ -51,7 +51,7 @@ BUSINESS_TABLES=(
   paper_valuation_gaps
 )
 
-PAPER_TRADING_ENUM_TYPES=(
+BUSINESS_ENUM_TYPES=(
   paper_account_status
   paper_fee_preset
   paper_cash_event_type
@@ -65,16 +65,20 @@ PAPER_TRADING_ENUM_TYPES=(
   paper_pending_settlement_source
   paper_ledger_rebuild_status
   paper_matching_run_status
+  monitor_market
+  monitor_frequency
+  monitor_reset_mode
+  forecast_ssf_candidate_state
 )
 
-paper_trading_enum_is_needed() {
+business_enum_is_needed() {
   local type_name="$1"
   local table_name="$2"
 
   [[ -z "$table_name" ]] && return 0
 
   case "$type_name:$table_name" in
-    paper_account_status:paper_accounts|paper_fee_preset:paper_accounts|paper_cash_event_type:paper_cash_ledger|paper_order_side:paper_orders|paper_order_side:paper_trades|paper_order_side:paper_trade_validity_checks|paper_order_status:paper_orders|paper_trade_validity_status:paper_orders|paper_trade_validity_status:paper_trade_validity_checks|paper_market:paper_orders|paper_market:paper_positions|paper_market:paper_position_lots|paper_market:paper_trades|paper_market:paper_trade_validity_checks|paper_position_source:paper_positions|paper_position_source:paper_position_lots|paper_round_trip_status:paper_position_round_trips|paper_trade_validity_granularity:paper_trade_validity_checks|paper_pending_settlement_source:paper_pending_settlement|paper_ledger_rebuild_status:paper_ledger_rebuilds|paper_matching_run_status:paper_matching_runs)
+    paper_account_status:paper_accounts|paper_fee_preset:paper_accounts|paper_cash_event_type:paper_cash_ledger|paper_order_side:paper_orders|paper_order_side:paper_trades|paper_order_side:paper_trade_validity_checks|paper_order_status:paper_orders|paper_trade_validity_status:paper_orders|paper_trade_validity_status:paper_trade_validity_checks|paper_market:paper_orders|paper_market:paper_positions|paper_market:paper_position_lots|paper_market:paper_trades|paper_market:paper_trade_validity_checks|paper_position_source:paper_positions|paper_position_source:paper_position_lots|paper_round_trip_status:paper_position_round_trips|paper_trade_validity_granularity:paper_trade_validity_checks|paper_pending_settlement_source:paper_pending_settlement|paper_ledger_rebuild_status:paper_ledger_rebuilds|paper_matching_run_status:paper_matching_runs|monitor_market:stock_monitor_targets|monitor_market:forecast_ssf_candidates|monitor_frequency:stock_monitor_targets|monitor_reset_mode:stock_monitor_targets|forecast_ssf_candidate_state:forecast_ssf_candidates)
       return 0
       ;;
     *)
@@ -83,15 +87,15 @@ paper_trading_enum_is_needed() {
   esac
 }
 
-paper_trading_enum_can_be_dropped() {
+business_enum_can_be_dropped() {
   local type_name="$1"
   local table_name="$2"
 
   [[ -z "$table_name" ]] && return 0
-  paper_trading_enum_is_needed "$type_name" "$table_name" || return 1
+  business_enum_is_needed "$type_name" "$table_name" || return 1
 
   case "$type_name" in
-    paper_order_side|paper_trade_validity_status|paper_market|paper_position_source)
+    paper_order_side|paper_trade_validity_status|paper_market|paper_position_source|monitor_market)
       return 1
       ;;
     *)

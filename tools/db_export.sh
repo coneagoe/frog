@@ -132,11 +132,11 @@ fi
 
 SELECTED_ENUM_TYPES=()
 CLEAN_ENUM_TYPES=()
-for type_name in "${PAPER_TRADING_ENUM_TYPES[@]}"; do
-  if paper_trading_enum_is_needed "$type_name" "$TABLE_NAME"; then
+for type_name in "${BUSINESS_ENUM_TYPES[@]}"; do
+  if business_enum_is_needed "$type_name" "$TABLE_NAME"; then
     SELECTED_ENUM_TYPES+=("$type_name")
   fi
-  if paper_trading_enum_can_be_dropped "$type_name" "$TABLE_NAME"; then
+  if business_enum_can_be_dropped "$type_name" "$TABLE_NAME"; then
     CLEAN_ENUM_TYPES+=("$type_name")
   fi
 done

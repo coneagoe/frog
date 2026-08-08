@@ -18,6 +18,12 @@ PAPER_ENUM_TYPES = (
     "paper_ledger_rebuild_status",
     "paper_matching_run_status",
 )
+MONITOR_ENUM_TYPES = (
+    "monitor_market",
+    "monitor_frequency",
+    "monitor_reset_mode",
+    "forecast_ssf_candidate_state",
+)
 
 
 def _run_script_result(
@@ -238,3 +244,55 @@ def test_paper_accounts_export_queries_only_its_enum_types(tmp_path: Path):
     assert "type=paper_account_status" in commands
     assert "type=paper_fee_preset" in commands
     assert "type=paper_matching_run_status" not in commands
+
+
+def test_selected_monitor_target_dump_creates_required_monitor_types_before_table(tmp_path: Path):
+    output_file = tmp_path / "targets.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--table", "stock_monitor_targets", "--out", str(output_file)], tmp_path)
+
+    dump = output_file.read_text(encoding="utf-8")
+    for type_name in ("monitor_market", "monitor_frequency", "monitor_reset_mode"):
+        assert dump.index(f'CREATE TYPE "public"."{type_name}"') < dump.index("-- dump output")
+    assert 'CREATE TYPE "public"."forecast_ssf_candidate_state"' not in dump
+
+
+def test_selected_forecast_ssf_candidate_dump_creates_required_monitor_types_before_table(tmp_path: Path):
+    output_file = tmp_path / "candidates.sql"
+    _run_script(
+        "db_export.sh",
+        ["--no-gzip", "--table", "forecast_ssf_candidates", "--out", str(output_file)],
+        tmp_path,
+    )
+
+    dump = output_file.read_text(encoding="utf-8")
+    for type_name in ("monitor_market", "forecast_ssf_candidate_state"):
+        assert dump.index(f'CREATE TYPE "public"."{type_name}"') < dump.index("-- dump output")
+    assert 'CREATE TYPE "public"."monitor_frequency"' not in dump
+    assert 'CREATE TYPE "public"."monitor_reset_mode"' not in dump
+
+
+def test_selected_monitor_target_clean_does_not_drop_shared_monitor_market(tmp_path: Path):
+    input_file = tmp_path / "targets.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    _run_script("db_import.sh", ["--clean", "--table", "stock_monitor_targets", "--in", str(input_file)], tmp_path)
+
+    drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
+    assert 'DROP TYPE IF EXISTS "public"."monitor_market"' not in drop_sql
+    assert 'DROP TYPE IF EXISTS "public"."monitor_frequency"' in drop_sql
+    assert 'DROP TYPE IF EXISTS "public"."monitor_reset_mode"' in drop_sql
+
+
+def test_clean_full_import_drops_tables_before_every_monitor_enum(tmp_path: Path):
+    input_file = tmp_path / "monitor.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    _run_script("db_import.sh", ["--clean", "--in", str(input_file)], tmp_path)
+
+    drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
+    for type_name in MONITOR_ENUM_TYPES:
+        assert drop_sql.index('DROP TABLE IF EXISTS "public"."stock_monitor_targets"') < drop_sql.index(
+            f'DROP TYPE IF EXISTS "public"."{type_name}"'
+        )
+    drop_positions = [drop_sql.index(f'DROP TYPE IF EXISTS "public"."{type_name}"') for type_name in MONITOR_ENUM_TYPES]
+    assert drop_positions == sorted(drop_positions, reverse=True)
