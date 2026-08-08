@@ -10,7 +10,18 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
+from storage.enum_governance import migrate_enums
+from storage.enum_migration import STORAGE_ENUM_ADAPTER, STORAGE_ENUM_GROUPS
+
 ROOT = Path(__file__).resolve().parents[2]
+STORAGE_ENUM_TYPES = {
+    "blackroom_market",
+    "blackroom_source",
+    "daily_bar_diagnostic_adjust",
+    "daily_bar_diagnostic_classification",
+    "ssf_change_signal_status",
+}
+STORAGE_ENUM_LABELS = {group.type_name: group.labels for group in STORAGE_ENUM_GROUPS}
 
 
 def _engine() -> Engine:
@@ -38,6 +49,10 @@ def postgres_schema() -> Iterator[tuple[Engine, str]]:
                 "order_id integer REFERENCES paper_orders(id))"
             )
         )
+        _create_legacy_storage_tables(connection)
+        migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+        for type_name in STORAGE_ENUM_TYPES:
+            assert enum_type_exists(connection, schema, type_name)
     try:
         yield engine, schema
     finally:
@@ -98,6 +113,66 @@ def table_exists(connection: Connection, schema: str, table: str) -> bool:
     )
 
 
+def enum_type_exists(connection: Connection, schema: str, type_name: str) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                "SELECT EXISTS (SELECT FROM pg_type t "
+                "JOIN pg_namespace n ON n.oid = t.typnamespace "
+                "WHERE n.nspname = :schema AND t.typname = :type_name)"
+            ),
+            {"schema": schema, "type_name": type_name},
+        ).scalar_one()
+    )
+
+
+def constraint_exists(connection: Connection, schema: str, table: str, name: str) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                "SELECT EXISTS (SELECT FROM pg_constraint c "
+                "JOIN pg_class t ON t.oid = c.conrelid "
+                "JOIN pg_namespace n ON n.oid = t.relnamespace "
+                "WHERE n.nspname = :schema AND t.relname = :table AND c.conname = :name)"
+            ),
+            {"schema": schema, "table": table, "name": name},
+        ).scalar_one()
+    )
+
+
+def enum_labels(connection: Connection, schema: str, type_name: str) -> tuple[str, ...]:
+    return tuple(
+        connection.execute(
+            text(
+                "SELECT e.enumlabel FROM pg_enum e "
+                "JOIN pg_type t ON t.oid = e.enumtypid "
+                "JOIN pg_namespace n ON n.oid = t.typnamespace "
+                "WHERE n.nspname = :schema AND t.typname = :type_name "
+                "ORDER BY e.enumsortorder"
+            ),
+            {"schema": schema, "type_name": type_name},
+        ).scalars()
+    )
+
+
+def _create_legacy_storage_tables(connection: Connection) -> None:
+    statements = (
+        "CREATE TABLE blackroom_records ("
+        "id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', "
+        "source varchar(50) NOT NULL DEFAULT 'manual')",
+        "CREATE TABLE daily_bar_diagnostics ("
+        "id integer primary key, adjust varchar(10) NOT NULL, "
+        "classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL)",
+        "CREATE TABLE ssf_change_signals ("
+        "id integer primary key, status varchar(20) NOT NULL DEFAULT 'signal', "
+        "event_types jsonb NOT NULL)",
+        "INSERT INTO daily_bar_diagnostics VALUES (1, 'bfq', 'downloaded', '[{\"status\": \"downloaded\"}]'::jsonb)",
+        "INSERT INTO ssf_change_signals VALUES (1, 'signal', '[\"increase\"]'::jsonb)",
+    )
+    for statement in statements:
+        connection.execute(text(statement))
+
+
 def _assert_foreign_keys_and_selected_table_remain(connection: Connection, schema: str) -> None:
     assert foreign_key_exists(connection, schema, "paper_trades", "paper_trades_order_id_fkey")
     assert foreign_key_exists(
@@ -107,6 +182,58 @@ def _assert_foreign_keys_and_selected_table_remain(connection: Connection, schem
         "paper_trade_validity_checks_order_id_fkey",
     )
     assert table_exists(connection, schema, "paper_orders")
+
+
+@pytest.mark.parametrize(
+    ("table", "enum_types", "check_name"),
+    (
+        (
+            "daily_bar_diagnostics",
+            ("daily_bar_diagnostic_adjust", "daily_bar_diagnostic_classification"),
+            "ck_daily_bar_diagnostics_provider_outcome_status",
+        ),
+        ("ssf_change_signals", ("ssf_change_signal_status",), "ck_ssf_change_signals_event_types"),
+    ),
+)
+def test_selected_storage_table_export_restores_enums_data_and_json_check(
+    postgres_schema: tuple[Engine, str],
+    tmp_path: Path,
+    table: str,
+    enum_types: tuple[str, ...],
+    check_name: str,
+) -> None:
+    engine, schema = postgres_schema
+    dump_file = tmp_path / f"{table}.sql"
+
+    export = _run_script(
+        "db_export.sh",
+        ["--no-gzip", "--schema", schema, "--table", table, "--out", str(dump_file)],
+    )
+
+    assert export.returncode == 0, export.stderr
+    dump = dump_file.read_text(encoding="utf-8")
+    table_marker = f"-- Name: {table}; Type: TABLE; Schema: {schema};"
+    for type_name in enum_types:
+        assert dump.index(f'CREATE TYPE "{schema}"."{type_name}"') < dump.index(table_marker)
+    assert check_name in dump
+
+    with engine.begin() as connection:
+        connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+
+    imported = _run_script(
+        "db_import.sh",
+        ["--schema", schema, "--table", table, "--in", str(dump_file)],
+    )
+
+    assert imported.returncode == 0, imported.stderr
+    with engine.connect() as connection:
+        for type_name in enum_types:
+            assert enum_type_exists(connection, schema, type_name)
+            assert enum_labels(connection, schema, type_name) == STORAGE_ENUM_LABELS[type_name]
+        assert table_exists(connection, schema, table)
+        assert connection.execute(text(f'SELECT count(*) FROM "{schema}"."{table}"')).scalar_one() == 1
+        assert constraint_exists(connection, schema, table, check_name)
 
 
 def test_clean_selected_table_export_is_rejected_before_mutation(

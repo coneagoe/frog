@@ -41,7 +41,7 @@ def _run_script_result(
     docker.write_text(
         "#!/usr/bin/env bash\n"
         'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"\n'
-        "if [[ \"$*\" == *' psql '* && \"$*\" == *' -c '* ]]; then\n"
+        "if [[ \"$*\" == *' psql '* ]]; then\n"
         "  if [[ \"$*\" == *'pg_constraint'* ]]; then\n"
         "    if [[ \"$*\" == *'source_table.relname NOT IN'* ]]; then\n"
         '      [[ -n "$UNMANAGED_INBOUND_FOREIGN_KEY" ]] && printf \'%s\\n\' "$UNMANAGED_INBOUND_FOREIGN_KEY"\n'
@@ -89,7 +89,7 @@ def test_export_places_enum_before_matching_table_dump(tmp_path: Path):
     assert "'paper_matching_run_status_label'" in dump
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     database_commands = [command for command in commands if " psql " in command or " pg_dump " in command]
-    assert database_commands[0].endswith("ORDER BY e.enumsortorder;")
+    assert "type=paper_matching_run_status" in database_commands[0]
     assert "pg_dump" in database_commands[1]
 
 
