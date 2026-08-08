@@ -372,6 +372,52 @@ def migrate_paper_trading_enums(
     return _result(converted=converted)
 
 
+def _migrate(
+    connection: Connection,
+    groups: tuple[PaperTradingEnumGroup, ...],
+    *,
+    dry_run: bool = False,
+    rollback: bool = False,
+    dry_run_reports_conversion: bool = False,
+) -> PaperTradingEnumMigrationResult:
+    """Run the legacy scoped migration used by matching-status bootstrap."""
+
+    if connection.dialect.name != "postgresql":
+        return _result(groups, dry_run=dry_run, rollback=rollback)
+
+    missing_tables = _preflight(connection, groups, rollback=rollback)
+    if missing_tables and len(missing_tables) != len(
+        {column.table_name for group in groups for column in group.columns}
+    ):
+        raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
+    changed = any(
+        not _column_has_type(connection, column, group.type_name) for group in groups for column in group.columns
+    )
+    if dry_run:
+        return _result(
+            groups, dry_run=True, rollback=rollback, converted=changed if dry_run_reports_conversion else False
+        )
+    if missing_tables:
+        if rollback:
+            return _result(groups, rollback=True)
+        for group in groups:
+            _create_type(connection, group)
+        _create_missing_tables(connection, missing_tables)
+        _preflight(connection, groups, rollback=False)
+        return _result(groups, converted=True)
+    if rollback:
+        rolled_back = _rollback(connection, groups)
+        _verify(connection, groups, rollback=True)
+        return _result(groups, rollback=True, rolled_back=rolled_back)
+
+    if changed:
+        for group in groups:
+            _create_type(connection, group)
+            _alter_group(connection, group, rollback=False)
+    _verify(connection, groups, rollback=False)
+    return _result(groups, converted=changed)
+
+
 def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...], *, rollback: bool) -> set[str]:
     governed_names = {column.table_name for group in groups for column in group.columns}
     missing_tables = {name for name in governed_names if not _table_exists(connection, name)}

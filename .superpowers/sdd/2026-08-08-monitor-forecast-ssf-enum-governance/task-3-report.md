@@ -45,3 +45,40 @@ unified coordinator and does not modify Monitor behavior.
 
 No PostgreSQL URL was configured in this worktree, so live enum DDL,
 partial-index predicate validation, and rollback execution could not run here.
+
+## Regression Fix
+
+### Root Cause
+
+Task 3 replaced the legacy `_migrate(connection, groups, ...)` orchestration
+helper with full-domain adapter callbacks. The existing
+`paper_trading.storage.matching_status_migration` module imports `_migrate` to
+run a deliberately scoped migration containing only
+`paper_matching_run_status`. Removing it caused matching-status test collection
+to fail with an import error.
+
+The matching-status caller cannot use the full Paper Trading adapter: it must
+work when only `paper_matching_runs` exists, and its dry run reports whether
+the single status column would be converted through
+`dry_run_reports_conversion=True`.
+
+### Fix
+
+- Restored `_migrate` as a private compatibility helper for scoped Paper
+  Trading migration callers.
+- Preserved the former non-PostgreSQL, preflight, missing-table bootstrap,
+  apply, verify, rollback, and `dry_run_reports_conversion` result semantics.
+- Left `PAPER_TRADING_ENUM_ADAPTER` and its full-domain phase behavior
+  unchanged.
+
+### Regression Evidence
+
+1. Before the fix, `uv run pytest
+   test/paper_trading/storage/test_matching_status_migration.py -v` failed at
+   collection: `matching_status_migration.py` could not import `_migrate`.
+2. After the fix, the same suite collected 15 tests: 1 portable SQLite test
+   passed and 14 PostgreSQL tests explicitly skipped because
+   `TEST_POSTGRESQL_URL` is unavailable.
+3. `uv run pytest test/paper_trading/storage/test_enum_migration.py -v`
+   collected 14 PostgreSQL tests and explicitly skipped all 14 for the same
+   missing environment variable.
