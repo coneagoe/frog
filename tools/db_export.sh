@@ -212,8 +212,9 @@ run_export_docker() {
     for type_name in "${SELECTED_ENUM_TYPES[@]}"; do
       local enum_labels_file
       enum_labels_file="$(mktemp)"
+      # psql expands variables from input, but not from -c commands.
       # shellcheck disable=SC2086
-      $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -v "schema=$SCHEMA" -v "type=$type_name" -At -c "$enum_query" >"$enum_labels_file"
+      printf '%s\n' "$enum_query" | $dc exec -T "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" psql "${psql_args_common[@]}" -v "schema=$SCHEMA" -v "type=$type_name" -At >"$enum_labels_file"
       if [[ -s "$enum_labels_file" ]]; then
         printf 'DO $$ BEGIN CREATE TYPE "%s"."%s" AS ENUM (' "$SCHEMA" "$type_name" >>"$ENUM_DDL_FILE"
         paste -sd, "$enum_labels_file" >>"$ENUM_DDL_FILE"

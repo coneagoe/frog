@@ -549,31 +549,31 @@ and migration output. Run commands from the repository root.
 
 The unified enum governance migration follows the enum evolution policy in
 [`docs/database_design.md`](database_design.md). It is the only supported
-production operator interface for the governed Paper Trading, Monitor, and
-Forecast SSF schemas. Run it in a maintenance window with every business writer
-stopped while PostgreSQL remains running. Keep the verified backup and all
-command output together in the maintenance record.
+production operator interface for the governed Paper Trading, Monitor, Forecast
+SSF, and Storage schemas. Run it in a maintenance window with every business
+writer stopped while PostgreSQL remains running. Keep the verified backup and
+all command output together in the maintenance record.
 
-The governed types are `paper_account_status`, `paper_fee_preset`,
-`paper_cash_event_type`, `paper_order_side`, `paper_order_status`,
-`paper_trade_validity_status`, `paper_market`, `paper_position_source`,
-`paper_round_trip_status`, `paper_trade_validity_granularity`,
-`paper_pending_settlement_source`, `paper_ledger_rebuild_status`, and
-`paper_matching_run_status`. Full backups include their definitions before the
-dependent table dumps. Selected-table dumps never include clean `DROP`
-statements and use duplicate-safe type creation, so they can restore without
-replacing an existing shared type.
-
-The Monitor and Forecast SSF types are `monitor_market`,
-`monitor_frequency`, `monitor_reset_mode`, and
-`forecast_ssf_candidate_state`. `monitor_market` is shared by
+The governed types are the 13 Paper Trading types:
+`paper_account_status`, `paper_fee_preset`, `paper_cash_event_type`,
+`paper_order_side`, `paper_order_status`, `paper_trade_validity_status`,
+`paper_market`, `paper_position_source`, `paper_round_trip_status`,
+`paper_trade_validity_granularity`, `paper_pending_settlement_source`,
+`paper_ledger_rebuild_status`, and `paper_matching_run_status`; the four
+Monitor and Forecast SSF types: `monitor_market`, `monitor_frequency`,
+`monitor_reset_mode`, and `forecast_ssf_candidate_state`; and the five Storage
+types: `blackroom_market`, `blackroom_source`,
+`daily_bar_diagnostic_adjust`, `daily_bar_diagnostic_classification`, and
+`ssf_change_signal_status`. `monitor_market` is shared by
 `stock_monitor_targets` and `forecast_ssf_candidates`; `monitor_frequency` and
 `monitor_reset_mode` belong to `stock_monitor_targets`; and
-`forecast_ssf_candidate_state` belongs to `forecast_ssf_candidates`. A full
-backup creates every enum type before its dependent tables, and a full clean
-restore drops dependent tables before their types. A selected-table clean
-restore must retain `monitor_market` whenever its other dependent table is not
-selected.
+`forecast_ssf_candidate_state` belongs to `forecast_ssf_candidates`.
+
+Full exports create every managed type before dependent tables. Selected-table
+exports create only the required types with duplicate-safe DDL, so a restore
+does not replace an existing shared type. `pg_dump` preserves table-owned
+defaults, indexes, foreign keys, and JSON checks. A full clean restore drops
+dependent tables before the managed types.
 
 Monitor `condition` remains JSON because it carries structured rule
 configuration. Application write paths validate the complete conditional-rule
@@ -591,11 +591,12 @@ startup intentionally does not create or convert those governed tables; use the
 migration command for that explicit schema change. It also does not create or
 alter governed PostgreSQL enum types or legacy varchar columns.
 
-`db_export.sh --clean --table NAME` is unsupported. To recover a selected table
-into a clean destination, use `db_import.sh --clean --table NAME`; it refuses
-to run when an unselected table has an inbound foreign key to the selected
-table. Use a full business-database clean restore only when every FK-owning
-dependent table is included in the managed restore set.
+Selected-table clean export is unsupported. Selected-table clean import refuses
+to run when an unselected table has a foreign key referencing the selected
+table. This prevents the restore from silently dropping a constraint that the
+selected-table dump cannot recreate. Use a full business-database clean restore
+when the required tables are managed together, or use a separately reviewed
+recovery procedure.
 
 1. Stop every business writer while leaving PostgreSQL running and retain a
    verified backup.
@@ -619,8 +620,11 @@ dependent table is included in the managed restore set.
    before restarting workers.
 4. Restart compatible writers only after the migration result and smoke tests
    pass.
-5. Use the tested schema rollback procedure only if required. Keep writers
-   stopped and run:
+5. Use the tested schema rollback procedure only if required. Rollback converts
+    enum columns back to their documented legacy string types, restores defaults
+    and indexes, removes managed JSON checks, rejects unmanaged dependencies,
+    and drops types only after dependencies are gone. Keep writers stopped and
+    run:
 
    ```bash
    uv run tools/migrate_enums.py --rollback --json

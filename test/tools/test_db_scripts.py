@@ -41,7 +41,7 @@ def _run_script_result(
     docker.write_text(
         "#!/usr/bin/env bash\n"
         'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"\n'
-        "if [[ \"$*\" == *' psql '* && \"$*\" == *' -c '* ]]; then\n"
+        "if [[ \"$*\" == *' psql '* ]]; then\n"
         "  if [[ \"$*\" == *'pg_constraint'* ]]; then\n"
         "    if [[ \"$*\" == *'source_table.relname NOT IN'* ]]; then\n"
         '      [[ -n "$UNMANAGED_INBOUND_FOREIGN_KEY" ]] && printf \'%s\\n\' "$UNMANAGED_INBOUND_FOREIGN_KEY"\n'
@@ -89,7 +89,7 @@ def test_export_places_enum_before_matching_table_dump(tmp_path: Path):
     assert "'paper_matching_run_status_label'" in dump
     commands = (tmp_path / "commands.log").read_text(encoding="utf-8").splitlines()
     database_commands = [command for command in commands if " psql " in command or " pg_dump " in command]
-    assert database_commands[0].endswith("ORDER BY e.enumsortorder;")
+    assert "type=paper_matching_run_status" in database_commands[0]
     assert "pg_dump" in database_commands[1]
 
 
@@ -114,6 +114,52 @@ def test_full_export_places_every_paper_enum_before_table_dump(tmp_path: Path):
     for type_name in PAPER_ENUM_TYPES:
         assert f'CREATE TYPE "public"."{type_name}"' in dump
         assert dump.index(f'CREATE TYPE "public"."{type_name}"') < dump.index("-- dump output")
+
+
+def test_full_export_includes_storage_enum_types_before_table_dump(tmp_path: Path):
+    output_file = tmp_path / "storage.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--out", str(output_file)], tmp_path)
+
+    dump = output_file.read_text(encoding="utf-8")
+    for type_name in (
+        "blackroom_market",
+        "blackroom_source",
+        "daily_bar_diagnostic_adjust",
+        "daily_bar_diagnostic_classification",
+        "ssf_change_signal_status",
+    ):
+        assert f'CREATE TYPE "public"."{type_name}"' in dump
+        assert dump.index(f'CREATE TYPE "public"."{type_name}"') < dump.index("-- dump output")
+
+
+def test_selected_storage_table_exports_only_required_storage_types(tmp_path: Path):
+    output_file = tmp_path / "diagnostics.sql"
+    _run_script(
+        "db_export.sh",
+        ["--no-gzip", "--table", "daily_bar_diagnostics", "--out", str(output_file)],
+        tmp_path,
+    )
+
+    dump = output_file.read_text(encoding="utf-8")
+    assert 'CREATE TYPE "public"."daily_bar_diagnostic_adjust"' in dump
+    assert 'CREATE TYPE "public"."daily_bar_diagnostic_classification"' in dump
+    assert 'CREATE TYPE "public"."blackroom_market"' not in dump
+    assert 'CREATE TYPE "public"."ssf_change_signal_status"' not in dump
+
+
+def test_selected_storage_table_clean_drops_private_types_only(tmp_path: Path):
+    input_file = tmp_path / "diagnostics.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+    _run_script(
+        "db_import.sh",
+        ["--clean", "--table", "daily_bar_diagnostics", "--in", str(input_file)],
+        tmp_path,
+    )
+
+    drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
+    assert 'DROP TYPE IF EXISTS "public"."daily_bar_diagnostic_adjust"' in drop_sql
+    assert 'DROP TYPE IF EXISTS "public"."daily_bar_diagnostic_classification"' in drop_sql
+    assert 'DROP TYPE IF EXISTS "public"."blackroom_market"' not in drop_sql
 
 
 def test_clean_full_import_drops_tables_before_every_paper_enum(tmp_path: Path):
