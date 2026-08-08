@@ -143,3 +143,4 @@ dmypy.json
 /docker/
 /logs/
 /.review-*
+/.superpowers/
