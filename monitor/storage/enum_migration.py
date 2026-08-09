@@ -9,7 +9,7 @@ from sqlalchemy.engine import Connection
 
 from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
-from storage.enum_governance_adapter import EnumGovernanceAdapter, empty_enum_governance_audit
+from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import ForecastSSFCandidate, StockMonitorTarget
 
 
@@ -198,6 +198,102 @@ def _adapter_rollback(connection: Connection) -> bool:
     return _rollback(connection)
 
 
+def _adapter_audit(connection: Connection, *, rollback: bool):
+    from storage.enum_governance import (
+        EnumGovernanceCheckAudit,
+        EnumGovernanceColumnAudit,
+        EnumGovernanceDomainAudit,
+        EnumGovernanceGroupAudit,
+    )
+
+    missing_tables = {table.name for table in _GOVERNED_TABLES if not _table_exists(connection, table.name)}
+    groups = []
+    for group in MONITOR_ENUM_GROUPS:
+        observed_labels = _enum_labels(connection, group.type_name)
+        columns = []
+        for column in group.columns:
+            facts = None if column.table_name in missing_tables else _column_facts(connection, column)
+            observed_type = None if facts is None else facts[0]
+            observed_default = None if facts is None else _column_default(connection, column)
+            observed_values = () if facts is None else _column_values(connection, column)
+            enum_typed = observed_type == group.type_name
+            expected_type = _normalized_type(column.legacy_type_sql) if rollback else group.type_name
+            expected_default = (
+                column.default_sql
+                if rollback or not enum_typed
+                else _enum_default(column.default_sql, group.type_name)
+                if column.default_sql
+                else None
+            )
+            indexes_ready = _indexes_ready(connection, column, required=True)
+            valid_type = observed_type == expected_type or (
+                not rollback and observed_type == _normalized_type(column.legacy_type_sql)
+            )
+            values_ready = not observed_values or all(
+                value is None or value in group.labels for value in observed_values
+            )
+            missing_table = column.table_name in missing_tables
+            ready = missing_table or (
+                facts is not None
+                and valid_type
+                and facts[1] == column.nullable
+                and values_ready
+                and _defaults_match(observed_default, expected_default)
+                and (indexes_ready or not (rollback or enum_typed))
+            )
+            columns.append(
+                EnumGovernanceColumnAudit(
+                    column.table_name,
+                    column.column_name,
+                    expected_type,
+                    observed_type,
+                    group.labels,
+                    observed_values,
+                    expected_default,
+                    observed_default,
+                    tuple(name for name, _ in column.indexes),
+                    indexes_ready,
+                    ready,
+                    None if ready else "incompatible column catalog facts",
+                )
+            )
+        dependencies = _type_dependencies(connection, group) if rollback and observed_labels else ()
+        ready = observed_labels in ((), group.labels) and all(column.ready for column in columns) and not dependencies
+        groups.append(
+            EnumGovernanceGroupAudit(
+                group.type_name,
+                group.labels,
+                observed_labels,
+                tuple(columns),
+                dependencies,
+                ready,
+                None if ready else "incompatible enum catalog facts",
+            )
+        )
+    check_required = rollback and any(
+        column.observed_type == group.type_name for group in groups for column in group.columns
+    )
+    check_definition = None if "stock_monitor_targets" in missing_tables else _condition_check_definition(connection)
+    check_ready = _condition_check_ready(connection, required=check_required)
+    checks = (
+        EnumGovernanceCheckAudit(
+            "stock_monitor_targets",
+            _CONDITION_CHECK_NAME,
+            check_required,
+            check_definition,
+            check_ready,
+            None if check_ready else "incompatible condition constraint",
+        ),
+    )
+    return EnumGovernanceDomainAudit(
+        "monitor",
+        tuple(groups),
+        checks,
+        tuple(sorted(missing_tables)),
+        all(group.ready for group in groups) and check_ready,
+    )
+
+
 MONITOR_ENUM_ADAPTER = EnumGovernanceAdapter(
     name="monitor",
     preflight=_adapter_preflight,
@@ -205,7 +301,7 @@ MONITOR_ENUM_ADAPTER = EnumGovernanceAdapter(
     verify=_adapter_verify,
     rollback=_adapter_rollback,
     result=_result,
-    audit=empty_enum_governance_audit("monitor"),
+    audit=_adapter_audit,
 )
 
 
@@ -298,6 +394,41 @@ def _validate_values(connection: Connection, group: MonitorEnumGroup, column: Mo
     )
     if unknown and (not column.nullable or any(value is not None for value in unknown)):
         raise MonitorEnumMigrationError(f"{group.type_name}: unknown legacy values {unknown}")
+
+
+def _column_values(connection: Connection, column: MonitorEnumColumn) -> tuple[str | None, ...]:
+    return tuple(
+        connection.execute(
+            text(
+                f"SELECT DISTINCT {column.column_name}::text FROM {column.table_name} "
+                f"ORDER BY {column.column_name}::text NULLS FIRST"
+            )
+        ).scalars()
+    )
+
+
+def _defaults_match(observed: str | None, expected: str | None) -> bool:
+    return (
+        observed is None
+        if expected is None
+        else observed is not None and _normalize_expression(observed) == _normalize_expression(expected)
+    )
+
+
+def _indexes_ready(connection: Connection, column: MonitorEnumColumn, *, required: bool) -> bool:
+    try:
+        _validate_indexes(connection, column, required=required)
+    except MonitorEnumMigrationError:
+        return False
+    return True
+
+
+def _condition_check_ready(connection: Connection, *, required: bool) -> bool:
+    try:
+        _validate_condition_check(connection, required=required)
+    except MonitorEnumMigrationError:
+        return False
+    return True
 
 
 def _create_type(connection: Connection, group: MonitorEnumGroup) -> None:
