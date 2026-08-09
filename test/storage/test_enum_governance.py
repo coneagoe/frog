@@ -3,6 +3,7 @@
 import os
 import uuid
 from dataclasses import dataclass
+from inspect import signature
 from typing import cast
 
 import pytest
@@ -231,15 +232,9 @@ def _audit(name: str, events: list[str]):
 
 
 def test_adapter_requires_audit_callback() -> None:
-    with pytest.raises(TypeError, match="missing 1 required positional argument: 'audit'"):
-        EnumGovernanceAdapter(
-            "paper",
-            lambda connection, *, rollback: None,
-            lambda connection: False,
-            lambda connection, *, rollback: None,
-            lambda connection: False,
-            lambda *, dry_run, rollback, converted, rolled_back: "paper",
-        )
+    audit = signature(EnumGovernanceAdapter).parameters["audit"]
+
+    assert audit.default is audit.empty
 
 
 def test_normal_migration_preflights_every_adapter_before_ddl() -> None:

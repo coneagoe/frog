@@ -30,6 +30,7 @@ def _engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
     return create_engine(url)
 
 
@@ -166,10 +167,18 @@ def test_postgresql_governed_writer_smoke_uses_canonical_labels(postgres_schema,
         assert blackroom.market == "A"
         assert diagnostic.adjust == "bfq"
         assert signal_ids
-        assert session.get(BlackroomRecord, blackroom.id).source == "manual"
-        assert session.get(DailyBarDiagnostic, diagnostic.id).classification == "missing_market_data"
-        assert session.get(SSFChangeSignal, signal_ids[0]).event_types == ["increase"]
-        assert session.get(StockMonitorTarget, target["data"]["id"]).frequency == "daily"
+        persisted_blackroom = session.get(BlackroomRecord, blackroom.id)
+        persisted_diagnostic = session.get(DailyBarDiagnostic, diagnostic.id)
+        persisted_signal = session.get(SSFChangeSignal, signal_ids[0])
+        persisted_target = session.get(StockMonitorTarget, target["data"]["id"])
+        assert persisted_blackroom is not None
+        assert persisted_diagnostic is not None
+        assert persisted_signal is not None
+        assert persisted_target is not None
+        assert persisted_blackroom.source == "manual"
+        assert persisted_diagnostic.classification == "missing_market_data"
+        assert persisted_signal.event_types == ["increase"]
+        assert persisted_target.frequency == "daily"
 
 
 def test_postgresql_governed_catalog_contains_writer_enums_and_checks(postgres_schema) -> None:
@@ -248,6 +257,7 @@ def test_sqlite_governed_writers_preserve_canonical_labels(sqlite_storage: Stora
     target = MonitorTargetService(storage=sqlite_storage).add_target(
         "600519", "A", {"type": "price_threshold", "direction": "below", "value": 1500}
     )
+    assert sqlite_storage.Session is not None
     with sqlite_storage.Session() as session:
         diagnostic = PaperTradingRepository(session).upsert_daily_bar_diagnostic(
             date(2026, 8, 9), "000001", "bfq", "missing_market_data", [], resolved=False
@@ -261,6 +271,7 @@ def test_sqlite_governed_writers_preserve_canonical_labels(sqlite_storage: Stora
     assert target["data"]["frequency"] == "daily"
     assert target["data"]["reset_mode"] == "auto"
     assert signal_ids
+    assert sqlite_storage.Session is not None
     with sqlite_storage.Session() as session:
         signal = session.get(SSFChangeSignal, signal_ids[0])
         assert signal is not None
