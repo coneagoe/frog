@@ -550,9 +550,8 @@ and migration output. Run commands from the repository root.
 The unified enum governance migration follows the enum evolution policy in
 [`docs/database_design.md`](database_design.md). It is the only supported
 production operator interface for the governed Paper Trading, Monitor, Forecast
-SSF, and Storage schemas. Run it in a maintenance window with every business
-writer stopped while PostgreSQL remains running. Keep the verified backup and
-all command output together in the maintenance record.
+SSF, and Storage schemas. Keep the maintenance record, verified backup, and
+every command's JSON output together.
 
 The governed types are the 13 Paper Trading types:
 `paper_account_status`, `paper_fee_preset`, `paper_cash_event_type`,
@@ -598,41 +597,60 @@ selected-table dump cannot recreate. Use a full business-database clean restore
 when the required tables are managed together, or use a separately reviewed
 recovery procedure.
 
-1. Stop every business writer while leaving PostgreSQL running and retain a
-   verified backup.
-2. Run the full preflight without changing the database:
+#### Preconditions
 
-   ```bash
-   uv run tools/migrate_enums.py --dry-run --json
-   ```
+- Record database, schema, deployment revision, maintenance owner, and start
+  time.
+- Stop API/CLI automation, Airflow scheduling and workers, Celery workers, and
+  all other business writers; leave PostgreSQL running.
+- Create a full business-database export with `tools/db_export.sh`, and prove it
+  can be inspected and restored in an isolated target before production DDL.
 
-   Resolve every reported preflight error before continuing. Unknown legacy
-   values cause the migration to abort without mutation; do not coerce or
-   relabel them without an approved data decision.
-3. Run the conversion during the maintenance window:
+#### Preflight and Migration
 
-   ```bash
-   uv run tools/migrate_enums.py --json
-   ```
+```bash
+uv run tools/migrate_enums.py --dry-run --json
+uv run tools/migrate_enums.py --json
+```
 
-   Retain the successful JSON output with the backup, and verify the reported
-   enum groups. Run focused Monitor and Paper Trading write-path smoke tests
-   before restarting workers.
-4. Restart compatible writers only after the migration result and smoke tests
-   pass.
-5. Use the tested schema rollback procedure only if required. Rollback converts
-    enum columns back to their documented legacy string types, restores defaults
-    and indexes, removes managed JSON checks, rejects unmanaged dependencies,
-    and drops types only after dependencies are gone. Keep writers stopped and
-    run:
+Run only the dry run first. Retain and review its JSON document; do not run the
+live command while any group, column, check, or dependency is non-ready. Resolve
+unknown legacy values without coercion or relabeling until an approved data
+decision exists. After every item is ready, run the live command and retain its
+JSON document.
 
-   ```bash
-   uv run tools/migrate_enums.py --rollback --json
-   ```
+#### Independent Verification and Smoke
 
-   Retain the rollback output with the original migration record. Restart only
-   writer versions compatible with the verified database schema after the
-   successful migration or rollback verification.
+Verify enum labels, column types, defaults, indexes, and JSON checks through
+PostgreSQL catalog queries independent of the command output. Run
+`uv run pytest test/storage/test_enum_governance_smoke.py -v` with
+`TEST_POSTGRESQL_URL` targeting an isolated migrated database. Resume compatible
+services only after this gate passes.
+
+The label contract crosses API responses, CLI task output, Airflow task output,
+Celery task output, frontend consumers, and database exports. Repository tests
+cover the export/import contract; operators must observe canonical readable
+labels in the API, CLI, Airflow, Celery, and frontend runtime paths because this
+repository does not claim runtime verification for those consumers.
+
+Restart in this order: keep the database running; start the application/API;
+start one worker class at a time and observe canonical labels in its output;
+confirm canonical labels in API and CLI task output and in an export; then
+return Airflow schedules to normal. Do not resume a consumer that cannot read
+every label in the migrated database.
+
+#### Schema Rollback
+
+```bash
+uv run tools/migrate_enums.py --rollback --json
+```
+
+Keep writers stopped. This converts columns back to documented varchar types and
+removes managed types and checks after dependency verification. It is schema-only
+and non-destructive: it does not restore lost data or replace a verified backup
+restore. Never drop governed tables to force rollback and never rely on
+application startup to migrate schema. Retain the rollback JSON document and
+restart only versions compatible with the independently verified schema.
 
 ### Future label compatibility
 
