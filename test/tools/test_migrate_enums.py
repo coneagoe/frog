@@ -11,6 +11,11 @@ from pathlib import Path
 import pytest
 
 import tools.migrate_enums as command
+from storage.enum_governance import (
+    EnumGovernanceColumnAudit,
+    EnumGovernanceDomainAudit,
+    EnumGovernanceGroupAudit,
+)
 
 
 @dataclass
@@ -63,6 +68,7 @@ class FakeResult:
     converted: bool
     rolled_back: bool
     domains: tuple[FakeDomain, ...]
+    audits: tuple[EnumGovernanceDomainAudit, ...]
 
 
 def _result_with_paper_and_monitor_groups() -> FakeResult:
@@ -79,6 +85,40 @@ def _result_with_paper_and_monitor_groups() -> FakeResult:
             FakeDomain(
                 "monitor",
                 FakeDomainResult((FakeGroup("monitor_market", (FakeColumn("stock_monitor_targets", "market"),)),)),
+            ),
+        ),
+        audits=(
+            EnumGovernanceDomainAudit(
+                name="paper_trading",
+                groups=(
+                    EnumGovernanceGroupAudit(
+                        type_name="paper_order_side",
+                        expected_labels=("buy", "sell"),
+                        observed_labels=(),
+                        columns=(
+                            EnumGovernanceColumnAudit(
+                                table_name="paper_orders",
+                                column_name="side",
+                                expected_type="paper_order_side",
+                                observed_type="character varying(10)",
+                                expected_labels=("buy", "sell"),
+                                observed_values=("buy",),
+                                expected_default=None,
+                                observed_default=None,
+                                index_names=("ix_paper_orders_side",),
+                                indexes_ready=True,
+                                ready=True,
+                                reason=None,
+                            ),
+                        ),
+                        dependencies=(),
+                        ready=True,
+                        reason=None,
+                    ),
+                ),
+                checks=(),
+                missing_tables=(),
+                ready=True,
             ),
         ),
     )
@@ -108,6 +148,47 @@ def test_main_emits_stable_json_for_all_domains(monkeypatch, capsys) -> None:
     assert output["converted"] is False
     assert output["rolled_back"] is False
     assert [domain["name"] for domain in output["domains"]] == ["paper_trading", "monitor"]
+
+
+def test_main_emits_json_schema_readiness_audits(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(command, "migrate_enums", lambda connection, **kwargs: _result_with_paper_and_monitor_groups())
+    monkeypatch.setattr(command, "parse_config", lambda: None)
+    monkeypatch.setattr(command, "get_storage", lambda: FakeStorage(FakeTransaction()))
+
+    assert command.main(["--dry-run", "--json"]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    audit = output["audits"][0]
+    group = audit["groups"][0]
+    column = group["columns"][0]
+    assert set(audit) == {"checks", "groups", "missing_tables", "name", "ready"}
+    assert set(group) == {
+        "columns",
+        "dependencies",
+        "expected_labels",
+        "observed_labels",
+        "ready",
+        "reason",
+        "type_name",
+    }
+    assert set(column) == {
+        "column_name",
+        "expected_default",
+        "expected_labels",
+        "expected_type",
+        "index_names",
+        "indexes_ready",
+        "observed_default",
+        "observed_type",
+        "observed_values",
+        "ready",
+        "reason",
+        "table_name",
+    }
+    assert audit["name"] == "paper_trading"
+    assert group["expected_labels"] == ["buy", "sell"]
+    assert column["observed_values"] == ["buy"]
+    assert audit["checks"] == []
 
 
 def test_main_forwards_rollback_to_migration(monkeypatch) -> None:
