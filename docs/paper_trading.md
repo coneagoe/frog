@@ -816,7 +816,7 @@ UNION ALL
 SELECT 'uq_matching_active_scope predicate=' || coalesce(pg_get_expr(i.indpred, i.indrelid), '<missing>')
 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = :'schema' AND c.relname = 'uq_matching_active_scope'
-  AND (NOT i.indisunique OR pg_get_expr(i.indpred, i.indrelid) !~* 'status\\s*=\\s*''running''\\s*::\\s*paper_matching_run_status');
+  AND (NOT i.indisunique OR pg_get_expr(i.indpred, i.indrelid) !~* 'status\s*=\s*''running''\s*::\s*paper_matching_run_status');
 SQL
 ```
 
