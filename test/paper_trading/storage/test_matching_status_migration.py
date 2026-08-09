@@ -251,6 +251,10 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
             ).scalar_one()
             paper_valuation_gaps = connection.execute(text("SELECT to_regclass('paper_valuation_gaps')")).scalar_one()
             daily_bar_diagnostics = connection.execute(text("SELECT to_regclass('daily_bar_diagnostics')")).scalar_one()
+            stock_monitor_targets = connection.execute(text("SELECT to_regclass('stock_monitor_targets')")).scalar_one()
+            forecast_ssf_candidates = connection.execute(
+                text("SELECT to_regclass('forecast_ssf_candidates')")
+            ).scalar_one()
     finally:
         reset_storage()
         storage_db_module._metadata_initialized_pids.discard(os.getpid())
@@ -260,7 +264,9 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
     assert all(column_type.startswith("character varying") for column_type in column_types.values())
     assert paper_account_snapshots is None
     assert paper_valuation_gaps is None
-    assert daily_bar_diagnostics == "daily_bar_diagnostics"
+    assert daily_bar_diagnostics is None
+    assert stock_monitor_targets is None
+    assert forecast_ssf_candidates is None
 
 
 def test_postgresql_rejects_unknown_legacy_status_without_changes(postgres_schema):

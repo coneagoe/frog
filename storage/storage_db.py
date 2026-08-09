@@ -104,6 +104,7 @@ from .model import (
     tb_name_etf_basic,
     tb_name_etf_daily,
     tb_name_forecast,
+    tb_name_forecast_ssf_candidate,
     tb_name_general_info_etf,
     tb_name_general_info_ggt,
     tb_name_general_info_stock,
@@ -139,6 +140,7 @@ from .model import (
     tb_name_ssf_change_signal,
     tb_name_stk_holdernumber,
     tb_name_stk_limit_a_stock,
+    tb_name_stock_monitor_target,
     tb_name_suspend_d_a_stock,
     tb_name_top10_floatholders,
 )
@@ -307,6 +309,8 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
     tb_name_ssf_change_signal,
+    tb_name_stock_monitor_target,
+    tb_name_forecast_ssf_candidate,
 }
 
 _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
