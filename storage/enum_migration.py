@@ -180,7 +180,7 @@ def _adapter_audit(connection: Connection, *, rollback: bool):
             expected_type = _normalized_type(column.legacy_type_sql) if rollback else group.type_name
             expected_default = (
                 column.default_sql
-                if rollback or not enum_typed
+                if not enum_typed
                 else _enum_default(column.default_sql, group.type_name)
                 if column.default_sql
                 else None

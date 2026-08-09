@@ -461,6 +461,22 @@ def test_dry_run_reports_converted_schema_labels_checks_and_values(postgres_sche
     assert all(audit.ready for audit in result.audits)
 
 
+def test_rollback_audit_reports_converted_enum_defaults_as_ready(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        assert migrate_enums(connection).converted is True
+
+        result = migrate_enums(connection, rollback=True)
+
+    audits = {audit.name: audit for audit in result.audits}
+    paper = next(group for group in audits["paper_trading"].groups if group.type_name == "paper_account_status")
+    assert paper.columns[0].observed_type == "paper_account_status"
+    assert paper.columns[0].observed_default == "'active'::paper_account_status"
+    assert paper.columns[0].expected_default == "'active'::paper_account_status"
+    assert all(audit.ready for audit in result.audits)
+
+
 def test_rollback_preflight_reports_storage_dependency_before_failing(postgres_schema) -> None:
     engine, schema = postgres_schema
     with engine.begin() as connection:
