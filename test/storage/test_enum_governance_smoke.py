@@ -40,8 +40,24 @@ def postgres_schema() -> Iterator[tuple[Engine, str]]:
     with admin_engine.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA "{schema}"'))
         connection.execute(text(f'SET search_path TO "{schema}"'))
-        Base.metadata.create_all(connection)
-        assert migrate_enums(connection).converted is True
+        migration = migrate_enums(connection)
+        assert migration.converted is True
+        assert all(audit.missing_tables for audit in migration.audits)
+        assert set(
+            connection.execute(
+                text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() "
+                    "AND tablename IN ('paper_orders', 'stock_monitor_targets', 'blackroom_records', "
+                    "'daily_bar_diagnostics', 'ssf_change_signals')"
+                )
+            ).scalars()
+        ) == {
+            "paper_orders",
+            "stock_monitor_targets",
+            "blackroom_records",
+            "daily_bar_diagnostics",
+            "ssf_change_signals",
+        }
     engine = create_engine(admin_engine.url, connect_args={"options": f"-csearch_path={schema}"})
     try:
         yield engine, schema
@@ -245,3 +261,8 @@ def test_sqlite_governed_writers_preserve_canonical_labels(sqlite_storage: Stora
     assert target["data"]["frequency"] == "daily"
     assert target["data"]["reset_mode"] == "auto"
     assert signal_ids
+    with sqlite_storage.Session() as session:
+        signal = session.get(SSFChangeSignal, signal_ids[0])
+        assert signal is not None
+        assert signal.status == "signal"
+        assert signal.event_types == ["increase"]
