@@ -17,8 +17,9 @@ def _run_test_runner(
     command_log = tmp_path / "commands.log"
     (bin_dir / "docker").write_text(
         "#!/usr/bin/env bash\n"
-        "printf 'docker %s COMPOSE_PLACEHOLDERS=%s:%s:%s:%s:%s:%s:%s:%s\\n' "
-        '"${*}" "${SMTP_HOST:-}" "${SMTP_PORT:-}" "${SMTP_USER:-}" '
+        "printf 'docker %s TEST_POSTGRESQL_URL=%s COMPOSE_PLACEHOLDERS=%s:%s:%s:%s:%s:%s:%s:%s\\n' "
+        '"${*}" "${TEST_POSTGRESQL_URL:-}" '
+        '"${SMTP_HOST:-}" "${SMTP_PORT:-}" "${SMTP_USER:-}" '
         '"${SMTP_PASSWORD:-}" "${SMTP_MAIL_FROM:-}" "${ALERT_EMAILS:-}" '
         '"${TUSHARE_TOKEN:-}" "${PAPER_TRADING_API_TOKEN:-}" '
         '>> "$COMMAND_LOG"\n',
@@ -61,11 +62,11 @@ def _run_test_runner(
 
 def test_compose_defines_isolated_test_database():
     compose_file = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    test_db_block = compose_file.split("  test_db:\n", maxsplit=1)[1].split("  db:\n", maxsplit=1)[0]
 
-    assert "  test_db:\n" in compose_file
-    assert "timescale/timescaledb:latest-pg16" in compose_file
-    assert 'ports: ["127.0.0.1:5433:5432"]' in compose_file
-    assert "- /var/lib/postgresql/data" in compose_file
+    assert "timescale/timescaledb:latest-pg16" in test_db_block
+    assert 'ports: ["127.0.0.1:5433:5432"]' in test_db_block
+    assert "- /var/lib/postgresql/data" in test_db_block
     assert "./docker/db:/var/lib/postgresql/data" in compose_file
 
 
@@ -74,9 +75,9 @@ def test_runner_starts_test_database_runs_pytest_and_cleans_up(tmp_path: Path):
 
     assert completed.returncode == 0
     assert commands == [
-        f"docker compose up -d --wait test_db COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
+        f"docker compose up -d --wait test_db TEST_POSTGRESQL_URL= COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
         "uv run pytest test -k enum TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5433/quant",
-        f"docker compose rm -sfv test_db COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
+        f"docker compose rm -sfv test_db TEST_POSTGRESQL_URL= COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
     ]
 
 
@@ -84,4 +85,6 @@ def test_runner_preserves_pytest_failure_after_cleanup(tmp_path: Path):
     completed, commands = _run_test_runner([], tmp_path, pytest_status=1)
 
     assert completed.returncode == 1
-    assert commands[-1] == f"docker compose rm -sfv test_db COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}"
+    assert commands[-1] == (
+        f"docker compose rm -sfv test_db TEST_POSTGRESQL_URL= COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}"
+    )
