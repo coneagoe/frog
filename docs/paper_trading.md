@@ -603,8 +603,41 @@ recovery procedure.
   time.
 - Stop API/CLI automation, Airflow scheduling and workers, Celery workers, and
   all other business writers; leave PostgreSQL running.
-- Create a full business-database export with `tools/db_export.sh`, and prove it
-  can be inspected and restored in an isolated target before production DDL.
+- Set the source connection values and the immutable backup path in the
+  maintenance record, then create the full export:
+
+  ```bash
+  export DB_SERVICE=db
+  export PROD_DB=quant
+  export PROD_SCHEMA=public
+  export DB_USER=quant
+  export BACKUP_FILE="./backups/${PROD_DB}_pre_enum_$(date +%Y%m%d_%H%M%S).sql.gz"
+  bash tools/db_export.sh --service "$DB_SERVICE" --db "$PROD_DB" --user "$DB_USER" \
+    --schema "$PROD_SCHEMA" --out "$BACKUP_FILE"
+  test -s "$BACKUP_FILE"
+  gzip -t "$BACKUP_FILE"
+  ```
+
+- Provision an empty, isolated restore database before the maintenance window.
+  It must not be the production database and must use the same schema name as
+  `PROD_SCHEMA`: the plain SQL dump contains schema-qualified objects and
+  `db_import.sh` does not rewrite schemas. Record the target database identity,
+  schema, provisioning approval, backup checksum, export timestamp, import exit
+  status, and catalog-query transcript. Only the isolated target may use
+  `--clean`:
+
+  ```bash
+  export ISOLATED_DB=quant_enum_restore_20260809
+  export ISOLATED_SCHEMA="$PROD_SCHEMA"
+  bash tools/db_import.sh --clean --service "$DB_SERVICE" --db "$ISOLATED_DB" \
+    --user "$DB_USER" --schema "$ISOLATED_SCHEMA" --in "$BACKUP_FILE"
+  ```
+
+  Record the export command's `Wrote:` path, `test -s` and `gzip -t` exit
+  statuses, the import command's `[db_import] Done.` output, and its zero exit
+  status as the restore proof. Inspect the isolated target before production DDL;
+  do not use these commands to create or drop the target. Its isolated
+  provisioning is an operator prerequisite.
 
 #### Preflight and Migration
 
@@ -622,7 +655,186 @@ JSON document.
 #### Independent Verification and Smoke
 
 Verify enum labels, column types, defaults, indexes, and JSON checks through
-PostgreSQL catalog queries independent of the command output. Run
+PostgreSQL catalog queries independent of the command output. The following
+queries are read-only and use the repository's Docker Compose access pattern.
+They target the migrated production database after the live command; set the
+same `DB_SERVICE`, `PROD_DB`, `PROD_SCHEMA`, and `DB_USER` values recorded
+above. Each query must return **zero rows**. Save its output and exit status in
+the maintenance record; any row is a mismatch and blocks restart.
+
+```bash
+docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
+  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+WITH expected(type_name, labels) AS (
+  VALUES
+    ('paper_account_status', ARRAY['active','disabled']),
+    ('paper_fee_preset', ARRAY['a_share']),
+    ('paper_cash_event_type', ARRAY['deposit','withdrawal','freeze','release','trade','fee']),
+    ('paper_order_side', ARRAY['buy','sell']),
+    ('paper_order_status', ARRAY['new','accepted','partially_filled','filled','cancelled','rejected']),
+    ('paper_trade_validity_status', ARRAY['valid','suspicious','invalid','unchecked']),
+    ('paper_market', ARRAY['a_share','hk_connect']),
+    ('paper_position_source', ARRAY['trade','imported']),
+    ('paper_round_trip_status', ARRAY['open','closed']),
+    ('paper_trade_validity_granularity', ARRAY['daily']),
+    ('paper_pending_settlement_source', ARRAY['hk_sell']),
+    ('paper_ledger_rebuild_status', ARRAY['completed']),
+    ('paper_matching_run_status', ARRAY['running','completed','completed_with_warnings','failed']),
+    ('monitor_market', ARRAY['A','HK','ETF']),
+    ('monitor_frequency', ARRAY['daily','intraday']),
+    ('monitor_reset_mode', ARRAY['auto','manual']),
+    ('forecast_ssf_candidate_state', ARRAY['eligible','ineligible','deferred','paused','blackroom','delisted_or_unlisted']),
+    ('blackroom_market', ARRAY['A','HK','ETF']),
+    ('blackroom_source', ARRAY['manual','shareholder_selling','shareholder_reduction']),
+    ('daily_bar_diagnostic_adjust', ARRAY['bfq','qfq','hfq']),
+    ('daily_bar_diagnostic_classification', ARRAY['missing_market_data','missing_exact_date','downloaded','resolved']),
+    ('ssf_change_signal_status', ARRAY['signal','no_signal'])
+), observed AS (
+  SELECT t.typname AS type_name, array_agg(e.enumlabel ORDER BY e.enumsortorder) AS labels
+  FROM pg_type t
+  JOIN pg_namespace n ON n.oid = t.typnamespace
+  LEFT JOIN pg_enum e ON e.enumtypid = t.oid
+  WHERE n.nspname = :'schema'
+  GROUP BY t.typname
+)
+SELECT e.type_name, e.labels AS expected_labels, o.labels AS observed_labels
+FROM expected e LEFT JOIN observed o USING (type_name)
+WHERE o.labels IS DISTINCT FROM e.labels
+ORDER BY e.type_name;"
+```
+
+Expected result: zero rows. This proves every governed type has exactly its
+documented labels in documented order; it includes readable export labels such
+as `bfq`, `downloaded`, `signal`, and `increase`'s JSON-check boundary.
+
+```bash
+docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
+  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+WITH expected(table_name, column_name, type_name) AS (
+  VALUES
+    ('paper_accounts','status','paper_account_status'), ('paper_accounts','fee_preset','paper_fee_preset'),
+    ('paper_cash_ledger','event_type','paper_cash_event_type'), ('paper_orders','side','paper_order_side'),
+    ('paper_trades','side','paper_order_side'), ('paper_trade_validity_checks','side','paper_order_side'),
+    ('paper_orders','status','paper_order_status'), ('paper_orders','validity_status','paper_trade_validity_status'),
+    ('paper_trade_validity_checks','status','paper_trade_validity_status'), ('paper_orders','market','paper_market'),
+    ('paper_positions','market','paper_market'), ('paper_position_lots','market','paper_market'),
+    ('paper_trades','market','paper_market'), ('paper_trade_validity_checks','market','paper_market'),
+    ('paper_positions','source','paper_position_source'), ('paper_position_lots','source','paper_position_source'),
+    ('paper_position_round_trips','status','paper_round_trip_status'),
+    ('paper_trade_validity_checks','data_granularity','paper_trade_validity_granularity'),
+    ('paper_pending_settlement','source','paper_pending_settlement_source'),
+    ('paper_ledger_rebuilds','status','paper_ledger_rebuild_status'), ('paper_matching_runs','status','paper_matching_run_status'),
+    ('stock_monitor_targets','market','monitor_market'), ('forecast_ssf_candidates','market','monitor_market'),
+    ('stock_monitor_targets','frequency','monitor_frequency'), ('stock_monitor_targets','reset_mode','monitor_reset_mode'),
+    ('forecast_ssf_candidates','state','forecast_ssf_candidate_state'), ('blackroom_records','market','blackroom_market'),
+    ('blackroom_records','source','blackroom_source'), ('daily_bar_diagnostics','adjust','daily_bar_diagnostic_adjust'),
+    ('daily_bar_diagnostics','classification','daily_bar_diagnostic_classification'), ('ssf_change_signals','status','ssf_change_signal_status')
+), observed AS (
+  SELECT c.relname AS table_name, a.attname AS column_name, t.typname AS type_name
+  FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_type t ON t.oid = a.atttypid
+  WHERE n.nspname = :'schema' AND a.attnum > 0 AND NOT a.attisdropped
+)
+SELECT e.*, o.type_name AS observed_type
+FROM expected e LEFT JOIN observed o USING (table_name, column_name)
+WHERE o.type_name IS DISTINCT FROM e.type_name
+ORDER BY e.table_name, e.column_name;"
+```
+
+Expected result: zero rows. This proves all 31 governed columns use their
+managed enum types.
+
+```bash
+docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
+  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+WITH expected AS (
+  SELECT * FROM (VALUES
+    ('paper_accounts','status', '''active''::paper_account_status'),
+    ('paper_accounts','fee_preset', '''a_share''::paper_fee_preset'),
+    ('paper_orders','market', '''a_share''::paper_market'),
+    ('paper_positions','market', '''a_share''::paper_market'),
+    ('paper_position_lots','market', '''a_share''::paper_market'),
+    ('paper_trades','market', '''a_share''::paper_market'),
+    ('paper_trade_validity_checks','market', '''a_share''::paper_market'),
+    ('paper_positions','source', '''trade''::paper_position_source'),
+    ('paper_position_lots','source', '''trade''::paper_position_source'),
+    ('paper_position_round_trips','status', '''open''::paper_round_trip_status'),
+    ('paper_trade_validity_checks','data_granularity', '''daily''::paper_trade_validity_granularity'),
+    ('stock_monitor_targets','market', '''A''::monitor_market'),
+    ('forecast_ssf_candidates','market', '''A''::monitor_market'),
+    ('stock_monitor_targets','frequency', '''daily''::monitor_frequency'),
+    ('stock_monitor_targets','reset_mode', '''auto''::monitor_reset_mode'),
+    ('blackroom_records','market', '''A''::blackroom_market'),
+    ('blackroom_records','source', '''manual''::blackroom_source'),
+    ('ssf_change_signals','status', '''signal''::ssf_change_signal_status')
+  ) AS v(table_name, column_name, default_expression)
+), observed AS (
+  SELECT c.relname AS table_name, a.attname AS column_name, pg_get_expr(d.adbin, d.adrelid) AS default_expression
+  FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.adnum WHERE n.nspname = :'schema'
+)
+SELECT e.*, o.default_expression AS observed_default
+FROM expected e LEFT JOIN observed o USING (table_name, column_name)
+WHERE replace(replace(lower(o.default_expression), '(', ''), ')', '') IS DISTINCT FROM lower(e.default_expression)
+ORDER BY e.table_name, e.column_name;"
+```
+
+Expected result: zero rows. This verifies every governed enum default; columns
+omitted from the query intentionally have no default.
+
+```bash
+docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
+  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+WITH expected(name) AS (
+  VALUES ('ix_paper_orders_status'), ('ix_paper_orders_validity_status'),
+    ('ix_paper_trade_validity_checks_status'), ('ix_paper_orders_market'),
+    ('ix_paper_positions_market'), ('ix_paper_position_lots_market'), ('ix_paper_trades_market'),
+    ('ix_paper_trade_validity_checks_market'), ('ix_paper_position_round_trips_status'),
+    ('ix_paper_ledger_rebuilds_status'), ('uq_matching_active_scope'),
+    ('ix_stock_monitor_targets_market'), ('ix_forecast_ssf_candidates_market'),
+    ('ix_stock_monitor_targets_frequency'), ('ix_stock_monitor_targets_reset_mode'),
+    ('ix_forecast_ssf_candidates_state')
+), observed AS (
+  SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = :'schema' AND c.relkind = 'i'
+)
+SELECT e.name AS missing_index FROM expected e LEFT JOIN observed o USING (name) WHERE o.name IS NULL
+UNION ALL
+SELECT 'uq_matching_active_scope predicate=' || coalesce(pg_get_expr(i.indpred, i.indrelid), '<missing>')
+FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = :'schema' AND c.relname = 'uq_matching_active_scope'
+  AND (NOT i.indisunique OR pg_get_expr(i.indpred, i.indrelid) !~* 'status\\s*=\\s*''running''\\s*::\\s*paper_matching_run_status');"
+```
+
+Expected result: zero rows. This proves all managed indexes exist and the
+active matching-run index remains unique with the enum-typed `running`
+predicate.
+
+```bash
+docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
+  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+WITH expected(table_name, constraint_name, required_text) AS (
+  VALUES
+    ('stock_monitor_targets','ck_stock_monitor_targets_condition_type','price_threshold'),
+    ('daily_bar_diagnostics','ck_daily_bar_diagnostics_provider_outcome_status','downloaded'),
+    ('ssf_change_signals','ck_ssf_change_signals_event_types','increase')
+), observed AS (
+  SELECT t.relname AS table_name, c.conname AS constraint_name, pg_get_constraintdef(c.oid) AS definition
+  FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+  WHERE n.nspname = :'schema' AND c.contype = 'c'
+)
+SELECT e.*, o.definition
+FROM expected e LEFT JOIN observed o USING (table_name, constraint_name)
+WHERE o.definition IS NULL OR o.definition NOT ILIKE '%' || e.required_text || '%'
+ORDER BY e.table_name, e.constraint_name;"
+```
+
+Expected result: zero rows. This proves all three managed JSON checks exist and
+retain their required canonical-label boundary. The full constraint definitions
+must also match the migration's preflight JSON audit; do not restart on a
+conflicting definition.
+
+Run
 `uv run pytest test/storage/test_enum_governance_smoke.py -v` with
 `TEST_POSTGRESQL_URL` targeting an isolated migrated database. Resume compatible
 services only after this gate passes.

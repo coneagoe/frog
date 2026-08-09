@@ -42,3 +42,25 @@
   for those consumers.
 - The smoke gate and PostgreSQL export/import integration tests require an
   isolated database configured through `TEST_POSTGRESQL_URL`.
+
+## Review Fixes
+
+- Added the exact full backup command using `tools/db_export.sh`, including
+  non-empty and gzip-integrity checks.
+- Added the exact isolated full restore command using `tools/db_import.sh
+  --clean`, with distinct source and isolated-target database variables,
+  same-schema requirements, and required recorded evidence.
+- Added read-only `docker compose exec -T ... psql` catalog queries. Each has a
+  zero-row expected result and independently verifies the full enum-label
+  inventory, all 31 governed column types, enum defaults, managed indexes, and
+  the three managed JSON checks.
+- The restore procedure explicitly prohibits targeting production and does not
+  include target creation or deletion.
+
+## Review Fix Test Results
+
+- `uv run pytest test/tools/test_db_scripts.py test/tools/test_db_scripts_postgresql.py test/tools/test_migrate_enums.py -v`
+  - 28 passed, 4 skipped.
+- Required Ruff format and check commands passed for the enum governance scope.
+- PostgreSQL integration cases remain skipped exclusively because
+  `TEST_POSTGRESQL_URL` is unavailable.
