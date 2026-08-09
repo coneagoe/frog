@@ -353,7 +353,7 @@ def _adapter_audit(connection: Connection, *, rollback: bool):
             observed_default = None if facts is None else _column_default(connection, column)
             observed_values = () if facts is None else _column_values(connection, column)
             enum_typed = observed_type == group.type_name
-            expected_type = _normalized_type(column.legacy_type_sql) if rollback else group.type_name
+            expected_type = group.type_name
             expected_default = _expected_default(group, column, rollback=not enum_typed)
             indexes_ready = _indexes_ready(connection, column, enum_typed=rollback or enum_typed)
             valid_type = observed_type == expected_type or (
@@ -802,8 +802,11 @@ def _type_dependencies(connection: Connection, group: PaperTradingEnumGroup) -> 
                 f"(VALUES {managed_columns}) "
                 ", managed_indexes(table_name, index_name) AS "
                 f"(VALUES {managed_indexes}) "
-                "SELECT pg_describe_object(d.classid, d.objid, d.objsubid) "
+                "SELECT DISTINCT COALESCE('view ' || v.relname, pg_describe_object(d.classid, d.objid, d.objsubid)) "
                 "FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid "
+                "LEFT JOIN pg_class vc ON vc.oid = d.objid AND vc.relkind = 'v' "
+                "LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid "
+                "LEFT JOIN pg_class v ON v.oid = COALESCE(vc.oid, r.ev_class) "
                 "WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace "
                 "AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') "
                 "AND NOT EXISTS ("

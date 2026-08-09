@@ -308,3 +308,15 @@ def test_rollback_rejects_unmanaged_storage_enum_dependency(postgres_schema) -> 
         for group in STORAGE_ENUM_GROUPS:
             for column in group.columns:
                 assert _column_type(connection, column.table_name, column.column_name) == group.type_name
+
+
+def test_rollback_audit_normalizes_view_dependency_to_one_view_name(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_storage_enums(connection)
+        connection.execute(text("CREATE VIEW blackroom_market_dependency AS SELECT 'A'::blackroom_market AS market"))
+
+        audit = STORAGE_ENUM_ADAPTER.audit(connection, rollback=True)
+
+    blackroom = next(group for group in audit.groups if group.type_name == "blackroom_market")
+    assert blackroom.dependencies == ("view blackroom_market_dependency",)

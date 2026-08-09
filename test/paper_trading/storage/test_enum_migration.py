@@ -357,6 +357,18 @@ def test_rollback_rejects_non_column_enum_dependency_before_drop(postgres_schema
         assert _column_type(connection, "paper_matching_runs", "status") == "paper_matching_run_status"
 
 
+def test_rollback_audit_normalizes_view_dependency_to_one_view_name(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_paper_trading_enums(connection)
+        connection.execute(text("CREATE VIEW paper_order_side_dependency AS SELECT 'buy'::paper_order_side AS side"))
+
+        audit = PAPER_TRADING_ENUM_ADAPTER.audit(connection, rollback=True)
+
+    order_side = next(group for group in audit.groups if group.type_name == "paper_order_side")
+    assert order_side.dependencies == ("view paper_order_side_dependency",)
+
+
 def test_rollback_rejects_undeclared_partial_index_enum_dependency(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:

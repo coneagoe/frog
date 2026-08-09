@@ -217,7 +217,7 @@ def _adapter_audit(connection: Connection, *, rollback: bool):
             observed_default = None if facts is None else _column_default(connection, column)
             observed_values = () if facts is None else _column_values(connection, column)
             enum_typed = observed_type == group.type_name
-            expected_type = _normalized_type(column.legacy_type_sql) if rollback else group.type_name
+            expected_type = group.type_name
             expected_default = (
                 column.default_sql
                 if not enum_typed
@@ -360,6 +360,11 @@ def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
             for column in group.columns
         )
         _validate_condition_check(connection, required=check_required)
+        for group in MONITOR_ENUM_GROUPS:
+            if _enum_labels(connection, group.type_name):
+                dependencies = _type_dependencies(connection, group)
+                if dependencies:
+                    raise MonitorEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
     else:
         _validate_condition_check(connection, required=False)
     return missing_tables
@@ -669,8 +674,11 @@ def _type_dependencies(connection: Connection, group: MonitorEnumGroup) -> tuple
             text(
                 "WITH managed_columns(table_name, column_name) AS "
                 f"(VALUES {managed_columns}) "
-                "SELECT pg_describe_object(d.classid, d.objid, d.objsubid) "
+                "SELECT DISTINCT COALESCE('view ' || v.relname, pg_describe_object(d.classid, d.objid, d.objsubid)) "
                 "FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid "
+                "LEFT JOIN pg_class vc ON vc.oid = d.objid AND vc.relkind = 'v' "
+                "LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid "
+                "LEFT JOIN pg_class v ON v.oid = COALESCE(vc.oid, r.ev_class) "
                 "WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace "
                 "AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') "
                 "AND NOT EXISTS ("
