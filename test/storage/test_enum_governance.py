@@ -14,6 +14,7 @@ from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_GROUPS
 from storage.enum_governance import (
     ENUM_GOVERNANCE_ADAPTERS,
     EnumGovernanceAdapter,
+    EnumGovernanceDomainAudit,
     EnumGovernanceError,
     migrate_enums,
 )
@@ -191,6 +192,7 @@ def _adapter(
     changed: bool = True,
     fail_preflight: bool = False,
     fail_apply: bool = False,
+    audit=None,
 ) -> EnumGovernanceAdapter:
     def preflight(connection: FakeConnection, *, rollback: bool) -> None:
         del connection, rollback
@@ -217,7 +219,16 @@ def _adapter(
     def result(*, dry_run: bool, rollback: bool, converted: bool, rolled_back: bool) -> str:
         return f"{name}:{dry_run}:{rollback}:{converted}:{rolled_back}"
 
-    return EnumGovernanceAdapter(name, preflight, apply, verify, rollback, result)
+    return EnumGovernanceAdapter(name, preflight, apply, verify, rollback, result, audit)
+
+
+def _audit(name: str, events: list[str]):
+    def audit(connection: FakeConnection, *, rollback: bool) -> EnumGovernanceDomainAudit:
+        del connection, rollback
+        events.append(f"{name}.audit")
+        return EnumGovernanceDomainAudit(name, (), (), (), True)
+
+    return audit
 
 
 def test_normal_migration_preflights_every_adapter_before_ddl() -> None:
@@ -265,6 +276,48 @@ def test_dry_run_only_preflights_adapters() -> None:
         ("paper", "paper:True:False:False:False"),
         ("monitor", "monitor:True:False:False:False"),
     ]
+
+
+def test_dry_run_collects_audits_only_after_every_preflight() -> None:
+    events: list[str] = []
+    result = migrate_enums(
+        cast(Connection, FakeConnection()),
+        dry_run=True,
+        adapters=(
+            _adapter("paper", events, audit=_audit("paper", events)),
+            _adapter("monitor", events, audit=_audit("monitor", events)),
+        ),
+    )
+
+    assert events == ["paper.preflight", "monitor.preflight", "paper.audit", "monitor.audit"]
+    assert [audit.name for audit in result.audits] == ["paper", "monitor"]
+
+
+def test_preflight_failure_does_not_collect_audits() -> None:
+    events: list[str] = []
+
+    with pytest.raises(EnumGovernanceError, match="monitor preflight failed"):
+        migrate_enums(
+            cast(Connection, FakeConnection()),
+            dry_run=True,
+            adapters=(
+                _adapter("paper", events, audit=_audit("paper", events)),
+                _adapter("monitor", events, fail_preflight=True, audit=_audit("monitor", events)),
+            ),
+        )
+
+    assert events == ["paper.preflight", "monitor.preflight"]
+
+
+def test_non_postgresql_connection_returns_empty_audits() -> None:
+    events: list[str] = []
+
+    result = migrate_enums(
+        cast(Connection, FakeConnection(dialect_name="sqlite")),
+        adapters=(_adapter("paper", events, audit=_audit("paper", events)),),
+    )
+
+    assert result.audits == ()
 
 
 def test_rollback_preflights_then_rolls_back_then_verifies_each_adapter() -> None:
