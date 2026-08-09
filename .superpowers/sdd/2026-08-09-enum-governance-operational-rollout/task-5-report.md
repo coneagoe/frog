@@ -64,3 +64,23 @@
 - Required Ruff format and check commands passed for the enum governance scope.
 - PostgreSQL integration cases remain skipped exclusively because
   `TEST_POSTGRESQL_URL` is unavailable.
+
+## Review Fix Round 2
+
+- Replaced every `psql -c` catalog command with a quoted stdin heredoc. The
+  commands continue to pass `-v "schema=$PROD_SCHEMA"`, and `:'schema'` now
+  expands safely where psql supports variable interpolation.
+- Expanded the defaults catalog query to every governed enum column. It reports
+  both an incorrect required default and a default present on a column that must
+  have none.
+- Replaced keyword-only JSON CHECK validation with a zero-row comparison of the
+  full normalized `pg_get_constraintdef` output against each documented managed
+  CHECK expression.
+
+## Review Fix Round 2 Test Results
+
+- `uv run pytest test/tools/test_db_scripts.py test/tools/test_db_scripts_postgresql.py test/tools/test_migrate_enums.py -v`
+  - 28 passed, 4 skipped.
+- Required Ruff format and check commands passed for the enum governance scope.
+- PostgreSQL integration cases remain skipped exclusively because
+  `TEST_POSTGRESQL_URL` is unavailable.

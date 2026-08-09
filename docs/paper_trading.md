@@ -664,7 +664,7 @@ the maintenance record; any row is a mismatch and blocks restart.
 
 ```bash
 docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
-  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+  -v "schema=$PROD_SCHEMA" -P pager=off <<'SQL'
 WITH expected(type_name, labels) AS (
   VALUES
     ('paper_account_status', ARRAY['active','disabled']),
@@ -700,7 +700,8 @@ WITH expected(type_name, labels) AS (
 SELECT e.type_name, e.labels AS expected_labels, o.labels AS observed_labels
 FROM expected e LEFT JOIN observed o USING (type_name)
 WHERE o.labels IS DISTINCT FROM e.labels
-ORDER BY e.type_name;"
+ORDER BY e.type_name;
+SQL
 ```
 
 Expected result: zero rows. This proves every governed type has exactly its
@@ -709,7 +710,7 @@ as `bfq`, `downloaded`, `signal`, and `increase`'s JSON-check boundary.
 
 ```bash
 docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
-  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+  -v "schema=$PROD_SCHEMA" -P pager=off <<'SQL'
 WITH expected(table_name, column_name, type_name) AS (
   VALUES
     ('paper_accounts','status','paper_account_status'), ('paper_accounts','fee_preset','paper_fee_preset'),
@@ -738,7 +739,8 @@ WITH expected(table_name, column_name, type_name) AS (
 SELECT e.*, o.type_name AS observed_type
 FROM expected e LEFT JOIN observed o USING (table_name, column_name)
 WHERE o.type_name IS DISTINCT FROM e.type_name
-ORDER BY e.table_name, e.column_name;"
+ORDER BY e.table_name, e.column_name;
+SQL
 ```
 
 Expected result: zero rows. This proves all 31 governed columns use their
@@ -746,7 +748,7 @@ managed enum types.
 
 ```bash
 docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
-  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+  -v "schema=$PROD_SCHEMA" -P pager=off <<'SQL'
 WITH expected AS (
   SELECT * FROM (VALUES
     ('paper_accounts','status', '''active''::paper_account_status'),
@@ -766,25 +768,36 @@ WITH expected AS (
     ('stock_monitor_targets','reset_mode', '''auto''::monitor_reset_mode'),
     ('blackroom_records','market', '''A''::blackroom_market'),
     ('blackroom_records','source', '''manual''::blackroom_source'),
-    ('ssf_change_signals','status', '''signal''::ssf_change_signal_status')
+    ('daily_bar_diagnostics','adjust', NULL),
+    ('daily_bar_diagnostics','classification', NULL),
+    ('ssf_change_signals','status', '''signal''::ssf_change_signal_status'),
+    ('paper_cash_ledger','event_type', NULL),
+    ('paper_orders','side', NULL), ('paper_trades','side', NULL),
+    ('paper_trade_validity_checks','side', NULL), ('paper_orders','status', NULL),
+    ('paper_orders','validity_status', NULL), ('paper_trade_validity_checks','status', NULL),
+    ('paper_pending_settlement','source', NULL), ('paper_ledger_rebuilds','status', NULL),
+    ('paper_matching_runs','status', NULL), ('forecast_ssf_candidates','state', NULL)
   ) AS v(table_name, column_name, default_expression)
 ), observed AS (
   SELECT c.relname AS table_name, a.attname AS column_name, pg_get_expr(d.adbin, d.adrelid) AS default_expression
-  FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid JOIN pg_namespace n ON n.oid = c.relnamespace
-  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.adnum WHERE n.nspname = :'schema'
+  FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+  LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+  WHERE n.nspname = :'schema' AND a.attnum > 0 AND NOT a.attisdropped
 )
 SELECT e.*, o.default_expression AS observed_default
 FROM expected e LEFT JOIN observed o USING (table_name, column_name)
-WHERE replace(replace(lower(o.default_expression), '(', ''), ')', '') IS DISTINCT FROM lower(e.default_expression)
-ORDER BY e.table_name, e.column_name;"
+WHERE coalesce(replace(replace(lower(o.default_expression), '(', ''), ')', ''), '')
+  IS DISTINCT FROM coalesce(lower(e.default_expression), '')
+ORDER BY e.table_name, e.column_name;
+SQL
 ```
 
-Expected result: zero rows. This verifies every governed enum default; columns
-omitted from the query intentionally have no default.
+Expected result: zero rows. This verifies every governed enum default and that
+every other governed enum column has no unexpected default.
 
 ```bash
 docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
-  -v "schema=$PROD_SCHEMA" -P pager=off -c "
+  -v "schema=$PROD_SCHEMA" -P pager=off <<'SQL'
 WITH expected(name) AS (
   VALUES ('ix_paper_orders_status'), ('ix_paper_orders_validity_status'),
     ('ix_paper_trade_validity_checks_status'), ('ix_paper_orders_market'),
@@ -803,7 +816,8 @@ UNION ALL
 SELECT 'uq_matching_active_scope predicate=' || coalesce(pg_get_expr(i.indpred, i.indrelid), '<missing>')
 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = :'schema' AND c.relname = 'uq_matching_active_scope'
-  AND (NOT i.indisunique OR pg_get_expr(i.indpred, i.indrelid) !~* 'status\\s*=\\s*''running''\\s*::\\s*paper_matching_run_status');"
+  AND (NOT i.indisunique OR pg_get_expr(i.indpred, i.indrelid) !~* 'status\\s*=\\s*''running''\\s*::\\s*paper_matching_run_status');
+SQL
 ```
 
 Expected result: zero rows. This proves all managed indexes exist and the
@@ -812,27 +826,35 @@ predicate.
 
 ```bash
 docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$PROD_DB" \
-  -v "schema=$PROD_SCHEMA" -P pager=off -c "
-WITH expected(table_name, constraint_name, required_text) AS (
+  -v "schema=$PROD_SCHEMA" -P pager=off <<'SQL'
+WITH expected(table_name, constraint_name, definition) AS (
   VALUES
-    ('stock_monitor_targets','ck_stock_monitor_targets_condition_type','price_threshold'),
-    ('daily_bar_diagnostics','ck_daily_bar_diagnostics_provider_outcome_status','downloaded'),
-    ('ssf_change_signals','ck_ssf_change_signals_event_types','increase')
+    ('stock_monitor_targets','ck_stock_monitor_targets_condition_type',
+     $condition$CHECK (jsonb_typeof(condition) = 'object' AND condition ? 'type' AND condition->>'type' IS NOT NULL AND condition->>'type' = ANY (ARRAY['price_threshold', 'price_cross_ma', 'price_vs_ma', 'ma_cross', 'change_pct', 'rsi']))$condition$),
+    ('daily_bar_diagnostics','ck_daily_bar_diagnostics_provider_outcome_status',
+     $provider$CHECK (((jsonb_typeof((provider_outcomes)::jsonb) = 'array'::text) AND (NOT jsonb_path_exists((provider_outcomes)::jsonb, '$[*]?(((@.type() != "object" || !(exists (@."status"))) || @."status".type() != "string") || !((@."status" == "downloaded" || @."status" == "empty") || @."status" == "error"))'::jsonpath))))$provider$),
+    ('ssf_change_signals','ck_ssf_change_signals_event_types',
+     $ssf$CHECK (((jsonb_typeof((event_types)::jsonb) = 'array'::text) AND (NOT jsonb_path_exists((event_types)::jsonb, '$[*]?(@.type() != "string" || !(((@ == "increase" || @ == "decrease") || @ == "new_entry") || @ == "exit"))'::jsonpath))))$ssf$)
 ), observed AS (
-  SELECT t.relname AS table_name, c.conname AS constraint_name, pg_get_constraintdef(c.oid) AS definition
+  SELECT t.relname AS table_name, c.conname AS constraint_name,
+    replace(replace(replace(replace(regexp_replace(lower(pg_get_constraintdef(c.oid)), '\\s+', '', 'g'), '(', ''), ')', ''), '::jsonb', ''), '::text', '') AS normalized_definition
   FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
   WHERE n.nspname = :'schema' AND c.contype = 'c'
+), normalized_expected AS (
+  SELECT table_name, constraint_name,
+    replace(replace(replace(replace(regexp_replace(lower(definition), '\\s+', '', 'g'), '(', ''), ')', ''), '::jsonb', ''), '::text', '') AS normalized_definition
+  FROM expected
 )
-SELECT e.*, o.definition
-FROM expected e LEFT JOIN observed o USING (table_name, constraint_name)
-WHERE o.definition IS NULL OR o.definition NOT ILIKE '%' || e.required_text || '%'
-ORDER BY e.table_name, e.constraint_name;"
+SELECT e.*, o.normalized_definition AS observed_definition
+FROM normalized_expected e LEFT JOIN observed o USING (table_name, constraint_name)
+WHERE o.normalized_definition IS DISTINCT FROM e.normalized_definition
+ORDER BY e.table_name, e.constraint_name;
+SQL
 ```
 
 Expected result: zero rows. This proves all three managed JSON checks exist and
-retain their required canonical-label boundary. The full constraint definitions
-must also match the migration's preflight JSON audit; do not restart on a
-conflicting definition.
+their full normalized PostgreSQL catalog definitions match the documented
+expressions. Do not restart on a conflicting definition.
 
 Run
 `uv run pytest test/storage/test_enum_governance_smoke.py -v` with
