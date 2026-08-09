@@ -14,10 +14,11 @@ from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_GROUPS
 from storage.enum_governance import (
     ENUM_GOVERNANCE_ADAPTERS,
     EnumGovernanceAdapter,
+    EnumGovernanceDomainAudit,
     EnumGovernanceError,
     migrate_enums,
 )
-from storage.enum_migration import STORAGE_ENUM_GROUPS
+from storage.enum_migration import STORAGE_ENUM_ADAPTER, STORAGE_ENUM_GROUPS
 
 MANAGED_CHECK_NAMES = {
     "ck_stock_monitor_targets_condition_type",
@@ -217,7 +218,28 @@ def _adapter(
     def result(*, dry_run: bool, rollback: bool, converted: bool, rolled_back: bool) -> str:
         return f"{name}:{dry_run}:{rollback}:{converted}:{rolled_back}"
 
-    return EnumGovernanceAdapter(name, preflight, apply, verify, rollback, result)
+    return EnumGovernanceAdapter(name, preflight, apply, verify, rollback, result, _audit(name, events))
+
+
+def _audit(name: str, events: list[str]):
+    def audit(connection: FakeConnection, *, rollback: bool) -> EnumGovernanceDomainAudit:
+        del connection, rollback
+        events.append(f"{name}.audit")
+        return EnumGovernanceDomainAudit(name, (), (), (), True)
+
+    return audit
+
+
+def test_adapter_requires_audit_callback() -> None:
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'audit'"):
+        EnumGovernanceAdapter(
+            "paper",
+            lambda connection, *, rollback: None,
+            lambda connection: False,
+            lambda connection, *, rollback: None,
+            lambda connection: False,
+            lambda *, dry_run, rollback, converted, rolled_back: "paper",
+        )
 
 
 def test_normal_migration_preflights_every_adapter_before_ddl() -> None:
@@ -232,6 +254,9 @@ def test_normal_migration_preflights_every_adapter_before_ddl() -> None:
         "paper.preflight",
         "monitor.preflight",
         "storage.preflight",
+        "paper.audit",
+        "monitor.audit",
+        "storage.audit",
         "paper.apply",
         "monitor.apply",
         "storage.apply",
@@ -257,7 +282,7 @@ def test_dry_run_only_preflights_adapters() -> None:
         adapters=(_adapter("paper", events), _adapter("monitor", events)),
     )
 
-    assert events == ["paper.preflight", "monitor.preflight"]
+    assert events == ["paper.preflight", "monitor.preflight", "paper.audit", "monitor.audit"]
     assert result.dry_run is True
     assert result.converted is False
     assert result.rolled_back is False
@@ -265,6 +290,48 @@ def test_dry_run_only_preflights_adapters() -> None:
         ("paper", "paper:True:False:False:False"),
         ("monitor", "monitor:True:False:False:False"),
     ]
+
+
+def test_dry_run_collects_audits_only_after_every_preflight() -> None:
+    events: list[str] = []
+    result = migrate_enums(
+        cast(Connection, FakeConnection()),
+        dry_run=True,
+        adapters=(
+            _adapter("paper", events),
+            _adapter("monitor", events),
+        ),
+    )
+
+    assert events == ["paper.preflight", "monitor.preflight", "paper.audit", "monitor.audit"]
+    assert [audit.name for audit in result.audits] == ["paper", "monitor"]
+
+
+def test_preflight_failure_does_not_collect_audits() -> None:
+    events: list[str] = []
+
+    with pytest.raises(EnumGovernanceError, match="monitor preflight failed"):
+        migrate_enums(
+            cast(Connection, FakeConnection()),
+            dry_run=True,
+            adapters=(
+                _adapter("paper", events),
+                _adapter("monitor", events, fail_preflight=True),
+            ),
+        )
+
+    assert events == ["paper.preflight", "monitor.preflight"]
+
+
+def test_non_postgresql_connection_returns_empty_audits() -> None:
+    events: list[str] = []
+
+    result = migrate_enums(
+        cast(Connection, FakeConnection(dialect_name="sqlite")),
+        adapters=(_adapter("paper", events),),
+    )
+
+    assert result.audits == ()
 
 
 def test_rollback_preflights_then_rolls_back_then_verifies_each_adapter() -> None:
@@ -284,6 +351,9 @@ def test_rollback_preflights_then_rolls_back_then_verifies_each_adapter() -> Non
         "paper.preflight",
         "monitor.preflight",
         "storage.preflight",
+        "paper.audit",
+        "monitor.audit",
+        "storage.audit",
         "paper.rollback",
         "monitor.rollback",
         "storage.rollback",
@@ -344,6 +414,84 @@ def test_non_postgresql_connection_returns_no_change_without_adapters() -> None:
 
 def test_default_adapters_are_paper_trading_monitor_then_storage() -> None:
     assert tuple(adapter.name for adapter in ENUM_GOVERNANCE_ADAPTERS) == ("paper_trading", "monitor", "storage")
+
+
+def test_dry_run_reports_all_schema_readiness_facts(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(
+            text("INSERT INTO paper_orders (id, side, status, market) VALUES (1, 'buy', 'accepted', 'a_share')")
+        )
+
+        result = migrate_enums(connection, dry_run=True)
+
+    audits = {audit.name: audit for audit in result.audits}
+    paper = next(group for group in audits["paper_trading"].groups if group.type_name == "paper_order_side")
+    assert paper.expected_labels == ("buy", "sell")
+    assert paper.observed_labels == ()
+    assert paper.columns[0].observed_values == ("buy",)
+    assert paper.columns[0].observed_type == "character varying(10)"
+    assert audits["monitor"].checks[0].name == "ck_stock_monitor_targets_condition_type"
+    assert {check.name for check in audits["storage"].checks} == {
+        "ck_daily_bar_diagnostics_provider_outcome_status",
+        "ck_ssf_change_signals_event_types",
+    }
+    assert all(audit.ready for audit in result.audits)
+
+
+def test_dry_run_reports_converted_schema_labels_checks_and_values(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(
+            text("INSERT INTO paper_orders (id, side, status, market) VALUES (1, 'buy', 'accepted', 'a_share')")
+        )
+        assert migrate_enums(connection).converted is True
+
+        result = migrate_enums(connection, dry_run=True)
+
+    audits = {audit.name: audit for audit in result.audits}
+    paper = next(group for group in audits["paper_trading"].groups if group.type_name == "paper_order_side")
+    assert paper.observed_labels == ("buy", "sell")
+    assert paper.columns[0].observed_values == ("buy",)
+    assert paper.columns[0].observed_type == "paper_order_side"
+    assert all(check.ready for check in audits["monitor"].checks)
+    assert all(check.ready for check in audits["storage"].checks)
+    assert all(audit.ready for audit in result.audits)
+
+
+def test_rollback_audit_reports_converted_enum_defaults_as_ready(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        assert migrate_enums(connection).converted is True
+
+        result = migrate_enums(connection, rollback=True)
+
+    audits = {audit.name: audit for audit in result.audits}
+    paper = next(group for group in audits["paper_trading"].groups if group.type_name == "paper_account_status")
+    assert paper.columns[0].observed_type == "paper_account_status"
+    assert paper.columns[0].observed_default == "'active'::paper_account_status"
+    assert paper.columns[0].expected_default == "'active'::paper_account_status"
+    assert all(audit.ready for audit in result.audits)
+
+
+def test_rollback_preflight_reports_storage_dependency_before_failing(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        assert migrate_enums(connection).converted is True
+        connection.execute(text("CREATE VIEW blackroom_market_dependency AS SELECT 'A'::blackroom_market AS market"))
+
+        with pytest.raises(EnumGovernanceError, match="storage preflight failed"):
+            migrate_enums(connection, rollback=True)
+
+        audit = STORAGE_ENUM_ADAPTER.audit(connection, rollback=True)
+
+    blackroom = next(group for group in audit.groups if group.type_name == "blackroom_market")
+    assert blackroom.dependencies == ("view blackroom_market_dependency",)
+    assert blackroom.ready is False
 
 
 def test_atomic_migration_prevents_all_conversion_when_storage_json_is_invalid(postgres_schema) -> None:
