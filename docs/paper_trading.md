@@ -830,19 +830,19 @@ docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$
 WITH expected(table_name, constraint_name, definition) AS (
   VALUES
     ('stock_monitor_targets','ck_stock_monitor_targets_condition_type',
-     $condition$CHECK (jsonb_typeof(condition) = 'object' AND condition ? 'type' AND condition->>'type' IS NOT NULL AND condition->>'type' = ANY (ARRAY['price_threshold', 'price_cross_ma', 'price_vs_ma', 'ma_cross', 'change_pct', 'rsi']))$condition$),
+     $condition$CHECK (((jsonb_typeof(condition) = 'object'::text) AND (condition ? 'type'::text) AND ((condition ->> 'type'::text) IS NOT NULL) AND ((condition ->> 'type'::text) = ANY (ARRAY['price_threshold'::text, 'price_cross_ma'::text, 'price_vs_ma'::text, 'ma_cross'::text, 'change_pct'::text, 'rsi'::text]))))$condition$),
     ('daily_bar_diagnostics','ck_daily_bar_diagnostics_provider_outcome_status',
      $provider$CHECK (((jsonb_typeof((provider_outcomes)::jsonb) = 'array'::text) AND (NOT jsonb_path_exists((provider_outcomes)::jsonb, '$[*]?(((@.type() != "object" || !(exists (@."status"))) || @."status".type() != "string") || !((@."status" == "downloaded" || @."status" == "empty") || @."status" == "error"))'::jsonpath))))$provider$),
     ('ssf_change_signals','ck_ssf_change_signals_event_types',
      $ssf$CHECK (((jsonb_typeof((event_types)::jsonb) = 'array'::text) AND (NOT jsonb_path_exists((event_types)::jsonb, '$[*]?(@.type() != "string" || !(((@ == "increase" || @ == "decrease") || @ == "new_entry") || @ == "exit"))'::jsonpath))))$ssf$)
 ), observed AS (
   SELECT t.relname AS table_name, c.conname AS constraint_name,
-    replace(replace(replace(replace(regexp_replace(lower(pg_get_constraintdef(c.oid)), '\\s+', '', 'g'), '(', ''), ')', ''), '::jsonb', ''), '::text', '') AS normalized_definition
+    replace(replace(regexp_replace(lower(pg_get_constraintdef(c.oid)), '[[:space:]]+', '', 'g'), '::jsonb', ''), '::text', '') AS normalized_definition
   FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
   WHERE n.nspname = :'schema' AND c.contype = 'c'
 ), normalized_expected AS (
   SELECT table_name, constraint_name,
-    replace(replace(replace(replace(regexp_replace(lower(definition), '\\s+', '', 'g'), '(', ''), ')', ''), '::jsonb', ''), '::text', '') AS normalized_definition
+    replace(replace(regexp_replace(lower(definition), '[[:space:]]+', '', 'g'), '::jsonb', ''), '::text', '') AS normalized_definition
   FROM expected
 )
 SELECT e.*, o.normalized_definition AS observed_definition
@@ -854,7 +854,9 @@ SQL
 
 Expected result: zero rows. This proves all three managed JSON checks exist and
 their full normalized PostgreSQL catalog definitions match the documented
-expressions. Do not restart on a conflicting definition.
+expressions. Normalization removes whitespace and only PostgreSQL's
+presentation-only `::jsonb` and `::text` casts; it preserves parentheses,
+Boolean grouping, and operators. Do not restart on a conflicting definition.
 
 Run
 `uv run pytest test/storage/test_enum_governance_smoke.py -v` with

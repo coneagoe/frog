@@ -84,3 +84,21 @@
 - Required Ruff format and check commands passed for the enum governance scope.
 - PostgreSQL integration cases remain skipped exclusively because
   `TEST_POSTGRESQL_URL` is unavailable.
+
+## Review Fix Round 3
+
+- Corrected JSON CHECK normalization to use PostgreSQL's
+  `regexp_replace(value, '[[:space:]]+', '', 'g')` form.
+- Preserved all parentheses, Boolean grouping, and operators during full catalog
+  definition comparison; normalization now removes only whitespace and known
+  presentation-only `::jsonb` and `::text` casts.
+- The documented zero-row result now explicitly means no full normalized CHECK
+  definition mismatches.
+
+## Review Fix Round 3 Test Results
+
+- `uv run pytest test/tools/test_db_scripts.py test/tools/test_db_scripts_postgresql.py test/tools/test_migrate_enums.py -v`
+  - 28 passed, 4 skipped.
+- Required Ruff format and check commands passed for the enum governance scope.
+- PostgreSQL integration cases remain skipped exclusively because
+  `TEST_POSTGRESQL_URL` is unavailable.
