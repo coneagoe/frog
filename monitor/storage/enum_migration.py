@@ -9,7 +9,7 @@ from sqlalchemy.engine import Connection
 
 from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
-from storage.enum_governance_adapter import EnumGovernanceAdapter
+from storage.enum_governance_adapter import EnumGovernanceAdapter, empty_enum_governance_audit
 from storage.model import ForecastSSFCandidate, StockMonitorTarget
 
 
@@ -205,6 +205,7 @@ MONITOR_ENUM_ADAPTER = EnumGovernanceAdapter(
     verify=_adapter_verify,
     rollback=_adapter_rollback,
     result=_result,
+    audit=empty_enum_governance_audit("monitor"),
 )
 
 

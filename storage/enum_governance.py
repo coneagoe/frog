@@ -94,11 +94,7 @@ def migrate_enums(
 
     for adapter in adapters:
         _run_phase(adapter, "preflight", adapter.preflight, connection, rollback=rollback)
-    audits = tuple(
-        _run_phase(adapter, "audit", adapter.audit, connection, rollback=rollback)
-        for adapter in adapters
-        if adapter.audit is not None
-    )
+    audits = tuple(_run_phase(adapter, "audit", adapter.audit, connection, rollback=rollback) for adapter in adapters)
     if dry_run:
         return _result(adapters, dry_run=True, rollback=rollback, audits=audits)
     if rollback:

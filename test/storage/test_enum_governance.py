@@ -192,7 +192,6 @@ def _adapter(
     changed: bool = True,
     fail_preflight: bool = False,
     fail_apply: bool = False,
-    audit=None,
 ) -> EnumGovernanceAdapter:
     def preflight(connection: FakeConnection, *, rollback: bool) -> None:
         del connection, rollback
@@ -219,7 +218,7 @@ def _adapter(
     def result(*, dry_run: bool, rollback: bool, converted: bool, rolled_back: bool) -> str:
         return f"{name}:{dry_run}:{rollback}:{converted}:{rolled_back}"
 
-    return EnumGovernanceAdapter(name, preflight, apply, verify, rollback, result, audit)
+    return EnumGovernanceAdapter(name, preflight, apply, verify, rollback, result, _audit(name, events))
 
 
 def _audit(name: str, events: list[str]):
@@ -229,6 +228,18 @@ def _audit(name: str, events: list[str]):
         return EnumGovernanceDomainAudit(name, (), (), (), True)
 
     return audit
+
+
+def test_adapter_requires_audit_callback() -> None:
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'audit'"):
+        EnumGovernanceAdapter(
+            "paper",
+            lambda connection, *, rollback: None,
+            lambda connection: False,
+            lambda connection, *, rollback: None,
+            lambda connection: False,
+            lambda *, dry_run, rollback, converted, rolled_back: "paper",
+        )
 
 
 def test_normal_migration_preflights_every_adapter_before_ddl() -> None:
@@ -243,6 +254,9 @@ def test_normal_migration_preflights_every_adapter_before_ddl() -> None:
         "paper.preflight",
         "monitor.preflight",
         "storage.preflight",
+        "paper.audit",
+        "monitor.audit",
+        "storage.audit",
         "paper.apply",
         "monitor.apply",
         "storage.apply",
@@ -268,7 +282,7 @@ def test_dry_run_only_preflights_adapters() -> None:
         adapters=(_adapter("paper", events), _adapter("monitor", events)),
     )
 
-    assert events == ["paper.preflight", "monitor.preflight"]
+    assert events == ["paper.preflight", "monitor.preflight", "paper.audit", "monitor.audit"]
     assert result.dry_run is True
     assert result.converted is False
     assert result.rolled_back is False
@@ -284,8 +298,8 @@ def test_dry_run_collects_audits_only_after_every_preflight() -> None:
         cast(Connection, FakeConnection()),
         dry_run=True,
         adapters=(
-            _adapter("paper", events, audit=_audit("paper", events)),
-            _adapter("monitor", events, audit=_audit("monitor", events)),
+            _adapter("paper", events),
+            _adapter("monitor", events),
         ),
     )
 
@@ -301,8 +315,8 @@ def test_preflight_failure_does_not_collect_audits() -> None:
             cast(Connection, FakeConnection()),
             dry_run=True,
             adapters=(
-                _adapter("paper", events, audit=_audit("paper", events)),
-                _adapter("monitor", events, fail_preflight=True, audit=_audit("monitor", events)),
+                _adapter("paper", events),
+                _adapter("monitor", events, fail_preflight=True),
             ),
         )
 
@@ -314,7 +328,7 @@ def test_non_postgresql_connection_returns_empty_audits() -> None:
 
     result = migrate_enums(
         cast(Connection, FakeConnection(dialect_name="sqlite")),
-        adapters=(_adapter("paper", events, audit=_audit("paper", events)),),
+        adapters=(_adapter("paper", events),),
     )
 
     assert result.audits == ()
@@ -337,6 +351,9 @@ def test_rollback_preflights_then_rolls_back_then_verifies_each_adapter() -> Non
         "paper.preflight",
         "monitor.preflight",
         "storage.preflight",
+        "paper.audit",
+        "monitor.audit",
+        "storage.audit",
         "paper.rollback",
         "monitor.rollback",
         "storage.rollback",

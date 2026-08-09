@@ -18,7 +18,7 @@ from storage.domain_enums import (
     validate_provider_outcomes,
     validate_ssf_event_types,
 )
-from storage.enum_governance_adapter import EnumGovernanceAdapter
+from storage.enum_governance_adapter import EnumGovernanceAdapter, empty_enum_governance_audit
 from storage.model import BlackroomRecord, DailyBarDiagnostic, SSFChangeSignal
 
 
@@ -159,7 +159,13 @@ def _adapter_rollback(connection: Connection) -> bool:
 
 
 STORAGE_ENUM_ADAPTER = EnumGovernanceAdapter(
-    "storage", _adapter_preflight, _adapter_apply, _adapter_verify, _adapter_rollback, _result
+    "storage",
+    _adapter_preflight,
+    _adapter_apply,
+    _adapter_verify,
+    _adapter_rollback,
+    _result,
+    empty_enum_governance_audit("storage"),
 )
 
 

@@ -22,7 +22,7 @@ from paper_trading.domain.enums import (
     TradeValidityGranularity,
     TradeValidityStatus,
 )
-from storage.enum_governance_adapter import EnumGovernanceAdapter
+from storage.enum_governance_adapter import EnumGovernanceAdapter, empty_enum_governance_audit
 from storage.model import (
     PaperAccount,
     PaperAccountSnapshot,
@@ -346,6 +346,7 @@ PAPER_TRADING_ENUM_ADAPTER = EnumGovernanceAdapter(
     verify=_adapter_verify,
     rollback=_adapter_rollback,
     result=_result,
+    audit=empty_enum_governance_audit("paper_trading"),
 )
 
 
