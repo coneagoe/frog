@@ -2,7 +2,7 @@
 set -euo pipefail
 
 compose() {
-  env \
+  env -u TEST_POSTGRESQL_URL \
     SMTP_HOST=placeholder \
     SMTP_PORT=25 \
     SMTP_USER=placeholder \

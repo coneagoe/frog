@@ -38,6 +38,7 @@ def _run_test_runner(
     environment["COMMAND_LOG"] = str(command_log)
     environment["PATH"] = f"{bin_dir}:{environment['PATH']}"
     environment["PYTEST_STATUS"] = str(pytest_status)
+    environment["TEST_POSTGRESQL_URL"] = "postgresql://sentinel:sentinel@127.0.0.1:5433/sentinel"
     for name in (
         "SMTP_HOST",
         "SMTP_PORT",

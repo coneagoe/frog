@@ -189,3 +189,45 @@ git diff --check
 The focused fake-executable tests now prove the desired boundary behavior:
 Docker receives no test database URL, uv receives the exact IPv4 URL, cleanup
 runs, and a pytest status of 1 is preserved.
+
+## Caller URL Isolation Follow-Up
+
+### Changes
+
+- Updated `compose()` to invoke Docker through
+  `env -u TEST_POSTGRESQL_URL` while preserving its command-scoped Compose
+  placeholder variables.
+- Updated the fake-executable test environment to deliberately provide
+  `TEST_POSTGRESQL_URL=postgresql://sentinel:sentinel@127.0.0.1:5433/sentinel`.
+  Both Docker calls must still observe an empty value; uv must observe the
+  fixed `postgresql://quant:quant@127.0.0.1:5433/quant` value.
+
+### RED Command And Result
+
+```bash
+uv run pytest test/tools/test_run_tests.py -v
+```
+
+Result: 1 passed, 2 failed. Both `docker compose up -d --wait test_db` and
+`docker compose rm -sfv test_db` received the caller-provided sentinel URL,
+confirming that command-scoping the pytest assignment alone did not clear a
+parent environment value for Compose.
+
+### GREEN Commands And Results
+
+```bash
+uv run pytest test/tools/test_run_tests.py -v
+# 3 passed in 0.06s
+
+uv run ruff check test/tools/test_run_tests.py
+# All checks passed!
+
+uv run ruff format --check test/tools/test_run_tests.py
+# 1 file already formatted
+
+git diff --check
+# no output; exit status 0
+```
+
+The runner now clears caller-supplied test database URLs for both Compose
+invocations and assigns the exact fixed IPv4 URL only to pytest.
