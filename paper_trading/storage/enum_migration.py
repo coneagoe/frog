@@ -773,6 +773,13 @@ def _validate_indexes(connection: Connection, column: PaperTradingEnumColumn, *,
 
 def _type_dependencies(connection: Connection, group: PaperTradingEnumGroup) -> tuple[str, ...]:
     managed_columns = ", ".join(f"(:table_name_{index}, :column_name_{index})" for index, _ in enumerate(group.columns))
+    declared_indexes = tuple(
+        (column.table_name, index_name) for column in group.columns for index_name, _ in column.indexes
+    )
+    managed_indexes = (
+        ", ".join(f"(:index_table_name_{index}, :index_name_{index})" for index, _ in enumerate(declared_indexes))
+        or "(NULL, NULL)"
+    )
     parameters = {"type_name": group.type_name}
     parameters.update(
         {
@@ -781,11 +788,20 @@ def _type_dependencies(connection: Connection, group: PaperTradingEnumGroup) -> 
             for field in ("table_name", "column_name")
         }
     )
+    parameters.update(
+        {
+            f"index_{field}_{index}": value
+            for index, declared_index in enumerate(declared_indexes)
+            for field, value in zip(("table_name", "name"), declared_index, strict=True)
+        }
+    )
     return tuple(
         connection.execute(
             text(
                 "WITH managed_columns(table_name, column_name) AS "
                 f"(VALUES {managed_columns}) "
+                ", managed_indexes(table_name, index_name) AS "
+                f"(VALUES {managed_indexes}) "
                 "SELECT pg_describe_object(d.classid, d.objid, d.objsubid) "
                 "FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid "
                 "WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace "
@@ -800,6 +816,16 @@ def _type_dependencies(connection: Connection, group: PaperTradingEnumGroup) -> 
                 "(d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.objsubid = a.attnum) "
                 "OR (d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid)"
                 ")"
+                ") "
+                "AND NOT EXISTS ("
+                "SELECT 1 FROM managed_indexes mi "
+                "JOIN pg_class tc ON tc.relname = mi.table_name "
+                "JOIN pg_namespace tn ON tn.oid = tc.relnamespace "
+                "JOIN pg_class ic ON ic.relname = mi.index_name "
+                "JOIN pg_namespace inn ON inn.oid = ic.relnamespace "
+                "JOIN pg_index i ON i.indrelid = tc.oid AND i.indexrelid = ic.oid "
+                "WHERE tn.nspname = current_schema() AND inn.nspname = current_schema() "
+                "AND d.classid = 'pg_class'::regclass AND d.objid = ic.oid"
                 ") "
                 "ORDER BY 1"
             ),
