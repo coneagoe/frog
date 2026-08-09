@@ -55,7 +55,7 @@ def test_runner_starts_test_database_runs_pytest_and_cleans_up(tmp_path: Path):
     assert completed.returncode == 0
     assert commands == [
         "docker compose up -d --wait test_db",
-        "uv run pytest test -k enum TEST_POSTGRESQL_URL=postgresql://quant:quant@localhost:5433/quant",
+        "uv run pytest test -k enum TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5433/quant",
         "docker compose rm -sfv test_db",
     ]
 

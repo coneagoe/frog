@@ -7,6 +7,6 @@ cleanup() {
 
 trap cleanup EXIT
 
-export TEST_POSTGRESQL_URL="postgresql://quant:quant@localhost:5433/quant"
+export TEST_POSTGRESQL_URL="postgresql://quant:quant@127.0.0.1:5433/quant"
 docker compose up -d --wait test_db
 uv run pytest test "$@"
