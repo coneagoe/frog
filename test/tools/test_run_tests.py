@@ -3,6 +3,10 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+COMPOSE_PLACEHOLDERS = (
+    "placeholder:25:placeholder:placeholder:"
+    "placeholder@example.invalid:placeholder@example.invalid:placeholder:placeholder"
+)
 
 
 def _run_test_runner(
@@ -12,7 +16,12 @@ def _run_test_runner(
     bin_dir.mkdir()
     command_log = tmp_path / "commands.log"
     (bin_dir / "docker").write_text(
-        '#!/usr/bin/env bash\nprintf \'docker %s\\n\' "$*" >> "$COMMAND_LOG"\n',
+        "#!/usr/bin/env bash\n"
+        "printf 'docker %s COMPOSE_PLACEHOLDERS=%s:%s:%s:%s:%s:%s:%s:%s\\n' "
+        '"${*}" "${SMTP_HOST:-}" "${SMTP_PORT:-}" "${SMTP_USER:-}" '
+        '"${SMTP_PASSWORD:-}" "${SMTP_MAIL_FROM:-}" "${ALERT_EMAILS:-}" '
+        '"${TUSHARE_TOKEN:-}" "${PAPER_TRADING_API_TOKEN:-}" '
+        '>> "$COMMAND_LOG"\n',
         encoding="utf-8",
     )
     (bin_dir / "uv").write_text(
@@ -28,6 +37,17 @@ def _run_test_runner(
     environment["COMMAND_LOG"] = str(command_log)
     environment["PATH"] = f"{bin_dir}:{environment['PATH']}"
     environment["PYTEST_STATUS"] = str(pytest_status)
+    for name in (
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "SMTP_PASSWORD",
+        "SMTP_MAIL_FROM",
+        "ALERT_EMAILS",
+        "TUSHARE_TOKEN",
+        "PAPER_TRADING_API_TOKEN",
+    ):
+        environment.pop(name, None)
     completed = subprocess.run(
         ["bash", str(ROOT / "tools" / "run_tests.sh"), *arguments],
         cwd=ROOT,
@@ -54,9 +74,9 @@ def test_runner_starts_test_database_runs_pytest_and_cleans_up(tmp_path: Path):
 
     assert completed.returncode == 0
     assert commands == [
-        "docker compose up -d --wait test_db",
+        f"docker compose up -d --wait test_db COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
         "uv run pytest test -k enum TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5433/quant",
-        "docker compose rm -sfv test_db",
+        f"docker compose rm -sfv test_db COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
     ]
 
 
@@ -64,4 +84,4 @@ def test_runner_preserves_pytest_failure_after_cleanup(tmp_path: Path):
     completed, commands = _run_test_runner([], tmp_path, pytest_status=1)
 
     assert completed.returncode == 1
-    assert commands[-1] == "docker compose rm -sfv test_db"
+    assert commands[-1] == f"docker compose rm -sfv test_db COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}"
