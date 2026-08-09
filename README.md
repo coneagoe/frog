@@ -24,6 +24,17 @@ This repo enforces LF via `.gitattributes`. If you need a one-time normalization
 
 - `git add --renormalize .`
 
+## Testing
+
+Run the full test suite with:
+
+```bash
+tools/run_tests.sh
+```
+
+The runner starts the isolated `test_db` service, supplies `TEST_POSTGRESQL_URL`
+only to the test process, and removes the service and its data after pytest exits.
+
 ## Configuration
 
 Create a `.env` file in the project root with the following required variables:
