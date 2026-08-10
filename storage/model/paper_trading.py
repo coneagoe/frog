@@ -57,6 +57,13 @@ tb_name_daily_bar_diagnostics = "daily_bar_diagnostics"
 tb_name_paper_valuation_gaps = "paper_valuation_gaps"
 tb_name_paper_ledger_rebuilds = "paper_ledger_rebuilds"
 tb_name_paper_etf_eligibility = "paper_etf_eligibility"
+ETF_ELIGIBILITY_SYMBOL_CHECK_NAME = "ck_paper_etf_eligibility_symbol_six_ascii_digits"
+ETF_ELIGIBILITY_SYMBOL_CHECK_SQL = (
+    "length(symbol) = 6 AND length("
+    "replace(replace(replace(replace(replace(replace(replace(replace(replace(replace("
+    "symbol, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), "
+    "'5', ''), '6', ''), '7', ''), '8', ''), '9', '')) = 0"
+)
 
 
 def _value_enum(enum_type: type[StrEnum], name: str) -> Enum:
@@ -409,11 +416,8 @@ class ETFEligibility(Base):
     __tablename__ = tb_name_paper_etf_eligibility
     __table_args__ = (
         CheckConstraint(
-            "length(symbol) = 6 AND length("
-            "replace(replace(replace(replace(replace(replace(replace(replace(replace(replace("
-            "symbol, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), "
-            "'5', ''), '6', ''), '7', ''), '8', ''), '9', '')) = 0",
-            name="ck_paper_etf_eligibility_symbol_six_ascii_digits",
+            ETF_ELIGIBILITY_SYMBOL_CHECK_SQL,
+            name=ETF_ELIGIBILITY_SYMBOL_CHECK_NAME,
         ),
     )
 

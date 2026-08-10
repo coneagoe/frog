@@ -165,6 +165,18 @@ def _constraint_columns(connection: Connection, table_name: str, constraint_name
     )
 
 
+def _check_constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_constraint "
+                "WHERE conrelid = :table_name::regclass AND conname = :constraint_name AND contype = 'c')"
+            ),
+            {"table_name": table_name, "constraint_name": constraint_name},
+        ).scalar_one()
+    )
+
+
 def _table_exists(connection: Connection, table_name: str) -> bool:
     return bool(
         connection.execute(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}).scalar_one()
@@ -332,6 +344,50 @@ def test_apply_creates_missing_etf_eligibility_table_after_enum_conversion(postg
         assert result.converted is True
         assert _table_exists(connection, "paper_etf_eligibility")
         assert _column_type(connection, "paper_etf_eligibility", "status") == "paper_etf_eligibility_status"
+
+
+def test_apply_adds_and_rollback_removes_etf_eligibility_symbol_check(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(
+            text(
+                "ALTER TABLE paper_etf_eligibility "
+                "DROP CONSTRAINT IF EXISTS ck_paper_etf_eligibility_symbol_six_ascii_digits"
+            )
+        )
+        assert not _check_constraint_exists(
+            connection, "paper_etf_eligibility", "ck_paper_etf_eligibility_symbol_six_ascii_digits"
+        )
+
+        assert migrate_paper_trading_enums(connection).converted is True
+
+        assert _check_constraint_exists(
+            connection, "paper_etf_eligibility", "ck_paper_etf_eligibility_symbol_six_ascii_digits"
+        )
+
+        assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
+
+        assert not _check_constraint_exists(
+            connection, "paper_etf_eligibility", "ck_paper_etf_eligibility_symbol_six_ascii_digits"
+        )
+
+
+def test_preflight_rejects_invalid_existing_etf_eligibility_symbol(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO paper_etf_eligibility "
+                "(symbol, name, exchange, list_status, last_seen_at, last_refresh_at) "
+                "VALUES ('510300.SH', 'CSI 300 ETF', 'SH', 'L', now(), now())"
+            )
+        )
+
+        with pytest.raises(PaperTradingEnumMigrationError, match="invalid ETF eligibility symbols"):
+            migrate_paper_trading_enums(connection)
+
+        assert _enum_types(connection) == set()
 
 
 def test_dry_run_leaves_missing_operational_tables_absent_after_enum_conversion(postgres_schema):
