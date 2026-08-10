@@ -1281,5 +1281,9 @@ def test_sell_reservation_isolated_by_market_for_same_symbol(sqlite_session):
     )
 
     assert order.status == OrderStatus.ACCEPTED.value
-    assert repo.get_position(account.id, Market.A_SHARE, "000001").frozen_quantity == 100
-    assert repo.get_position(account.id, Market.HK_CONNECT, "000001").frozen_quantity == 0
+    a_share_position = repo.get_position(account.id, Market.A_SHARE, "000001")
+    hk_connect_position = repo.get_position(account.id, Market.HK_CONNECT, "000001")
+    assert a_share_position is not None
+    assert hk_connect_position is not None
+    assert a_share_position.frozen_quantity == 100
+    assert hk_connect_position.frozen_quantity == 0

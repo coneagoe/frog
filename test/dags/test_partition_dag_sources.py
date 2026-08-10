@@ -236,7 +236,7 @@ def test_persist_diagnostic_commits_and_closes_its_session(monkeypatch):
     from paper_trading.domain.market_data_diagnostics import StockHistoryOutcome
 
     events = []
-    received_args = []
+    received_args: list[object] = []
     session = MagicMock()
     session.commit.side_effect = lambda: events.append("commit")
     session.close.side_effect = lambda: events.append("close")

@@ -961,8 +961,12 @@ def test_rebuild_restores_same_symbol_imported_lots_by_market(sqlite_session):
 
     repo.clear_account_rebuild_state(account.id)
 
-    assert repo.get_position(account.id, "a_share", "00700").total_quantity == 100
-    assert repo.get_position(account.id, "hk_connect", "00700").total_quantity == 100
+    a_share_position = repo.get_position(account.id, "a_share", "00700")
+    hk_connect_position = repo.get_position(account.id, "hk_connect", "00700")
+    assert a_share_position is not None
+    assert hk_connect_position is not None
+    assert a_share_position.total_quantity == 100
+    assert hk_connect_position.total_quantity == 100
 
 
 def test_same_symbol_positions_and_lots_are_isolated_by_market(sqlite_session):
@@ -975,8 +979,12 @@ def test_same_symbol_positions_and_lots_are_isolated_by_market(sqlite_session):
     repo.create_position_lot(account.id, "a_share", "00700", date(2026, 7, 1), 100, 100, Decimal("9"))
     repo.create_position_lot(account.id, "hk_connect", "00700", date(2026, 7, 1), 200, 200, Decimal("400"))
 
-    assert repo.get_position(account.id, "a_share", "00700").total_quantity == 100
-    assert repo.get_position(account.id, "hk_connect", "00700").total_quantity == 200
+    a_share_position = repo.get_position(account.id, "a_share", "00700")
+    hk_connect_position = repo.get_position(account.id, "hk_connect", "00700")
+    assert a_share_position is not None
+    assert hk_connect_position is not None
+    assert a_share_position.total_quantity == 100
+    assert hk_connect_position.total_quantity == 200
     assert [lot.remaining_quantity for lot in repo.get_lots(account.id, "a_share", "00700")] == [100]
     assert [lot.remaining_quantity for lot in repo.get_lots(account.id, "hk_connect", "00700")] == [200]
 
@@ -1057,24 +1065,35 @@ def test_same_symbol_round_trips_are_isolated_by_market(sqlite_session):
         )
         repo.create_round_trip(account.id, market, "00700", trade.id, date(2026, 7, 1), Decimal("1000"), Decimal("1"))
 
-    assert repo.get_open_round_trip(account.id, "a_share", "00700").market == "a_share"
-    assert repo.get_open_round_trip(account.id, "hk_connect", "00700").market == "hk_connect"
+    a_share_round_trip = repo.get_open_round_trip(account.id, "a_share", "00700")
+    hk_connect_round_trip = repo.get_open_round_trip(account.id, "hk_connect", "00700")
+    assert a_share_round_trip is not None
+    assert hk_connect_round_trip is not None
+    assert a_share_round_trip.market == "a_share"
+    assert hk_connect_round_trip.market == "hk_connect"
 
 
 def test_same_symbol_diagnostics_are_isolated_by_market(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
-    values = {
-        "business_date": date(2026, 7, 1),
-        "stock_id": "00700",
-        "adjust": "bfq",
-        "classification": "missing_exact_date",
-        "provider_outcomes": [],
-        "resolved": False,
-    }
-
-    a_share = repo.upsert_daily_bar_diagnostic(market="a_share", **values)
-    hk_connect = repo.upsert_daily_bar_diagnostic(market="hk_connect", **values)
+    a_share = repo.upsert_daily_bar_diagnostic(
+        business_date=date(2026, 7, 1),
+        market="a_share",
+        stock_id="00700",
+        adjust="bfq",
+        classification="missing_exact_date",
+        provider_outcomes=[],
+        resolved=False,
+    )
+    hk_connect = repo.upsert_daily_bar_diagnostic(
+        business_date=date(2026, 7, 1),
+        market="hk_connect",
+        stock_id="00700",
+        adjust="bfq",
+        classification="missing_exact_date",
+        provider_outcomes=[],
+        resolved=False,
+    )
 
     assert a_share.id != hk_connect.id
     assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 1), "a_share", "00700") is True

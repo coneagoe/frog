@@ -24,7 +24,7 @@ from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
-from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
+from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
 
 
 class _TestDate(date):
@@ -910,14 +910,14 @@ def test_matching_same_symbol_isolates_fills_lots_pnl_and_diagnostics(sqlite_ses
         market=Market.HK_CONNECT.value,
     )
 
-    class MarketSeparatedBars:
-        def get_daily_bar(self, symbol, requested_date, market=None):
+    class MarketSeparatedBars(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None):
             if market == Market.HK_CONNECT.value:
                 raise KeyError("HK bar unavailable")
-            return DailyBar(symbol, requested_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
+            return DailyBar(symbol, trade_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
 
-        def next_trade_date(self, current_date):
-            return current_date
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
 
     market_data = MarketSeparatedBars()
     service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
@@ -925,8 +925,12 @@ def test_matching_same_symbol_isolates_fills_lots_pnl_and_diagnostics(sqlite_ses
     assert service.match_order(a_share_order) == "filled"
     assert service.match_order(hk_order) == "warning"
     assert repo.get_position(account.id, Market.A_SHARE, "000001") is None
-    assert repo.get_position(account.id, Market.HK_CONNECT, "000001").total_quantity == 200
+    hk_connect_position = repo.get_position(account.id, Market.HK_CONNECT, "000001")
+    assert hk_connect_position is not None
+    assert hk_connect_position.total_quantity == 200
     assert repo.get_lots(account.id, Market.HK_CONNECT, "000001")[0].remaining_quantity == 200
-    assert repo.get_account(account.id).realized_pnl == Decimal("94.4900")
+    reloaded_account = repo.get_account(account.id)
+    assert reloaded_account is not None
+    assert reloaded_account.realized_pnl == Decimal("94.4900")
     diagnostics = repo.list_daily_bar_diagnostics()
     assert [(item.market, item.stock_id, item.resolved) for item in diagnostics] == [("hk_connect", "000001", False)]
