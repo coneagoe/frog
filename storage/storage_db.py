@@ -130,6 +130,7 @@ from .model import (
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
+    tb_name_paper_etf_eligibility,
     tb_name_paper_ledger_rebuilds,
     tb_name_paper_matching_runs,
     tb_name_paper_orders,
@@ -309,6 +310,7 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_paper_trade_validity_checks,
     tb_name_paper_pending_settlement,
     tb_name_paper_ledger_rebuilds,
+    tb_name_paper_etf_eligibility,
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
     tb_name_ssf_change_signal,
@@ -1887,13 +1889,7 @@ class StorageDb:
             bool: 保存是否成功
         """
         try:
-            df = df.rename(columns=COL_MAP_ETF_BASIC)
-            # 提取ETF代码（去掉 .SH/.SZ 后缀）
-            df[COL_ETF_ID] = df[COL_ETF_ID].str.split(".").str[0]
-            df = df[list(COL_MAP_ETF_BASIC.values())]
-            # 转换日期为 date 类型
-            df[COL_SETUP_DATE] = pd.to_datetime(df[COL_SETUP_DATE], format="%Y%m%d", errors="coerce").dt.date
-            df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d", errors="coerce").dt.date
+            df = self._prepare_etf_basic(df)
             df.to_sql(
                 tb_name_etf_basic,
                 self.engine,
@@ -1907,6 +1903,42 @@ class StorageDb:
         except Exception as e:
             logger.error(f"保存ETF基础信息数据失败: {str(e)}")
             return False
+
+    @staticmethod
+    def _prepare_etf_basic(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.rename(columns=COL_MAP_ETF_BASIC)
+        # 提取ETF代码（去掉 .SH/.SZ 后缀）
+        df[COL_ETF_ID] = df[COL_ETF_ID].str.split(".").str[0]
+        df = df[list(COL_MAP_ETF_BASIC.values())]
+        # 转换日期为 date 类型
+        df[COL_SETUP_DATE] = pd.to_datetime(df[COL_SETUP_DATE], format="%Y%m%d", errors="coerce").dt.date
+        df[COL_IPO_DATE] = pd.to_datetime(df[COL_IPO_DATE], format="%Y%m%d", errors="coerce").dt.date
+        return df
+
+    def refresh_etf_basic_and_reconcile(self, df: pd.DataFrame) -> bool:
+        """Replace ETF basic data and reconcile eligibility atomically."""
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            prepared = self._prepare_etf_basic(df)
+            with session.begin():
+                session.query(ETFBasic).delete()
+                prepared.to_sql(
+                    tb_name_etf_basic,
+                    session.connection(),
+                    if_exists="append",
+                    index=False,
+                    method="multi",
+                )
+                snapshot = session.query(ETFBasic).all()
+                ETFEligibilityService(PaperTradingRepository(session)).reconcile(snapshot, datetime.now(timezone.utc))
+            logger.info(f"ETF基础信息数据保存成功，数据条数: {len(prepared)}")
+            return True
+        except Exception as e:
+            logger.error(f"保存ETF基础信息数据或同步ETF准入状态失败: {str(e)}")
+            return False
+        finally:
+            session.close()
 
     def reconcile_etf_eligibility(self) -> None:
         """Reconcile paper-trading eligibility from the persisted ETF snapshot."""

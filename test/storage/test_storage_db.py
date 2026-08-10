@@ -57,6 +57,7 @@ from storage.model import (  # noqa: E402
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
+    tb_name_paper_etf_eligibility,
     tb_name_paper_ledger_rebuilds,
     tb_name_paper_matching_runs,
     tb_name_paper_orders,
@@ -130,6 +131,7 @@ def test_postgresql_storage_startup_excludes_all_enum_governed_paper_tables(monk
             tb_name_paper_trade_validity_checks,
             tb_name_paper_pending_settlement,
             tb_name_paper_ledger_rebuilds,
+            tb_name_paper_etf_eligibility,
             tb_name_paper_account_snapshots,
             tb_name_paper_valuation_gaps,
             tb_name_blackroom_record,
@@ -462,6 +464,91 @@ def test_reconcile_etf_eligibility_reads_replaced_persisted_etf_basic_snapshot(s
         ("159915", "Chinext ETF", "disabled"),
         ("510300", "Updated CSI 300 ETF", "unknown"),
     ]
+
+
+def test_refresh_etf_basic_rolls_back_provider_and_eligibility_when_reconciliation_fails(storage, monkeypatch):
+    from paper_trading.storage.models import ETFEligibility
+
+    ETFBasic.__table__.create(storage.engine)
+    ETFEligibility.__table__.create(storage.engine)
+    initial_snapshot = pd.DataFrame(
+        {
+            "ts_code": ["510300.SH"],
+            "csname": ["Original CSI 300 ETF"],
+            "extname": ["Original CSI 300 ETF"],
+            "cname": ["Original CSI 300 ETF"],
+            "index_code": ["000300"],
+            "index_name": ["CSI 300"],
+            "setup_date": ["20200101"],
+            "list_date": ["20200101"],
+            "list_status": ["L"],
+            "exchange": ["SH"],
+            "mgr_name": ["Manager"],
+            "custod_name": ["Custodian"],
+            "mgt_fee": [0.5],
+            "etf_type": ["ETF"],
+        }
+    )
+    replacement_snapshot = initial_snapshot.copy()
+    replacement_snapshot.loc[:, "csname"] = "Replacement CSI 300 ETF"
+
+    assert storage.save_etf_basic(initial_snapshot) is True
+    storage.reconcile_etf_eligibility()
+    monkeypatch.setattr(
+        "storage.storage_db.ETFEligibilityService.reconcile",
+        Mock(side_effect=RuntimeError("reconciliation failed")),
+    )
+
+    assert storage.refresh_etf_basic_and_reconcile(replacement_snapshot) is False
+
+    with Session(storage.engine) as session:
+        provider = session.get(ETFBasic, "510300")
+        eligibility = session.get(ETFEligibility, "510300")
+    assert provider is not None
+    assert eligibility is not None
+    assert provider.中文简称 == "Original CSI 300 ETF"
+    assert eligibility.name == "Original CSI 300 ETF"
+
+
+def test_refresh_etf_basic_updates_provider_and_eligibility_together(storage):
+    from paper_trading.storage.models import ETFEligibility
+
+    ETFBasic.__table__.create(storage.engine)
+    ETFEligibility.__table__.create(storage.engine)
+    initial_snapshot = pd.DataFrame(
+        {
+            "ts_code": ["510300.SH", "159915.SZ"],
+            "csname": ["Original CSI 300 ETF", "Chinext ETF"],
+            "extname": ["Original CSI 300 ETF", "Chinext ETF"],
+            "cname": ["Original CSI 300 ETF", "Chinext ETF"],
+            "index_code": ["000300", "399006"],
+            "index_name": ["CSI 300", "Chinext"],
+            "setup_date": ["20200101", "20200101"],
+            "list_date": ["20200101", "20200101"],
+            "list_status": ["L", "L"],
+            "exchange": ["SH", "SZ"],
+            "mgr_name": ["Manager", "Manager"],
+            "custod_name": ["Custodian", "Custodian"],
+            "mgt_fee": [0.5, 0.5],
+            "etf_type": ["ETF", "ETF"],
+        }
+    )
+    replacement_snapshot = initial_snapshot.iloc[[0]].copy()
+    replacement_snapshot.loc[:, "csname"] = "Replacement CSI 300 ETF"
+
+    assert storage.refresh_etf_basic_and_reconcile(initial_snapshot) is True
+    assert storage.refresh_etf_basic_and_reconcile(replacement_snapshot) is True
+
+    with Session(storage.engine) as session:
+        provider = session.get(ETFBasic, "510300")
+        current = session.get(ETFEligibility, "510300")
+        missing = session.get(ETFEligibility, "159915")
+    assert provider is not None
+    assert current is not None
+    assert missing is not None
+    assert provider.中文简称 == "Replacement CSI 300 ETF"
+    assert current.name == "Replacement CSI 300 ETF"
+    assert missing.status == "disabled"
 
 
 def test_ensure_a_stock_basic_schema_widens_legacy_controller_name(storage, monkeypatch, a_stock_basic_schema_upgrade):

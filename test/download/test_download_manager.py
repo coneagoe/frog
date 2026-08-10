@@ -37,21 +37,16 @@ def _make_manager(monkeypatch):
 
 
 class TestDownloadManager:
-    def test_download_etf_basic_reconciles_saved_snapshot_after_successful_save(self, monkeypatch):
+    def test_download_etf_basic_refreshes_and_reconciles_saved_snapshot_atomically(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         etf_basic = pd.DataFrame({"ts_code": ["510300.SH"]})
         downloader.dl_etf_basic.return_value = etf_basic
-        storage.save_etf_basic.return_value = True
+        storage.refresh_etf_basic_and_reconcile.return_value = True
 
         result = manager.download_etf_basic()
 
         assert result is True
-        storage.save_etf_basic.assert_called_once_with(etf_basic)
-        storage.reconcile_etf_eligibility.assert_called_once_with()
-        assert storage.method_calls == [
-            ("save_etf_basic", (etf_basic,), {}),
-            ("reconcile_etf_eligibility", (), {}),
-        ]
+        storage.refresh_etf_basic_and_reconcile.assert_called_once_with(etf_basic)
 
     def test_download_etf_basic_does_not_reconcile_failed_or_empty_refreshes(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
@@ -59,27 +54,23 @@ class TestDownloadManager:
 
         downloader.dl_etf_basic.return_value = pd.DataFrame()
         assert manager.download_etf_basic() is False
-        storage.save_etf_basic.assert_not_called()
-        storage.reconcile_etf_eligibility.assert_not_called()
+        storage.refresh_etf_basic_and_reconcile.assert_not_called()
 
         downloader.dl_etf_basic.return_value = etf_basic
-        storage.save_etf_basic.return_value = False
+        storage.refresh_etf_basic_and_reconcile.return_value = False
         assert manager.download_etf_basic() is False
-        storage.save_etf_basic.assert_called_once_with(etf_basic)
-        storage.reconcile_etf_eligibility.assert_not_called()
+        storage.refresh_etf_basic_and_reconcile.assert_called_once_with(etf_basic)
 
     def test_download_etf_basic_returns_false_when_reconciliation_fails(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         etf_basic = pd.DataFrame({"ts_code": ["510300.SH"]})
         downloader.dl_etf_basic.return_value = etf_basic
-        storage.save_etf_basic.return_value = True
-        storage.reconcile_etf_eligibility.side_effect = RuntimeError("reconciliation failed")
+        storage.refresh_etf_basic_and_reconcile.return_value = False
 
         result = manager.download_etf_basic()
 
         assert result is False
-        storage.save_etf_basic.assert_called_once_with(etf_basic)
-        storage.reconcile_etf_eligibility.assert_called_once_with()
+        storage.refresh_etf_basic_and_reconcile.assert_called_once_with(etf_basic)
 
     def test_download_etf_basic_download_error_does_not_save_or_reconcile(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
@@ -88,8 +79,7 @@ class TestDownloadManager:
         result = manager.download_etf_basic()
 
         assert result is False
-        storage.save_etf_basic.assert_not_called()
-        storage.reconcile_etf_eligibility.assert_not_called()
+        storage.refresh_etf_basic_and_reconcile.assert_not_called()
 
     def test_download_forecast_saves_provider_result(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
