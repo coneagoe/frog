@@ -1,4 +1,3 @@
-import re
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,7 +8,6 @@ from paper_trading.storage.models import ETFEligibility
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.etf_basic import ETFBasic
 
-_BARE_ETF_SYMBOL = re.compile(r"^\d{6}$")
 _VALID_EXCHANGES = {"SH", "SZ"}
 _LISTED_STATUS = "L"
 
@@ -61,7 +59,7 @@ class ETFEligibilityService:
         return self.repo.list_etf_eligibility()
 
     def classify(self, symbol: str, status: ETFEligibilityStatus, reviewed_by: str) -> ETFEligibility:
-        symbol = self._require_bare_symbol(symbol)
+        eligibility = self.repo.get_etf_eligibility(symbol)
         provider = self.repo.session.get(ETFBasic, symbol)
         if provider is None:
             raise KeyError(f"ETF not found: {symbol}")
@@ -69,14 +67,15 @@ class ETFEligibilityService:
             raise ValueError("ETF exchange must be SH or SZ")
         if provider.存续状态 != _LISTED_STATUS:
             raise ValueError("ETF listing status must be L")
-        eligibility = self.repo.get_etf_eligibility(symbol)
         if eligibility is None:
             raise KeyError(f"ETF eligibility not found: {symbol}")
         return self.repo.classify_etf_eligibility(symbol, status, reviewed_by)
 
     def validate_etf_eligibility(self, symbol: str) -> ETFEligibilityValidation:
-        if not _BARE_ETF_SYMBOL.fullmatch(symbol):
-            return ETFEligibilityValidation(False, "ETF_NOT_FOUND", "ETF symbol must be a bare six-digit value")
+        try:
+            eligibility = self.repo.get_etf_eligibility(symbol)
+        except ValueError:
+            return ETFEligibilityValidation(False, "INVALID_ETF_SYMBOL", "ETF symbol must be a bare six-digit value")
         provider = self.repo.session.get(ETFBasic, symbol)
         if provider is None:
             return ETFEligibilityValidation(False, "ETF_NOT_FOUND", "ETF was not found")
@@ -84,7 +83,6 @@ class ETFEligibilityService:
             return ETFEligibilityValidation(False, "INVALID_ETF_EXCHANGE", "ETF exchange must be SH or SZ")
         if provider.存续状态 != _LISTED_STATUS:
             return ETFEligibilityValidation(False, "INVALID_ETF_LISTING_STATUS", "ETF listing status must be L")
-        eligibility = self.repo.get_etf_eligibility(symbol)
         if eligibility is None:
             return ETFEligibilityValidation(
                 False, "ETF_ELIGIBILITY_UNREVIEWED", "ETF eligibility has not been reviewed"
@@ -96,9 +94,3 @@ class ETFEligibilityService:
         if eligibility.status in {ETFEligibilityStatus.MONEY_MARKET.value, ETFEligibilityStatus.DISABLED.value}:
             return ETFEligibilityValidation(False, "UNSUPPORTED_ETF_TYPE", "ETF type is not supported")
         return ETFEligibilityValidation(True, "ELIGIBLE", "ETF is eligible")
-
-    @staticmethod
-    def _require_bare_symbol(symbol: str) -> str:
-        if not _BARE_ETF_SYMBOL.fullmatch(symbol):
-            raise ValueError("ETF symbol must be a bare six-digit value")
-        return symbol

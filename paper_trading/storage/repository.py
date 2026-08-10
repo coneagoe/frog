@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -49,6 +50,14 @@ from storage.domain_enums import (
     validate_provider_outcomes,
 )
 
+_BARE_ETF_SYMBOL = re.compile(r"^\d{6}$")
+
+
+def _require_bare_etf_symbol(symbol: str) -> str:
+    if not _BARE_ETF_SYMBOL.fullmatch(symbol):
+        raise ValueError("ETF symbol must be a bare six-digit value")
+    return symbol
+
 
 def _validate_fee_values(**values: Decimal | None) -> None:
     for field_name, value in values.items():
@@ -72,6 +81,7 @@ class PaperTradingRepository:
         return list(query.order_by(ETFEligibility.symbol.asc()).all())
 
     def get_etf_eligibility(self, symbol: str) -> ETFEligibility | None:
+        symbol = _require_bare_etf_symbol(symbol)
         return cast(ETFEligibility | None, self.session.get(ETFEligibility, symbol))
 
     def upsert_etf_eligibility(
@@ -83,6 +93,7 @@ class PaperTradingRepository:
         refreshed_at: datetime,
         status: ETFEligibilityStatus | None = None,
     ) -> ETFEligibility:
+        symbol = _require_bare_etf_symbol(symbol)
         eligibility = self.get_etf_eligibility(symbol)
         if eligibility is None:
             eligibility = ETFEligibility(
@@ -110,8 +121,12 @@ class PaperTradingRepository:
         return eligibility
 
     def classify_etf_eligibility(self, symbol: str, status: ETFEligibilityStatus, reviewed_by: str) -> ETFEligibility:
+        symbol = _require_bare_etf_symbol(symbol)
         if status not in {ETFEligibilityStatus.SUPPORTED, ETFEligibilityStatus.MONEY_MARKET}:
             raise ValueError("ETF eligibility classification must be supported or money_market")
+        reviewed_by = reviewed_by.strip()
+        if not reviewed_by:
+            raise ValueError("reviewed_by must not be blank")
         eligibility = self.get_etf_eligibility(symbol)
         if eligibility is None:
             raise KeyError(f"ETF eligibility not found: {symbol}")

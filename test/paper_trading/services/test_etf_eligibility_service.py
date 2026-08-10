@@ -126,6 +126,7 @@ def test_classify_rejects_provider_records_that_are_not_current_domestic_etfs(se
         ("510300", None, None, "ETF_NOT_FOUND", False),
         ("510301", etf("510301", "Unreviewed ETF", "SH", "L"), None, "ETF_ELIGIBILITY_UNREVIEWED", False),
         ("510302", etf("510302", "Money ETF", "SZ", "L"), "money_market", "UNSUPPORTED_ETF_TYPE", False),
+        ("510306", etf("510306", "Disabled ETF", "SZ", "L"), "disabled", "UNSUPPORTED_ETF_TYPE", False),
         ("510303", etf("510303", "Foreign ETF", "HK", "L"), "supported", "INVALID_ETF_EXCHANGE", False),
         ("510304", etf("510304", "Delisted ETF", "SH", "D"), "supported", "INVALID_ETF_LISTING_STATUS", False),
         ("510305", etf("510305", "Supported ETF", "SZ", "L"), "supported", "ELIGIBLE", True),
@@ -141,11 +142,22 @@ def test_validate_etf_eligibility_returns_stable_provider_and_review_outcomes(
         session.flush()
     if eligibility_status is not None:
         repo.upsert_etf_eligibility(
-            symbol, provider.中文简称, provider.交易所, provider.存续状态, datetime(2026, 8, 10, tzinfo=timezone.utc)
+            symbol,
+            provider.中文简称,
+            provider.交易所,
+            provider.存续状态,
+            datetime(2026, 8, 10, tzinfo=timezone.utc),
+            status=ETFEligibilityStatus(eligibility_status),
         )
-        repo.classify_etf_eligibility(symbol, ETFEligibilityStatus(eligibility_status), "operator")
 
     result = service.validate_etf_eligibility(symbol)
 
     assert result.code == code
     assert result.eligible is eligible
+
+
+def test_validate_etf_eligibility_rejects_suffixed_symbol_with_stable_outcome(session):
+    result = ETFEligibilityService(PaperTradingRepository(session)).validate_etf_eligibility("510300.SH")
+
+    assert result.eligible is False
+    assert result.code == "INVALID_ETF_SYMBOL"

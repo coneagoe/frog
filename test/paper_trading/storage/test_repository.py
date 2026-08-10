@@ -58,6 +58,28 @@ def test_etf_eligibility_repository_upserts_gets_and_filters_status(sqlite_sessi
     assert [row.symbol for row in repo.list_etf_eligibility("supported")] == ["510300"]
 
 
+@pytest.mark.parametrize("symbol", ["510300.SH", "51030", "5103000", "5103A0"])
+def test_etf_eligibility_repository_rejects_non_bare_symbols(sqlite_session, symbol):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    with pytest.raises(ValueError, match="bare six-digit"):
+        repo.get_etf_eligibility(symbol)
+    with pytest.raises(ValueError, match="bare six-digit"):
+        repo.upsert_etf_eligibility(symbol, "ETF", "SH", "L", datetime(2026, 8, 10, tzinfo=timezone.utc))
+    with pytest.raises(ValueError, match="bare six-digit"):
+        repo.classify_etf_eligibility(symbol, ETFEligibilityStatus.SUPPORTED, "operator")
+
+
+def test_etf_eligibility_repository_rejects_blank_reviewer(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    repo.upsert_etf_eligibility("510300", "CSI 300 ETF", "SH", "L", datetime(2026, 8, 10, tzinfo=timezone.utc))
+
+    with pytest.raises(ValueError, match="reviewed_by"):
+        repo.classify_etf_eligibility("510300", ETFEligibilityStatus.SUPPORTED, " \t")
+
+
 def test_validate_provider_outcomes_normalizes_valid_values():
     outcomes = [{"provider": "tushare", "status": "empty", "detail": None}]
 
