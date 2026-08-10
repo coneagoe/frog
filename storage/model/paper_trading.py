@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Enum,
@@ -406,6 +407,15 @@ class PaperLedgerRebuild(Base):
 
 class ETFEligibility(Base):
     __tablename__ = tb_name_paper_etf_eligibility
+    __table_args__ = (
+        CheckConstraint(
+            "length(symbol) = 6 AND length("
+            "replace(replace(replace(replace(replace(replace(replace(replace(replace(replace("
+            "symbol, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), "
+            "'5', ''), '6', ''), '7', ''), '8', ''), '9', '')) = 0",
+            name="ck_paper_etf_eligibility_symbol_six_ascii_digits",
+        ),
+    )
 
     symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)

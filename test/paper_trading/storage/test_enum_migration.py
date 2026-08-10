@@ -326,6 +326,7 @@ def test_apply_creates_missing_etf_eligibility_table_after_enum_conversion(postg
         assert migrate_paper_trading_enums(connection).converted is True
         connection.execute(text("DROP TABLE paper_etf_eligibility"))
 
+        PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=False)
         result = migrate_paper_trading_enums(connection)
 
         assert result.converted is True

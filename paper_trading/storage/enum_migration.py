@@ -327,10 +327,13 @@ def _result(
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     groups = PAPER_TRADING_ENUM_GROUPS
     missing_tables = _preflight(connection, groups, rollback=rollback)
-    required_tables = {column.table_name for group in groups for column in group.columns} - {
-        table.name for table in _OPTIONAL_GOVERNED_TABLES
-    }
-    required_missing = missing_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
+    operational_tables = {table.name for table in _OPERATIONAL_TABLES}
+    required_tables = (
+        {column.table_name for group in groups for column in group.columns}
+        - operational_tables
+        - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
+    )
+    required_missing = missing_tables - operational_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
     if required_missing and required_missing != required_tables:
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
 

@@ -1,6 +1,8 @@
 from datetime import datetime
 
+import pytest
 from sqlalchemy import Enum, create_engine, inspect
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from paper_trading.domain.enums import ETFEligibilityStatus
@@ -51,4 +53,46 @@ def test_etf_eligibility_schema_tracks_provider_and_review_lifecycle(tmp_path):
 
     inspector = inspect(engine)
     assert tb_name_paper_etf_eligibility in inspector.get_table_names()
+    engine.dispose()
+
+
+def test_etf_eligibility_accepts_a_bare_six_digit_symbol(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(
+            ETFEligibility(
+                symbol="510300",
+                name="CSI 300 ETF",
+                exchange="SH",
+                list_status="L",
+                last_seen_at=datetime(2026, 8, 10),
+                last_refresh_at=datetime(2026, 8, 10),
+            )
+        )
+        session.commit()
+
+    engine.dispose()
+
+
+@pytest.mark.parametrize("symbol", ["510300.SH", "SH510300", "51030", "51030A"])
+def test_etf_eligibility_rejects_non_bare_six_digit_symbols(tmp_path, symbol):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(
+            ETFEligibility(
+                symbol=symbol,
+                name="CSI 300 ETF",
+                exchange="SH",
+                list_status="L",
+                last_seen_at=datetime(2026, 8, 10),
+                last_refresh_at=datetime(2026, 8, 10),
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
     engine.dispose()
