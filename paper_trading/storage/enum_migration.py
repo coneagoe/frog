@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
+    ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
     Market,
@@ -25,6 +26,7 @@ from paper_trading.domain.enums import (
 from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import (
     DailyBarDiagnostic,
+    ETFEligibility,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -38,7 +40,12 @@ from storage.model import (
     PaperTradeValidityCheck,
     PaperValuationGap,
 )
-from storage.model.paper_trading import PaperPendingSettlement
+from storage.model.paper_trading import (
+    ETF_ELIGIBILITY_SYMBOL_CHECK_NAME,
+    ETF_ELIGIBILITY_SYMBOL_CHECK_SQL,
+    PaperPendingSettlement,
+    tb_name_paper_etf_eligibility,
+)
 
 
 class PaperTradingEnumMigrationError(RuntimeError):
@@ -263,6 +270,19 @@ PAPER_TRADING_ENUM_GROUPS = (
             ),
         ),
     ),
+    PaperTradingEnumGroup(
+        "paper_etf_eligibility_status",
+        _labels(ETFEligibilityStatus),
+        (
+            _column(
+                "paper_etf_eligibility",
+                "status",
+                "VARCHAR(20)",
+                "'unknown'",
+                indexes=(_index("ix_paper_etf_eligibility_status", "paper_etf_eligibility", "status"),),
+            ),
+        ),
+    ),
 )
 
 _GOVERNED_TABLES = (
@@ -279,12 +299,14 @@ _GOVERNED_TABLES = (
     PaperLedgerRebuild.__table__,
     PaperAccountSnapshot.__table__,
     PaperValuationGap.__table__,
+    ETFEligibility.__table__,
 )
 _OPTIONAL_GOVERNED_TABLES = (DailyBarDiagnostic.__table__,)
 _MARKET_COLUMNS_REMOVED_ON_ROLLBACK = {"paper_position_round_trips", "daily_bar_diagnostics"}
 _OPERATIONAL_TABLES = (
     PaperAccountSnapshot.__table__,
     PaperValuationGap.__table__,
+    ETFEligibility.__table__,
 )
 _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_status", re.IGNORECASE)
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)
@@ -310,10 +332,15 @@ def _result(
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     groups = PAPER_TRADING_ENUM_GROUPS
     missing_tables = _preflight(connection, groups, rollback=rollback)
-    required_tables = {column.table_name for group in groups for column in group.columns} - {
-        table.name for table in _OPTIONAL_GOVERNED_TABLES
-    }
-    required_missing = missing_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
+    if not rollback and _table_exists(connection, tb_name_paper_etf_eligibility):
+        _validate_etf_eligibility_symbols(connection)
+    operational_tables = {table.name for table in _OPERATIONAL_TABLES}
+    required_tables = (
+        {column.table_name for group in groups for column in group.columns}
+        - operational_tables
+        - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
+    )
+    required_missing = missing_tables - operational_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
     if required_missing and required_missing != required_tables:
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
 
@@ -328,6 +355,7 @@ def _adapter_apply(connection: Connection) -> bool:
         for column in group.columns
         if _table_exists(connection, column.table_name)
     )
+    changed = _ensure_etf_eligibility_symbol_check(connection) or changed
     if missing_tables:
         for group in groups:
             _create_type(connection, group)
@@ -359,6 +387,7 @@ def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
     if rollback and all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
         return
     _verify(connection, PAPER_TRADING_ENUM_GROUPS, rollback=rollback)
+    _verify_etf_eligibility_symbol_check(connection, rollback=rollback)
     if not rollback:
         _verify_market_qualified_keys(connection)
 
@@ -649,7 +678,11 @@ def _rollback(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...])
             _alter_group(connection, group, rollback=True)
             changed = True
     _restore_legacy_market_qualified_keys(connection)
+    if any(group.type_name == "paper_etf_eligibility_status" for group in groups):
+        changed = _drop_etf_eligibility_symbol_check(connection) or changed
     _verify(connection, groups, rollback=True)
+    if any(group.type_name == "paper_etf_eligibility_status" for group in groups):
+        _verify_etf_eligibility_symbol_check(connection, rollback=True)
     for group in groups:
         if _enum_labels(connection, group.type_name):
             connection.execute(text(f"DROP TYPE {group.type_name}"))
@@ -678,6 +711,71 @@ def _verify(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...], *
                 )
             _validate_default(connection, group, column, rollback=rollback)
             _validate_indexes(connection, column, enum_typed=not rollback)
+
+
+def _validate_etf_eligibility_symbols(connection: Connection) -> None:
+    invalid = connection.execute(
+        text(
+            f"SELECT symbol FROM {tb_name_paper_etf_eligibility} WHERE NOT ({ETF_ELIGIBILITY_SYMBOL_CHECK_SQL}) LIMIT 1"
+        )
+    ).scalar_one_or_none()
+    if invalid is not None:
+        raise PaperTradingEnumMigrationError(f"invalid ETF eligibility symbols: {invalid}")
+
+
+def _etf_eligibility_symbol_check_ready(connection: Connection) -> bool:
+    definition = connection.execute(
+        text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid = :table_name::regclass AND conname = :constraint_name AND contype = 'c'"
+        ),
+        {"table_name": tb_name_paper_etf_eligibility, "constraint_name": ETF_ELIGIBILITY_SYMBOL_CHECK_NAME},
+    ).scalar_one_or_none()
+    if definition is None:
+        return False
+    normalized_definition = (
+        _normalize_expression(str(definition).removeprefix("CHECK"))
+        .replace("::text", "")
+        .replace("(", "")
+        .replace(")", "")
+    )
+    normalized_expected = _normalize_expression(ETF_ELIGIBILITY_SYMBOL_CHECK_SQL).replace("(", "").replace(")", "")
+    return normalized_definition == normalized_expected
+
+
+def _ensure_etf_eligibility_symbol_check(connection: Connection) -> bool:
+    if not _table_exists(connection, tb_name_paper_etf_eligibility):
+        return False
+    if _etf_eligibility_symbol_check_ready(connection):
+        return False
+    if _constraint_exists(connection, tb_name_paper_etf_eligibility, ETF_ELIGIBILITY_SYMBOL_CHECK_NAME):
+        raise PaperTradingEnumMigrationError("invalid ETF eligibility symbol check constraint")
+    connection.execute(
+        text(
+            f"ALTER TABLE {tb_name_paper_etf_eligibility} ADD CONSTRAINT {ETF_ELIGIBILITY_SYMBOL_CHECK_NAME} "
+            f"CHECK ({ETF_ELIGIBILITY_SYMBOL_CHECK_SQL})"
+        )
+    )
+    return True
+
+
+def _drop_etf_eligibility_symbol_check(connection: Connection) -> bool:
+    if not _table_exists(connection, tb_name_paper_etf_eligibility):
+        return False
+    if not _constraint_exists(connection, tb_name_paper_etf_eligibility, ETF_ELIGIBILITY_SYMBOL_CHECK_NAME):
+        return False
+    connection.execute(
+        text(f"ALTER TABLE {tb_name_paper_etf_eligibility} DROP CONSTRAINT {ETF_ELIGIBILITY_SYMBOL_CHECK_NAME}")
+    )
+    return True
+
+
+def _verify_etf_eligibility_symbol_check(connection: Connection, *, rollback: bool) -> None:
+    if not _table_exists(connection, tb_name_paper_etf_eligibility):
+        return
+    ready = _etf_eligibility_symbol_check_ready(connection)
+    if ready != (not rollback):
+        raise PaperTradingEnumMigrationError("invalid ETF eligibility symbol check constraint")
 
 
 def _add_market_columns(connection: Connection) -> None:

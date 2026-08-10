@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
 
@@ -6,7 +6,14 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from paper_trading.domain.enums import CashEventType, Market, MatchingRunStatus, OrderSide, OrderStatus
+from paper_trading.domain.enums import (
+    CashEventType,
+    ETFEligibilityStatus,
+    Market,
+    MatchingRunStatus,
+    OrderSide,
+    OrderStatus,
+)
 from paper_trading.storage.models import PaperTradeValidityCheck
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.domain_enums import (
@@ -33,6 +40,44 @@ def test_daily_bar_diagnostic_scalar_columns_use_value_enums():
     assert DailyBarDiagnostic.__table__.c.classification.type.enums == [
         member.value for member in DailyBarDiagnosticClassification
     ]
+
+
+def test_etf_eligibility_repository_upserts_gets_and_filters_status(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    refreshed_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    repo.upsert_etf_eligibility("510300", "CSI 300 ETF", "SH", "L", refreshed_at)
+    repo.upsert_etf_eligibility(
+        "159915", "Chinext ETF", "SZ", "L", refreshed_at, status=ETFEligibilityStatus.MONEY_MARKET
+    )
+
+    classified = repo.classify_etf_eligibility("510300", ETFEligibilityStatus.SUPPORTED, "operator")
+
+    assert repo.get_etf_eligibility("510300") is classified
+    assert [row.symbol for row in repo.list_etf_eligibility()] == ["159915", "510300"]
+    assert [row.symbol for row in repo.list_etf_eligibility("supported")] == ["510300"]
+
+
+@pytest.mark.parametrize("symbol", ["510300.SH", "51030", "5103000", "5103A0"])
+def test_etf_eligibility_repository_rejects_non_bare_symbols(sqlite_session, symbol):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    with pytest.raises(ValueError, match="bare six-digit"):
+        repo.get_etf_eligibility(symbol)
+    with pytest.raises(ValueError, match="bare six-digit"):
+        repo.upsert_etf_eligibility(symbol, "ETF", "SH", "L", datetime(2026, 8, 10, tzinfo=timezone.utc))
+    with pytest.raises(ValueError, match="bare six-digit"):
+        repo.classify_etf_eligibility(symbol, ETFEligibilityStatus.SUPPORTED, "operator")
+
+
+def test_etf_eligibility_repository_rejects_blank_reviewer(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    repo.upsert_etf_eligibility("510300", "CSI 300 ETF", "SH", "L", datetime(2026, 8, 10, tzinfo=timezone.utc))
+
+    with pytest.raises(ValueError, match="reviewed_by"):
+        repo.classify_etf_eligibility("510300", ETFEligibilityStatus.SUPPORTED, " \t")
 
 
 def test_validate_provider_outcomes_normalizes_valid_values():

@@ -74,6 +74,13 @@ class LedgerRebuildStatus(StrEnum):
     COMPLETED = "completed"
 
 
+class ETFEligibilityStatus(StrEnum):
+    UNKNOWN = "unknown"
+    SUPPORTED = "supported"
+    MONEY_MARKET = "money_market"
+    DISABLED = "disabled"
+
+
 # Marker prefix for rejection reasons set by OrderDeleteService replay.
 # reset_orders_for_replay uses this to distinguish replay-induced rejections
 # (which may become resolvable after a later delete) from original/business

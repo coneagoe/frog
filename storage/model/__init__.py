@@ -41,6 +41,7 @@ from .ingredient import (
 )
 from .paper_trading import (
     DailyBarDiagnostic,
+    ETFEligibility,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -57,6 +58,7 @@ from .paper_trading import (
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
+    tb_name_paper_etf_eligibility,
     tb_name_paper_ledger_rebuilds,
     tb_name_paper_matching_runs,
     tb_name_paper_orders,
@@ -146,8 +148,10 @@ __all__ = [
     "PaperTradeValidityCheck",
     "PaperValuationGap",
     "DailyBarDiagnostic",
+    "ETFEligibility",
     "PaperLedgerRebuild",
     "tb_name_daily_bar_diagnostics",
+    "tb_name_paper_etf_eligibility",
     "tb_name_paper_ledger_rebuilds",
     "tb_name_paper_trade_validity_checks",
     "tb_name_paper_accounts",

@@ -37,6 +37,50 @@ def _make_manager(monkeypatch):
 
 
 class TestDownloadManager:
+    def test_download_etf_basic_refreshes_and_reconciles_saved_snapshot_atomically(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        etf_basic = pd.DataFrame({"ts_code": ["510300.SH"]})
+        downloader.dl_etf_basic.return_value = etf_basic
+        storage.refresh_etf_basic_and_reconcile.return_value = True
+
+        result = manager.download_etf_basic()
+
+        assert result is True
+        storage.refresh_etf_basic_and_reconcile.assert_called_once_with(etf_basic)
+
+    def test_download_etf_basic_does_not_reconcile_failed_or_empty_refreshes(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        etf_basic = pd.DataFrame({"ts_code": ["510300.SH"]})
+
+        downloader.dl_etf_basic.return_value = pd.DataFrame()
+        assert manager.download_etf_basic() is False
+        storage.refresh_etf_basic_and_reconcile.assert_not_called()
+
+        downloader.dl_etf_basic.return_value = etf_basic
+        storage.refresh_etf_basic_and_reconcile.return_value = False
+        assert manager.download_etf_basic() is False
+        storage.refresh_etf_basic_and_reconcile.assert_called_once_with(etf_basic)
+
+    def test_download_etf_basic_returns_false_when_reconciliation_fails(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        etf_basic = pd.DataFrame({"ts_code": ["510300.SH"]})
+        downloader.dl_etf_basic.return_value = etf_basic
+        storage.refresh_etf_basic_and_reconcile.return_value = False
+
+        result = manager.download_etf_basic()
+
+        assert result is False
+        storage.refresh_etf_basic_and_reconcile.assert_called_once_with(etf_basic)
+
+    def test_download_etf_basic_download_error_does_not_save_or_reconcile(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        downloader.dl_etf_basic.side_effect = RuntimeError("provider unavailable")
+
+        result = manager.download_etf_basic()
+
+        assert result is False
+        storage.refresh_etf_basic_and_reconcile.assert_not_called()
+
     def test_download_forecast_saves_provider_result(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         forecast = pd.DataFrame({"股票代码": ["600001"]})

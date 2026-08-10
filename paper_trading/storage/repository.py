@@ -1,3 +1,4 @@
+import re
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from paper_trading.domain.enums import (
     REPLAY_REJECTION_MARKER,
     CashEventType,
+    ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
     Market,
@@ -27,6 +29,7 @@ from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label, canonical_stock_id
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
+    ETFEligibility,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -47,6 +50,14 @@ from storage.domain_enums import (
     validate_provider_outcomes,
 )
 
+_BARE_ETF_SYMBOL = re.compile(r"^\d{6}$")
+
+
+def _require_bare_etf_symbol(symbol: str) -> str:
+    if not _BARE_ETF_SYMBOL.fullmatch(symbol):
+        raise ValueError("ETF symbol must be a bare six-digit value")
+    return symbol
+
 
 def _validate_fee_values(**values: Decimal | None) -> None:
     for field_name, value in values.items():
@@ -62,6 +73,68 @@ def _require_fee_update(**values: Decimal | None) -> None:
 class PaperTradingRepository:
     def __init__(self, session: Session):
         self.session = session
+
+    def list_etf_eligibility(self, status: str | None = None) -> list[ETFEligibility]:
+        query = self.session.query(ETFEligibility)
+        if status is not None:
+            query = query.filter(ETFEligibility.status == ETFEligibilityStatus(status).value)
+        return list(query.order_by(ETFEligibility.symbol.asc()).all())
+
+    def get_etf_eligibility(self, symbol: str) -> ETFEligibility | None:
+        symbol = _require_bare_etf_symbol(symbol)
+        return cast(ETFEligibility | None, self.session.get(ETFEligibility, symbol))
+
+    def upsert_etf_eligibility(
+        self,
+        symbol: str,
+        name: str,
+        exchange: str,
+        list_status: str,
+        refreshed_at: datetime,
+        status: ETFEligibilityStatus | None = None,
+    ) -> ETFEligibility:
+        symbol = _require_bare_etf_symbol(symbol)
+        eligibility = self.get_etf_eligibility(symbol)
+        if eligibility is None:
+            eligibility = ETFEligibility(
+                symbol=symbol,
+                name=name,
+                exchange=exchange,
+                list_status=list_status,
+                last_seen_at=refreshed_at,
+                last_refresh_at=refreshed_at,
+                status=(status or ETFEligibilityStatus.UNKNOWN).value,
+            )
+            self.session.add(eligibility)
+        else:
+            eligibility.name = name
+            eligibility.exchange = exchange
+            eligibility.list_status = list_status
+            eligibility.last_seen_at = refreshed_at
+            eligibility.last_refresh_at = refreshed_at
+            if status is not None:
+                eligibility.status = status.value
+                if status is ETFEligibilityStatus.DISABLED:
+                    eligibility.reviewed_at = None
+                    eligibility.reviewed_by = None
+        self.session.flush()
+        return eligibility
+
+    def classify_etf_eligibility(self, symbol: str, status: ETFEligibilityStatus, reviewed_by: str) -> ETFEligibility:
+        symbol = _require_bare_etf_symbol(symbol)
+        if status not in {ETFEligibilityStatus.SUPPORTED, ETFEligibilityStatus.MONEY_MARKET}:
+            raise ValueError("ETF eligibility classification must be supported or money_market")
+        reviewed_by = reviewed_by.strip()
+        if not reviewed_by:
+            raise ValueError("reviewed_by must not be blank")
+        eligibility = self.get_etf_eligibility(symbol)
+        if eligibility is None:
+            raise KeyError(f"ETF eligibility not found: {symbol}")
+        eligibility.status = status.value
+        eligibility.reviewed_by = reviewed_by
+        eligibility.reviewed_at = datetime.now(timezone.utc)
+        self.session.flush()
+        return eligibility
 
     def upsert_daily_bar_diagnostic(
         self,

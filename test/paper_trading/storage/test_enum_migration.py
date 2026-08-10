@@ -77,6 +77,7 @@ def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
         "CREATE TABLE paper_ledger_rebuilds (id integer primary key, status varchar(20) NOT NULL)",
         "CREATE TABLE daily_bar_diagnostics (id integer primary key, business_date date NOT NULL, stock_id varchar(20) NOT NULL, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL, CONSTRAINT uq_daily_bar_diagnostics_business_key UNIQUE (business_date, stock_id, adjust))",
         "CREATE TABLE paper_matching_runs (id integer primary key, trade_date date NOT NULL, scope_key varchar(40) NOT NULL, status varchar(32) NOT NULL)",
+        "CREATE TABLE paper_etf_eligibility (symbol varchar(20) primary key, name varchar(200) NOT NULL, exchange varchar(10) NOT NULL, list_status varchar(10) NOT NULL, last_seen_at timestamptz NOT NULL, last_refresh_at timestamptz NOT NULL, status varchar(20) NOT NULL DEFAULT 'unknown', reviewed_at timestamptz, reviewed_by varchar(100), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())",
         "CREATE INDEX ix_paper_positions_market ON paper_positions (market)",
         "CREATE INDEX ix_paper_position_lots_market ON paper_position_lots (market)",
         "CREATE INDEX ix_paper_orders_status ON paper_orders (status)",
@@ -88,6 +89,7 @@ def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
         "CREATE INDEX ix_paper_position_round_trips_status ON paper_position_round_trips (status)",
         "CREATE INDEX ix_paper_ledger_rebuilds_status ON paper_ledger_rebuilds (status)",
         "CREATE UNIQUE INDEX uq_matching_active_scope ON paper_matching_runs (trade_date, scope_key) WHERE status = 'running'",
+        "CREATE INDEX ix_paper_etf_eligibility_status ON paper_etf_eligibility (status)",
     )
     for statement in statements:
         connection.execute(text(statement))
@@ -163,6 +165,18 @@ def _constraint_columns(connection: Connection, table_name: str, constraint_name
     )
 
 
+def _check_constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_constraint "
+                "WHERE conrelid = :table_name::regclass AND conname = :constraint_name AND contype = 'c')"
+            ),
+            {"table_name": table_name, "constraint_name": constraint_name},
+        ).scalar_one()
+    )
+
+
 def _table_exists(connection: Connection, table_name: str) -> bool:
     return bool(
         connection.execute(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}).scalar_one()
@@ -188,6 +202,14 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
         assert _column_type(connection, "paper_matching_runs", "status") == "paper_matching_run_status"
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         assert _index_exists(connection, "uq_matching_active_scope")
+        assert _column_type(connection, "paper_etf_eligibility", "status") == "paper_etf_eligibility_status"
+        assert _index_exists(connection, "ix_paper_etf_eligibility_status")
+        assert _enum_labels(connection, "paper_etf_eligibility_status") == (
+            "unknown",
+            "supported",
+            "money_market",
+            "disabled",
+        )
         assert "completed_with_warnings" in _enum_labels(connection, "paper_matching_run_status")
 
         PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=True)
@@ -197,6 +219,8 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
         assert _column_type(connection, "paper_matching_runs", "status") == "character varying(32)"
         assert _enum_types(connection) == set()
         assert _index_exists(connection, "uq_matching_active_scope")
+        assert _column_type(connection, "paper_etf_eligibility", "status") == "character varying(20)"
+        assert _index_exists(connection, "ix_paper_etf_eligibility_status")
 
 
 def test_dry_run_reports_every_group_without_ddl(postgres_schema):
@@ -306,6 +330,64 @@ def test_apply_creates_missing_dependent_operational_tables_after_enum_conversio
         assert result.converted is False
         assert _table_exists(connection, "paper_account_snapshots")
         assert _table_exists(connection, "paper_valuation_gaps")
+
+
+def test_apply_creates_missing_etf_eligibility_table_after_enum_conversion(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(text("DROP TABLE paper_etf_eligibility"))
+
+        PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=False)
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        assert _table_exists(connection, "paper_etf_eligibility")
+        assert _column_type(connection, "paper_etf_eligibility", "status") == "paper_etf_eligibility_status"
+
+
+def test_apply_adds_and_rollback_removes_etf_eligibility_symbol_check(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(
+            text(
+                "ALTER TABLE paper_etf_eligibility "
+                "DROP CONSTRAINT IF EXISTS ck_paper_etf_eligibility_symbol_six_ascii_digits"
+            )
+        )
+        assert not _check_constraint_exists(
+            connection, "paper_etf_eligibility", "ck_paper_etf_eligibility_symbol_six_ascii_digits"
+        )
+
+        assert migrate_paper_trading_enums(connection).converted is True
+
+        assert _check_constraint_exists(
+            connection, "paper_etf_eligibility", "ck_paper_etf_eligibility_symbol_six_ascii_digits"
+        )
+
+        assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
+
+        assert not _check_constraint_exists(
+            connection, "paper_etf_eligibility", "ck_paper_etf_eligibility_symbol_six_ascii_digits"
+        )
+
+
+def test_preflight_rejects_invalid_existing_etf_eligibility_symbol(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO paper_etf_eligibility "
+                "(symbol, name, exchange, list_status, last_seen_at, last_refresh_at) "
+                "VALUES ('510300.SH', 'CSI 300 ETF', 'SH', 'L', now(), now())"
+            )
+        )
+
+        with pytest.raises(PaperTradingEnumMigrationError, match="invalid ETF eligibility symbols"):
+            migrate_paper_trading_enums(connection)
+
+        assert _enum_types(connection) == set()
 
 
 def test_dry_run_leaves_missing_operational_tables_absent_after_enum_conversion(postgres_schema):

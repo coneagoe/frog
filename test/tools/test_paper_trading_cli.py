@@ -1888,3 +1888,131 @@ class TestClientConstruction:
             client.list_accounts()
         _, kwargs = mock_req.call_args
         assert kwargs.get("timeout") == PaperTradingApiClient.TIMEOUT
+
+
+# ---------------------------------------------------------------------------
+# ETF eligibility commands
+# ---------------------------------------------------------------------------
+
+
+class TestETFEligibilityClient:
+    def test_etf_eligibility_methods_use_expected_api_contract(self):
+        """Catch incorrect ETF eligibility HTTP paths, queries, or request bodies."""
+        from tools.paper_trading_cli import PaperTradingApiClient
+
+        with patch.dict(os.environ, {"PAPER_TRADING_API_TOKEN": "tok"}, clear=True):
+            client = PaperTradingApiClient()
+        mock_response = MagicMock(status_code=200, json=lambda: {})
+        with patch.object(client._session, "request", return_value=mock_response) as request:
+            client.list_etf_eligibility()
+            client.list_etf_eligibility(status="unknown")
+            client.get_etf_eligibility("510300")
+            client.classify_etf_eligibility("510300", "supported", "alice")
+
+        assert request.call_args_list[0].args == ("GET", "http://localhost:8000/paper/etf-eligibility")
+        assert "params" not in request.call_args_list[0].kwargs
+        assert request.call_args_list[1].args == ("GET", "http://localhost:8000/paper/etf-eligibility")
+        assert request.call_args_list[1].kwargs["params"] == {"status": "unknown"}
+        assert request.call_args_list[2].args == ("GET", "http://localhost:8000/paper/etf-eligibility/510300")
+        assert request.call_args_list[3].args == ("POST", "http://localhost:8000/paper/etf-eligibility/510300/classify")
+        assert request.call_args_list[3].kwargs["json"] == {"status": "supported", "reviewed_by": "alice"}
+
+
+class TestETFEligibilityCommands:
+    def test_etf_eligibility_list_forwards_optional_status_and_uses_human_output(self, capsys):
+        """Catch list commands that lose a status filter or bypass standard text output."""
+        client = _mock_client()
+        client.list_etf_eligibility.return_value = {
+            "items": [{"symbol": "510300", "name": "CSI 300 ETF", "status": "unknown"}]
+        }
+
+        code = main(["etf_eligibility", "list", "--status", "unknown"], client=client)
+
+        assert code == EXIT_CODES["OK"]
+        client.list_etf_eligibility.assert_called_once_with(status="unknown")
+        assert "510300" in capsys.readouterr().out
+
+    def test_etf_eligibility_get_preserves_bare_symbol_and_json_response(self, capsys):
+        """Catch CLI symbol rewriting or JSON output changes for eligibility inspection."""
+        client = _mock_client()
+        client.get_etf_eligibility.return_value = {"symbol": "510300", "status": "unknown"}
+
+        code = main(["--json", "etf_eligibility", "get", "--symbol", "510300"], client=client)
+
+        assert code == EXIT_CODES["OK"]
+        client.get_etf_eligibility.assert_called_once_with(symbol="510300")
+        assert json.loads(capsys.readouterr().out) == {"symbol": "510300", "status": "unknown"}
+
+    def test_etf_eligibility_classify_forwards_supported_status_and_reviewer(self, capsys):
+        """Catch classification requests with an incorrect status, reviewer, or output path."""
+        client = _mock_client()
+        client.classify_etf_eligibility.return_value = {
+            "symbol": "510300",
+            "status": "supported",
+            "reviewed_by": "alice",
+        }
+
+        code = main(
+            [
+                "etf_eligibility",
+                "classify",
+                "--symbol",
+                "510300",
+                "--status",
+                "supported",
+                "--reviewed-by",
+                "alice",
+            ],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["OK"]
+        client.classify_etf_eligibility.assert_called_once_with(
+            symbol="510300", status="supported", reviewed_by="alice"
+        )
+        assert "alice" in capsys.readouterr().out
+
+    def test_etf_eligibility_classify_accepts_money_market_status(self):
+        """Catch parser changes that exclude the allowed money_market classification."""
+        client = _mock_client()
+        client.classify_etf_eligibility.return_value = {"symbol": "511990", "status": "money_market"}
+
+        code = main(
+            [
+                "etf_eligibility",
+                "classify",
+                "--symbol",
+                "511990",
+                "--status",
+                "money_market",
+                "--reviewed-by",
+                "alice",
+            ],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["OK"]
+        client.classify_etf_eligibility.assert_called_once_with(
+            symbol="511990", status="money_market", reviewed_by="alice"
+        )
+
+    def test_etf_eligibility_classify_rejects_status_outside_allowed_values(self):
+        """Catch parser regressions that allow API-only eligibility states for review."""
+        client = _mock_client()
+
+        code = main(
+            [
+                "etf_eligibility",
+                "classify",
+                "--symbol",
+                "510300",
+                "--status",
+                "unknown",
+                "--reviewed-by",
+                "alice",
+            ],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+        client.classify_etf_eligibility.assert_not_called()

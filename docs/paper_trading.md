@@ -86,9 +86,27 @@ uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment 
 uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment ""
 uv run tools/paper_trading_cli.py order delete --order-id 123
 uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account-id 1
+uv run tools/paper_trading_cli.py etf_eligibility list --status unknown
+uv run tools/paper_trading_cli.py etf_eligibility get --symbol 510300
+uv run tools/paper_trading_cli.py etf_eligibility classify --symbol 510300 --status supported --reviewed-by alice
 ```
 
 The `order update-comment` command with `--comment ""` clears the stored comment to `NULL` on the order and all linked trades.
+
+### ETF Eligibility Review
+
+ETF orders require an eligibility review in the later ETF-support workflow. Use
+the CLI to list the refresh-discovered records, inspect one bare six-digit
+symbol, and record a reviewer classification. Classification accepts only
+`supported` or `money_market`; the API remains the authority for ETF symbol and
+provider validation.
+
+```bash
+uv run tools/paper_trading_cli.py etf_eligibility list
+uv run tools/paper_trading_cli.py etf_eligibility list --status unknown
+uv run tools/paper_trading_cli.py etf_eligibility get --symbol 510300
+uv run tools/paper_trading_cli.py etf_eligibility classify --symbol 510300 --status supported --reviewed-by alice
+```
 
 Order creation queues an accepted order; it does not run matching or create a trade immediately. If an `idempotency_key` is supplied, repeating the same request for the same account returns the original order without reserving cash again. Reusing that key for different order fields is rejected.
 
