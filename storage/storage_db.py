@@ -92,11 +92,14 @@ from common.const import (
 )
 from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
+from paper_trading.services.etf_eligibility_service import ETFEligibilityService
+from paper_trading.storage.repository import PaperTradingRepository
 
 from .config import StorageConfig
 from .domain_enums import SSFChangeSignalStatus, validate_ssf_event_types
 from .model import (
     Base,
+    ETFBasic,
     tb_name_a_stock_basic,
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
@@ -1904,6 +1907,20 @@ class StorageDb:
         except Exception as e:
             logger.error(f"保存ETF基础信息数据失败: {str(e)}")
             return False
+
+    def reconcile_etf_eligibility(self) -> None:
+        """Reconcile paper-trading eligibility from the persisted ETF snapshot."""
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            snapshot = session.query(ETFBasic).all()
+            ETFEligibilityService(PaperTradingRepository(session)).reconcile(snapshot, datetime.now(timezone.utc))
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def load_etf_basic(self) -> pd.DataFrame:
         """

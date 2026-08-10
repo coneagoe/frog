@@ -993,7 +993,11 @@ class DownloadManager:
                 return False
 
             logging.info(f"成功下载 {len(df)} 条ETF基础信息数据")
-            return get_storage().save_etf_basic(df)
+            storage = get_storage()
+            if not storage.save_etf_basic(df):
+                return False
+            storage.reconcile_etf_eligibility()
+            return True
 
         except Exception as e:
             logging.error(f"下载ETF基础信息数据时出错: {e}")
