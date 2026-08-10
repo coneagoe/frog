@@ -44,7 +44,9 @@ def test_reconcile_refreshes_provider_fields_and_disables_absent_or_delisted_row
         ("159915", "Delisted ETF", "SZ", "D", "disabled"),
         ("510300", "New name", "SZ", "L", "unknown"),
     ]
-    assert repo.get_etf_eligibility("510300").last_refresh_at == datetime(2026, 8, 10)
+    refreshed = repo.get_etf_eligibility("510300")
+    assert refreshed is not None
+    assert refreshed.last_refresh_at == datetime(2026, 8, 10)
 
 
 def test_reconcile_preserves_review_audit_and_is_idempotent_for_current_listing(session):
