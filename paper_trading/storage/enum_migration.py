@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
+    ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
     Market,
@@ -25,6 +26,7 @@ from paper_trading.domain.enums import (
 from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import (
     DailyBarDiagnostic,
+    ETFEligibility,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -263,6 +265,19 @@ PAPER_TRADING_ENUM_GROUPS = (
             ),
         ),
     ),
+    PaperTradingEnumGroup(
+        "paper_etf_eligibility_status",
+        _labels(ETFEligibilityStatus),
+        (
+            _column(
+                "paper_etf_eligibility",
+                "status",
+                "VARCHAR(20)",
+                "'unknown'",
+                indexes=(_index("ix_paper_etf_eligibility_status", "paper_etf_eligibility", "status"),),
+            ),
+        ),
+    ),
 )
 
 _GOVERNED_TABLES = (
@@ -279,12 +294,14 @@ _GOVERNED_TABLES = (
     PaperLedgerRebuild.__table__,
     PaperAccountSnapshot.__table__,
     PaperValuationGap.__table__,
+    ETFEligibility.__table__,
 )
 _OPTIONAL_GOVERNED_TABLES = (DailyBarDiagnostic.__table__,)
 _MARKET_COLUMNS_REMOVED_ON_ROLLBACK = {"paper_position_round_trips", "daily_bar_diagnostics"}
 _OPERATIONAL_TABLES = (
     PaperAccountSnapshot.__table__,
     PaperValuationGap.__table__,
+    ETFEligibility.__table__,
 )
 _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_status", re.IGNORECASE)
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)

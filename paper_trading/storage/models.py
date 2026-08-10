@@ -1,5 +1,6 @@
 from storage.model.paper_trading import (
     DailyBarDiagnostic,
+    ETFEligibility,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -17,6 +18,7 @@ from storage.model.paper_trading import (
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
+    tb_name_paper_etf_eligibility,
     tb_name_paper_matching_runs,
     tb_name_paper_orders,
     tb_name_paper_pending_settlement,
@@ -30,6 +32,7 @@ from storage.model.paper_trading import (
 
 __all__ = [
     "DailyBarDiagnostic",
+    "ETFEligibility",
     "PaperLedgerRebuild",
     "PaperAccount",
     "PaperCashLedger",
@@ -44,6 +47,7 @@ __all__ = [
     "PaperAccountSnapshot",
     "PaperMatchingRun",
     "tb_name_daily_bar_diagnostics",
+    "tb_name_paper_etf_eligibility",
     "tb_name_paper_accounts",
     "tb_name_paper_cash_ledger",
     "tb_name_paper_pending_settlement",

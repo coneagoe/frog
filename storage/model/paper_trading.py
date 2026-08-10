@@ -23,6 +23,7 @@ from sqlalchemy.sql import func
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
+    ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
     Market,
@@ -54,6 +55,7 @@ tb_name_paper_pending_settlement = "paper_pending_settlement"
 tb_name_daily_bar_diagnostics = "daily_bar_diagnostics"
 tb_name_paper_valuation_gaps = "paper_valuation_gaps"
 tb_name_paper_ledger_rebuilds = "paper_ledger_rebuilds"
+tb_name_paper_etf_eligibility = "paper_etf_eligibility"
 
 
 def _value_enum(enum_type: type[StrEnum], name: str) -> Enum:
@@ -400,6 +402,27 @@ class PaperLedgerRebuild(Base):
     regenerated_counts: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False)
     error_details: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ETFEligibility(Base):
+    __tablename__ = tb_name_paper_etf_eligibility
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    exchange: Mapped[str] = mapped_column(String(10), nullable=False)
+    list_status: Mapped[str] = mapped_column(String(10), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_refresh_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(
+        _value_enum(ETFEligibilityStatus, "paper_etf_eligibility_status"),
+        nullable=False,
+        server_default="unknown",
+        index=True,
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class DailyBarDiagnostic(Base):
