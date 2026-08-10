@@ -41,6 +41,7 @@ from common.const import (  # noqa: E402
 from storage.config import StorageConfig  # noqa: E402
 from storage.model import (  # noqa: E402
     Base,
+    ETFBasic,
     PaperAccount,
     PaperPositionLot,
     tb_name_blackroom_record,
@@ -419,6 +420,48 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
 
     with Session(storage.engine) as session:
         assert session.query(PaperAccount).order_by(PaperAccount.id).one().hk_commission_rate is None
+
+
+def test_reconcile_etf_eligibility_reads_replaced_persisted_etf_basic_snapshot(storage):
+    from paper_trading.storage.models import ETFEligibility
+
+    ETFBasic.__table__.create(storage.engine)
+    ETFEligibility.__table__.create(storage.engine)
+    initial_snapshot = pd.DataFrame(
+        {
+            "ts_code": ["510300.SH", "159915.SZ"],
+            "csname": ["Old CSI 300 ETF", "Chinext ETF"],
+            "extname": ["Old CSI 300 ETF", "Chinext ETF"],
+            "cname": ["Old CSI 300 ETF", "Chinext ETF"],
+            "index_code": ["000300", "399006"],
+            "index_name": ["CSI 300", "Chinext"],
+            "setup_date": ["20200101", "20200101"],
+            "list_date": ["20200101", "20200101"],
+            "list_status": ["L", "L"],
+            "exchange": ["SH", "SZ"],
+            "mgr_name": ["Manager", "Manager"],
+            "custod_name": ["Custodian", "Custodian"],
+            "mgt_fee": [0.5, 0.5],
+            "etf_type": ["ETF", "ETF"],
+        }
+    )
+    replacement_snapshot = initial_snapshot.iloc[[0]].copy()
+    replacement_snapshot.loc[:, "csname"] = "Updated CSI 300 ETF"
+
+    assert storage.save_etf_basic(initial_snapshot) is True
+    storage.reconcile_etf_eligibility()
+    assert storage.save_etf_basic(replacement_snapshot) is True
+    storage.reconcile_etf_eligibility()
+
+    with Session(storage.engine) as session:
+        persisted = session.query(ETFBasic).order_by(ETFBasic.基金代码).all()
+        eligibility = session.query(ETFEligibility).order_by(ETFEligibility.symbol).all()
+
+    assert [(row.基金代码, row.中文简称) for row in persisted] == [("510300", "Updated CSI 300 ETF")]
+    assert [(row.symbol, row.name, row.status) for row in eligibility] == [
+        ("159915", "Chinext ETF", "disabled"),
+        ("510300", "Updated CSI 300 ETF", "unknown"),
+    ]
 
 
 def test_ensure_a_stock_basic_schema_widens_legacy_controller_name(storage, monkeypatch, a_stock_basic_schema_upgrade):

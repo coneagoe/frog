@@ -81,6 +81,16 @@ class TestDownloadManager:
         storage.save_etf_basic.assert_called_once_with(etf_basic)
         storage.reconcile_etf_eligibility.assert_called_once_with()
 
+    def test_download_etf_basic_download_error_does_not_save_or_reconcile(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        downloader.dl_etf_basic.side_effect = RuntimeError("provider unavailable")
+
+        result = manager.download_etf_basic()
+
+        assert result is False
+        storage.save_etf_basic.assert_not_called()
+        storage.reconcile_etf_eligibility.assert_not_called()
+
     def test_download_forecast_saves_provider_result(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         forecast = pd.DataFrame({"股票代码": ["600001"]})
