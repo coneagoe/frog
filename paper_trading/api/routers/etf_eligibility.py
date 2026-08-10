@@ -30,7 +30,7 @@ def list_etf_eligibility(
         items = PaperTradingRepository(session).list_etf_eligibility(status_filter)
     except ValueError as exc:
         raise _unprocessable("INVALID_ETF_ELIGIBILITY_STATUS", str(exc)) from exc
-    return ETFEligibilityListResponse(items=items)
+    return ETFEligibilityListResponse(items=[ETFEligibilityResponse.model_validate(item) for item in items])
 
 
 @router.get("/{symbol}", response_model=ETFEligibilityResponse)
