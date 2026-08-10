@@ -27,6 +27,9 @@ Commands:
   matching list
   matching get --run-id ID
   snapshot list --account-id ID
+  etf_eligibility list [--status STATUS]
+  etf_eligibility get --symbol SYMBOL
+  etf_eligibility classify --symbol SYMBOL --status supported|money_market --reviewed-by NAME
 
 Exit codes:
   0  success
@@ -240,6 +243,22 @@ class PaperTradingApiClient:
     def rebuild_delayed_daily_bar_orders(self) -> dict[str, Any]:
         return self._request("POST", "/paper/matching/runs/rebuilds")
 
+    def list_etf_eligibility(self, status: str | None = None) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        if status is not None:
+            kwargs["params"] = {"status": status}
+        return self._request("GET", "/paper/etf-eligibility", **kwargs)
+
+    def get_etf_eligibility(self, symbol: str) -> dict[str, Any]:
+        return self._request("GET", f"/paper/etf-eligibility/{symbol}")
+
+    def classify_etf_eligibility(self, symbol: str, status: str, reviewed_by: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/paper/etf-eligibility/{symbol}/classify",
+            json={"status": status, "reviewed_by": reviewed_by},
+        )
+
 
 def run_paper_trading_matching(
     trade_date: str,
@@ -354,6 +373,21 @@ def _add_snapshot_subparsers(subparsers: Any) -> None:
     p_list.add_argument("--account-id", type=int, required=True)
 
 
+def _add_etf_eligibility_subparsers(subparsers: Any) -> None:
+    eligibility = subparsers.add_parser("etf_eligibility", help="Manage ETF eligibility reviews")
+    eligibility_sub = eligibility.add_subparsers(
+        dest="etf_eligibility_command", required=True, parser_class=_SafeParser
+    )
+    p_list = eligibility_sub.add_parser("list", help="List ETF eligibility records")
+    p_list.add_argument("--status", default=None, help="Optional eligibility status filter")
+    p_get = eligibility_sub.add_parser("get", help="Get ETF eligibility details")
+    p_get.add_argument("--symbol", required=True, help="Bare ETF symbol")
+    p_classify = eligibility_sub.add_parser("classify", help="Classify ETF eligibility")
+    p_classify.add_argument("--symbol", required=True, help="Bare ETF symbol")
+    p_classify.add_argument("--status", required=True, choices=["supported", "money_market"])
+    p_classify.add_argument("--reviewed-by", required=True, help="Reviewer name")
+
+
 def build_parser() -> _SafeParser:
     parser = _SafeParser(
         description="Paper trading API CLI",
@@ -368,6 +402,7 @@ def build_parser() -> _SafeParser:
     _add_trade_subparsers(subparsers)
     _add_matching_subparsers(subparsers)
     _add_snapshot_subparsers(subparsers)
+    _add_etf_eligibility_subparsers(subparsers)
     return parser
 
 
@@ -600,12 +635,28 @@ def _handle_snapshot(client: PaperTradingApiClient, args: argparse.Namespace) ->
     raise _ParserError(f"unknown snapshot command: {cmd}")
 
 
+def _handle_etf_eligibility(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:
+    cmd = args.etf_eligibility_command
+    if cmd == "list":
+        return client.list_etf_eligibility(status=args.status)
+    if cmd == "get":
+        return client.get_etf_eligibility(symbol=args.symbol)
+    if cmd == "classify":
+        return client.classify_etf_eligibility(
+            symbol=args.symbol,
+            status=args.status,
+            reviewed_by=args.reviewed_by,
+        )
+    raise _ParserError(f"unknown ETF eligibility command: {cmd}")
+
+
 _HANDLERS: dict[str, Any] = {
     "account": _handle_account,
     "order": _handle_order,
     "trade": _handle_trade,
     "matching": _handle_matching,
     "snapshot": _handle_snapshot,
+    "etf_eligibility": _handle_etf_eligibility,
 }
 
 
@@ -656,7 +707,14 @@ def main(argv: list[str] | None = None, client: PaperTradingApiClient | None = N
 
 
 def _get_subcommand(args: argparse.Namespace) -> str | None:
-    for attr in ("account_command", "order_command", "trade_command", "matching_command", "snapshot_command"):
+    for attr in (
+        "account_command",
+        "order_command",
+        "trade_command",
+        "matching_command",
+        "snapshot_command",
+        "etf_eligibility_command",
+    ):
         val = getattr(args, attr, None)
         if val is not None:
             return val
