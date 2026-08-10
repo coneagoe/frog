@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -24,5 +25,5 @@ class ETFEligibilityListResponse(BaseModel):
 class ClassifyETFEligibilityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: str
+    status: Literal["supported", "money_market"]
     reviewed_by: str

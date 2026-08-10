@@ -51,9 +51,8 @@ def classify_etf_eligibility(
     session: Session = Depends(get_session),
 ):
     try:
-        eligibility_status = ETFEligibilityStatus(request.status)
         eligibility = ETFEligibilityService(PaperTradingRepository(session)).classify(
-            symbol, eligibility_status, request.reviewed_by
+            symbol, ETFEligibilityStatus(request.status), request.reviewed_by
         )
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

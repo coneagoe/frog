@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
@@ -84,6 +85,44 @@ def test_get_etf_eligibility_returns_record(monkeypatch, sqlite_session):
     assert response.json()["reviewed_at"] is None
 
 
+def test_get_etf_eligibility_returns_not_found_for_missing_record(monkeypatch, sqlite_session):
+    response = _client(monkeypatch, sqlite_session).get(
+        "/paper/etf-eligibility/510300", headers={"Authorization": "Bearer secret"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_list_etf_eligibility_rejects_invalid_filter_with_structured_error(monkeypatch, sqlite_session):
+    response = _client(monkeypatch, sqlite_session).get(
+        "/paper/etf-eligibility", params={"status": "invalid"}, headers={"Authorization": "Bearer secret"}
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "INVALID_ETF_ELIGIBILITY_STATUS",
+            "message": "'invalid' is not a valid ETFEligibilityStatus",
+            "details": {},
+        }
+    }
+
+
+def test_get_etf_eligibility_rejects_invalid_symbol_with_structured_error(monkeypatch, sqlite_session):
+    response = _client(monkeypatch, sqlite_session).get(
+        "/paper/etf-eligibility/510300.SH", headers={"Authorization": "Bearer secret"}
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "INVALID_ETF_SYMBOL",
+            "message": "ETF symbol must be a bare six-digit value",
+            "details": {},
+        }
+    }
+
+
 def test_classify_etf_eligibility_persists_review_audit(monkeypatch, sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     _add_etf(repo, sqlite_session, "510300", "CSI 300 ETF")
@@ -104,28 +143,44 @@ def test_classify_etf_eligibility_persists_review_audit(monkeypatch, sqlite_sess
     assert eligibility.status == "money_market"
 
 
-def test_classify_etf_eligibility_rejects_invalid_lifecycle_input(monkeypatch, sqlite_session):
+@pytest.mark.parametrize("invalid_status", ["unknown", "disabled", "arbitrary"])
+def test_classify_etf_eligibility_rejects_non_operator_statuses(monkeypatch, sqlite_session, invalid_status):
     repo = PaperTradingRepository(sqlite_session)
     _add_etf(repo, sqlite_session, "510300", "CSI 300 ETF")
     sqlite_session.commit()
 
     response = _client(monkeypatch, sqlite_session).post(
         "/paper/etf-eligibility/510300/classify",
-        json={"status": "unknown", "reviewed_by": "reviewer"},
+        json={"status": invalid_status, "reviewed_by": "reviewer"},
         headers={"Authorization": "Bearer secret"},
     )
 
     assert response.status_code == 422
-    assert response.json() == {
-        "detail": {
-            "code": "INVALID_ETF_ELIGIBILITY_CLASSIFICATION",
-            "message": "ETF eligibility classification must be supported or money_market",
-            "details": {},
-        }
-    }
+    assert response.json()["detail"][0]["loc"] == ["body", "status"]
 
 
 def test_classify_etf_eligibility_returns_not_found_for_missing_record(monkeypatch, sqlite_session):
+    response = _client(monkeypatch, sqlite_session).post(
+        "/paper/etf-eligibility/510300/classify",
+        json={"status": "supported", "reviewed_by": "reviewer"},
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_classify_etf_eligibility_returns_not_found_for_missing_provider(monkeypatch, sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo.upsert_etf_eligibility(
+        "510300",
+        "CSI 300 ETF",
+        "SH",
+        "L",
+        datetime(2026, 8, 10, 9, 30, tzinfo=timezone.utc),
+    )
+    sqlite_session.commit()
+
     response = _client(monkeypatch, sqlite_session).post(
         "/paper/etf-eligibility/510300/classify",
         json={"status": "supported", "reviewed_by": "reviewer"},
@@ -154,3 +209,39 @@ def test_classify_etf_eligibility_rejects_invalid_provider_metadata(monkeypatch,
             "details": {},
         }
     }
+
+
+def test_classify_etf_eligibility_rejects_invalid_listing_status(monkeypatch, sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    _add_etf(repo, sqlite_session, "510300", "Delisted ETF", list_status="D")
+    sqlite_session.commit()
+
+    response = _client(monkeypatch, sqlite_session).post(
+        "/paper/etf-eligibility/510300/classify",
+        json={"status": "supported", "reviewed_by": "reviewer"},
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "INVALID_ETF_LISTING_STATUS",
+            "message": "ETF listing status must be L",
+            "details": {},
+        }
+    }
+
+
+def test_classify_etf_eligibility_rejects_extra_request_fields(monkeypatch, sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    _add_etf(repo, sqlite_session, "510300", "CSI 300 ETF")
+    sqlite_session.commit()
+
+    response = _client(monkeypatch, sqlite_session).post(
+        "/paper/etf-eligibility/510300/classify",
+        json={"status": "supported", "reviewed_by": "reviewer", "admin": True},
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "admin"]
