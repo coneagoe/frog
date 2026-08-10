@@ -17,6 +17,7 @@ from common.const import (
     AdjustType,
     PeriodType,
 )
+from paper_trading.domain.enums import Market
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.models import PaperAccountSnapshot
@@ -31,7 +32,7 @@ def test_generate_snapshot_values_positions_at_close(tmp_path):
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
     account = repo.create_account("demo", Decimal("100000.00"))
-    repo.upsert_position(account.id, "000001.SZ", 100, 0, Decimal("900.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001.SZ", 100, 0, Decimal("900.00"))
     storage = FakeHistoryStorage(
         {
             "000001": pd.DataFrame(
@@ -82,7 +83,7 @@ def test_generate_snapshot_persists_nav_fields(tmp_path):
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
     account = repo.create_account("demo", Decimal("100000.00"))
-    repo.upsert_position(account.id, "000001.SZ", 100, 0, Decimal("900.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001.SZ", 100, 0, Decimal("900.00"))
     storage = FakeHistoryStorage(
         {
             "000001": pd.DataFrame(
@@ -117,7 +118,7 @@ def test_generate_snapshot_updates_existing_account_date_snapshot(tmp_path):
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
     account = repo.create_account("demo", Decimal("100000.00"))
-    repo.upsert_position(account.id, "000001.SZ", 100, 0, Decimal("900.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001.SZ", 100, 0, Decimal("900.00"))
     storage = FakeHistoryStorage(
         {
             "000001": pd.DataFrame(
@@ -136,7 +137,7 @@ def test_generate_snapshot_updates_existing_account_date_snapshot(tmp_path):
     snapshot_service = SnapshotService(repo, market_data)
 
     snapshot_service.generate_snapshot(account.id, date(2026, 6, 16))
-    repo.upsert_position(account.id, "000001.SZ", 200, 0, Decimal("1800.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001.SZ", 200, 0, Decimal("1800.00"))
     snapshot = snapshot_service.generate_snapshot(account.id, date(2026, 6, 16))
     session.commit()
 
@@ -176,26 +177,28 @@ def test_snapshot_passes_position_market_to_get_daily_bar(sqlite_session):
     # Create an imported HK position and rebuild it from its lot.
     repo.create_position_lot(
         account.id,
+        Market.HK_CONNECT,
         "00700",
         date(2026, 7, 1),
         original_quantity=100,
         remaining_quantity=100,
         cost_price=Decimal("400.00"),
         source="imported",
-        market="hk_connect",
     )
     repo.upsert_position(
         account.id,
+        Market.HK_CONNECT,
         "00700",
         total_quantity=100,
         frozen_quantity=0,
         cost_amount=Decimal("40000.00"),
         source="imported",
-        market="hk_connect",
     )
     repo.clear_account_rebuild_state(account.id)
     # Create an A-share position
-    repo.upsert_position(account.id, "000001.SZ", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("1000.00"))
+    repo.upsert_position(
+        account.id, Market.A_SHARE, "000001.SZ", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("1000.00")
+    )
 
     class MarketCaptureProvider(FakeMarketDataProvider):
         def __init__(self):
@@ -228,7 +231,7 @@ def test_missing_exact_date_position_bar_records_valuation_gap(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("valuation-gap", Decimal("100000.00"))
-    repo.upsert_position(account.id, "300996", 100, 0, Decimal("900.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
 
     class MissingBarProvider(FakeMarketDataProvider):
         def get_daily_bar(self, symbol, trade_date, market=None):
@@ -277,4 +280,35 @@ def test_missing_bar_details_support_legacy_position_without_market():
     assert outcome.valuation_gap is not None
     assert outcome.valuation_gap.details == [
         {"symbol": "300996", "market": None, "error": "'No daily bar for 300996 on 2026-07-28'"}
+    ]
+
+
+def test_missing_same_symbol_bars_are_market_qualified_and_deterministic(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("two-market-gap", Decimal("100000.00"))
+    trade_date = date(2026, 7, 28)
+    repo.upsert_position(account.id, Market.HK_CONNECT, "000001", 200, 0, Decimal("1600.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("900.00"))
+
+    class MissingBarProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError(f"No daily bar for {market}:{symbol} on {trade_date}")
+
+    outcome = SnapshotService(repo, MissingBarProvider()).generate_snapshot_or_gap(account.id, trade_date)
+
+    assert outcome.status == "valuation_gap"
+    assert outcome.valuation_gap is not None
+    assert outcome.valuation_gap.missing_symbols == ["000001", "000001"]
+    assert outcome.valuation_gap.details == [
+        {
+            "symbol": "000001",
+            "market": "a_share",
+            "error": "'No daily bar for a_share:000001 on 2026-07-28'",
+        },
+        {
+            "symbol": "000001",
+            "market": "hk_connect",
+            "error": "'No daily bar for hk_connect:000001 on 2026-07-28'",
+        },
     ]

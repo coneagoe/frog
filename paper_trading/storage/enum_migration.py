@@ -24,6 +24,7 @@ from paper_trading.domain.enums import (
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import (
+    DailyBarDiagnostic,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
@@ -191,6 +192,20 @@ PAPER_TRADING_ENUM_GROUPS = (
                 "'a_share'",
                 indexes=(_index("ix_paper_trade_validity_checks_market", "paper_trade_validity_checks", "market"),),
             ),
+            _column(
+                "paper_position_round_trips",
+                "market",
+                "VARCHAR(20)",
+                "'a_share'",
+                indexes=(_index("ix_paper_position_round_trips_market", "paper_position_round_trips", "market"),),
+            ),
+            _column(
+                "daily_bar_diagnostics",
+                "market",
+                "VARCHAR(20)",
+                "'a_share'",
+                indexes=(_index("ix_daily_bar_diagnostics_market", "daily_bar_diagnostics", "market"),),
+            ),
         ),
     ),
     PaperTradingEnumGroup(
@@ -265,6 +280,8 @@ _GOVERNED_TABLES = (
     PaperAccountSnapshot.__table__,
     PaperValuationGap.__table__,
 )
+_OPTIONAL_GOVERNED_TABLES = (DailyBarDiagnostic.__table__,)
+_MARKET_COLUMNS_REMOVED_ON_ROLLBACK = {"paper_position_round_trips", "daily_bar_diagnostics"}
 _OPERATIONAL_TABLES = (
     PaperAccountSnapshot.__table__,
     PaperValuationGap.__table__,
@@ -293,9 +310,11 @@ def _result(
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     groups = PAPER_TRADING_ENUM_GROUPS
     missing_tables = _preflight(connection, groups, rollback=rollback)
-    if missing_tables and len(missing_tables) != len(
-        {column.table_name for group in groups for column in group.columns}
-    ):
+    required_tables = {column.table_name for group in groups for column in group.columns} - {
+        table.name for table in _OPTIONAL_GOVERNED_TABLES
+    }
+    required_missing = missing_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
+    if required_missing and required_missing != required_tables:
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
 
 
@@ -303,24 +322,34 @@ def _adapter_apply(connection: Connection) -> bool:
     groups = PAPER_TRADING_ENUM_GROUPS
     _adapter_preflight(connection, rollback=False)
     missing_tables = _preflight(connection, groups, rollback=False)
-    changed = any(
-        not _column_has_type(connection, column, group.type_name) for group in groups for column in group.columns
+    changed = bool(missing_tables) or any(
+        _column_facts(connection, column) is None or not _column_has_type(connection, column, group.type_name)
+        for group in groups
+        for column in group.columns
+        if _table_exists(connection, column.table_name)
     )
     if missing_tables:
         for group in groups:
             _create_type(connection, group)
         _create_missing_tables(
             connection,
-            missing_tables,
+            missing_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES},
             create_operational_tables=groups is PAPER_TRADING_ENUM_GROUPS,
         )
+        _add_market_columns(connection)
+        for group in groups:
+            _alter_group(connection, group, rollback=False)
+        _upgrade_market_qualified_keys(connection)
         _preflight(connection, groups, rollback=False)
         return True
 
     if changed:
         for group in groups:
             _create_type(connection, group)
+        _add_market_columns(connection)
+        for group in groups:
             _alter_group(connection, group, rollback=False)
+    _upgrade_market_qualified_keys(connection)
     if groups is PAPER_TRADING_ENUM_GROUPS:
         _create_missing_tables(connection, set(), create_operational_tables=True)
     return changed
@@ -330,19 +359,28 @@ def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
     if rollback and all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
         return
     _verify(connection, PAPER_TRADING_ENUM_GROUPS, rollback=rollback)
+    if not rollback:
+        _verify_market_qualified_keys(connection)
 
 
 def _adapter_rollback(connection: Connection) -> bool:
     _adapter_preflight(connection, rollback=True)
-    if all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+    if all(
+        not _table_exists(connection, table.name) for table in _GOVERNED_TABLES
+    ) and not _diagnostics_only_market_state(connection):
         return False
+    _reject_legacy_key_collisions(connection)
     return _rollback(connection, PAPER_TRADING_ENUM_GROUPS)
 
 
 def _adapter_audit(connection: Connection, *, rollback: bool):
     from storage.enum_governance import EnumGovernanceColumnAudit, EnumGovernanceDomainAudit, EnumGovernanceGroupAudit
 
-    missing_tables = {table.name for table in _GOVERNED_TABLES if not _table_exists(connection, table.name)}
+    missing_tables = {
+        table.name
+        for table in _GOVERNED_TABLES + _OPTIONAL_GOVERNED_TABLES
+        if not _table_exists(connection, table.name)
+    }
     groups = []
     for group in PAPER_TRADING_ENUM_GROUPS:
         observed_labels = _enum_labels(connection, group.type_name)
@@ -428,7 +466,9 @@ def migrate_paper_trading_enums(
     if dry_run:
         return _result(dry_run=True, rollback=rollback)
     if rollback:
-        if all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+        if all(
+            not _table_exists(connection, table.name) for table in _GOVERNED_TABLES
+        ) and not _diagnostics_only_market_state(connection):
             return _result(rollback=True)
         rolled_back = PAPER_TRADING_ENUM_ADAPTER.rollback(connection)
         PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=True)
@@ -497,6 +537,8 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
                 continue
             facts = _column_facts(connection, column)
             if facts is None:
+                if not rollback and group.type_name == "paper_market" and column.column_name == "market":
+                    continue
                 raise PaperTradingEnumMigrationError(
                     f"{group.type_name}: missing {column.table_name}.{column.column_name}"
                 )
@@ -528,13 +570,17 @@ def _create_missing_tables(
     tables = [
         table
         for table in _GOVERNED_TABLES
-        if table.name in missing_tables
-        or (create_operational_tables and table in _OPERATIONAL_TABLES and not _table_exists(connection, table.name))
+        if table is not DailyBarDiagnostic.__table__
+        and (
+            table.name in missing_tables
+            or (
+                create_operational_tables and table in _OPERATIONAL_TABLES and not _table_exists(connection, table.name)
+            )
+        )
     ]
-    if not tables:
-        return
-    # Metadata creates the mapped native types and respects foreign-key order.
-    tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
+    if tables:
+        # Metadata creates the mapped native types and respects foreign-key order.
+        tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
 
 
 def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
@@ -544,12 +590,40 @@ def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
     connection.execute(text(f"CREATE TYPE {group.type_name} AS ENUM ({labels})"))
 
 
+def ensure_paper_market_type(connection: Connection) -> None:
+    """Create or validate the paper-owned market type for shared tables."""
+    group = next(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == "paper_market")
+    labels = _enum_labels(connection, group.type_name)
+    if labels and labels != group.labels:
+        raise PaperTradingEnumMigrationError(f"paper_market: unexpected enum labels {labels}")
+    _create_type(connection, group)
+
+
+def preflight_diagnostics_only_market_rollback(connection: Connection) -> bool:
+    """Validate paper-owned market cleanup for storage-only diagnostics bootstrap."""
+    if not _diagnostics_only_market_state(connection):
+        return False
+    PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=True)
+    return True
+
+
+def rollback_diagnostics_only_market(connection: Connection) -> bool:
+    """Remove paper-owned market state when diagnostics is the only paper target."""
+    if not _diagnostics_only_market_state(connection):
+        return False
+    rolled_back = PAPER_TRADING_ENUM_ADAPTER.rollback(connection)
+    PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=True)
+    return rolled_back
+
+
 def _alter_group(connection: Connection, group: PaperTradingEnumGroup, *, rollback: bool) -> None:
     for column in group.columns:
+        if not _table_exists(connection, column.table_name):
+            continue
         if not rollback and _column_has_type(connection, column, group.type_name):
             continue
         for index_name, _ in column.indexes:
-            connection.execute(text(f"DROP INDEX {index_name}"))
+            connection.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
         if column.default_sql is not None:
             connection.execute(text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} DROP DEFAULT"))
         target = column.legacy_type_sql if rollback else group.type_name
@@ -574,6 +648,7 @@ def _rollback(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...])
         if any(_column_has_type(connection, column, group.type_name) for column in group.columns):
             _alter_group(connection, group, rollback=True)
             changed = True
+    _restore_legacy_market_qualified_keys(connection)
     _verify(connection, groups, rollback=True)
     for group in groups:
         if _enum_labels(connection, group.type_name):
@@ -586,14 +661,158 @@ def _verify(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...], *
         if not rollback and _enum_labels(connection, group.type_name) != group.labels:
             raise PaperTradingEnumMigrationError(f"{group.type_name}: labels were not preserved")
         for column in group.columns:
+            if not _table_exists(connection, column.table_name):
+                continue
             expected = _normalized_type(column.legacy_type_sql) if rollback else group.type_name
             facts = _column_facts(connection, column)
+            if (
+                rollback
+                and facts is None
+                and group.type_name == "paper_market"
+                and column.table_name in _MARKET_COLUMNS_REMOVED_ON_ROLLBACK
+            ):
+                continue
             if facts is None or facts[0] != expected:
                 raise PaperTradingEnumMigrationError(
                     f"{group.type_name}: verification failed for {column.table_name}.{column.column_name}"
                 )
             _validate_default(connection, group, column, rollback=rollback)
             _validate_indexes(connection, column, enum_typed=not rollback)
+
+
+def _add_market_columns(connection: Connection) -> None:
+    market_group = next(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == "paper_market")
+    for column in market_group.columns:
+        if _table_exists(connection, column.table_name) and _column_facts(connection, column) is None:
+            connection.execute(
+                text(
+                    f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} VARCHAR(20) NOT NULL "
+                    "DEFAULT 'a_share'::character varying"
+                )
+            )
+            for _, index_sql in column.indexes:
+                connection.execute(text(index_sql))
+
+
+def _diagnostics_only_market_state(connection: Connection) -> bool:
+    return (
+        all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES)
+        and _table_exists(connection, "daily_bar_diagnostics")
+        and _column_has_type(
+            connection,
+            PaperTradingEnumColumn("daily_bar_diagnostics", "market", "VARCHAR(20)", None, False),
+            "paper_market",
+        )
+    )
+
+
+def _replace_unique_constraint(connection: Connection, table_name: str, old_name: str, columns: str) -> None:
+    if _constraint_exists(connection, table_name, old_name):
+        connection.execute(text(f"ALTER TABLE {table_name} DROP CONSTRAINT {old_name}"))
+    connection.execute(text(f"ALTER TABLE {table_name} ADD CONSTRAINT {old_name} UNIQUE ({columns})"))
+
+
+def _upgrade_market_qualified_keys(connection: Connection) -> None:
+    if _table_exists(connection, "paper_positions") and not _constraint_exists(
+        connection, "paper_positions", "uq_paper_positions_account_market_symbol"
+    ):
+        if _constraint_exists(connection, "paper_positions", "uq_paper_positions_account_symbol"):
+            connection.execute(text("ALTER TABLE paper_positions DROP CONSTRAINT uq_paper_positions_account_symbol"))
+        connection.execute(
+            text(
+                "ALTER TABLE paper_positions ADD CONSTRAINT uq_paper_positions_account_market_symbol "
+                "UNIQUE (account_id, market, symbol)"
+            )
+        )
+    if _table_exists(connection, "daily_bar_diagnostics") and _constraint_columns(
+        connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key"
+    ) != ("business_date", "market", "stock_id", "adjust"):
+        _replace_unique_constraint(
+            connection,
+            "daily_bar_diagnostics",
+            "uq_daily_bar_diagnostics_business_key",
+            "business_date, market, stock_id, adjust",
+        )
+
+
+def _reject_legacy_key_collisions(connection: Connection) -> None:
+    checks = (
+        ("paper_positions", "account_id, symbol", "paper positions"),
+        ("daily_bar_diagnostics", "business_date, stock_id, adjust", "daily bar diagnostics"),
+    )
+    for table_name, columns, description in checks:
+        if not _table_exists(connection, table_name):
+            continue
+        duplicate = connection.execute(
+            text(f"SELECT 1 FROM {table_name} GROUP BY {columns} HAVING count(*) > 1 LIMIT 1")
+        ).scalar_one_or_none()
+        if duplicate is not None:
+            raise PaperTradingEnumMigrationError(f"legacy uniqueness collision in {description}")
+
+
+def _restore_legacy_market_qualified_keys(connection: Connection) -> None:
+    if _table_exists(connection, "paper_positions"):
+        if _constraint_exists(connection, "paper_positions", "uq_paper_positions_account_market_symbol"):
+            connection.execute(
+                text("ALTER TABLE paper_positions DROP CONSTRAINT uq_paper_positions_account_market_symbol")
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE paper_positions ADD CONSTRAINT uq_paper_positions_account_symbol "
+                    "UNIQUE (account_id, symbol)"
+                )
+            )
+    if _table_exists(connection, "daily_bar_diagnostics"):
+        if (
+            _column_facts(
+                connection, PaperTradingEnumColumn("daily_bar_diagnostics", "market", "VARCHAR(20)", None, False)
+            )
+            is not None
+        ):
+            connection.execute(
+                text("ALTER TABLE daily_bar_diagnostics DROP CONSTRAINT uq_daily_bar_diagnostics_business_key")
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE daily_bar_diagnostics ADD CONSTRAINT uq_daily_bar_diagnostics_business_key "
+                    "UNIQUE (business_date, stock_id, adjust)"
+                )
+            )
+            connection.execute(text("ALTER TABLE daily_bar_diagnostics DROP COLUMN market"))
+    if _table_exists(connection, "paper_position_round_trips"):
+        connection.execute(text("ALTER TABLE paper_position_round_trips DROP COLUMN market"))
+
+
+def _constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:
+    return _constraint_columns(connection, table_name, constraint_name) is not None
+
+
+def _constraint_columns(connection: Connection, table_name: str, constraint_name: str) -> tuple[str, ...] | None:
+    columns = connection.execute(
+        text(
+            "SELECT array_agg(a.attname ORDER BY key.ordinality) FROM pg_constraint con "
+            "JOIN unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true "
+            "JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = key.attnum "
+            "WHERE con.conrelid = CAST(:table_name AS regclass) AND con.conname = :constraint_name GROUP BY con.oid"
+        ),
+        {"table_name": table_name, "constraint_name": constraint_name},
+    ).scalar_one_or_none()
+    return None if columns is None else tuple(columns)
+
+
+def _verify_market_qualified_keys(connection: Connection) -> None:
+    expected = {
+        "paper_positions": ("uq_paper_positions_account_market_symbol", ("account_id", "market", "symbol")),
+        "daily_bar_diagnostics": (
+            "uq_daily_bar_diagnostics_business_key",
+            ("business_date", "market", "stock_id", "adjust"),
+        ),
+    }
+    for table_name, (constraint_name, columns) in expected.items():
+        if not _table_exists(connection, table_name):
+            continue
+        if _constraint_columns(connection, table_name, constraint_name) != columns:
+            raise PaperTradingEnumMigrationError(f"missing or invalid market-qualified key {constraint_name}")
 
 
 def _table_exists(connection: Connection, table_name: str) -> bool:

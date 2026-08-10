@@ -78,15 +78,20 @@ class SnapshotService:
         for position in self.repo.get_positions(account_id):
             if int(position.total_quantity or 0) <= 0:
                 continue
+            position_market = getattr(position, "market", None)
+            market = getattr(position_market, "value", position_market)
             try:
-                self.market_data.get_daily_bar(position.symbol, trade_date, market=getattr(position, "market", None))
+                self.market_data.get_daily_bar(position.symbol, trade_date, market=market)
             except KeyError as exc:
                 missing_symbols.append(position.symbol)
-                details.append(
-                    {"symbol": position.symbol, "market": getattr(position, "market", None), "error": str(exc)}
-                )
+                details.append({"symbol": position.symbol, "market": market, "error": str(exc)})
         if missing_symbols:
-            gap = self.repo.upsert_valuation_gap(account_id, trade_date, sorted(missing_symbols), details)
+            gap = self.repo.upsert_valuation_gap(
+                account_id,
+                trade_date,
+                sorted(missing_symbols),
+                sorted(details, key=lambda detail: (detail["market"] or "", detail["symbol"])),
+            )
             return SnapshotOutcome(status="valuation_gap", valuation_gap=gap)
 
         snapshot = self.generate_snapshot(account_id, trade_date)

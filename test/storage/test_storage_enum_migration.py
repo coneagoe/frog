@@ -47,6 +47,20 @@ def postgres_schema():
         engine.dispose()
 
 
+@pytest.fixture()
+def empty_postgres_schema():
+    engine = _engine()
+    schema = f"storage_enum_migration_empty_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    try:
+        yield engine, schema
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
+
+
 def _connection(engine: Engine, schema: str) -> Connection:
     connection = engine.connect()
     connection.execute(text(f'SET search_path TO "{schema}"'))
@@ -294,6 +308,31 @@ def test_second_apply_is_idempotent_and_rollback_restores_legacy_schema(postgres
         assert _check_definitions(connection) == {}
 
 
+def test_direct_storage_rollback_removes_diagnostics_only_paper_market(empty_postgres_schema) -> None:
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_storage_enums(connection).converted is True
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+
+        result = migrate_storage_enums(connection, rollback=True)
+
+        assert result.rolled_back is True
+        assert (
+            connection.execute(
+                text(
+                    "SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+                    "WHERE c.relnamespace = current_schema()::regnamespace "
+                    "AND c.relname = 'daily_bar_diagnostics' AND a.attname = 'market' "
+                    "AND a.attnum > 0 AND NOT a.attisdropped"
+                )
+            ).scalar_one_or_none()
+            is None
+        )
+        assert _enum_labels(connection, "paper_market") == ()
+        assert _enum_types(connection) == set()
+        assert _check_names(connection) == set()
+
+
 def test_rollback_rejects_unmanaged_storage_enum_dependency(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -320,3 +359,11 @@ def test_rollback_audit_normalizes_view_dependency_to_one_view_name(postgres_sch
 
     blackroom = next(group for group in audit.groups if group.type_name == "blackroom_market")
     assert blackroom.dependencies == ("view blackroom_market_dependency",)
+
+
+def test_storage_adapter_does_not_own_daily_diagnostic_market() -> None:
+    assert not any(
+        column.table_name == "daily_bar_diagnostics" and column.column_name == "market"
+        for group in STORAGE_ENUM_GROUPS
+        for column in group.columns
+    )

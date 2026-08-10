@@ -56,11 +56,14 @@ def _repo_and_service(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
-    repo.upsert_daily_bar_diagnostic(date(2026, 6, 16), "000001.SZ", "bfq", "missing_market_data", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        date(2026, 6, 16), Market.A_SHARE, "000001.SZ", "bfq", "missing_market_data", [], resolved=False
+    )
     session.commit()
     for business_date in (date(2026, 6, 16), date(2026, 6, 17), date(2026, 7, 21)):
         repo.upsert_daily_bar_diagnostic(
             business_date,
+            Market.A_SHARE,
             "000001.SZ",
             "bfq",
             "missing_market_data",
@@ -319,7 +322,7 @@ def test_place_order_replays_past_a_share_buy_without_current_cash_freeze(tmp_pa
     assert order.status == OrderStatus.FILLED.value
     assert order.frozen_cash == Decimal("1005.0100")
     assert repo.get_cash_available(account.id) == Decimal("98994.9900")
-    position = repo.get_position(account.id, "000002.SZ")
+    position = repo.get_position(account.id, Market.A_SHARE, "000002.SZ")
     assert position is not None
     assert position.total_quantity == 100
     engine.dispose()
@@ -360,7 +363,7 @@ def test_place_order_replays_past_sell_against_historical_matured_position(tmp_p
 
     assert sell.status == OrderStatus.FILLED.value
     assert sell.rejection_code is None
-    assert repo.get_position(account.id, "000001.SZ") is None
+    assert repo.get_position(account.id, Market.A_SHARE, "000001.SZ") is None
     engine.dispose()
 
 
@@ -397,7 +400,7 @@ def test_historical_order_33_sell_is_not_rejected_for_past_date(tmp_path, monkey
 
     assert sell.status == OrderStatus.FILLED.value
     assert sell.rejection_code is None
-    assert repo.get_position(account.id, "002558") is None
+    assert repo.get_position(account.id, Market.A_SHARE, "002558") is None
     engine.dispose()
 
 
@@ -440,7 +443,9 @@ def test_past_a_share_order_requires_unresolved_canonical_bfq_diagnostic(tmp_pat
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("historical-canonical", Decimal("100000.00"))
     trade_date = date(2026, 6, 17)
-    repo.upsert_daily_bar_diagnostic(trade_date, "000002.SZ", "bfq", "missing_market_data", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.A_SHARE, "000002.SZ", "bfq", "missing_market_data", [], resolved=False
+    )
 
     order = service.place_order(
         account.id,
@@ -554,12 +559,13 @@ def test_place_sell_order_freezes_sellable_position(tmp_path):
     account = repo.create_account("demo", Decimal("100000.00"))
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001.SZ",
         total_quantity=200,
         frozen_quantity=0,
         cost_amount=Decimal("1800.00"),
     )
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
 
     order = service.place_order(
         account_id=account.id,
@@ -573,7 +579,7 @@ def test_place_sell_order_freezes_sellable_position(tmp_path):
 
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.frozen_quantity == 100
-    position = repo.get_position(account.id, "000001.SZ")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
     assert position is not None
     assert position.frozen_quantity == 100
     engine.dispose()
@@ -628,7 +634,9 @@ def test_place_buy_order_sets_validity_valid_with_daily_bar(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
-    repo.upsert_daily_bar_diagnostic(date(2026, 6, 16), "000001.SZ", "bfq", "missing_market_data", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        date(2026, 6, 16), Market.A_SHARE, "000001.SZ", "bfq", "missing_market_data", [], resolved=False
+    )
     session.commit()
 
     bar = pd.DataFrame(
@@ -684,12 +692,13 @@ def test_place_sell_order_sets_validity_unchecked_when_market_data_missing(tmp_p
     account = repo.create_account("demo", Decimal("100000.00"))
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001.SZ",
         total_quantity=200,
         frozen_quantity=0,
         cost_amount=Decimal("1800.00"),
     )
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
 
     order = service.place_order(
         account_id=account.id,
@@ -739,12 +748,13 @@ def test_place_sell_order_rejects_t1_violation(tmp_path):
     account = repo.create_account("demo", Decimal("100000.00"))
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001.SZ",
         total_quantity=100,
         frozen_quantity=0,
         cost_amount=Decimal("900.00"),
     )
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
 
     order = service.place_order(
         account_id=account.id,
@@ -760,7 +770,7 @@ def test_place_sell_order_rejects_t1_violation(tmp_path):
     assert order.rejection_code == "A_SHARE_T1_VIOLATION"
     assert "A股 T+1" in order.rejection_reason
     assert "不可当日卖出" in order.rejection_reason
-    position = repo.get_position(account.id, "000001.SZ")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
     assert position is not None
     assert position.frozen_quantity == 0
     engine.dispose()
@@ -771,13 +781,14 @@ def test_place_sell_order_rejects_partial_t1_violation_with_mixed_lots(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001.SZ",
         total_quantity=200,
         frozen_quantity=0,
         cost_amount=Decimal("1800.00"),
     )
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 100, 100, Decimal("9.00"))
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 15), 100, 100, Decimal("9.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
 
     order = service.place_order(
         account_id=account.id,
@@ -793,7 +804,7 @@ def test_place_sell_order_rejects_partial_t1_violation_with_mixed_lots(tmp_path)
     assert order.rejection_code == "A_SHARE_T1_VIOLATION"
     assert "A股 T+1" in order.rejection_reason
     assert "不可当日卖出" in order.rejection_reason
-    position = repo.get_position(account.id, "000001.SZ")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
     assert position is not None
     assert position.frozen_quantity == 0
     engine.dispose()
@@ -804,12 +815,13 @@ def test_place_sell_order_keeps_existing_frozen_quantity_after_t1_rejection(tmp_
     account = repo.create_account("demo", Decimal("100000.00"))
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001.SZ",
         total_quantity=200,
         frozen_quantity=100,
         cost_amount=Decimal("1800.00"),
     )
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
 
     order = service.place_order(
         account_id=account.id,
@@ -823,7 +835,7 @@ def test_place_sell_order_keeps_existing_frozen_quantity_after_t1_rejection(tmp_
 
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "A_SHARE_T1_VIOLATION"
-    position = repo.get_position(account.id, "000001.SZ")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
     assert position is not None
     assert position.frozen_quantity == 100
     engine.dispose()
@@ -834,12 +846,13 @@ def test_place_sell_order_keeps_insufficient_position_precedence_when_position_i
     account = repo.create_account("demo", Decimal("100000.00"))
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001.SZ",
         total_quantity=100,
         frozen_quantity=100,
         cost_amount=Decimal("900.00"),
     )
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("9.00"))
 
     order = service.place_order(
         account_id=account.id,
@@ -853,7 +866,7 @@ def test_place_sell_order_keeps_insufficient_position_precedence_when_position_i
 
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "INSUFFICIENT_POSITION"
-    position = repo.get_position(account.id, "000001.SZ")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
     assert position is not None
     assert position.frozen_quantity == 100
     engine.dispose()
@@ -961,7 +974,9 @@ def test_a_share_order_unchanged_with_market_omitted(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("a-demo", Decimal("100000.00"))
-    repo.upsert_daily_bar_diagnostic(date(2026, 7, 21), "000001.SZ", "bfq", "missing_market_data", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        date(2026, 7, 21), Market.A_SHARE, "000001.SZ", "bfq", "missing_market_data", [], resolved=False
+    )
     md = FakeMarketDataProvider()
     hk_meta = HkConnectMetadataProvider(sqlite_session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
@@ -981,7 +996,9 @@ def test_a_share_explicit_market_still_works(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("a-explicit", Decimal("100000.00"))
-    repo.upsert_daily_bar_diagnostic(date(2026, 7, 21), "000001.SZ", "bfq", "missing_market_data", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        date(2026, 7, 21), Market.A_SHARE, "000001.SZ", "bfq", "missing_market_data", [], resolved=False
+    )
     md = FakeMarketDataProvider()
     hk_meta = HkConnectMetadataProvider(sqlite_session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
@@ -1076,8 +1093,10 @@ def test_hk_connect_sell_board_lot_ok(sqlite_session):
     session = sqlite_session
     session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
     session.flush()
-    repo.upsert_position(account.id, "00700", total_quantity=200, frozen_quantity=0, cost_amount=Decimal("80000.00"))
-    repo.create_position_lot(account.id, "00700", date(2026, 7, 20), 200, 200, Decimal("400.00"))
+    repo.upsert_position(
+        account.id, Market.HK_CONNECT, "00700", total_quantity=200, frozen_quantity=0, cost_amount=Decimal("80000.00")
+    )
+    repo.create_position_lot(account.id, Market.HK_CONNECT, "00700", date(2026, 7, 20), 200, 200, Decimal("400.00"))
     md = FakeMarketDataProvider()
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
@@ -1102,8 +1121,10 @@ def test_hk_connect_sell_odd_lot_ok(sqlite_session):
     session = sqlite_session
     session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
     session.flush()
-    repo.upsert_position(account.id, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00"))
-    repo.create_position_lot(account.id, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
+    repo.upsert_position(
+        account.id, Market.HK_CONNECT, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00")
+    )
+    repo.create_position_lot(account.id, Market.HK_CONNECT, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
     md = FakeMarketDataProvider()
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
@@ -1129,8 +1150,10 @@ def test_hk_connect_sell_rejects_invalid_odd_lot(sqlite_session):
     session = sqlite_session
     session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
     session.flush()
-    repo.upsert_position(account.id, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00"))
-    repo.create_position_lot(account.id, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
+    repo.upsert_position(
+        account.id, Market.HK_CONNECT, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00")
+    )
+    repo.create_position_lot(account.id, Market.HK_CONNECT, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
     md = FakeMarketDataProvider()
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
@@ -1156,8 +1179,10 @@ def test_hk_connect_sell_rejects_partial_odd_lot(sqlite_session):
     session = sqlite_session
     session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
     session.flush()
-    repo.upsert_position(account.id, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00"))
-    repo.create_position_lot(account.id, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
+    repo.upsert_position(
+        account.id, Market.HK_CONNECT, "00700", total_quantity=250, frozen_quantity=0, cost_amount=Decimal("100000.00")
+    )
+    repo.create_position_lot(account.id, Market.HK_CONNECT, "00700", date(2026, 7, 20), 250, 250, Decimal("400.00"))
     md = FakeMarketDataProvider()
     hk_meta = HkConnectMetadataProvider(session)
     service = OrderService(repo, md, hk_metadata=hk_meta)
@@ -1239,3 +1264,22 @@ def test_hk_connect_accepts_hk_symbol(sqlite_session):
     )
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.market == "hk_connect"
+
+
+def test_sell_reservation_isolated_by_market_for_same_symbol(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("market-reservation", Decimal("100000.00"))
+    trade_date = date(2026, 7, 21)
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("900.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 7, 20), 100, 100, Decimal("9.00"))
+    repo.upsert_position(account.id, Market.HK_CONNECT, "000001", 200, 0, Decimal("1600.00"))
+    repo.create_position_lot(account.id, Market.HK_CONNECT, "000001", trade_date, 200, 200, Decimal("8.00"))
+
+    order = OrderService(repo, FakeMarketDataProvider())._accept_sell_order(
+        account.id, "000001", 100, Decimal("10.00"), trade_date, Market.A_SHARE, None
+    )
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert repo.get_position(account.id, Market.A_SHARE, "000001").frozen_quantity == 100
+    assert repo.get_position(account.id, Market.HK_CONNECT, "000001").frozen_quantity == 0

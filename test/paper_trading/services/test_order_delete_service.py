@@ -47,6 +47,7 @@ def seed_historical_a_share_diagnostics(session):
         for symbol in symbols:
             repo.upsert_daily_bar_diagnostic(
                 trade_date,
+                Market.A_SHARE,
                 symbol,
                 "bfq",
                 "missing_market_data",
@@ -137,7 +138,9 @@ def test_rebuild_from_fills_delayed_order_and_replays_later_ledger(session):
     market_data = FakeMarketDataProvider()
     matching = MatchingService(repo, market_data, SnapshotService(repo, market_data))
     matching.run(later_date, account.id)
-    repo.upsert_daily_bar_diagnostic(early_date, "000001", "bfq", "missing_exact_date", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        early_date, Market.A_SHARE, "000001", "bfq", "missing_exact_date", [], resolved=False
+    )
 
     rebuild = OrderDeleteService(repo, market_data).rebuild_account_from(account.id, early_date, [early_order.id])
 
@@ -185,7 +188,9 @@ def test_rebuild_from_preserves_deposit_and_resolves_readable_skipped_diagnostic
         OrderStatus.ACCEPTED,
         frozen_cash=Decimal("20005.0000"),
     )
-    repo.upsert_daily_bar_diagnostic(trade_date, "000001", "bfq", "missing_exact_date", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.A_SHARE, "000001", "bfq", "missing_exact_date", [], resolved=False
+    )
 
     rebuild = OrderDeleteService(repo, FakeMarketDataProvider()).rebuild_account_from(
         account.id, trade_date, [order.id]
@@ -464,6 +469,7 @@ def test_delete_surviving_sell_replay_not_negative_frozen_quantity(session):
     # Seed an imported lot (durable baseline) for the sell symbol.
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001",
         total_quantity=200,
         frozen_quantity=0,
@@ -472,6 +478,7 @@ def test_delete_surviving_sell_replay_not_negative_frozen_quantity(session):
     )
     repo.create_position_lot(
         account.id,
+        Market.A_SHARE,
         "000001",
         date(2026, 7, 15),
         200,
@@ -512,7 +519,7 @@ def test_delete_surviving_sell_replay_not_negative_frozen_quantity(session):
     assert deleted is True
 
     # The imported-position replay must keep frozen_quantity non-negative.
-    position = repo.get_position(account.id, "000001")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001")
     assert position is not None
     assert position.frozen_quantity >= 0, f"Negative frozen_quantity: {position.frozen_quantity}"
     assert int(position.frozen_quantity) == 0, f"Expected frozen_quantity=0 after fill, got {position.frozen_quantity}"
@@ -632,7 +639,7 @@ def test_delete_surviving_buy_then_sell_same_symbol_preserves_position(session):
     assert deleted is True
 
     # Position for the buy/sell symbol must be correct.
-    assert repo.get_position(account.id, "000001") is None
+    assert repo.get_position(account.id, Market.A_SHARE, "000001") is None
     persisted_account = repo.get_account(account.id)
     assert persisted_account is not None
     assert persisted_account.realized_pnl == Decimal("494.2300")
@@ -718,7 +725,7 @@ def test_delete_inventory_buy_rejects_surviving_sell_without_naked_trade(session
     assert len(sell_trades) == 0, f"Expected 0 sell trades for 000001, got {len(sell_trades)}"
 
     # No position for the sold symbol.
-    position = repo.get_position(account.id, "000001")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001")
     assert position is None or int(position.total_quantity) == 0
 
     # Cash must not include sell proceeds.
@@ -795,6 +802,7 @@ def test_delete_over_reserved_same_date_sells_rejects_unsupported(session):
     # ── Baseline: imported lot (60 shares) ────────────────────────────────
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001",
         total_quantity=60,
         frozen_quantity=0,
@@ -803,6 +811,7 @@ def test_delete_over_reserved_same_date_sells_rejects_unsupported(session):
     )
     repo.create_position_lot(
         account.id,
+        Market.A_SHARE,
         "000001",
         date(2026, 7, 14),
         60,
@@ -834,7 +843,7 @@ def test_delete_over_reserved_same_date_sells_rejects_unsupported(session):
     matching_service.run(date(2026, 7, 16), account.id)
 
     # Position: 60 (imported) + 100 (BUY-A) + 100 (BUY-B) = 260
-    pos = repo.get_position(account.id, "000001")
+    pos = repo.get_position(account.id, Market.A_SHARE, "000001")
     assert pos is not None
     assert int(pos.total_quantity) == 260
 
@@ -859,7 +868,7 @@ def test_delete_over_reserved_same_date_sells_rejects_unsupported(session):
     matching_service.run(date(2026, 7, 18), account.id)
 
     # Both filled: position = 260 − 100 − 100 = 60
-    pos = repo.get_position(account.id, "000001")
+    pos = repo.get_position(account.id, Market.A_SHARE, "000001")
     assert pos is not None
     assert int(pos.total_quantity) == 60
     assert len(repo.list_trades(account.id)) == 4  # 2 buys + 2 sells
@@ -874,7 +883,7 @@ def test_delete_over_reserved_same_date_sells_rejects_unsupported(session):
     # Dates: [7/16, 7/18]
 
     # Verify final position is non-negative and correct.
-    position = repo.get_position(account.id, "000001")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001")
     assert position is not None
     assert int(position.frozen_quantity) >= 0, f"Negative frozen_quantity: {position.frozen_quantity}"
     # Position = 60 (imported) + 100 (BUY-B replay) − 100 (one sell) = 60
@@ -919,6 +928,7 @@ def test_delete_sell_funded_buy_rejects_when_cash_insufficient(session):
     # Imported lot to back the sell.
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001",
         total_quantity=100,
         frozen_quantity=0,
@@ -927,6 +937,7 @@ def test_delete_sell_funded_buy_rejects_when_cash_insufficient(session):
     )
     repo.create_position_lot(
         account.id,
+        Market.A_SHARE,
         "000001",
         date(2026, 7, 14),
         100,
@@ -977,7 +988,7 @@ def test_delete_sell_funded_buy_rejects_when_cash_insufficient(session):
     assert len(trades) == 0, f"Expected 0 trades after sell delete+replay, got {len(trades)}"
 
     # No position for the buy symbol (never created).
-    pos = repo.get_position(account.id, "000002")
+    pos = repo.get_position(account.id, Market.A_SHARE, "000002")
     assert pos is None
 
 
@@ -1003,6 +1014,7 @@ def test_delete_same_date_sell_fills_before_buy_cash_check(session):
     # 000001 (back the surviving sell)
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "000001",
         total_quantity=100,
         frozen_quantity=0,
@@ -1011,6 +1023,7 @@ def test_delete_same_date_sell_fills_before_buy_cash_check(session):
     )
     repo.create_position_lot(
         account.id,
+        Market.A_SHARE,
         "000001",
         date(2026, 7, 14),
         100,
@@ -1021,6 +1034,7 @@ def test_delete_same_date_sell_fills_before_buy_cash_check(session):
     # 999999 (back the prior sell that will be deleted)
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "999999",
         total_quantity=100,
         frozen_quantity=0,
@@ -1029,6 +1043,7 @@ def test_delete_same_date_sell_fills_before_buy_cash_check(session):
     )
     repo.create_position_lot(
         account.id,
+        Market.A_SHARE,
         "999999",
         date(2026, 7, 14),
         100,
@@ -1093,9 +1108,9 @@ def test_delete_same_date_sell_fills_before_buy_cash_check(session):
         assert t.symbol in ("000001", "000002"), f"Unexpected trade symbol: {t.symbol}"
 
     # Position 000001 = 0 (sold), 000002 = 1000 (bought).
-    pos1 = repo.get_position(account.id, "000001")
+    pos1 = repo.get_position(account.id, Market.A_SHARE, "000001")
     assert pos1 is None
-    pos2 = repo.get_position(account.id, "000002")
+    pos2 = repo.get_position(account.id, Market.A_SHARE, "000002")
     assert pos2 is not None and int(pos2.total_quantity) == 1000
 
 
@@ -1376,7 +1391,7 @@ def test_delete_same_date_buy_then_sell_t1_rejects_if_no_matured_lot(session):
     assert buy_b_order.status == OrderStatus.FILLED.value, f"Expected BUY FILLED, got {buy_b_order.status}"
 
     # Position: only the 100 from BUY B remain (sell did not go through).
-    position = repo.get_position(account.id, "000001")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001")
     assert position is not None
     assert int(position.total_quantity) == 100, f"Expected total_quantity=100, got {position.total_quantity}"
     assert int(position.frozen_quantity) == 0, f"Expected frozen_quantity=0, got {position.frozen_quantity}"
@@ -1410,6 +1425,7 @@ def test_replay_rejected_order_reconsidered_on_later_delete(session):
     # ── Imported lots for the prior SELL symbol ─────────────────────────
     repo.upsert_position(
         account.id,
+        Market.A_SHARE,
         "999999",
         total_quantity=100,
         frozen_quantity=0,
@@ -1418,6 +1434,7 @@ def test_replay_rejected_order_reconsidered_on_later_delete(session):
     )
     repo.create_position_lot(
         account.id,
+        Market.A_SHARE,
         "999999",
         date(2026, 7, 14),
         100,
@@ -1604,3 +1621,47 @@ def test_delete_replay_with_hk_order_uses_hk_validity(sqlite_session):
     assert last_check.touched_limit_down is None, (
         f"Expected None for HK limit-down, got {last_check.touched_limit_down}"
     )
+
+
+def test_delete_replay_preserves_same_symbol_other_market_position(session):
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("market-replay", Decimal("100000"))
+    trade_date = date(2026, 7, 18)
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000.00"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 7, 14), 100, 100, Decimal("10.00"), source="imported"
+    )
+    repo.upsert_position(account.id, Market.HK_CONNECT, "000001", 200, 0, Decimal("1600.00"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.HK_CONNECT, "000001", date(2026, 7, 14), 200, 200, Decimal("8.00"), source="imported"
+    )
+    sell = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        100,
+        Decimal("15.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_quantity=100,
+        market=Market.A_SHARE.value,
+    )
+    deleted = repo.create_order(
+        account.id,
+        "000002",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.00"),
+        market=Market.A_SHARE.value,
+    )
+
+    assert OrderDeleteService(repo, FakeMarketDataProvider()).delete_order(deleted.id) is True
+    assert repo.get_order(sell.id).status == OrderStatus.FILLED.value
+    assert repo.get_position(account.id, Market.A_SHARE, "000001") is None
+    hk_position = repo.get_position(account.id, Market.HK_CONNECT, "000001")
+    assert hk_position is not None
+    assert hk_position.total_quantity == 200
+    assert repo.get_lots(account.id, Market.HK_CONNECT, "000001")[0].remaining_quantity == 200

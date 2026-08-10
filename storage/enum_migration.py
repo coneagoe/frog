@@ -274,9 +274,17 @@ def migrate_storage_enums(
     if dry_run:
         return _result(dry_run=True, rollback=rollback)
     if rollback:
+        from paper_trading.storage.enum_migration import (
+            preflight_diagnostics_only_market_rollback,
+            rollback_diagnostics_only_market,
+        )
+
+        paper_diagnostics_rollback = preflight_diagnostics_only_market_rollback(connection)
         rolled_back = STORAGE_ENUM_ADAPTER.rollback(connection)
+        if paper_diagnostics_rollback:
+            rollback_diagnostics_only_market(connection)
         STORAGE_ENUM_ADAPTER.verify(connection, rollback=True)
-        return _result(rollback=True, rolled_back=rolled_back)
+        return _result(rollback=True, rolled_back=rolled_back or paper_diagnostics_rollback)
     converted = STORAGE_ENUM_ADAPTER.apply(connection)
     STORAGE_ENUM_ADAPTER.verify(connection, rollback=False)
     return _result(converted=converted)
@@ -324,6 +332,9 @@ def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
 def _create_missing_tables(connection: Connection, missing: set[str]) -> None:
     tables = [table for table in _GOVERNED_TABLES if table.name in missing]
     if tables:
+        from paper_trading.storage.enum_migration import ensure_paper_market_type
+
+        ensure_paper_market_type(connection)
         tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
 
 

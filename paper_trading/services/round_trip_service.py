@@ -17,10 +17,11 @@ class RoundTripService:
         self._record_sell(trade, post_position_quantity)
 
     def _record_buy(self, trade: PaperTrade) -> None:
-        cycle = self.repo.get_open_round_trip(trade.account_id, trade.symbol)
+        cycle = self.repo.get_open_round_trip(trade.account_id, trade.market, trade.symbol)
         if cycle is None:
             self.repo.create_round_trip(
                 account_id=trade.account_id,
+                market=trade.market,
                 symbol=trade.symbol,
                 open_trade_id=trade.id,
                 open_trade_date=trade.trade_date,
@@ -35,7 +36,7 @@ class RoundTripService:
         )
 
     def _record_sell(self, trade: PaperTrade, post_position_quantity: int) -> None:
-        cycle = self.repo.get_open_round_trip(trade.account_id, trade.symbol)
+        cycle = self.repo.get_open_round_trip(trade.account_id, trade.market, trade.symbol)
         if cycle is None:
             return
         exit_amount = (Decimal(cycle.exit_amount or 0) + Decimal(trade.amount)).quantize(Decimal("0.0001"))
@@ -57,15 +58,16 @@ class RoundTripService:
 
     def rebuild_account(self, account_id: int) -> list[PaperPositionRoundTrip]:
         self.repo.delete_round_trips(account_id)
-        quantities: dict[str, int] = {}
+        quantities: dict[tuple[str, str], int] = {}
         trades = sorted(self.repo.list_trades(account_id), key=lambda trade: (trade.trade_date, trade.id))
         for trade in trades:
             side = OrderSide(str(trade.side))
-            current_quantity = quantities.get(trade.symbol, 0)
+            key = (trade.market, trade.symbol)
+            current_quantity = quantities.get(key, 0)
             if side == OrderSide.BUY:
                 current_quantity += int(trade.quantity)
             else:
                 current_quantity -= int(trade.quantity)
-            quantities[trade.symbol] = current_quantity
+            quantities[key] = current_quantity
             self.record_fill(trade, post_position_quantity=current_quantity)
         return self.repo.list_round_trips(account_id)

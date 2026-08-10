@@ -10,7 +10,7 @@ import paper_trading.services.order_service as order_service_module
 from common.const import COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_security_name_provider, get_session
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.storage.market_data import StorageMarketDataProvider
 from paper_trading.storage.models import PaperCashLedger, PaperMatchingRun, PaperTrade
 from paper_trading.storage.repository import PaperTradingRepository
@@ -49,7 +49,7 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
     )
     account_id = account_response.json()["id"]
     PaperTradingRepository(session).upsert_daily_bar_diagnostic(
-        date(2026, 6, 16), "000001", "bfq", "missing_market_data", [], resolved=False
+        date(2026, 6, 16), Market.A_SHARE, "000001", "bfq", "missing_market_data", [], resolved=False
     )
 
     response = client.post(
@@ -104,7 +104,7 @@ def test_create_order_queues_without_matching(monkeypatch, sqlite_session):
     )
     account_id = account_response.json()["id"]
     PaperTradingRepository(session).upsert_daily_bar_diagnostic(
-        date(2026, 6, 16), "000001", "bfq", "missing_market_data", [], resolved=False
+        date(2026, 6, 16), Market.A_SHARE, "000001", "bfq", "missing_market_data", [], resolved=False
     )
 
     response = client.post(
@@ -143,7 +143,7 @@ def test_create_order_idempotency_replays_original_order(monkeypatch, sqlite_ses
         "/paper/accounts", json={"name": "demo", "initial_cash": "100000.00"}, headers=headers
     ).json()["id"]
     PaperTradingRepository(session).upsert_daily_bar_diagnostic(
-        date(2026, 7, 28), "000001", "bfq", "missing_market_data", [], resolved=False
+        date(2026, 7, 28), Market.A_SHARE, "000001", "bfq", "missing_market_data", [], resolved=False
     )
     payload = {
         "symbol": "000001",

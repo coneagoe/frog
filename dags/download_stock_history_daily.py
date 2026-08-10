@@ -35,6 +35,7 @@ from common.const import (  # noqa: E402
     AdjustType,
     PeriodType,
 )
+from paper_trading.domain.enums import Market  # noqa: E402
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label  # noqa: E402
 from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
 from stock.market import is_a_share_trade_date  # noqa: E402
@@ -49,6 +50,7 @@ def _persist_diagnostic(storage, business_date, stock_id, adjust, outcome):
     try:
         PaperTradingRepository(session).upsert_daily_bar_diagnostic(
             business_date,
+            Market.A_SHARE,
             stock_id,
             canonical_adjust_label(adjust),
             outcome.classification,

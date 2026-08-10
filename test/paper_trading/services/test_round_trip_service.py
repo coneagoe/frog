@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.services.round_trip_service import RoundTripService
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -38,7 +38,7 @@ def test_record_buy_opens_round_trip(tmp_path):
     RoundTripService(repo).record_fill(trade, post_position_quantity=100)
     session.commit()
 
-    cycle = repo.get_open_round_trip(account.id, "000001.SZ")
+    cycle = repo.get_open_round_trip(account.id, Market.A_SHARE, "000001.SZ")
     assert cycle is not None
     assert cycle.entry_amount == Decimal("1000.0000")
     assert cycle.fees == Decimal("5.0000")
@@ -130,7 +130,7 @@ def test_record_partial_sell_does_not_close_round_trip(tmp_path):
     service.record_fill(sell_trade, post_position_quantity=50)
     session.commit()
 
-    cycle = repo.get_open_round_trip(account.id, "000001.SZ")
+    cycle = repo.get_open_round_trip(account.id, Market.A_SHARE, "000001.SZ")
     assert cycle is not None
     assert cycle.status == "open"
     assert cycle.exit_amount == Decimal("550.0000")
@@ -171,6 +171,7 @@ def test_rebuild_account_recreates_multiple_closed_cycles(tmp_path):
     # deletes existing cycles before recreating from the trade list.
     repo.create_round_trip(
         account_id=account.id,
+        market=Market.A_SHARE,
         symbol="000001.SZ",
         open_trade_id=trades[0].id,
         open_trade_date=date(2026, 1, 1),
@@ -186,4 +187,38 @@ def test_rebuild_account_recreates_multiple_closed_cycles(tmp_path):
     assert cycles[0].realized_pnl == Decimal("89.0000")
     assert cycles[1].realized_pnl == Decimal("-110.0000")
     assert len(cycles) == 2  # stale round trip replaced
+    engine.dispose()
+
+
+def test_rebuild_account_keeps_same_symbol_market_cycles_separate(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("market-cycles", Decimal("100000.00"))
+    for market, side, price, trade_date in [
+        (Market.A_SHARE, OrderSide.BUY, "10.00", date(2026, 6, 16)),
+        (Market.HK_CONNECT, OrderSide.BUY, "20.00", date(2026, 6, 16)),
+        (Market.A_SHARE, OrderSide.SELL, "11.00", date(2026, 6, 17)),
+        (Market.HK_CONNECT, OrderSide.SELL, "22.00", date(2026, 6, 17)),
+    ]:
+        order = repo.create_order(
+            account.id, "000001", side, 100, Decimal(price), trade_date, OrderStatus.FILLED, market=market.value
+        )
+        repo.create_trade(
+            order.id,
+            account.id,
+            "000001",
+            side,
+            100,
+            Decimal(price),
+            Decimal(price) * 100,
+            Decimal("0"),
+            trade_date,
+            market=market.value,
+        )
+
+    cycles = RoundTripService(repo).rebuild_account(account.id)
+
+    assert [(cycle.market, cycle.status, cycle.realized_pnl) for cycle in cycles] == [
+        ("a_share", "closed", Decimal("100.0000")),
+        ("hk_connect", "closed", Decimal("200.0000")),
+    ]
     engine.dispose()

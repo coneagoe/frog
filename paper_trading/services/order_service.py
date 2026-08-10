@@ -222,7 +222,7 @@ class OrderService:
                 comment,
             )
         # HK sell: validate odd-lot rules against the current position
-        position = self.repo.get_position(account_id, symbol)
+        position = self.repo.get_position(account_id, market, symbol)
         if position is not None:
             total_qty = int(position.total_quantity or 0)
             odd_lot_remainder = total_qty % meta.board_lot
@@ -330,7 +330,7 @@ class OrderService:
         if (
             market == Market.A_SHARE
             and trade_date < date.today()
-            and not self.repo.has_unresolved_daily_bar_diagnostic(trade_date, symbol)
+            and not self.repo.has_unresolved_daily_bar_diagnostic(trade_date, market, symbol)
         ):
             raise PaperTradingError(
                 "HISTORICAL_TRADE_DATE_NOT_ELIGIBLE",
@@ -372,7 +372,7 @@ class OrderService:
                 note="cancel_buy_order",
             )
         if int(order.frozen_quantity or 0) > 0:
-            position = self.repo.get_position(order.account_id, order.symbol)
+            position = self.repo.get_position(order.account_id, order.market, order.symbol)
             if position is not None:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         return self.repo.update_order_status(order, OrderStatus.CANCELLED)
@@ -435,14 +435,14 @@ class OrderService:
         idempotency_key: str | None,
         comment: str | None = None,
     ) -> PaperOrder:
-        position = self.repo.get_position(account_id, symbol)
+        position = self.repo.get_position(account_id, market, symbol)
         total_sellable = (
             0 if position is None else int(position.total_quantity or 0) - int(position.frozen_quantity or 0)
         )
         ensure_sufficient_position(total_sellable, quantity)
         assert position is not None
 
-        lots = self.repo.get_lots(account_id, symbol)
+        lots = self.repo.get_lots(account_id, market, symbol)
         matured_qty = sum(int(lot.remaining_quantity or 0) for lot in lots if lot.buy_trade_date < trade_date)
         sellable_matured = matured_qty - int(position.frozen_quantity or 0)
         if quantity > sellable_matured:
@@ -528,7 +528,7 @@ class OrderService:
         idempotency_key: str | None,
         comment: str | None = None,
     ) -> PaperOrder:
-        position = self.repo.get_position(account_id, symbol)
+        position = self.repo.get_position(account_id, market, symbol)
         total_sellable = (
             0 if position is None else int(position.total_quantity or 0) - int(position.frozen_quantity or 0)
         )

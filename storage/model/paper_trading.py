@@ -119,7 +119,9 @@ class PaperCashLedger(Base):
 
 class PaperPosition(Base):
     __tablename__ = tb_name_paper_positions
-    __table_args__ = (UniqueConstraint("account_id", "symbol", name="uq_paper_positions_account_symbol"),)
+    __table_args__ = (
+        UniqueConstraint("account_id", "market", "symbol", name="uq_paper_positions_account_market_symbol"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[int] = mapped_column(
@@ -284,6 +286,9 @@ class PaperPositionRoundTrip(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    market: Mapped[str] = mapped_column(
+        _value_enum(Market, "paper_market"), nullable=False, server_default="a_share", index=True
+    )
 
 
 class PaperAccountSnapshot(Base):
@@ -400,11 +405,14 @@ class PaperLedgerRebuild(Base):
 class DailyBarDiagnostic(Base):
     __tablename__ = tb_name_daily_bar_diagnostics
     __table_args__ = (
-        UniqueConstraint("business_date", "stock_id", "adjust", name="uq_daily_bar_diagnostics_business_key"),
+        UniqueConstraint("business_date", "market", "stock_id", "adjust", name="uq_daily_bar_diagnostics_business_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     business_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    market: Mapped[str] = mapped_column(
+        _value_enum(Market, "paper_market"), nullable=False, server_default="a_share", index=True
+    )
     stock_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     adjust: Mapped[str] = mapped_column(
         _value_enum(DailyBarDiagnosticAdjust, "daily_bar_diagnostic_adjust"), nullable=False

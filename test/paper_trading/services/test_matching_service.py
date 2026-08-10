@@ -17,7 +17,7 @@ from common.const import (
     COL_OPEN,
     COL_STOCK_ID,
 )
-from paper_trading.domain.enums import MatchingRunStatus, OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, MatchingRunStatus, OrderSide, OrderStatus
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
@@ -48,6 +48,7 @@ def _services(tmp_path):
         for symbol in ("000001.SZ", "000001"):
             repo.upsert_daily_bar_diagnostic(
                 business_date,
+                Market.A_SHARE,
                 symbol,
                 "bfq",
                 "missing_market_data",
@@ -87,7 +88,7 @@ def test_matching_fills_buy_order_and_creates_lot(tmp_path):
     session.commit()
 
     filled = repo.get_order(order.id)
-    lots = repo.get_lots(account.id, "000001.SZ")
+    lots = repo.get_lots(account.id, Market.A_SHARE, "000001.SZ")
     assert run.filled_count == 1
     assert filled.status == OrderStatus.FILLED.value
     assert filled.filled_quantity == 100
@@ -102,7 +103,7 @@ def test_matching_fills_buy_order_and_creates_lot(tmp_path):
 def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("retry-gap", Decimal("100000.00"))
-    repo.upsert_position(account.id, "300996", 100, 0, Decimal("900.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
     class MutableMarketData:
@@ -133,7 +134,7 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     assert repo.list_snapshots(account.id) == []
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
     cash_after_fill = repo.get_cash_available(account.id)
-    position_after_fill = repo.get_position(account.id, "000001.SZ").total_quantity
+    position_after_fill = repo.get_position(account.id, Market.A_SHARE, "000001.SZ").total_quantity
 
     market_data.available = True
     second_run = matching_service.run(trade_date)
@@ -142,7 +143,7 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     assert second_run.filled_count == 0
     assert len(repo.list_trades(account.id)) == 1
     assert repo.get_cash_available(account.id) == cash_after_fill
-    assert repo.get_position(account.id, "000001.SZ").total_quantity == position_after_fill
+    assert repo.get_position(account.id, Market.A_SHARE, "000001.SZ").total_quantity == position_after_fill
     assert len(repo.list_snapshots(account.id)) == 1
     gap = repo.get_valuation_gap(account.id, trade_date)
     assert gap is not None
@@ -159,8 +160,8 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
     engine, session, repo, _, _, trade_date = _services(tmp_path)
     complete = repo.create_account("complete", Decimal("100000.00"))
     incomplete = repo.create_account("incomplete", Decimal("100000.00"))
-    repo.upsert_position(complete.id, "000001.SZ", 100, 0, Decimal("900.00"))
-    repo.upsert_position(incomplete.id, "300996", 100, 0, Decimal("900.00"))
+    repo.upsert_position(complete.id, Market.A_SHARE, "000001.SZ", 100, 0, Decimal("900.00"))
+    repo.upsert_position(incomplete.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
 
     class MixedMarketData:
         def is_trade_date(self, trade_date: date) -> bool:
@@ -223,14 +224,14 @@ def test_matching_skips_limit_order_not_touched(tmp_path):
 def test_matching_fills_sell_order_and_releases_frozen_position(tmp_path):
     engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
-    repo.upsert_position(account.id, "000001.SZ", 200, 0, Decimal("1800.00"))
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001.SZ", 200, 0, Decimal("1800.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.SELL, 100, Decimal("10.00"), trade_date)
 
     run = matching_service.run(trade_date)
     session.commit()
 
-    position = repo.get_position(account.id, "000001.SZ")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
     assert run.filled_count == 1
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
     assert position.total_quantity == 100
@@ -253,7 +254,7 @@ def test_matching_closes_round_trip_when_position_returns_to_zero(tmp_path):
     assert len(cycles) == 1
     assert cycles[0].status == "closed"
     assert cycles[0].close_trade_date == next_date
-    assert repo.get_position(account.id, "000001.SZ") is None
+    assert repo.get_position(account.id, Market.A_SHARE, "000001.SZ") is None
     assert repo.get_account(account.id).realized_pnl == Decimal("44.4600")
     engine.dispose()
 
@@ -330,8 +331,8 @@ def test_matching_uses_account_fee_config_for_sell_fees(tmp_path):
         stamp_duty_rate=Decimal("0.001"),
         transfer_fee_rate=Decimal("0"),
     )
-    repo.upsert_position(account.id, "000001.SZ", 200, 0, Decimal("1800.00"))
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001.SZ", 200, 0, Decimal("1800.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 15), 200, 200, Decimal("9.00"))
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.SELL, 100, Decimal("10.00"), trade_date)
 
     matching_service.run(trade_date)
@@ -441,7 +442,9 @@ def test_non_market_data_snapshot_exception_still_raises(tmp_path):
 def test_matching_mixed_exact_date_data_keeps_missing_order_accepted(tmp_path):
     engine, session, repo, order_service, _, trade_date = _services(tmp_path)
     account = repo.create_account("mixed-data", Decimal("100000.00"))
-    repo.upsert_daily_bar_diagnostic(trade_date, "000002.SZ", "bfq", "missing_market_data", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.A_SHARE, "000002.SZ", "bfq", "missing_market_data", [], resolved=False
+    )
     available = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
     missing = order_service.place_order(account.id, "000002.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
@@ -571,7 +574,9 @@ def test_match_order_propagates_sqlalchemy_errors_but_returns_failed_for_other_e
 def test_matching_same_date_retry_fills_only_previously_accepted_order(tmp_path):
     engine, session, repo, order_service, _, trade_date = _services(tmp_path)
     account = repo.create_account("retry-data", Decimal("100000.00"))
-    repo.upsert_daily_bar_diagnostic(trade_date, "000002.SZ", "bfq", "missing_market_data", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.A_SHARE, "000002.SZ", "bfq", "missing_market_data", [], resolved=False
+    )
     available = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
     missing = order_service.place_order(account.id, "000002.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
     missing_bar: dict[str, object] = {}
@@ -614,7 +619,9 @@ def test_matching_same_date_retry_fills_only_previously_accepted_order(tmp_path)
 def test_matching_fill_resolves_historical_retry_diagnostic(tmp_path):
     engine, session, repo, order_service, _, trade_date = _services(tmp_path)
     account = repo.create_account("historical-retry", Decimal("100000.00"))
-    repo.upsert_daily_bar_diagnostic(trade_date, "000001.SZ", "bfq", "missing_exact_date", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.A_SHARE, "000001.SZ", "bfq", "missing_exact_date", [], resolved=False
+    )
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
     class ExactDateMarketData:
@@ -736,7 +743,7 @@ def test_hk_connect_matching_uses_hk_fees_and_persists_market(sqlite_session):
     positions = repo.get_positions(account.id)
     assert len(positions) == 1
     assert positions[0].market == "hk_connect"
-    lots = repo.get_lots(account.id, "00700")
+    lots = repo.get_lots(account.id, Market.HK_CONNECT, "00700")
     assert len(lots) == 1
     assert lots[0].market == "hk_connect"
 
@@ -798,7 +805,7 @@ def test_hk_connect_matching_sell_creates_pending_settlement(sqlite_session):
     session = sqlite_session
     session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
     session.flush()
-    repo.upsert_position(account.id, "00700", 100, 0, Decimal("30000.00"), market="hk_connect")
+    repo.upsert_position(account.id, Market.HK_CONNECT, "00700", 100, 0, Decimal("30000.00"))
     order = repo.create_order(
         account_id=account.id,
         symbol="00700",
@@ -870,3 +877,56 @@ def test_hk_connect_matching_buy_does_not_create_pending_settlement(sqlite_sessi
     service.match_order(order)
     pending = repo.list_pending_settlements(account.id)
     assert len(pending) == 0
+
+
+def test_matching_same_symbol_isolates_fills_lots_pnl_and_diagnostics(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("market-matching", Decimal("100000.00"))
+    trade_date = date(2026, 7, 21)
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 100, Decimal("900.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 7, 20), 100, 100, Decimal("9.00"))
+    repo.upsert_position(account.id, Market.HK_CONNECT, "000001", 200, 0, Decimal("1600.00"))
+    repo.create_position_lot(account.id, Market.HK_CONNECT, "000001", date(2026, 7, 20), 200, 200, Decimal("8.00"))
+    a_share_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_quantity=100,
+        market=Market.A_SHARE.value,
+    )
+    hk_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        market=Market.HK_CONNECT.value,
+    )
+
+    class MarketSeparatedBars:
+        def get_daily_bar(self, symbol, requested_date, market=None):
+            if market == Market.HK_CONNECT.value:
+                raise KeyError("HK bar unavailable")
+            return DailyBar(symbol, requested_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10"))
+
+        def next_trade_date(self, current_date):
+            return current_date
+
+    market_data = MarketSeparatedBars()
+    service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+
+    assert service.match_order(a_share_order) == "filled"
+    assert service.match_order(hk_order) == "warning"
+    assert repo.get_position(account.id, Market.A_SHARE, "000001") is None
+    assert repo.get_position(account.id, Market.HK_CONNECT, "000001").total_quantity == 200
+    assert repo.get_lots(account.id, Market.HK_CONNECT, "000001")[0].remaining_quantity == 200
+    assert repo.get_account(account.id).realized_pnl == Decimal("94.4900")
+    diagnostics = repo.list_daily_bar_diagnostics()
+    assert [(item.market, item.stock_id, item.resolved) for item in diagnostics] == [("hk_connect", "000001", False)]

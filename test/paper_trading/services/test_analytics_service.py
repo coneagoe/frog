@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -42,6 +42,7 @@ def test_analytics_computes_execution_and_trade_quality(tmp_path):
     )
     win = repo.create_round_trip(
         account.id,
+        Market.A_SHARE,
         "000001.SZ",
         1,
         date(2026, 6, 16),
@@ -173,6 +174,7 @@ def test_analytics_streak_uses_close_date_ordering(tmp_path):
     # When ordered by close date: loser then winner → max consecutive win = 1 (not 2)
     rt1 = repo.create_round_trip(
         account.id,
+        Market.A_SHARE,
         "A",
         1,
         date(2026, 6, 1),
@@ -192,6 +194,7 @@ def test_analytics_streak_uses_close_date_ordering(tmp_path):
     )
     rt2 = repo.create_round_trip(
         account.id,
+        Market.A_SHARE,
         "B",
         3,
         date(2026, 6, 5),
@@ -228,6 +231,7 @@ def test_analytics_recent_round_trips_limit_and_ordering(tmp_path):
     for i in range(20):
         rt = repo.create_round_trip(
             account.id,
+            Market.A_SHARE,
             f"S{i}",
             i + 1,
             date(2026, 6, 1),
@@ -250,6 +254,7 @@ def test_analytics_recent_round_trips_limit_and_ordering(tmp_path):
     for i in range(20, 30):
         repo.create_round_trip(
             account.id,
+            Market.A_SHARE,
             f"O{i}",
             i + 1,
             date(2026, 6, 1 + i),
@@ -279,6 +284,7 @@ def test_analytics_recent_round_trips_limit_open_only(tmp_path):
     for i in range(30):
         repo.create_round_trip(
             account.id,
+            Market.A_SHARE,
             f"O{i}",
             i + 1,
             date(2026, 6, 1 + i),

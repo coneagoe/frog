@@ -66,12 +66,14 @@ class PaperTradingRepository:
     def upsert_daily_bar_diagnostic(
         self,
         business_date: date,
+        market: str | Market,
         stock_id: str,
         adjust: str,
         classification: str,
         provider_outcomes: list[dict[str, Any]],
         resolved: bool,
     ) -> DailyBarDiagnostic:
+        market = Market(market).value
         normalized_stock_id = canonical_stock_id(stock_id)
         adjust = DailyBarDiagnosticAdjust(canonical_adjust_label(adjust)).value
         classification = DailyBarDiagnosticClassification(classification).value
@@ -79,6 +81,7 @@ class PaperTradingRepository:
         now = datetime.now(timezone.utc)
         values = {
             "business_date": business_date,
+            "market": market,
             "stock_id": normalized_stock_id,
             "adjust": adjust,
             "classification": classification,
@@ -99,6 +102,7 @@ class PaperTradingRepository:
             statement = statement.on_conflict_do_update(
                 index_elements=[
                     DailyBarDiagnostic.business_date,
+                    DailyBarDiagnostic.market,
                     DailyBarDiagnostic.stock_id,
                     DailyBarDiagnostic.adjust,
                 ],
@@ -114,7 +118,7 @@ class PaperTradingRepository:
 
         diagnostic = (
             self.session.query(DailyBarDiagnostic)
-            .filter_by(business_date=business_date, stock_id=normalized_stock_id, adjust=adjust)
+            .filter_by(business_date=business_date, market=market, stock_id=normalized_stock_id, adjust=adjust)
             .one_or_none()
         )
         if diagnostic is None:
@@ -141,6 +145,7 @@ class PaperTradingRepository:
             .join(
                 DailyBarDiagnostic,
                 (DailyBarDiagnostic.business_date == PaperOrder.trade_date)
+                & (DailyBarDiagnostic.market == PaperOrder.market)
                 & (DailyBarDiagnostic.stock_id == PaperOrder.symbol)
                 & (DailyBarDiagnostic.adjust == "bfq"),
             )
@@ -154,12 +159,16 @@ class PaperTradingRepository:
             .all()
         )
 
-    def has_unresolved_daily_bar_diagnostic(self, business_date: date, stock_id: str, adjust: str = "bfq") -> bool:
+    def has_unresolved_daily_bar_diagnostic(
+        self, business_date: date, market: str | Market, stock_id: str, adjust: str = "bfq"
+    ) -> bool:
+        market = Market(market).value
         adjust = canonical_adjust_label(adjust)
         return (
             self.session.query(DailyBarDiagnostic.id)
             .filter(
                 DailyBarDiagnostic.business_date == business_date,
+                DailyBarDiagnostic.market == market,
                 DailyBarDiagnostic.stock_id == canonical_stock_id(stock_id),
                 DailyBarDiagnostic.adjust == adjust,
                 DailyBarDiagnostic.resolved.is_(False),
@@ -622,39 +631,39 @@ class PaperTradingRepository:
     def upsert_position(
         self,
         account_id: int,
+        market: str | Market,
         symbol: str,
         total_quantity: int,
         frozen_quantity: int,
         cost_amount: Decimal,
         realized_pnl: Decimal = Decimal("0"),
         source: str = "trade",
-        market: str | None = None,
     ) -> PaperPosition:
+        market = Market(market).value
         source = PositionSource(source).value
-        position = self.get_position(account_id, symbol)
+        position = self.get_position(account_id, market, symbol)
         if position is None:
-            position = PaperPosition(account_id=account_id, symbol=symbol, source=source)
+            position = PaperPosition(account_id=account_id, market=market, symbol=symbol, source=source)
             self.session.add(position)
         position.total_quantity = total_quantity
         position.frozen_quantity = frozen_quantity
         position.cost_amount = cost_amount
         position.realized_pnl = realized_pnl
-        if market is not None:
-            position.market = Market(market).value
         self.session.flush()
         return position
 
     def create_position_lot(
         self,
         account_id: int,
+        market: str | Market,
         symbol: str,
         buy_trade_date: date,
         original_quantity: int,
         remaining_quantity: int,
         cost_price: Decimal,
         source: str = "trade",
-        market: str = "a_share",
     ) -> PaperPositionLot:
+        market = Market(market).value
         lot = PaperPositionLot(
             account_id=account_id,
             symbol=symbol,
@@ -663,7 +672,7 @@ class PaperTradingRepository:
             remaining_quantity=remaining_quantity,
             cost_price=cost_price,
             source=PositionSource(source).value,
-            market=Market(market).value,
+            market=market,
         )
         self.session.add(lot)
         self.session.flush()
@@ -828,10 +837,15 @@ class PaperTradingRepository:
         self.session.flush()
         return order
 
-    def get_position(self, account_id: int, symbol: str) -> PaperPosition | None:
+    def get_position(self, account_id: int, market: str | Market, symbol: str) -> PaperPosition | None:
+        market = Market(market).value
         return (
             self.session.query(PaperPosition)
-            .filter(PaperPosition.account_id == account_id, PaperPosition.symbol == symbol)
+            .filter(
+                PaperPosition.account_id == account_id,
+                PaperPosition.market == market,
+                PaperPosition.symbol == symbol,
+            )
             .one_or_none()
         )
 
@@ -839,11 +853,13 @@ class PaperTradingRepository:
         self.session.delete(position)
         self.session.flush()
 
-    def get_lots(self, account_id: int, symbol: str) -> list[PaperPositionLot]:
+    def get_lots(self, account_id: int, market: str | Market, symbol: str) -> list[PaperPositionLot]:
+        market = Market(market).value
         return list(
             self.session.query(PaperPositionLot)
             .filter(
                 PaperPositionLot.account_id == account_id,
+                PaperPositionLot.market == market,
                 PaperPositionLot.symbol == symbol,
             )
             .order_by(PaperPositionLot.buy_trade_date.asc(), PaperPositionLot.id.asc())
@@ -853,6 +869,7 @@ class PaperTradingRepository:
     def create_round_trip(
         self,
         account_id: int,
+        market: str | Market,
         symbol: str,
         open_trade_id: int,
         open_trade_date: date,
@@ -861,6 +878,7 @@ class PaperTradingRepository:
     ) -> PaperPositionRoundTrip:
         cycle = PaperPositionRoundTrip(
             account_id=account_id,
+            market=Market(market).value,
             symbol=symbol,
             open_trade_id=open_trade_id,
             open_trade_date=open_trade_date,
@@ -872,11 +890,13 @@ class PaperTradingRepository:
         self.session.flush()
         return cycle
 
-    def get_open_round_trip(self, account_id: int, symbol: str) -> PaperPositionRoundTrip | None:
+    def get_open_round_trip(self, account_id: int, market: str | Market, symbol: str) -> PaperPositionRoundTrip | None:
+        market = Market(market).value
         return (
             self.session.query(PaperPositionRoundTrip)
             .filter(
                 PaperPositionRoundTrip.account_id == account_id,
+                PaperPositionRoundTrip.market == market,
                 PaperPositionRoundTrip.symbol == symbol,
                 PaperPositionRoundTrip.status == RoundTripStatus.OPEN.value,
             )
@@ -951,12 +971,6 @@ class PaperTradingRepository:
             )
             .all()
         )
-        market_by_symbol: dict[str, str] = {}
-        for lot in imported_lots:
-            market = market_by_symbol.setdefault(lot.symbol, lot.market)
-            if market != lot.market:
-                raise ValueError(f"conflicting markets for imported symbol: {lot.symbol}")
-
         if not preserve_execution_history:
             counts["validity_checks"] = (
                 self.session.query(PaperTradeValidityCheck)
@@ -1034,21 +1048,22 @@ class PaperTradingRepository:
             .delete(synchronize_session="fetch")
         )
         # Rebuild aggregate positions from surviving imported lots.
-        total_qty: dict[str, int] = defaultdict(int)
-        total_cost: dict[str, Decimal] = defaultdict(Decimal)
+        total_qty: dict[tuple[str, str], int] = defaultdict(int)
+        total_cost: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
         for lot in imported_lots:
-            total_qty[lot.symbol] += int(lot.remaining_quantity)
-            total_cost[lot.symbol] += Decimal(lot.cost_price) * int(lot.remaining_quantity)
-        for symbol in total_qty:
+            key = (lot.market, lot.symbol)
+            total_qty[key] += int(lot.remaining_quantity)
+            total_cost[key] += Decimal(lot.cost_price) * int(lot.remaining_quantity)
+        for market, symbol in total_qty:
             position = PaperPosition(
                 account_id=account_id,
                 symbol=symbol,
-                total_quantity=total_qty[symbol],
+                total_quantity=total_qty[(market, symbol)],
                 frozen_quantity=0,
-                cost_amount=total_cost[symbol].quantize(Decimal("0.0001")),
+                cost_amount=total_cost[(market, symbol)].quantize(Decimal("0.0001")),
                 realized_pnl=Decimal("0"),
                 source=PositionSource.IMPORTED.value,
-                market=market_by_symbol[symbol],
+                market=market,
             )
             self.session.add(position)
         self.session.flush()

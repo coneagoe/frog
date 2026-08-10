@@ -123,6 +123,7 @@ def test_daily_bar_diagnostic_has_business_key_and_json_outcomes():
     assert DailyBarDiagnostic.__table__.primary_key.columns.keys() == ["id"]
     assert {column.name for column in DailyBarDiagnostic.__table__.columns} >= {
         "business_date",
+        "market",
         "stock_id",
         "adjust",
         "classification",
@@ -131,11 +132,28 @@ def test_daily_bar_diagnostic_has_business_key_and_json_outcomes():
         "last_observed_at",
         "resolved",
     }
-    assert any(
-        constraint.name == "uq_daily_bar_diagnostics_business_key"
-        and {column.name for column in constraint.columns} == {"business_date", "stock_id", "adjust"}
+    assert (
+        "uq_daily_bar_diagnostics_business_key",
+        ("business_date", "market", "stock_id", "adjust"),
+    ) in {
+        (constraint.name, tuple(column.name for column in constraint.columns))
         for constraint in DailyBarDiagnostic.__table__.constraints
-    )
+        if constraint.name
+    }
+
+
+def test_market_qualified_position_and_round_trip_keys():
+    position_constraints = {
+        (constraint.name, tuple(column.name for column in constraint.columns))
+        for constraint in PaperPosition.__table__.constraints
+        if constraint.name
+    }
+    round_trip = PaperPositionRoundTrip.__table__
+
+    assert ("uq_paper_positions_account_market_symbol", ("account_id", "market", "symbol")) in position_constraints
+    assert round_trip.c.market.nullable is False
+    assert round_trip.c.market.server_default is not None
+    assert round_trip.c.market.type.name == "paper_market"
 
 
 def test_daily_bar_diagnostic_resolved_has_postgresql_boolean_default():
@@ -191,6 +209,8 @@ def test_selected_paper_columns_use_shared_value_enums():
     assert PaperPositionLot.__table__.c.market.type.name == "paper_market"
     assert PaperTrade.__table__.c.market.type.name == "paper_market"
     assert PaperTradeValidityCheck.__table__.c.market.type.name == "paper_market"
+    assert PaperPositionRoundTrip.__table__.c.market.type.name == "paper_market"
+    assert DailyBarDiagnostic.__table__.c.market.type.name == "paper_market"
     assert PaperPosition.__table__.c.source.type.name == "paper_position_source"
     assert PaperPositionLot.__table__.c.source.type.name == "paper_position_source"
     assert PaperPositionRoundTrip.__table__.c.status.type.name == "paper_round_trip_status"
@@ -294,6 +314,7 @@ def test_selected_paper_enum_defaults_round_trip_as_readable_strings(tmp_path):
         assert (loaded_position.source, loaded_position.market) == ("trade", "a_share")
         assert (loaded_lot.source, loaded_lot.market) == ("trade", "a_share")
         assert loaded_cycle.status == "open"
+        assert loaded_cycle.market == "a_share"
         assert loaded_check.data_granularity == "daily"
         assert loaded_rebuild.status == "completed"
 

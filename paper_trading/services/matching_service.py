@@ -152,7 +152,7 @@ class MatchingService:
                 note="reject_order_release",
             )
         if int(order.frozen_quantity or 0) > 0:
-            position = self.repo.get_position(order.account_id, order.symbol)
+            position = self.repo.get_position(order.account_id, order.market, order.symbol)
             if position is not None:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
@@ -160,6 +160,7 @@ class MatchingService:
     def _record_missing_exact_date_diagnostic(self, order: PaperOrder, error: KeyError) -> None:
         self.repo.upsert_daily_bar_diagnostic(
             order.trade_date,
+            order.market,
             order.symbol,
             "bfq",
             "missing_exact_date",
@@ -169,10 +170,11 @@ class MatchingService:
 
     def _resolve_matching_diagnostic(self, order: PaperOrder) -> None:
         if order.market == "a_share" and self.repo.has_unresolved_daily_bar_diagnostic(
-            order.trade_date, order.symbol, "bfq"
+            order.trade_date, order.market, order.symbol, "bfq"
         ):
             self.repo.upsert_daily_bar_diagnostic(
                 order.trade_date,
+                order.market,
                 order.symbol,
                 "bfq",
                 "resolved",
@@ -220,7 +222,7 @@ class MatchingService:
         )
         if side == OrderSide.BUY:
             self._settle_buy(order, trade.id, amount, fees)
-            position = self.repo.get_position(order.account_id, order.symbol)
+            position = self.repo.get_position(order.account_id, order.market, order.symbol)
             self.round_trip_service.record_fill(
                 trade,
                 post_position_quantity=0 if position is None else int(position.total_quantity or 0),
@@ -237,7 +239,7 @@ class MatchingService:
                     trade_id=trade.id,
                     source="hk_sell",
                 )
-            position = self.repo.get_position(order.account_id, order.symbol)
+            position = self.repo.get_position(order.account_id, order.market, order.symbol)
             self.round_trip_service.record_fill(
                 trade,
                 post_position_quantity=0 if position is None else int(position.total_quantity or 0),
@@ -262,25 +264,25 @@ class MatchingService:
                 order_id=order.id,
                 trade_id=trade_id,
             )
-        position = self.repo.get_position(order.account_id, order.symbol)
+        position = self.repo.get_position(order.account_id, order.market, order.symbol)
         current_quantity = 0 if position is None else int(position.total_quantity or 0)
         current_cost = Decimal("0") if position is None else Decimal(position.cost_amount or 0)
         self.repo.upsert_position(
             order.account_id,
+            order.market,
             order.symbol,
             total_quantity=current_quantity + int(order.quantity),
             frozen_quantity=(0 if position is None else int(position.frozen_quantity or 0)),
             cost_amount=(current_cost + actual_cost).quantize(Decimal("0.0001")),
-            market=order.market,
         )
         self.repo.create_position_lot(
             order.account_id,
+            order.market,
             order.symbol,
             order.trade_date,
             int(order.quantity),
             int(order.quantity),
             Decimal(order.limit_price),
-            market=order.market,
         )
 
     def _settle_sell(self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal) -> None:
@@ -293,13 +295,13 @@ class MatchingService:
                 order_id=order.id,
                 trade_id=trade_id,
             )
-        position = self.repo.get_position(order.account_id, order.symbol)
+        position = self.repo.get_position(order.account_id, order.market, order.symbol)
         if position is None:
             return
         quantity_to_sell = int(order.quantity)
         remaining = quantity_to_sell
         cost_reduction = Decimal("0")
-        for lot in self.repo.get_lots(order.account_id, order.symbol):
+        for lot in self.repo.get_lots(order.account_id, order.market, order.symbol):
             if remaining <= 0:
                 break
             used = min(int(lot.remaining_quantity or 0), remaining)

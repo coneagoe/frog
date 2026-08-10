@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from monitor.monitor_target_service import MonitorTargetService
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_session
-from paper_trading.domain.enums import CashEventType, OrderSide, OrderStatus
+from paper_trading.domain.enums import CashEventType, Market, OrderSide, OrderStatus
 from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.models import DailyBarDiagnostic, PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
@@ -166,7 +166,7 @@ def test_postgresql_governed_writer_smoke_uses_canonical_labels(postgres_schema,
 
         blackroom = storage.create_blackroom_record(stock_code="000001", market="A", source="manual")
         diagnostic = repository.upsert_daily_bar_diagnostic(
-            date(2026, 8, 9), "000001", "bfq", "missing_market_data", [], resolved=False
+            date(2026, 8, 9), Market.A_SHARE, "000001", "bfq", "missing_market_data", [], resolved=False
         )
         session.commit()
         signal_ids = storage.save_ssf_change_signals([_signal_payload()])
@@ -267,7 +267,7 @@ def test_sqlite_governed_writers_preserve_canonical_labels(sqlite_storage: Stora
     assert sqlite_storage.Session is not None
     with sqlite_storage.Session() as session:
         diagnostic = PaperTradingRepository(session).upsert_daily_bar_diagnostic(
-            date(2026, 8, 9), "000001", "bfq", "missing_market_data", [], resolved=False
+            date(2026, 8, 9), Market.A_SHARE, "000001", "bfq", "missing_market_data", [], resolved=False
         )
         session.commit()
         assert diagnostic.adjust == "bfq"

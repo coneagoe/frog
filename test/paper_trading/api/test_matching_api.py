@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_session
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -19,6 +19,7 @@ def test_matching_api_records_snapshot_market_data_failure(monkeypatch, sqlite_s
     account = repo.create_account("api-failure", Decimal("100000.00"))
     repo.upsert_daily_bar_diagnostic(
         date(2026, 7, 27),
+        Market.A_SHARE,
         "00700",
         "bfq",
         "missing_market_data",
@@ -88,7 +89,9 @@ def test_matching_rebuild_api_replays_eligible_delayed_order(monkeypatch, sqlite
         OrderStatus.ACCEPTED,
         frozen_cash=Decimal("1005.0000"),
     )
-    repo.upsert_daily_bar_diagnostic(trade_date, "000001", "bfq", "missing_exact_date", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.A_SHARE, "000001", "bfq", "missing_exact_date", [], resolved=False
+    )
 
     class MarketData:
         def get_daily_bar(self, symbol, requested_date, market=None):

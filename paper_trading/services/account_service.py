@@ -1,3 +1,4 @@
+from collections import defaultdict
 from decimal import Decimal
 
 from paper_trading.domain.enums import Market
@@ -97,39 +98,34 @@ class AccountService:
             raise ValueError(f"paper account not found: {account_id}")
         if self.repo.get_positions(account_id) or self.repo.count_position_lots(account_id) > 0:
             raise ValueError("account already has positions")
-        market_by_symbol: dict[str, Market] = {}
-        for item in positions:
-            previous = market_by_symbol.setdefault(item.symbol, item.market)
-            if previous != item.market:
-                raise ValueError(f"conflicting markets for imported symbol: {item.symbol}")
         # Create lots first (one per item, even for duplicate symbols)
         for item in positions:
             self.repo.create_position_lot(
-                account_id=account_id,
-                symbol=item.symbol,
-                buy_trade_date=item.buy_trade_date,
-                original_quantity=item.quantity,
-                remaining_quantity=item.quantity,
-                cost_price=item.cost_price,
+                account_id,
+                item.market,
+                item.symbol,
+                item.buy_trade_date,
+                item.quantity,
+                item.quantity,
+                item.cost_price,
                 source="imported",
-                market=item.market.value,
             )
-        # Aggregate positions per symbol (one position per symbol)
-        from collections import defaultdict
-
-        total_qty: dict[str, int] = defaultdict(int)
-        total_cost: dict[str, Decimal] = defaultdict(Decimal)
+        # Aggregate positions by market-qualified symbol.
+        total_qty: dict[tuple[Market, str], int] = defaultdict(int)
+        total_cost: dict[tuple[Market, str], Decimal] = defaultdict(Decimal)
         for item in positions:
-            total_qty[item.symbol] += item.quantity
-            total_cost[item.symbol] += item.cost_price * item.quantity
-        for symbol in total_qty:
+            key = (item.market, item.symbol)
+            total_qty[key] += item.quantity
+            total_cost[key] += item.cost_price * item.quantity
+        for key, quantity in total_qty.items():
+            market, symbol = key
             self.repo.upsert_position(
-                account_id=account_id,
-                symbol=symbol,
-                total_quantity=total_qty[symbol],
-                frozen_quantity=0,
-                cost_amount=total_cost[symbol],
+                account_id,
+                market,
+                symbol,
+                quantity,
+                0,
+                total_cost[key],
                 realized_pnl=Decimal("0"),
                 source="imported",
-                market=market_by_symbol[symbol].value,
             )

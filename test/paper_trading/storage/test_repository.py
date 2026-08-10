@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from paper_trading.domain.enums import CashEventType, MatchingRunStatus, OrderSide, OrderStatus
+from paper_trading.domain.enums import CashEventType, Market, MatchingRunStatus, OrderSide, OrderStatus
 from paper_trading.storage.models import PaperTradeValidityCheck
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.domain_enums import (
@@ -99,6 +99,7 @@ def test_upsert_daily_bar_diagnostic_reuses_business_date_symbol_adjustment(sqli
 
     first = repo.upsert_daily_bar_diagnostic(
         business_date=date(2026, 7, 28),
+        market=Market.A_SHARE,
         stock_id="300996",
         adjust="bfq",
         classification="missing_market_data",
@@ -107,6 +108,7 @@ def test_upsert_daily_bar_diagnostic_reuses_business_date_symbol_adjustment(sqli
     )
     second = repo.upsert_daily_bar_diagnostic(
         business_date=date(2026, 7, 28),
+        market="a_share",
         stock_id="300996",
         adjust="bfq",
         classification="downloaded",
@@ -135,7 +137,7 @@ def test_upsert_daily_bar_diagnostic_rejects_invalid_finite_values(sqlite_sessio
 
     with pytest.raises(ValueError):
         PaperTradingRepository(sqlite_session).upsert_daily_bar_diagnostic(
-            date(2026, 8, 8), "000001", adjust, classification, outcomes, resolved=False
+            date(2026, 8, 8), "a_share", "000001", adjust, classification, outcomes, resolved=False
         )
 
 
@@ -145,6 +147,7 @@ def test_bfq_diagnostic_label_is_found_by_default_lookup(sqlite_session):
 
     repo.upsert_daily_bar_diagnostic(
         business_date=date(2026, 7, 28),
+        market="a_share",
         stock_id="300996",
         adjust="",
         classification="missing_market_data",
@@ -152,7 +155,7 @@ def test_bfq_diagnostic_label_is_found_by_default_lookup(sqlite_session):
         resolved=False,
     )
 
-    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "300996") is True
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "a_share", "300996") is True
 
 
 def test_diagnostic_lookup_normalizes_exchange_suffixed_and_bare_stock_ids(sqlite_session):
@@ -161,6 +164,7 @@ def test_diagnostic_lookup_normalizes_exchange_suffixed_and_bare_stock_ids(sqlit
 
     diagnostic = repo.upsert_daily_bar_diagnostic(
         business_date=date(2026, 7, 28),
+        market="a_share",
         stock_id="000002.SZ",
         adjust="bfq",
         classification="missing_market_data",
@@ -169,8 +173,8 @@ def test_diagnostic_lookup_normalizes_exchange_suffixed_and_bare_stock_ids(sqlit
     )
 
     assert diagnostic.stock_id == "000002"
-    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "000002") is True
-    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "000002.SZ") is True
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "a_share", "000002") is True
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 28), "a_share", "000002.SZ") is True
 
 
 def test_provider_outcome_rejects_unknown_status_and_normalizes_detail():
@@ -383,6 +387,7 @@ def test_round_trip_repository_creates_and_lists_closed_cycle(sqlite_session):
 
     cycle = repo.create_round_trip(
         account_id=account.id,
+        market="a_share",
         symbol="000001.SZ",
         open_trade_id=open_trade.id,
         open_trade_date=date(2026, 6, 16),
@@ -693,6 +698,7 @@ def test_delete_account_removes_round_trips(sqlite_session):
 
     repo.create_round_trip(
         account_id=account.id,
+        market="a_share",
         symbol="000001.SZ",
         open_trade_id=trade.id,
         open_trade_date=date(2026, 6, 16),
@@ -758,13 +764,22 @@ def test_clear_account_rebuild_state_preserves_initial_cash(sqlite_session):
     repo.add_cash_event(account.id, CashEventType.TRADE, Decimal("-1005.0000"), order_id=order.id, trade_id=trade.id)
     # Trade-derived position/lot — should be deleted by clear_account_rebuild_state
     repo.upsert_position(
-        account.id, "000001", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("1005.0000"), source="trade"
+        account.id,
+        "a_share",
+        "000001",
+        total_quantity=100,
+        frozen_quantity=0,
+        cost_amount=Decimal("1005.0000"),
+        source="trade",
     )
-    repo.create_position_lot(account.id, "000001", date(2026, 7, 19), 100, 100, Decimal("10.00"), source="trade")
+    repo.create_position_lot(
+        account.id, "a_share", "000001", date(2026, 7, 19), 100, 100, Decimal("10.00"), source="trade"
+    )
     # Imported lot with remaining_quantity < original_quantity (simulating a sell reducing it)
     # This lot must be reset to original_quantity after clear.
     repo.create_position_lot(
         account.id,
+        "a_share",
         "000002",
         date(2026, 7, 1),
         original_quantity=300,
@@ -774,7 +789,13 @@ def test_clear_account_rebuild_state_preserves_initial_cash(sqlite_session):
     )
     # Imported aggregate position (may have been mutated by trades) — will be rebuilt from lots
     repo.upsert_position(
-        account.id, "000002", total_quantity=100, frozen_quantity=0, cost_amount=Decimal("900.0000"), source="imported"
+        account.id,
+        "a_share",
+        "000002",
+        total_quantity=100,
+        frozen_quantity=0,
+        cost_amount=Decimal("900.0000"),
+        source="imported",
     )
     repo.save_snapshot(
         account_id=account.id,
@@ -797,7 +818,7 @@ def test_clear_account_rebuild_state_preserves_initial_cash(sqlite_session):
     # Trade-derived lot deleted
     assert repo.count_position_lots(account.id) == 1
     # Imported lot's remaining_quantity reset to original_quantity
-    lots = repo.get_lots(account.id, "000002")
+    lots = repo.get_lots(account.id, "a_share", "000002")
     assert len(lots) == 1
     assert lots[0].remaining_quantity == 300
     assert lots[0].original_quantity == 300
@@ -825,6 +846,7 @@ def test_clear_account_rebuild_state_resets_same_symbol_imported_after_trade(sql
     # Imported baseline: 200 shares @ 9.00
     repo.create_position_lot(
         account.id,
+        "a_share",
         "000001",
         date(2026, 7, 1),
         original_quantity=200,
@@ -834,6 +856,7 @@ def test_clear_account_rebuild_state_resets_same_symbol_imported_after_trade(sql
     )
     repo.upsert_position(
         account.id,
+        "a_share",
         "000001",
         total_quantity=200,
         frozen_quantity=0,
@@ -843,6 +866,7 @@ def test_clear_account_rebuild_state_resets_same_symbol_imported_after_trade(sql
     # Trade buy on same symbol: 100 shares @ 10.00 — mutates aggregate position
     repo.create_position_lot(
         account.id,
+        "a_share",
         "000001",
         date(2026, 7, 19),
         original_quantity=100,
@@ -852,6 +876,7 @@ def test_clear_account_rebuild_state_resets_same_symbol_imported_after_trade(sql
     )
     repo.upsert_position(
         account.id,
+        "a_share",
         "000001",
         total_quantity=300,
         frozen_quantity=0,
@@ -863,7 +888,7 @@ def test_clear_account_rebuild_state_resets_same_symbol_imported_after_trade(sql
     repo.clear_account_rebuild_state(account.id)
 
     # Trade lot deleted; imported lot reset to original_quantity
-    lots = repo.get_lots(account.id, "000001")
+    lots = repo.get_lots(account.id, "a_share", "000001")
     assert len(lots) == 1
     assert lots[0].source == "imported"
     assert lots[0].remaining_quantity == 200
@@ -882,62 +907,178 @@ def test_rebuild_preserves_imported_hk_market(sqlite_session):
     account = repo.create_account("hk-import", Decimal("100000"))
     repo.create_position_lot(
         account.id,
+        "hk_connect",
         "00700",
         date(2026, 7, 1),
         original_quantity=100,
         remaining_quantity=100,
         cost_price=Decimal("400.00"),
         source="imported",
-        market="hk_connect",
     )
     repo.upsert_position(
         account.id,
+        "hk_connect",
         "00700",
         total_quantity=100,
         frozen_quantity=0,
         cost_amount=Decimal("40000.0000"),
         source="imported",
-        market="hk_connect",
     )
     sqlite_session.commit()
 
     repo.clear_account_rebuild_state(account.id)
 
-    position = repo.get_position(account.id, "00700")
+    position = repo.get_position(account.id, "hk_connect", "00700")
     assert position is not None
     assert position.market == "hk_connect"
 
 
-def test_rebuild_rejects_persisted_mixed_markets_before_clearing(sqlite_session):
+def test_rebuild_restores_same_symbol_imported_lots_by_market(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("mixed-import", Decimal("100000"))
     for market in ("a_share", "hk_connect"):
         repo.create_position_lot(
             account.id,
+            market,
             "00700",
             date(2026, 7, 1),
             original_quantity=100,
             remaining_quantity=100,
             cost_price=Decimal("400.00"),
             source="imported",
-            market=market,
         )
     repo.upsert_position(
         account.id,
+        "a_share",
         "00700",
         total_quantity=200,
         frozen_quantity=0,
         cost_amount=Decimal("80000.0000"),
         source="imported",
-        market="a_share",
     )
     sqlite_session.commit()
 
-    with pytest.raises(ValueError, match="conflicting markets for imported symbol: 00700"):
-        repo.clear_account_rebuild_state(account.id)
+    repo.clear_account_rebuild_state(account.id)
 
-    assert repo.get_position(account.id, "00700") is not None
+    assert repo.get_position(account.id, "a_share", "00700").total_quantity == 100
+    assert repo.get_position(account.id, "hk_connect", "00700").total_quantity == 100
+
+
+def test_same_symbol_positions_and_lots_are_isolated_by_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("position-isolation", Decimal("100000"))
+
+    repo.upsert_position(account.id, "a_share", "00700", 100, 0, Decimal("900"))
+    repo.upsert_position(account.id, "hk_connect", "00700", 200, 0, Decimal("80000"))
+    repo.create_position_lot(account.id, "a_share", "00700", date(2026, 7, 1), 100, 100, Decimal("9"))
+    repo.create_position_lot(account.id, "hk_connect", "00700", date(2026, 7, 1), 200, 200, Decimal("400"))
+
+    assert repo.get_position(account.id, "a_share", "00700").total_quantity == 100
+    assert repo.get_position(account.id, "hk_connect", "00700").total_quantity == 200
+    assert [lot.remaining_quantity for lot in repo.get_lots(account.id, "a_share", "00700")] == [100]
+    assert [lot.remaining_quantity for lot in repo.get_lots(account.id, "hk_connect", "00700")] == [200]
+
+
+def test_create_position_lot_requires_and_normalizes_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("lot-market", Decimal("100000"))
+
+    lot = repo.create_position_lot(
+        account.id,
+        Market.HK_CONNECT,
+        "00700",
+        date(2026, 7, 1),
+        100,
+        100,
+        Decimal("400"),
+    )
+
+    assert lot.market == "hk_connect"
+
+
+def test_hk_diagnostic_does_not_select_same_symbol_a_share_order_for_rebuild(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("diagnostic-market", Decimal("100000"))
+    order = repo.create_order(
+        account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 7, 1),
+        OrderStatus.ACCEPTED,
+        market="a_share",
+    )
+    repo.upsert_daily_bar_diagnostic(
+        date(2026, 7, 1),
+        "hk_connect",
+        "00700",
+        "bfq",
+        "missing_exact_date",
+        [],
+        resolved=False,
+    )
+
+    assert repo.list_eligible_daily_bar_rebuild_orders() == []
+    assert order.market == "a_share"
+
+
+def test_same_symbol_round_trips_are_isolated_by_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("round-trip-isolation", Decimal("100000"))
+
+    for market in ("a_share", "hk_connect"):
+        order = repo.create_order(
+            account.id,
+            "00700",
+            OrderSide.BUY,
+            100,
+            Decimal("10"),
+            date(2026, 7, 1),
+            OrderStatus.FILLED,
+            market=market,
+        )
+        trade = repo.create_trade(
+            order.id,
+            account.id,
+            "00700",
+            OrderSide.BUY,
+            100,
+            Decimal("10"),
+            Decimal("1000"),
+            Decimal("1"),
+            date(2026, 7, 1),
+            market=market,
+        )
+        repo.create_round_trip(account.id, market, "00700", trade.id, date(2026, 7, 1), Decimal("1000"), Decimal("1"))
+
+    assert repo.get_open_round_trip(account.id, "a_share", "00700").market == "a_share"
+    assert repo.get_open_round_trip(account.id, "hk_connect", "00700").market == "hk_connect"
+
+
+def test_same_symbol_diagnostics_are_isolated_by_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    values = {
+        "business_date": date(2026, 7, 1),
+        "stock_id": "00700",
+        "adjust": "bfq",
+        "classification": "missing_exact_date",
+        "provider_outcomes": [],
+        "resolved": False,
+    }
+
+    a_share = repo.upsert_daily_bar_diagnostic(market="a_share", **values)
+    hk_connect = repo.upsert_daily_bar_diagnostic(market="hk_connect", **values)
+
+    assert a_share.id != hk_connect.id
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 1), "a_share", "00700") is True
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 1), "hk_connect", "00700") is True
 
 
 def test_reset_orders_for_replay_resets_replayable_statuses(sqlite_session):
@@ -1120,11 +1261,11 @@ def test_position_persists_market(sqlite_session):
     account = repo.create_account("pos-mkt", Decimal("100000.00"))
     pos = repo.upsert_position(
         account_id=account.id,
+        market="hk_connect",
         symbol="00700",
         total_quantity=100,
         frozen_quantity=0,
         cost_amount=Decimal("40000.00"),
-        market="hk_connect",
     )
     assert pos.market == "hk_connect"
 

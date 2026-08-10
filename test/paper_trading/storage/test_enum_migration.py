@@ -67,14 +67,15 @@ def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
     statements = (
         "CREATE TABLE paper_accounts (id integer primary key, status varchar(20) NOT NULL DEFAULT 'active', fee_preset varchar(30) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_cash_ledger (id integer primary key, event_type varchar(20) NOT NULL)",
-        "CREATE TABLE paper_positions (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_positions (id integer primary key, account_id integer NOT NULL, symbol varchar(20) NOT NULL, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share', CONSTRAINT uq_paper_positions_account_symbol UNIQUE (account_id, symbol))",
         "CREATE TABLE paper_position_lots (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_orders (id integer primary key, side varchar(10) NOT NULL, status varchar(30) NOT NULL, validity_status varchar(20), market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_trades (id integer primary key, side varchar(10) NOT NULL, market varchar(20) NOT NULL DEFAULT 'a_share')",
-        "CREATE TABLE paper_position_round_trips (id integer primary key, status varchar(20) NOT NULL DEFAULT 'open')",
+        "CREATE TABLE paper_position_round_trips (id integer primary key, account_id integer NOT NULL, symbol varchar(20) NOT NULL, status varchar(20) NOT NULL DEFAULT 'open')",
         "CREATE TABLE paper_trade_validity_checks (id integer primary key, side varchar(10) NOT NULL, status varchar(20) NOT NULL, data_granularity varchar(20) NOT NULL DEFAULT 'daily', market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_pending_settlement (id integer primary key, source varchar(20) NOT NULL)",
         "CREATE TABLE paper_ledger_rebuilds (id integer primary key, status varchar(20) NOT NULL)",
+        "CREATE TABLE daily_bar_diagnostics (id integer primary key, business_date date NOT NULL, stock_id varchar(20) NOT NULL, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL, CONSTRAINT uq_daily_bar_diagnostics_business_key UNIQUE (business_date, stock_id, adjust))",
         "CREATE TABLE paper_matching_runs (id integer primary key, trade_date date NOT NULL, scope_key varchar(40) NOT NULL, status varchar(32) NOT NULL)",
         "CREATE INDEX ix_paper_positions_market ON paper_positions (market)",
         "CREATE INDEX ix_paper_position_lots_market ON paper_position_lots (market)",
@@ -90,6 +91,20 @@ def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
     )
     for statement in statements:
         connection.execute(text(statement))
+
+
+def _create_legacy_diagnostics_table(connection: Connection) -> None:
+    connection.execute(
+        text(
+            "CREATE TABLE daily_bar_diagnostics ("
+            "id integer primary key, business_date date NOT NULL, stock_id varchar(20) NOT NULL, "
+            "adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL, "
+            "CONSTRAINT uq_daily_bar_diagnostics_business_key UNIQUE (business_date, stock_id, adjust))"
+        )
+    )
+    connection.execute(
+        text("INSERT INTO daily_bar_diagnostics VALUES (1, '2026-08-07', '000001', 'bfq', 'downloaded', '[]'::jsonb)")
+    )
 
 
 def _enum_types(connection: Connection) -> set[str]:
@@ -130,6 +145,21 @@ def _column_type(connection: Connection, table_name: str, column_name: str) -> s
 def _index_exists(connection: Connection, index_name: str) -> bool:
     return bool(
         connection.execute(text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}).scalar_one()
+    )
+
+
+def _constraint_columns(connection: Connection, table_name: str, constraint_name: str) -> tuple[str, ...]:
+    return tuple(
+        connection.execute(
+            text(
+                "SELECT a.attname FROM pg_constraint c "
+                "JOIN unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true "
+                "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key.attnum "
+                "WHERE c.conrelid = :table_name::regclass AND c.conname = :constraint_name "
+                "ORDER BY key.ordinality"
+            ),
+            {"table_name": table_name, "constraint_name": constraint_name},
+        ).scalars()
     )
 
 
@@ -324,8 +354,11 @@ def test_fresh_bootstrap_creates_all_enum_types(empty_postgres_schema):
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         for group in PAPER_TRADING_ENUM_GROUPS:
             for column in group.columns:
+                if column.table_name == "daily_bar_diagnostics":
+                    continue
                 assert _table_exists(connection, column.table_name)
                 assert _column_type(connection, column.table_name, column.column_name) == group.type_name
+        assert not _table_exists(connection, "daily_bar_diagnostics")
         assert _table_exists(connection, "paper_account_snapshots")
         assert _table_exists(connection, "paper_valuation_gaps")
 
@@ -396,3 +429,122 @@ def test_rollback_restores_exact_varchar_types_and_indexes(postgres_schema):
         assert _enum_types(connection) == set()
         assert _index_exists(connection, "ix_paper_orders_status")
         assert _index_exists(connection, "uq_matching_active_scope")
+
+
+def test_apply_adds_market_and_backfills_diagnostics_with_a_share(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics VALUES (1, '2026-08-07', '000001', 'bfq', 'downloaded', '[]'::jsonb)"
+            )
+        )
+        assert migrate_paper_trading_enums(connection).converted is True
+
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert (
+            connection.execute(text("SELECT market FROM daily_bar_diagnostics WHERE id = 1")).scalar_one() == "a_share"
+        )
+        assert (
+            connection.execute(
+                text(
+                    "SELECT conname FROM pg_constraint WHERE conrelid = 'daily_bar_diagnostics'::regclass AND conname = 'uq_daily_bar_diagnostics_business_key'"
+                )
+            ).scalar_one()
+            == "uq_daily_bar_diagnostics_business_key"
+        )
+        assert _constraint_columns(connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key") == (
+            "business_date",
+            "market",
+            "stock_id",
+            "adjust",
+        )
+
+
+def test_apply_upgrades_legacy_diagnostics_when_paper_tables_are_missing(empty_postgres_schema):
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        _create_legacy_diagnostics_table(connection)
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert (
+            connection.execute(text("SELECT market FROM daily_bar_diagnostics WHERE id = 1")).scalar_one() == "a_share"
+        )
+        assert _constraint_columns(connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key") == (
+            "business_date",
+            "market",
+            "stock_id",
+            "adjust",
+        )
+        assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+        for group in PAPER_TRADING_ENUM_GROUPS:
+            for column in group.columns:
+                if column.table_name != "daily_bar_diagnostics":
+                    assert _table_exists(connection, column.table_name)
+                    assert _column_type(connection, column.table_name, column.column_name) == group.type_name
+
+
+def test_rollback_rejects_rows_colliding_on_legacy_marketless_keys(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_paper_trading_enums(connection)
+        connection.execute(
+            text("INSERT INTO paper_positions (id, account_id, symbol, market) VALUES (1, 7, '000001', 'a_share')")
+        )
+        connection.execute(
+            text("INSERT INTO paper_positions (id, account_id, symbol, market) VALUES (2, 7, '000001', 'hk_connect')")
+        )
+        with pytest.raises(PaperTradingEnumMigrationError, match="legacy uniqueness"):
+            migrate_paper_trading_enums(connection, rollback=True)
+
+
+def test_rollback_rejects_diagnostic_rows_colliding_on_legacy_marketless_key(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_paper_trading_enums(connection)
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics "
+                "(id, business_date, stock_id, market, adjust, classification, provider_outcomes) "
+                "VALUES (1, '2026-08-07', '000001', 'a_share', 'bfq', 'downloaded', '[]'::jsonb), "
+                "(2, '2026-08-07', '000001', 'hk_connect', 'bfq', 'downloaded', '[]'::jsonb)"
+            )
+        )
+        with pytest.raises(PaperTradingEnumMigrationError, match="legacy uniqueness"):
+            migrate_paper_trading_enums(connection, rollback=True)
+
+
+def test_apply_upgrades_fully_preconverted_schema_with_missing_new_market_columns(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_paper_trading_enums(connection)
+        connection.execute(text("DROP INDEX ix_paper_position_round_trips_market"))
+        connection.execute(text("DROP INDEX ix_daily_bar_diagnostics_market"))
+        connection.execute(text("ALTER TABLE paper_position_round_trips DROP COLUMN market"))
+        connection.execute(
+            text("ALTER TABLE daily_bar_diagnostics DROP CONSTRAINT uq_daily_bar_diagnostics_business_key")
+        )
+        connection.execute(text("ALTER TABLE daily_bar_diagnostics DROP COLUMN market"))
+        connection.execute(
+            text(
+                "ALTER TABLE daily_bar_diagnostics ADD CONSTRAINT uq_daily_bar_diagnostics_business_key "
+                "UNIQUE (business_date, stock_id, adjust)"
+            )
+        )
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        assert _column_type(connection, "paper_position_round_trips", "market") == "paper_market"
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert _index_exists(connection, "ix_paper_position_round_trips_market")
+        assert _index_exists(connection, "ix_daily_bar_diagnostics_market")
+        assert _constraint_columns(connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key") == (
+            "business_date",
+            "market",
+            "stock_id",
+            "adjust",
+        )

@@ -232,9 +232,11 @@ def test_persist_diagnostic_commits_and_closes_its_session(monkeypatch):
     pytest.importorskip("pendulum")
     pytest.importorskip("airflow")
     import dags.download_stock_history_daily as dag_module
+    from paper_trading.domain.enums import Market
     from paper_trading.domain.market_data_diagnostics import StockHistoryOutcome
 
     events = []
+    received_args = []
     session = MagicMock()
     session.commit.side_effect = lambda: events.append("commit")
     session.close.side_effect = lambda: events.append("close")
@@ -246,6 +248,7 @@ def test_persist_diagnostic_commits_and_closes_its_session(monkeypatch):
 
         def upsert_daily_bar_diagnostic(self, *args):
             events.append("upsert")
+            received_args.extend(args)
 
     monkeypatch.setattr(dag_module, "PaperTradingRepository", Repository)
     outcome = StockHistoryOutcome("300996", "2026-07-28", "bfq", "missing_market_data", (), False)
@@ -259,6 +262,7 @@ def test_persist_diagnostic_commits_and_closes_its_session(monkeypatch):
     )
 
     assert events == ["upsert", "commit", "close"]
+    assert received_args[1] == Market.A_SHARE
 
 
 def test_daily_dag_closes_diagnostic_session_with_each_write():

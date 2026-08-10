@@ -112,8 +112,8 @@ def test_delete_account_removes_account_owned_rows(tmp_path):
         trade_date=date(2026, 6, 16),
     )
     session.add(trade)
-    repo.upsert_position(account.id, "000001.SZ", 100, 0, Decimal("1000.00"))
-    repo.create_position_lot(account.id, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("10.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001.SZ", 100, 0, Decimal("1000.00"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001.SZ", date(2026, 6, 16), 100, 100, Decimal("10.00"))
     repo.save_snapshot(
         account_id=account.id,
         trade_date=date(2026, 6, 16),
@@ -169,10 +169,10 @@ class TestImportPositions:
             ],
         )
 
-        assert repo.get_position(account.id, "00700").market == "hk_connect"
-        assert repo.get_lots(account.id, "00700")[0].market == "hk_connect"
+        assert repo.get_position(account.id, Market.HK_CONNECT, "00700").market == "hk_connect"
+        assert repo.get_lots(account.id, Market.HK_CONNECT, "00700")[0].market == "hk_connect"
 
-    def test_import_rejects_duplicate_symbol_with_conflicting_markets_before_writes(self, tmp_path):
+    def test_import_same_symbol_in_different_markets_creates_isolated_positions_and_lots(self, tmp_path):
         engine, session, repo, service = _repo_and_service(tmp_path)
         account = service.create_account("demo", Decimal("100000.00"))
         session.commit()
@@ -185,11 +185,17 @@ class TestImportPositions:
         )
         hk_connect_00700 = a_share_00700.model_copy(update={"market": Market.HK_CONNECT})
 
-        with pytest.raises(ValueError, match="conflicting markets for imported symbol: 00700"):
-            service.import_positions(account.id, [a_share_00700, hk_connect_00700])
+        service.import_positions(account.id, [a_share_00700, hk_connect_00700])
+        session.commit()
 
-        assert repo.get_positions(account.id) == []
-        assert repo.count_position_lots(account.id) == 0
+        a_share_position = repo.get_position(account.id, Market.A_SHARE, "00700")
+        hk_connect_position = repo.get_position(account.id, Market.HK_CONNECT, "00700")
+        assert a_share_position is not None
+        assert a_share_position.total_quantity == 100
+        assert hk_connect_position is not None
+        assert hk_connect_position.total_quantity == 100
+        assert len(repo.get_lots(account.id, Market.A_SHARE, "00700")) == 1
+        assert len(repo.get_lots(account.id, Market.HK_CONNECT, "00700")) == 1
 
     def test_import_creates_positions_and_lots(self, tmp_path):
         """Import seeds both a PaperPosition and PaperPositionLot per item."""
@@ -218,7 +224,7 @@ class TestImportPositions:
         assert positions[0].cost_amount == Decimal("1050.0000")
         assert positions[0].realized_pnl == Decimal("0")
 
-        lots = repo.get_lots(account.id, "000001")
+        lots = repo.get_lots(account.id, Market.A_SHARE, "000001")
         assert len(lots) == 1
         assert lots[0].original_quantity == 100
         assert lots[0].remaining_quantity == 100
@@ -255,7 +261,7 @@ class TestImportPositions:
         assert positions[0].total_quantity == 150
         assert positions[0].cost_amount == Decimal("1600.0000")  # 100*10 + 50*12
 
-        lots = repo.get_lots(account.id, "000001")
+        lots = repo.get_lots(account.id, Market.A_SHARE, "000001")
         assert len(lots) == 2
 
     def test_import_rejects_missing_account(self, tmp_path):
@@ -277,7 +283,7 @@ class TestImportPositions:
     def test_import_rejects_account_with_existing_positions(self, tmp_path):
         engine, session, repo, service = _repo_and_service(tmp_path)
         account = service.create_account("demo", Decimal("100000.00"))
-        repo.upsert_position(account.id, "EXISTING", 10, 0, Decimal("100.00"))
+        repo.upsert_position(account.id, Market.A_SHARE, "EXISTING", 10, 0, Decimal("100.00"))
         session.commit()
 
         with pytest.raises(ValueError, match="account already has positions"):
@@ -299,6 +305,7 @@ class TestImportPositions:
         account = service.create_account("demo", Decimal("100000.00"))
         repo.create_position_lot(
             account_id=account.id,
+            market=Market.A_SHARE,
             symbol="000001",
             buy_trade_date=date(2026, 1, 15),
             original_quantity=100,

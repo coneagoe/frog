@@ -252,9 +252,9 @@ class OrderDeleteService:
         else:
             frozen_qty = int(order.frozen_quantity or 0)
             if frozen_qty > 0:
-                position = self.repo.get_position(account_id, order.symbol)
+                position = self.repo.get_position(account_id, order.market, order.symbol)
                 if position is not None:
-                    lots = self.repo.get_lots(account_id, order.symbol)
+                    lots = self.repo.get_lots(account_id, order.market, order.symbol)
                     ok, code, reason = self._check_sell_reservation(
                         position,
                         lots,

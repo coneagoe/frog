@@ -19,7 +19,12 @@ from storage.enum_governance import (
     EnumGovernanceError,
     migrate_enums,
 )
-from storage.enum_migration import STORAGE_ENUM_ADAPTER, STORAGE_ENUM_GROUPS
+from storage.enum_migration import (
+    _PROVIDER_CHECK_SQL,
+    STORAGE_ENUM_ADAPTER,
+    STORAGE_ENUM_GROUPS,
+    _normalize_expression,
+)
 
 MANAGED_CHECK_NAMES = {
     "ck_stock_monitor_targets_condition_type",
@@ -55,6 +60,20 @@ def postgres_schema():
         _create_paper_legacy_schema(connection)
         _create_monitor_legacy_schema(connection)
         _create_storage_legacy_schema(connection)
+    try:
+        yield engine, schema
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
+
+
+@pytest.fixture()
+def empty_postgres_schema():
+    engine = _engine()
+    schema = f"enum_governance_empty_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
     try:
         yield engine, schema
     finally:
@@ -120,6 +139,20 @@ def _create_storage_legacy_schema(connection: Connection) -> None:
         connection.execute(text(statement))
 
 
+def _create_legacy_diagnostics_only_schema(connection: Connection) -> None:
+    _create_monitor_legacy_schema(connection)
+    statements = (
+        "CREATE TABLE blackroom_records (id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', source varchar(50) NOT NULL DEFAULT 'manual')",
+        "CREATE TABLE daily_bar_diagnostics (id integer primary key, business_date date NOT NULL, stock_id varchar(20) NOT NULL, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL, CONSTRAINT uq_daily_bar_diagnostics_business_key UNIQUE (business_date, stock_id, adjust))",
+        "CREATE TABLE ssf_change_signals (id integer primary key, status varchar(20) NOT NULL DEFAULT 'signal', event_types jsonb NOT NULL)",
+    )
+    for statement in statements:
+        connection.execute(text(statement))
+    connection.execute(
+        text("INSERT INTO daily_bar_diagnostics VALUES (1, '2026-08-07', '000001', 'bfq', 'downloaded', '[]'::jsonb)")
+    )
+
+
 def _column_type(connection: Connection, table_name: str, column_name: str) -> str:
     return str(
         connection.execute(
@@ -150,6 +183,21 @@ def _column_default(connection: Connection, table_name: str, column_name: str) -
 def _index_exists(connection: Connection, index_name: str) -> bool:
     return bool(
         connection.execute(text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}).scalar_one()
+    )
+
+
+def _constraint_columns(connection: Connection, table_name: str, constraint_name: str) -> tuple[str, ...]:
+    return tuple(
+        connection.execute(
+            text(
+                "SELECT a.attname FROM pg_constraint c "
+                "JOIN unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true "
+                "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key.attnum "
+                "WHERE c.conrelid = :table_name::regclass AND c.conname = :constraint_name "
+                "ORDER BY key.ordinality"
+            ),
+            {"table_name": table_name, "constraint_name": constraint_name},
+        ).scalars()
     )
 
 
@@ -409,6 +457,62 @@ def test_non_postgresql_connection_returns_no_change_without_adapters() -> None:
 
 def test_default_adapters_are_paper_trading_monitor_then_storage() -> None:
     assert tuple(adapter.name for adapter in ENUM_GOVERNANCE_ADAPTERS) == ("paper_trading", "monitor", "storage")
+
+
+def test_global_migration_bootstraps_empty_schema_without_partial_storage_domain(empty_postgres_schema) -> None:
+    engine, schema = empty_postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+
+        result = migrate_enums(connection)
+
+        expected_types = {group.type_name for group in _all_enum_groups()}
+        expected_tables = {column.table_name for group in _all_enum_groups() for column in group.columns}
+        assert result.converted is True
+        assert _all_managed_enum_types(connection) == expected_types
+        assert {
+            table_name
+            for table_name in expected_tables
+            if connection.execute(text("SELECT to_regclass(:table_name)"), {"table_name": table_name}).scalar_one()
+        } == expected_tables
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "daily_bar_diagnostic_adjust"
+        assert (
+            _column_type(connection, "daily_bar_diagnostics", "classification") == "daily_bar_diagnostic_classification"
+        )
+        provider_check = connection.execute(
+            text(
+                "SELECT pg_get_constraintdef(c.oid) FROM pg_constraint c "
+                "WHERE c.conrelid = 'daily_bar_diagnostics'::regclass "
+                "AND c.conname = 'ck_daily_bar_diagnostics_provider_outcome_status'"
+            )
+        ).scalar_one()
+        assert _normalize_expression(provider_check).replace("::jsonb", "") == _normalize_expression(
+            _PROVIDER_CHECK_SQL
+        ).replace("::jsonb", "")
+
+
+def test_global_migration_upgrades_legacy_diagnostics_when_paper_tables_are_missing(empty_postgres_schema) -> None:
+    engine, schema = empty_postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        _create_legacy_diagnostics_only_schema(connection)
+
+        result = migrate_enums(connection)
+
+        assert result.converted is True
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert (
+            connection.execute(text("SELECT market FROM daily_bar_diagnostics WHERE id = 1")).scalar_one() == "a_share"
+        )
+        assert _constraint_columns(connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key") == (
+            "business_date",
+            "market",
+            "stock_id",
+            "adjust",
+        )
+        assert _column_type(connection, "paper_orders", "market") == "paper_market"
+        assert _column_type(connection, "paper_orders", "side") == "paper_order_side"
 
 
 def test_dry_run_reports_all_schema_readiness_facts(postgres_schema) -> None:

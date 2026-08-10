@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_position_valuation_service, get_security_name_provider, get_session
+from paper_trading.domain.enums import Market
 from paper_trading.services.position_valuation_service import PositionValuation
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -204,7 +205,7 @@ class TestImportPositionsAPI:
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)
         PaperTradingRepository(session).upsert_position(
-            account_id, "000001", 100, 0, Decimal("1000.00"), realized_pnl=Decimal("75.00")
+            account_id, Market.A_SHARE, "000001", 100, 0, Decimal("1000.00"), realized_pnl=Decimal("75.00")
         )
         session.commit()
         client.app.dependency_overrides[get_position_valuation_service] = lambda: _FakePositionValuationService(
@@ -223,8 +224,8 @@ class TestImportPositionsAPI:
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)
         repo = PaperTradingRepository(session)
-        repo.upsert_position(account_id, "000001", 100, 0, Decimal("1000.00"))
-        repo.upsert_position(account_id, "00700", 10, 0, Decimal("4000.00"), market="hk_connect")
+        repo.upsert_position(account_id, Market.A_SHARE, "000001", 100, 0, Decimal("1000.00"))
+        repo.upsert_position(account_id, Market.HK_CONNECT, "00700", 10, 0, Decimal("4000.00"))
         session.commit()
         valuation = _FakePositionValuationService(
             {
@@ -246,8 +247,8 @@ class TestImportPositionsAPI:
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)
         repo = PaperTradingRepository(session)
-        repo.upsert_position(account_id, "000001", 100, 0, Decimal("1000.00"))
-        repo.upsert_position(account_id, "UNKNOWN", 100, 0, Decimal("1000.00"))
+        repo.upsert_position(account_id, Market.A_SHARE, "000001", 100, 0, Decimal("1000.00"))
+        repo.upsert_position(account_id, Market.A_SHARE, "UNKNOWN", 100, 0, Decimal("1000.00"))
         session.commit()
         client.app.dependency_overrides[get_position_valuation_service] = lambda: _FakePositionValuationService(
             {"000001": (Decimal("11.00"), "real_time", Decimal("100.00"))}
@@ -293,7 +294,7 @@ class TestImportPositionsAPI:
     def test_list_positions_includes_stock_name(self, monkeypatch, sqlite_session):
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)
-        PaperTradingRepository(session).upsert_position(account_id, "000001", 100, 0, Decimal("1000"))
+        PaperTradingRepository(session).upsert_position(account_id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
         session.commit()
         provider = _FakeSecurityNameProvider({("a_share", "000001"): "Ping An Bank"})
         client.app.dependency_overrides[get_security_name_provider] = lambda: provider
@@ -306,7 +307,7 @@ class TestImportPositionsAPI:
     def test_list_positions_returns_null_for_missing_stock_name(self, monkeypatch, sqlite_session):
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)
-        PaperTradingRepository(session).upsert_position(account_id, "UNKNOWN", 100, 0, Decimal("1000"))
+        PaperTradingRepository(session).upsert_position(account_id, Market.A_SHARE, "UNKNOWN", 100, 0, Decimal("1000"))
         session.commit()
         client.app.dependency_overrides[get_security_name_provider] = lambda: _FakeSecurityNameProvider({})
 
@@ -339,7 +340,7 @@ class TestImportPositionsAPI:
         positions = PaperTradingRepository(session).get_positions(account_id)
         assert positions[0].market == "hk_connect"
 
-    def test_import_positions_rejects_conflicting_markets_without_writes(self, monkeypatch, sqlite_session):
+    def test_import_positions_creates_isolated_same_symbol_cross_market_positions(self, monkeypatch, sqlite_session):
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)
 
@@ -365,11 +366,16 @@ class TestImportPositionsAPI:
             headers=headers,
         )
 
-        assert response.status_code == 422
-        assert response.json()["detail"] == "conflicting markets for imported symbol: 00700"
+        assert response.status_code == 200
         repo = PaperTradingRepository(session)
-        assert repo.get_positions(account_id) == []
-        assert repo.count_position_lots(account_id) == 0
+        a_share_position = repo.get_position(account_id, Market.A_SHARE, "00700")
+        hk_connect_position = repo.get_position(account_id, Market.HK_CONNECT, "00700")
+        assert a_share_position is not None
+        assert a_share_position.total_quantity == 100
+        assert hk_connect_position is not None
+        assert hk_connect_position.total_quantity == 100
+        assert len(repo.get_lots(account_id, Market.A_SHARE, "00700")) == 1
+        assert len(repo.get_lots(account_id, Market.HK_CONNECT, "00700")) == 1
 
     def test_import_positions_missing_account_returns_404(self, monkeypatch, sqlite_session):
         client, headers, _ = _client(monkeypatch, sqlite_session)
@@ -458,7 +464,7 @@ class TestImportPositionsAPI:
         account_id = _create_account(client, headers)
         # Pre-seed a position
         repo = PaperTradingRepository(session)
-        repo.upsert_position(account_id, "EXISTING", 10, 0, Decimal("100.00"))
+        repo.upsert_position(account_id, Market.A_SHARE, "EXISTING", 10, 0, Decimal("100.00"))
         session.commit()
 
         response = client.post(
@@ -485,6 +491,7 @@ class TestImportPositionsAPI:
         repo = PaperTradingRepository(session)
         repo.create_position_lot(
             account_id=account_id,
+            market=Market.A_SHARE,
             symbol="EXISTING",
             buy_trade_date=date(2026, 1, 15),
             original_quantity=100,

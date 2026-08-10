@@ -146,33 +146,38 @@ Validation rules:
 - `quantity` must be a positive integer.
 - `cost_price` must be a non-negative decimal.
 - `buy_trade_date` must be a valid calendar date in `YYYY-MM-DD` format.
-- Duplicate symbols create separate lots and aggregate into one position per symbol.
+- Duplicate symbols in the same market create separate lots and aggregate into
+  one position per `(market, symbol)`. The same bare symbol may be imported in
+  distinct markets as separate positions.
 - Import is rejected if the account does not exist (404) or already has positions (422).
 
 ### Repair Imported Position Markets
 
 Imports may optionally specify `market` as `a_share` or `hk_connect`. The aggregate
-position and each imported lot for the same account and symbol must use the same
-market value. If historical imported holdings were stored with the wrong market,
-run the standalone administrative repair command with an explicit mapping for every
-target. Do not use this command as a general market migration: it never discovers or
-changes unspecified account/symbol pairs, and it never changes trade-sourced lots.
+position and each imported lot use the same market-qualified identity. If historical
+imported holdings were stored with the wrong market, run the standalone administrative
+repair command with an explicit source-market and target-market mapping. Do not use
+this command as a general market migration: it never discovers or changes unspecified
+account/market/symbol identities, and it never changes trade-sourced lots.
 
 ```bash
 uv run tools/repair_paper_position_markets.py \
-  --mapping ACCOUNT_ID:00700:hk_connect
+  --mapping ACCOUNT_ID:a_share:00700:hk_connect
 ```
 
 Replace `ACCOUNT_ID` with the account ID supplied for the deployment; no production
 account ID is embedded in this procedure. Repeat `--mapping` for additional explicit
-targets. Every requested aggregate position is checked before any update is issued,
-and all updates run in one transaction, so a missing target leaves all targets
-unchanged. A successful repeat is safe and reports zero changed rows (idempotent).
+targets. Each mapping names the source and target markets, so the command updates
+only the specified source-market position and imported lots. Every requested
+source position and target-market collision is checked before any update is
+issued. All updates run in one transaction, so a missing source or existing
+distinct target-market position leaves all targets unchanged. A successful repeat
+must name the position's current market as its source market.
 Use `--json` for machine-readable results:
 
 ```bash
 uv run tools/repair_paper_position_markets.py --json \
-  --mapping ACCOUNT_ID:00700:hk_connect
+  --mapping ACCOUNT_ID:a_share:00700:hk_connect
 ```
 
 ## OpenClaw Conversation Order Entry
@@ -264,7 +269,7 @@ curl -X POST http://localhost:8000/paper/accounts/1/orders \
   -d '{"symbol":"00700","market":"hk_connect","side":"buy","quantity":100,"limit_price":"400.00","trade_date":"2026-07-18"}'
 ```
 
-HK Connect support is scoped to ordinary stocks. The backend uses explicit market routing rather than symbol inference: orders, trades, positions, and validity checks persist `market`. HK orders use HK GGT daily bars, HK-specific fees, board-lot and tick-size validation, and no A-share limit-up/down validity analysis. HK sell proceeds are not immediately available cash; they remain pending until the T+2 settlement service releases them. Account snapshots include pending settlement in total assets and expose `pending_settlement`.
+HK Connect support is scoped to ordinary stocks. The backend uses explicit market routing rather than symbol inference: orders, trades, positions, and validity checks persist `market`. State and market-data diagnostics are identified by market and symbol, so records sharing a symbol in different markets remain separate and diagnostics identify the affected market. HK orders use HK GGT daily bars, HK-specific fees, board-lot and tick-size validation, and no A-share limit-up/down validity analysis. HK sell proceeds are not immediately available cash; they remain pending until the T+2 settlement service releases them. Account snapshots include pending settlement in total assets and expose `pending_settlement`.
 
 ## Delete Account
 
