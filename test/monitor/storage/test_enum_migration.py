@@ -388,6 +388,30 @@ def test_rollback_rejects_non_column_enum_dependency_before_drop(postgres_schema
         assert _check_exists(connection)
 
 
+def test_rollback_audit_normalizes_view_dependency_to_one_view_name(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_monitor_enums(connection)
+        connection.execute(text("CREATE VIEW monitor_market_dependency AS SELECT 'A'::monitor_market AS market"))
+
+        audit = MONITOR_ENUM_ADAPTER.audit(connection, rollback=True)
+
+    market = next(group for group in audit.groups if group.type_name == "monitor_market")
+    assert market.dependencies == ("view monitor_market_dependency",)
+
+
+def test_rollback_preflight_rejects_view_dependency_before_rollback(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_monitor_enums(connection)
+        connection.execute(text("CREATE VIEW monitor_market_dependency AS SELECT 'A'::monitor_market AS market"))
+
+        with pytest.raises(MonitorEnumMigrationError, match="monitor_market: dependencies remain"):
+            MONITOR_ENUM_ADAPTER.preflight(connection, rollback=True)
+
+        assert _column_type(connection, "stock_monitor_targets", "market") == "monitor_market"
+
+
 def test_rollback_rejects_invalid_condition_before_altering_columns(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:

@@ -467,8 +467,15 @@ def test_rollback_audit_reports_converted_enum_defaults_as_ready(postgres_schema
     audits = {audit.name: audit for audit in result.audits}
     paper = next(group for group in audits["paper_trading"].groups if group.type_name == "paper_account_status")
     assert paper.columns[0].observed_type == "paper_account_status"
+    assert paper.columns[0].expected_type == "paper_account_status"
     assert paper.columns[0].observed_default == "'active'::paper_account_status"
     assert paper.columns[0].expected_default == "'active'::paper_account_status"
+    assert all(
+        column.expected_type == group.type_name
+        for audit in result.audits
+        for group in audit.groups
+        for column in group.columns
+    )
     assert all(audit.ready for audit in result.audits)
 
 

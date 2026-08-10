@@ -63,7 +63,7 @@ def postgres_schema() -> Iterator[tuple[Engine, str]]:
 
 def _run_script(script: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
-    environment.setdefault("COMPOSE_PROJECT_NAME", "frog")
+    environment["COMPOSE_PROJECT_NAME"] = ROOT.name
     required_compose_environment = {
         "ALERT_EMAILS": "test@example.com",
         "PAPER_TRADING_API_TOKEN": "test-token",
@@ -233,7 +233,7 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
 
     export = _run_script(
         "db_export.sh",
-        ["--no-gzip", "--schema", schema, "--table", table, "--out", str(dump_file)],
+        ["--service", "test_db", "--no-gzip", "--schema", schema, "--table", table, "--out", str(dump_file)],
     )
 
     assert export.returncode == 0, export.stderr
@@ -248,15 +248,15 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
             connection.execute(
                 text(
                     f'INSERT INTO "{schema}"."{table}" VALUES '
-                    "(2, 'qfq', 'empty', '[{\"status\": \"empty\"}]'::jsonb)"
+                    "(2, 'qfq', 'missing_market_data', '[{\"status\": \"empty\"}]'::jsonb)"
                 )
             )
         else:
-            connection.execute(text(f'INSERT INTO "{schema}"."{table}" VALUES (2, \'none\', \'["exit"]\'::jsonb)'))
+            connection.execute(text(f'INSERT INTO "{schema}"."{table}" VALUES (2, \'no_signal\', \'["exit"]\'::jsonb)'))
 
     imported = _run_script(
         "db_import.sh",
-        ["--clean", "--schema", schema, "--table", table, "--in", str(dump_file)],
+        ["--service", "test_db", "--clean", "--schema", schema, "--table", table, "--in", str(dump_file)],
     )
 
     assert imported.returncode == 0, imported.stderr
@@ -284,6 +284,8 @@ def test_clean_selected_table_export_is_rejected_before_mutation(
     result = _run_script(
         "db_export.sh",
         [
+            "--service",
+            "test_db",
             "--clean",
             "--no-gzip",
             "--table",
@@ -312,6 +314,8 @@ def test_clean_selected_table_import_rejects_inbound_foreign_keys_before_mutatio
     result = _run_script(
         "db_import.sh",
         [
+            "--service",
+            "test_db",
             "--clean",
             "--table",
             "paper_orders",

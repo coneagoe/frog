@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from monitor.monitor_target_service import MonitorTargetService
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_session
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import CashEventType, OrderSide, OrderStatus
 from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.models import DailyBarDiagnostic, PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
@@ -132,6 +132,13 @@ def test_postgresql_governed_writer_smoke_uses_canonical_labels(postgres_schema,
             date(2026, 8, 9),
             OrderStatus.ACCEPTED,
             frozen_cash=Decimal("1005.00"),
+        )
+        repository.add_cash_event(
+            account.id,
+            CashEventType.FREEZE,
+            Decimal("-1005.00"),
+            order_id=order.id,
+            note="Freeze cash for accepted order",
         )
         session.commit()
         assert order.side == "buy"
