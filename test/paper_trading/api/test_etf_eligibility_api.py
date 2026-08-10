@@ -169,6 +169,23 @@ def test_classify_etf_eligibility_returns_not_found_for_missing_record(monkeypat
     assert response.status_code == 404
 
 
+def test_classify_etf_eligibility_rejects_invalid_symbol_with_structured_error(monkeypatch, sqlite_session):
+    response = _client(monkeypatch, sqlite_session).post(
+        "/paper/etf-eligibility/510300.SH/classify",
+        json={"status": "supported", "reviewed_by": "reviewer"},
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": "INVALID_ETF_SYMBOL",
+            "message": "ETF symbol must be a bare six-digit value",
+            "details": {},
+        }
+    }
+
+
 def test_classify_etf_eligibility_returns_not_found_for_missing_provider(monkeypatch, sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     Base.metadata.create_all(sqlite_session.get_bind())

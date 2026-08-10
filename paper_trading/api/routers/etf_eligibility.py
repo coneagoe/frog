@@ -58,7 +58,9 @@ def classify_etf_eligibility(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         message = str(exc)
-        if "classification must be supported or money_market" in message:
+        if "symbol must be a bare six-digit value" in message:
+            code = "INVALID_ETF_SYMBOL"
+        elif "classification must be supported or money_market" in message:
             code = "INVALID_ETF_ELIGIBILITY_CLASSIFICATION"
         elif "exchange must be SH or SZ" in message:
             code = "INVALID_ETF_EXCHANGE"
