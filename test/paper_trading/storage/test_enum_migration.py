@@ -233,6 +233,8 @@ def test_rollback_rejects_persisted_etf_market_value(postgres_schema):
         with pytest.raises(PaperTradingEnumMigrationError):
             migrate_paper_trading_enums(connection, rollback=True)
 
+        assert _column_type(connection, "paper_orders", "market") == "paper_market"
+
 
 def test_dry_run_reports_every_group_without_ddl(postgres_schema):
     engine, schema = postgres_schema

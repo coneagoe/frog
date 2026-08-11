@@ -96,6 +96,10 @@ def _column(
     return PaperTradingEnumColumn(table_name, column_name, legacy_type_sql, default_sql, nullable, indexes)
 
 
+def _legacy_market_group(group: PaperTradingEnumGroup) -> PaperTradingEnumGroup:
+    return PaperTradingEnumGroup(group.type_name, ("a_share", "hk_connect"), group.columns)
+
+
 _MATCHING_INDEX_SQL = (
     "CREATE UNIQUE INDEX uq_matching_active_scope ON paper_matching_runs "
     "(trade_date, scope_key) WHERE status = 'running'"
@@ -583,6 +587,8 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
                 )
             if not rollback and type_name != group.type_name:
                 _validate_values(connection, group, column)
+            if rollback and group.type_name == "paper_market":
+                _validate_values(connection, _legacy_market_group(group), column)
             enum_typed = type_name == group.type_name
             _validate_indexes(connection, column, enum_typed=rollback or enum_typed)
             _validate_default(connection, group, column, rollback=not enum_typed)
