@@ -107,6 +107,7 @@ class PaperAccount(Base):
     hk_sfc_levy_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
     hk_afrc_levy_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
     hk_settlement_fee_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    etf_commission_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
 
 
 class PaperCashLedger(Base):

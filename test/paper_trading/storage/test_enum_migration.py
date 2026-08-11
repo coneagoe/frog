@@ -223,6 +223,17 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
         assert _index_exists(connection, "ix_paper_etf_eligibility_status")
 
 
+def test_rollback_rejects_persisted_etf_market_value(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        assert _enum_labels(connection, "paper_market") == ("a_share", "hk_connect", "etf")
+        connection.execute(text("INSERT INTO paper_orders (id, side, status, market) VALUES (1, 'buy', 'new', 'etf')"))
+
+        with pytest.raises(PaperTradingEnumMigrationError):
+            migrate_paper_trading_enums(connection, rollback=True)
+
+
 def test_dry_run_reports_every_group_without_ddl(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:

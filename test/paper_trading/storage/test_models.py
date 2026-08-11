@@ -8,7 +8,9 @@ from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
-from paper_trading.domain.enums import MatchingRunStatus
+# Initialize the storage facade before its paper-trading model re-export.
+import storage  # noqa: F401
+from paper_trading.domain.enums import Market, MatchingRunStatus
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
     PaperAccount,
@@ -52,6 +54,14 @@ def test_position_lot_market_defaults_to_a_share(tmp_path):
     assert market_column.nullable is False
     assert market_column.server_default is not None
     engine.dispose()
+
+
+def test_account_has_nullable_etf_commission_rate_column():
+    column = PaperAccount.__table__.c.etf_commission_rate
+
+    assert Market.ETF == "etf"
+    assert column.nullable is True
+    assert str(column.type) == "NUMERIC(20, 8)"
 
 
 def test_paper_order_round_trips_nullable_and_non_nullable_values(tmp_path):

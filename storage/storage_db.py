@@ -3260,6 +3260,7 @@ class StorageDb:
                 "hk_sfc_levy_rate": "NUMERIC(20, 8)",
                 "hk_afrc_levy_rate": "NUMERIC(20, 8)",
                 "hk_settlement_fee_rate": "NUMERIC(20, 8)",
+                "etf_commission_rate": "NUMERIC(20, 8)",
             }
             account_fee_columns.update(hk_account_fee_columns)
             for column_name, ddl in account_fee_columns.items():

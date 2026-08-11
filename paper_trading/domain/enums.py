@@ -23,6 +23,7 @@ class OrderStatus(StrEnum):
 class Market(StrEnum):
     A_SHARE = "a_share"
     HK_CONNECT = "hk_connect"
+    ETF = "etf"
 
 
 class CashEventType(StrEnum):

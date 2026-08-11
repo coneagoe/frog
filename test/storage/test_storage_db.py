@@ -424,6 +424,14 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
         assert session.query(PaperAccount).order_by(PaperAccount.id).one().hk_commission_rate is None
 
 
+def test_existing_account_schema_adds_etf_commission_rate(storage, paper_trading_schema_upgrade):
+    storage.ensure_paper_trading_schema()
+
+    account_columns = {column["name"] for column in inspect(storage.engine).get_columns(tb_name_paper_accounts)}
+
+    assert "etf_commission_rate" in account_columns
+
+
 def test_reconcile_etf_eligibility_reads_replaced_persisted_etf_basic_snapshot(storage):
     from paper_trading.storage.models import ETFEligibility
 
