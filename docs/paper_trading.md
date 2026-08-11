@@ -1,6 +1,6 @@
 # Paper Trading Backend
 
-The paper trading backend provides a FastAPI API for simulated trading. It supports multiple paper accounts, A-share and Southbound Hong Kong Stock Connect ordinary-stock limit orders, daily matching runs, market-specific fees, position lots, validity checks, pending HK settlement, and account snapshots.
+The paper trading backend provides a FastAPI API for simulated trading. It supports multiple paper accounts, A-share, ETF, and Southbound Hong Kong Stock Connect ordinary-stock limit orders, daily matching runs, market-specific fees, position lots, validity checks, pending HK settlement, and account snapshots.
 
 ## Docker (Recommended)
 
@@ -126,7 +126,7 @@ order. The rebuild preserves manual cash events and cancellations, reapplies
 normal matching rules, and records lightweight rebuild audit metadata. The
 authenticated endpoint is `POST /paper/matching/runs/rebuilds`.
 
-Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. Explicit fee flags override the preset values for the new account.
+Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. ETF orders use the account's `etf_commission_rate`, defaulting to `0.00006`; ETF fees are commission-only, with no minimum commission, stamp duty, or transfer fee. Explicit fee flags override the preset values for the new account.
 
 Use `--json` when machine-readable output is needed:
 
@@ -274,11 +274,11 @@ curl -X PATCH http://localhost:8000/paper/accounts/1 \
   -d '{"commission_rate":"0.0002","min_commission":"3.00"}'
 ```
 
-All fee fields are optional in the request body. Supported A-share fields are `commission_rate`, `min_commission`, `stamp_duty_rate`, and `transfer_fee_rate`. Supported HK Connect fields are `hk_commission_rate`, `hk_min_commission`, `hk_stamp_duty_rate`, `hk_trading_fee_rate`, `hk_sfc_levy_rate`, `hk_afrc_levy_rate`, and `hk_settlement_fee_rate`. Values must be non-negative decimals. An empty request body (no fee fields) is rejected with a 422 error.
+All fee fields are optional in the request body. Supported A-share fields are `commission_rate`, `min_commission`, `stamp_duty_rate`, and `transfer_fee_rate`. The ETF field is `etf_commission_rate`. Supported HK Connect fields are `hk_commission_rate`, `hk_min_commission`, `hk_stamp_duty_rate`, `hk_trading_fee_rate`, `hk_sfc_levy_rate`, `hk_afrc_levy_rate`, and `hk_settlement_fee_rate`. Values must be non-negative decimals. An empty request body (no fee fields) is rejected with a 422 error.
 
 ## Hong Kong Stock Connect Support
 
-Set `market` to `hk_connect` when creating Southbound Hong Kong Stock Connect ordinary-stock orders. If `market` is omitted, the backend treats the order as `a_share` for backward compatibility.
+Set `market` to `hk_connect` when creating Southbound Hong Kong Stock Connect ordinary-stock orders, or `etf` when creating ETF orders. If `market` is omitted, the backend treats the order as `a_share` for backward compatibility.
 
 ```bash
 curl -X POST http://localhost:8000/paper/accounts/1/orders \
