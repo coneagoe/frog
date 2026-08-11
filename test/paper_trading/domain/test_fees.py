@@ -11,7 +11,14 @@ from paper_trading.domain.enums import (
     RoundTripStatus,
     TradeValidityGranularity,
 )
-from paper_trading.domain.fees import DEFAULT_FEE_PRESET, FEE_PRESETS, FeeConfig, calculate_a_share_fees
+from paper_trading.domain.fees import (
+    DEFAULT_FEE_PRESET,
+    FEE_PRESETS,
+    EtfFeeConfig,
+    FeeConfig,
+    calculate_a_share_fees,
+    calculate_etf_fees,
+)
 
 
 def test_paper_trading_new_enum_values_are_canonical():
@@ -94,3 +101,25 @@ def test_a_share_fee_preset_matches_default_fee_config():
     assert preset.min_commission == Decimal("5.00")
     assert preset.stamp_duty_rate == Decimal("0.0005")
     assert preset.transfer_fee_rate == Decimal("0.00001")
+
+
+def test_etf_fees_use_default_rate_without_minimum():
+    fees = calculate_etf_fees(OrderSide.BUY, Decimal("1000"), EtfFeeConfig())
+
+    assert fees.commission == Decimal("0.06")
+    assert fees.stamp_duty == Decimal("0.00")
+    assert fees.transfer_fee == Decimal("0.00")
+    assert fees.total == Decimal("0.06")
+
+
+def test_etf_fees_round_to_cent_without_minimum():
+    fees = calculate_etf_fees(OrderSide.SELL, Decimal("123.45"))
+
+    assert fees.commission == Decimal("0.01")
+    assert fees.stamp_duty == Decimal("0.00")
+    assert fees.transfer_fee == Decimal("0.00")
+
+
+def test_etf_fee_config_rejects_negative_commission_rate():
+    with pytest.raises(ValueError, match="commission_rate"):
+        EtfFeeConfig(commission_rate=Decimal("-0.00001"))

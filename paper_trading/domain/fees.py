@@ -22,6 +22,15 @@ class FeeConfig:
 
 
 @dataclass(frozen=True)
+class EtfFeeConfig:
+    commission_rate: Decimal = Decimal("0.00006")
+
+    def __post_init__(self) -> None:
+        if self.commission_rate < 0:
+            raise ValueError("commission_rate must be non-negative")
+
+
+@dataclass(frozen=True)
 class FeeBreakdown:
     commission: Decimal
     stamp_duty: Decimal
@@ -70,9 +79,24 @@ def fee_config_from_account(account: Any) -> FeeConfig:
     )
 
 
+def etf_fee_config_from_account(account: Any) -> EtfFeeConfig:
+    rate = account.etf_commission_rate
+    return EtfFeeConfig(commission_rate=Decimal(rate) if rate is not None else EtfFeeConfig.commission_rate)
+
+
 def calculate_a_share_fees(side: OrderSide, amount: Decimal, config: FeeConfig | None = None) -> FeeBreakdown:
     fee_config = config or FeeConfig()
     commission = max(quantize_money(amount * fee_config.commission_rate), fee_config.min_commission)
     stamp_duty = quantize_money(amount * fee_config.stamp_duty_rate) if side == OrderSide.SELL else Decimal("0.00")
     transfer_fee = quantize_money(amount * fee_config.transfer_fee_rate)
     return FeeBreakdown(commission=commission, stamp_duty=stamp_duty, transfer_fee=transfer_fee)
+
+
+def calculate_etf_fees(side: OrderSide, amount: Decimal, config: EtfFeeConfig | None = None) -> FeeBreakdown:
+    del side
+    fee_config = config or EtfFeeConfig()
+    return FeeBreakdown(
+        commission=quantize_money(amount * fee_config.commission_rate),
+        stamp_duty=Decimal("0.00"),
+        transfer_fee=Decimal("0.00"),
+    )

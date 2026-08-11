@@ -6,7 +6,12 @@ from sqlalchemy.exc import IntegrityError
 
 from paper_trading.domain.enums import CashEventType, Market, OrderSide, OrderStatus
 from paper_trading.domain.errors import PaperTradingError
-from paper_trading.domain.fees import calculate_a_share_fees, fee_config_from_account
+from paper_trading.domain.fees import (
+    calculate_a_share_fees,
+    calculate_etf_fees,
+    etf_fee_config_from_account,
+    fee_config_from_account,
+)
 from paper_trading.domain.hk_connect_fees import (
     calculate_hk_connect_fees,
     hk_fee_config_from_account,
@@ -99,7 +104,7 @@ class OrderService:
                     idempotency_key,
                     comment,
                 )
-            if trade_date < date.today():
+            if resolved_market == Market.A_SHARE and trade_date < date.today():
                 return self._place_historical_a_share_order(
                     account_id,
                     symbol,
@@ -275,9 +280,12 @@ class OrderService:
         frozen_cash = Decimal("0")
         if side == OrderSide.BUY:
             amount = Decimal(quantity) * limit_price
-            frozen_cash = (
-                amount + calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account)).total
-            ).quantize(Decimal("0.0001"))
+            fees = (
+                calculate_etf_fees(OrderSide.BUY, amount, etf_fee_config_from_account(account))
+                if market == Market.ETF
+                else calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account))
+            )
+            frozen_cash = (amount + fees.total).quantize(Decimal("0.0001"))
 
         order = self.repo.create_order(
             account_id=account_id,
@@ -396,10 +404,12 @@ class OrderService:
         if account is None:
             raise ValueError(f"paper account not found: {account_id}")
         amount = Decimal(quantity) * limit_price
-        fee_config = fee_config_from_account(account)
-        frozen_cash = (amount + calculate_a_share_fees(OrderSide.BUY, amount, fee_config).total).quantize(
-            Decimal("0.0001")
+        fees = (
+            calculate_etf_fees(OrderSide.BUY, amount, etf_fee_config_from_account(account))
+            if market == Market.ETF
+            else calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account))
         )
+        frozen_cash = (amount + fees.total).quantize(Decimal("0.0001"))
         ensure_sufficient_cash(self.repo.get_cash_available(account_id), frozen_cash)
         order = self.repo.create_order(
             account_id=account_id,

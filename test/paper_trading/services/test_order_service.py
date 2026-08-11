@@ -924,6 +924,28 @@ def test_place_buy_order_uses_account_fee_config(tmp_path):
     engine.dispose()
 
 
+def test_etf_buy_reservation_matches_fill_fee(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("etf", Decimal("100000.00"))
+
+    order = service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        market=Market.ETF,
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == Market.ETF.value
+    assert order.frozen_cash == Decimal("1000.0600")
+    assert repo.get_cash_available(account.id) == Decimal("98999.9400")
+    engine.dispose()
+
+
 # ── HK Connect tests ──────────────────────────────────────────────────
 
 

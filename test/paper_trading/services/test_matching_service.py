@@ -345,6 +345,38 @@ def test_matching_uses_account_fee_config_for_sell_fees(tmp_path):
     engine.dispose()
 
 
+def test_etf_sell_uses_only_overridden_commission(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("etf", Decimal("100000"), etf_commission_rate=Decimal("0.00008"))
+    repo.upsert_position(account.id, Market.ETF, "510300", 100, 0, Decimal("900.00"))
+    repo.create_position_lot(account.id, Market.ETF, "510300", date(2026, 6, 15), 100, 100, Decimal("9.00"))
+    order = order_service.place_order(
+        account.id,
+        "510300",
+        OrderSide.SELL,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        market=Market.ETF,
+    )
+
+    matching_service.market_data = FakeMarketDataProvider(
+        {
+            ("510300", trade_date): DailyBar(
+                "510300", trade_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10")
+            )
+        }
+    )
+    assert matching_service.match_order(order) == "filled"
+    session.commit()
+
+    trade = repo.list_trades(account.id)[0]
+    assert trade.fees == Decimal("0.0800")
+    assert repo.get_cash_available(account.id) == Decimal("100999.9200")
+    assert repo.list_pending_settlements(account.id) == []
+    engine.dispose()
+
+
 def test_matching_copies_order_comment_to_trade(tmp_path):
     engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))

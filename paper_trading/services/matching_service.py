@@ -9,7 +9,12 @@ from paper_trading.domain.enums import (
     OrderSide,
     OrderStatus,
 )
-from paper_trading.domain.fees import calculate_a_share_fees, fee_config_from_account
+from paper_trading.domain.fees import (
+    calculate_a_share_fees,
+    calculate_etf_fees,
+    etf_fee_config_from_account,
+    fee_config_from_account,
+)
 from paper_trading.domain.hk_connect_fees import (
     calculate_hk_connect_fees,
     hk_fee_config_from_account,
@@ -202,6 +207,10 @@ class MatchingService:
         if order.market == "hk_connect":
             fee_config = hk_fee_config_from_account(account)
             fees = calculate_hk_connect_fees(side, amount, fee_config).total.quantize(Decimal("0.0001"))
+        elif order.market == "etf":
+            fees = calculate_etf_fees(side, amount, etf_fee_config_from_account(account)).total.quantize(
+                Decimal("0.0001")
+            )
         else:
             fees = calculate_a_share_fees(side, amount, fee_config_from_account(account)).total.quantize(
                 Decimal("0.0001")
