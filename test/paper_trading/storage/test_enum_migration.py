@@ -133,15 +133,14 @@ def _enum_labels(connection: Connection, type_name: str) -> tuple[str, ...]:
     )
 
 
-def _column_type(connection: Connection, table_name: str, column_name: str) -> str:  # noqa: E501
-    return str(
-        connection.execute(
-            text(
-                "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :table_name AND a.attname = :column_name"
-            ),
-            {"table_name": table_name, "column_name": column_name},
-        ).scalar_one()
-    )
+def _column_type(connection: Connection, table_name: str, column_name: str) -> str | None:  # noqa: E501
+    value = connection.execute(
+        text(
+            "SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :table_name AND a.attname = :column_name"
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    ).scalar_one_or_none()
+    return None if value is None else str(value)
 
 
 def _index_exists(connection: Connection, index_name: str) -> bool:
@@ -221,6 +220,30 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
         assert _index_exists(connection, "uq_matching_active_scope")
         assert _column_type(connection, "paper_etf_eligibility", "status") == "character varying(20)"
         assert _index_exists(connection, "ix_paper_etf_eligibility_status")
+
+
+def test_rollback_removes_additive_etf_commission_rate_column(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(text("ALTER TABLE paper_accounts ADD COLUMN etf_commission_rate NUMERIC(20, 8)"))
+
+        assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
+        assert _column_type(connection, "paper_accounts", "etf_commission_rate") is None
+
+
+def test_rollback_preserves_incompatible_etf_commission_rate_column(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(
+            text("ALTER TABLE paper_accounts ADD COLUMN etf_commission_rate NUMERIC(20, 8) NOT NULL DEFAULT 0")
+        )
+
+        with pytest.raises(PaperTradingEnumMigrationError, match="incompatible"):
+            migrate_paper_trading_enums(connection, rollback=True)
+
+        assert _column_type(connection, "paper_accounts", "etf_commission_rate") == "numeric(20,8)"
 
 
 def test_rollback_rejects_persisted_etf_market_value(postgres_schema):

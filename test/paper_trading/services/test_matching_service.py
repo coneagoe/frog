@@ -377,6 +377,33 @@ def test_etf_sell_uses_only_overridden_commission(tmp_path):
     engine.dispose()
 
 
+def test_etf_zero_commission_rate_has_no_fill_fee(tmp_path):
+    engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("zero-etf-fee", Decimal("100000"), etf_commission_rate=Decimal("0"))
+    order = order_service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        market=Market.ETF,
+    )
+    matching_service.market_data = FakeMarketDataProvider(
+        {
+            ("510300", trade_date): DailyBar(
+                "510300", trade_date, Decimal("10"), Decimal("11"), Decimal("9"), Decimal("10")
+            )
+        }
+    )
+
+    assert matching_service.match_order(order) == "filled"
+    session.commit()
+
+    assert repo.list_trades(account.id)[0].fees == Decimal("0.0000")
+    engine.dispose()
+
+
 def test_matching_copies_order_comment_to_trade(tmp_path):
     engine, session, repo, order_service, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))

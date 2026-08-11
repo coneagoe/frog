@@ -280,11 +280,7 @@ class OrderService:
         frozen_cash = Decimal("0")
         if side == OrderSide.BUY:
             amount = Decimal(quantity) * limit_price
-            fees = (
-                calculate_etf_fees(OrderSide.BUY, amount, etf_fee_config_from_account(account))
-                if market == Market.ETF
-                else calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account))
-            )
+            fees = calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account))
             frozen_cash = (amount + fees.total).quantize(Decimal("0.0001"))
 
         order = self.repo.create_order(

@@ -339,7 +339,9 @@ def _add_order_subparsers(subparsers: Any) -> None:
     p_create.add_argument("--trade-date", required=True)
     p_create.add_argument("--idempotency-key", default=None)
     p_create.add_argument("--comment", default=None)
-    p_create.add_argument("--market", default=None, choices=["a_share", "hk_connect"], help="Market (default: a_share)")
+    p_create.add_argument(
+        "--market", default=None, choices=["a_share", "hk_connect", "etf"], help="Market (default: a_share)"
+    )
     p_list = order_sub.add_parser("list", help="List orders for an account")
     p_list.add_argument("--account-id", type=int, required=True)
     p_get = order_sub.add_parser("get", help="Get order details")
@@ -489,7 +491,10 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
         if args.transfer_fee_rate is not None:
             kwargs["transfer_fee_rate"] = _parse_decimal(args.transfer_fee_rate, "--transfer-fee-rate")
         if args.etf_commission_rate is not None:
-            kwargs["etf_commission_rate"] = _parse_decimal(args.etf_commission_rate, "--etf-commission-rate")
+            kwargs["etf_commission_rate"] = _parse_non_negative_decimal(
+                args.etf_commission_rate,
+                "--etf-commission-rate",
+            )
         return client.create_account(**kwargs)
     if cmd == "list":
         return client.list_accounts()

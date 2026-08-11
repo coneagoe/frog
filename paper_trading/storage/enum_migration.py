@@ -307,6 +307,9 @@ _GOVERNED_TABLES = (
 )
 _OPTIONAL_GOVERNED_TABLES = (DailyBarDiagnostic.__table__,)
 _MARKET_COLUMNS_REMOVED_ON_ROLLBACK = {"paper_position_round_trips", "daily_bar_diagnostics"}
+_ETF_COMMISSION_RATE_COLUMN = PaperTradingEnumColumn(
+    "paper_accounts", "etf_commission_rate", "NUMERIC(20, 8)", None, True
+)
 _OPERATIONAL_TABLES = (
     PaperAccountSnapshot.__table__,
     PaperValuationGap.__table__,
@@ -347,6 +350,8 @@ def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     required_missing = missing_tables - operational_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
     if required_missing and required_missing != required_tables:
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
+    if rollback:
+        _preflight_etf_commission_rate_rollback(connection)
 
 
 def _adapter_apply(connection: Connection) -> bool:
@@ -392,6 +397,8 @@ def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
         return
     _verify(connection, PAPER_TRADING_ENUM_GROUPS, rollback=rollback)
     _verify_etf_eligibility_symbol_check(connection, rollback=rollback)
+    if rollback and _column_facts(connection, _ETF_COMMISSION_RATE_COLUMN) is not None:
+        raise PaperTradingEnumMigrationError("etf_commission_rate was not removed during rollback")
     if not rollback:
         _verify_market_qualified_keys(connection)
 
@@ -403,7 +410,8 @@ def _adapter_rollback(connection: Connection) -> bool:
     ) and not _diagnostics_only_market_state(connection):
         return False
     _reject_legacy_key_collisions(connection)
-    return _rollback(connection, PAPER_TRADING_ENUM_GROUPS)
+    changed = _rollback(connection, PAPER_TRADING_ENUM_GROUPS)
+    return _drop_etf_commission_rate_column(connection) or changed
 
 
 def _adapter_audit(connection: Connection, *, rollback: bool):
@@ -693,6 +701,44 @@ def _rollback(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...])
         if _enum_labels(connection, group.type_name):
             connection.execute(text(f"DROP TYPE {group.type_name}"))
     return changed
+
+
+def _preflight_etf_commission_rate_rollback(connection: Connection) -> None:
+    facts = _column_facts(connection, _ETF_COMMISSION_RATE_COLUMN)
+    if facts is None:
+        return
+    expected_type = _ETF_COMMISSION_RATE_COLUMN.legacy_type_sql.lower().replace(" ", "")
+    if facts[0].replace(" ", "") != expected_type or not facts[1]:
+        raise PaperTradingEnumMigrationError("incompatible paper_accounts.etf_commission_rate")
+    if _column_default(connection, _ETF_COMMISSION_RATE_COLUMN) is not None:
+        raise PaperTradingEnumMigrationError("unexpected default for paper_accounts.etf_commission_rate")
+    dependencies = _column_dependencies(connection, _ETF_COMMISSION_RATE_COLUMN)
+    if dependencies:
+        raise PaperTradingEnumMigrationError(f"paper_accounts.etf_commission_rate: dependencies remain: {dependencies}")
+
+
+def _drop_etf_commission_rate_column(connection: Connection) -> bool:
+    if _column_facts(connection, _ETF_COMMISSION_RATE_COLUMN) is None:
+        return False
+    connection.execute(text("ALTER TABLE paper_accounts DROP COLUMN etf_commission_rate"))
+    return True
+
+
+def _column_dependencies(connection: Connection, column: PaperTradingEnumColumn) -> tuple[str, ...]:
+    return tuple(
+        connection.execute(
+            text(
+                "SELECT DISTINCT pg_describe_object(d.classid, d.objid, d.objsubid) "
+                "FROM pg_depend d "
+                "JOIN pg_class c ON c.oid = d.refobjid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.refobjsubid "
+                "WHERE n.nspname = current_schema() AND c.relname = :table_name "
+                "AND a.attname = :column_name AND d.deptype NOT IN ('i', 'a') ORDER BY 1"
+            ),
+            {"table_name": column.table_name, "column_name": column.column_name},
+        ).scalars()
+    )
 
 
 def _verify(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...], *, rollback: bool) -> None:

@@ -946,6 +946,25 @@ def test_etf_buy_reservation_matches_fill_fee(tmp_path):
     engine.dispose()
 
 
+def test_etf_zero_commission_rate_has_no_reservation_or_fill_fee(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("zero-etf-fee", Decimal("100000.00"), etf_commission_rate=Decimal("0"))
+
+    order = service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+        market=Market.ETF,
+    )
+    session.commit()
+
+    assert order.frozen_cash == Decimal("1000.0000")
+    engine.dispose()
+
+
 # ── HK Connect tests ──────────────────────────────────────────────────
 
 

@@ -356,6 +356,26 @@ class TestAccountCreate:
             etf_commission_rate=Decimal("0.00008"),
         )
 
+    def test_create_account_rejects_negative_etf_commission_rate(self):
+        client = _mock_client()
+
+        code = main(
+            [
+                "account",
+                "create",
+                "--name",
+                "custom-fee",
+                "--initial-cash",
+                "100000.00",
+                "--etf-commission-rate",
+                "-0.00008",
+            ],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+        client.create_account.assert_not_called()
+
 
 class TestAccountList:
     def test_list_accounts_calls_client(self):
@@ -922,6 +942,34 @@ class TestAccountWithdraw:
 
 
 class TestOrderCreate:
+    def test_order_create_with_etf_market(self):
+        client = _mock_client()
+
+        code = main(
+            [
+                "order",
+                "create",
+                "--account-id",
+                "1",
+                "--symbol",
+                "510300",
+                "--side",
+                "buy",
+                "--quantity",
+                "100",
+                "--limit-price",
+                "10.00",
+                "--trade-date",
+                "2026-07-21",
+                "--market",
+                "etf",
+            ],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["OK"]
+        assert client.create_order.call_args.kwargs["market"] == "etf"
+
     def test_order_create_with_hk_market(self):
         client = _mock_client()
         client.create_order.return_value = {"id": 1, "symbol": "00700", "market": "hk_connect"}
