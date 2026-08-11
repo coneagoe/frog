@@ -5,7 +5,12 @@ import pytest
 from pydantic import ValidationError
 
 from paper_trading.domain.enums import Market
-from paper_trading.schemas.accounts import ImportPositionItem, ImportPositionsRequest, UpdateAccountFeeRequest
+from paper_trading.schemas.accounts import (
+    CreateAccountRequest,
+    ImportPositionItem,
+    ImportPositionsRequest,
+    UpdateAccountFeeRequest,
+)
 
 # ---------------------------------------------------------------------------
 # UpdateAccountFeeRequest
@@ -27,6 +32,24 @@ def test_update_account_fee_request_rejects_empty_payload():
 def test_update_account_fee_request_rejects_fee_preset():
     with pytest.raises(ValidationError):
         UpdateAccountFeeRequest(commission_rate=Decimal("0.0002"), fee_preset="a_share")
+
+
+def test_update_account_fee_request_accepts_etf_only_update():
+    request = UpdateAccountFeeRequest(etf_commission_rate=Decimal("0"))
+
+    assert request.etf_commission_rate == Decimal("0")
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: CreateAccountRequest(name="etf", initial_cash=Decimal("100000"), etf_commission_rate=Decimal("-0.1")),
+        lambda: UpdateAccountFeeRequest(etf_commission_rate=Decimal("-0.1")),
+    ],
+)
+def test_account_fee_requests_reject_negative_etf_rate(factory):
+    with pytest.raises(ValidationError):
+        factory()
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@ class AccountService:
         min_commission: Decimal | None = None,
         stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
+        etf_commission_rate: Decimal | None = None,
     ) -> PaperAccount:
         return self.repo.create_account(
             name=name,
@@ -29,6 +30,7 @@ class AccountService:
             min_commission=min_commission,
             stamp_duty_rate=stamp_duty_rate,
             transfer_fee_rate=transfer_fee_rate,
+            etf_commission_rate=etf_commission_rate,
         )
 
     def get_account(self, account_id: int) -> PaperAccount | None:
@@ -51,6 +53,7 @@ class AccountService:
         hk_sfc_levy_rate: Decimal | None = None,
         hk_afrc_levy_rate: Decimal | None = None,
         hk_settlement_fee_rate: Decimal | None = None,
+        etf_commission_rate: Decimal | None = None,
     ) -> PaperAccount | None:
         a_share_fields = {
             "commission_rate": commission_rate,
@@ -67,19 +70,33 @@ class AccountService:
             "hk_afrc_levy_rate": hk_afrc_levy_rate,
             "hk_settlement_fee_rate": hk_settlement_fee_rate,
         }
+        etf_fields = {"etf_commission_rate": etf_commission_rate}
         has_a_share = any(v is not None for v in a_share_fields.values())
         has_hk = any(v is not None for v in hk_fields.values())
+        has_etf = any(v is not None for v in etf_fields.values())
 
         if has_a_share:
             account = self.repo.update_account_fees(account_id=account_id, **a_share_fields)
             if account is None:
                 return None
             if has_hk:
-                return self.repo.update_account_hk_fees(account_id, **hk_fields)
+                account = self.repo.update_account_hk_fees(account_id, **hk_fields)
+                if account is None:
+                    return None
+            if has_etf:
+                return self.repo.update_account_etf_fees(account_id, **etf_fields)
             return account
 
         if has_hk:
-            return self.repo.update_account_hk_fees(account_id, **hk_fields)
+            account = self.repo.update_account_hk_fees(account_id, **hk_fields)
+            if account is None:
+                return None
+            if has_etf:
+                return self.repo.update_account_etf_fees(account_id, **etf_fields)
+            return account
+
+        if has_etf:
+            return self.repo.update_account_etf_fees(account_id, **etf_fields)
 
         # Existing A-share fee update path
         return self.repo.update_account_fees(

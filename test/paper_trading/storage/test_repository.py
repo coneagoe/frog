@@ -113,6 +113,15 @@ def test_create_account_initializes_nav_share_state(sqlite_session):
     assert ledger[0].share_delta == Decimal("100000.000000")
 
 
+def test_create_account_persists_etf_commission_rate(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    account = repo.create_account("etf-fees", Decimal("100000"), etf_commission_rate=Decimal("0.00008"))
+
+    assert account.etf_commission_rate == Decimal("0.00008000")
+
+
 def test_acquire_matching_run_uses_canonical_active_status(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

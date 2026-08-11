@@ -64,6 +64,35 @@ def test_update_account_fees_via_service(tmp_path):
     engine.dispose()
 
 
+def test_update_account_fees_accepts_only_etf_rate(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = service.create_account("demo", Decimal("100000.00"))
+
+    updated = service.update_account_fees(account.id, etf_commission_rate=Decimal("0"))
+
+    assert updated is not None
+    assert updated.etf_commission_rate == Decimal("0E-8")
+    engine.dispose()
+
+
+def test_update_account_fees_updates_all_market_fee_groups(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = service.create_account("demo", Decimal("100000.00"))
+
+    updated = service.update_account_fees(
+        account.id,
+        commission_rate=Decimal("0.0002"),
+        hk_commission_rate=Decimal("0.0003"),
+        etf_commission_rate=Decimal("0.00008"),
+    )
+
+    assert updated is not None
+    assert updated.commission_rate == Decimal("0.00020000")
+    assert updated.hk_commission_rate == Decimal("0.00030000")
+    assert updated.etf_commission_rate == Decimal("0.00008000")
+    engine.dispose()
+
+
 def test_update_account_fees_service_rejects_negative(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = service.create_account("demo", Decimal("100000.00"))

@@ -103,6 +103,7 @@ class PaperTradingApiClient:
         min_commission: Decimal | None = None,
         stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
+        etf_commission_rate: Decimal | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"name": name, "initial_cash": str(initial_cash)}
         if fee_preset is not None:
@@ -115,6 +116,8 @@ class PaperTradingApiClient:
             body["stamp_duty_rate"] = str(stamp_duty_rate)
         if transfer_fee_rate is not None:
             body["transfer_fee_rate"] = str(transfer_fee_rate)
+        if etf_commission_rate is not None:
+            body["etf_commission_rate"] = str(etf_commission_rate)
         return self._request("POST", "/paper/accounts", json=body)
 
     def list_accounts(self) -> list[dict[str, Any]]:
@@ -133,6 +136,7 @@ class PaperTradingApiClient:
         min_commission: Decimal | None = None,
         stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
+        etf_commission_rate: Decimal | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {}
         if commission_rate is not None:
@@ -143,6 +147,8 @@ class PaperTradingApiClient:
             body["stamp_duty_rate"] = str(stamp_duty_rate)
         if transfer_fee_rate is not None:
             body["transfer_fee_rate"] = str(transfer_fee_rate)
+        if etf_commission_rate is not None:
+            body["etf_commission_rate"] = str(etf_commission_rate)
         return self._request("PATCH", f"/paper/accounts/{account_id}", json=body)
 
     def list_positions(self, account_id: int) -> list[dict[str, Any]]:
@@ -287,6 +293,7 @@ def _add_account_subparsers(subparsers: Any) -> None:
     p_create.add_argument("--min-commission", default=None, help="Minimum commission override")
     p_create.add_argument("--stamp-duty-rate", default=None, help="Stamp duty rate override")
     p_create.add_argument("--transfer-fee-rate", default=None, help="Transfer fee rate override")
+    p_create.add_argument("--etf-commission-rate", default=None, help="ETF commission rate override")
     acct_sub.add_parser("list", help="List all accounts")
     p_get = acct_sub.add_parser("get", help="Get account details")
     p_get.add_argument("--account-id", type=int, required=True, help="Account ID")
@@ -317,6 +324,7 @@ def _add_account_subparsers(subparsers: Any) -> None:
     p_update.add_argument("--min-commission", default=None, help="Minimum commission override")
     p_update.add_argument("--stamp-duty-rate", default=None, help="Stamp duty rate override")
     p_update.add_argument("--transfer-fee-rate", default=None, help="Transfer fee rate override")
+    p_update.add_argument("--etf-commission-rate", default=None, help="ETF commission rate override")
 
 
 def _add_order_subparsers(subparsers: Any) -> None:
@@ -480,6 +488,8 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
             kwargs["stamp_duty_rate"] = _parse_decimal(args.stamp_duty_rate, "--stamp-duty-rate")
         if args.transfer_fee_rate is not None:
             kwargs["transfer_fee_rate"] = _parse_decimal(args.transfer_fee_rate, "--transfer-fee-rate")
+        if args.etf_commission_rate is not None:
+            kwargs["etf_commission_rate"] = _parse_decimal(args.etf_commission_rate, "--etf-commission-rate")
         return client.create_account(**kwargs)
     if cmd == "list":
         return client.list_accounts()
@@ -511,6 +521,11 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
             kwargs["transfer_fee_rate"] = _parse_non_negative_decimal(
                 args.transfer_fee_rate,
                 "--transfer-fee-rate",
+            )
+        if args.etf_commission_rate is not None:
+            kwargs["etf_commission_rate"] = _parse_non_negative_decimal(
+                args.etf_commission_rate,
+                "--etf-commission-rate",
             )
         if not kwargs:
             raise _ParserError("at least one fee field is required")

@@ -16,6 +16,7 @@ class CreateAccountRequest(BaseModel):
     min_commission: Decimal | None = Field(default=None, ge=0)
     stamp_duty_rate: Decimal | None = Field(default=None, ge=0)
     transfer_fee_rate: Decimal | None = Field(default=None, ge=0)
+    etf_commission_rate: Decimal | None = Field(default=None, ge=0)
 
 
 class UpdateAccountFeeRequest(BaseModel):
@@ -32,6 +33,7 @@ class UpdateAccountFeeRequest(BaseModel):
     hk_sfc_levy_rate: Decimal | None = Field(default=None, ge=0)
     hk_afrc_levy_rate: Decimal | None = Field(default=None, ge=0)
     hk_settlement_fee_rate: Decimal | None = Field(default=None, ge=0)
+    etf_commission_rate: Decimal | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def require_fee_field(self) -> Self:
@@ -49,6 +51,7 @@ class UpdateAccountFeeRequest(BaseModel):
                 self.hk_sfc_levy_rate,
                 self.hk_afrc_levy_rate,
                 self.hk_settlement_fee_rate,
+                self.etf_commission_rate,
             )
         ):
             raise ValueError("at least one fee field is required")
@@ -73,6 +76,7 @@ class AccountResponse(BaseModel):
     hk_sfc_levy_rate: Decimal | None = None
     hk_afrc_levy_rate: Decimal | None = None
     hk_settlement_fee_rate: Decimal | None = None
+    etf_commission_rate: Decimal | None = None
     status: str
     base_currency: str
     share_count: Decimal

@@ -339,6 +339,8 @@ class TestAccountCreate:
                     "0.0004",
                     "--transfer-fee-rate",
                     "0.00002",
+                    "--etf-commission-rate",
+                    "0.00008",
                 ]
             )
 
@@ -351,6 +353,7 @@ class TestAccountCreate:
             min_commission=Decimal("3.00"),
             stamp_duty_rate=Decimal("0.0004"),
             transfer_fee_rate=Decimal("0.00002"),
+            etf_commission_rate=Decimal("0.00008"),
         )
 
 
@@ -677,6 +680,17 @@ class TestAccountUpdateFee:
 
         exit_code = main(
             ["account", "update-fee", "--account-id", "1", "--commission-rate", "-0.0001"],
+            client=client,
+        )
+
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+        client.update_account_fees.assert_not_called()
+
+    def test_update_account_fees_rejects_negative_etf_fee(self):
+        client = _mock_client()
+
+        exit_code = main(
+            ["account", "update-fee", "--account-id", "1", "--etf-commission-rate", "-0.0001"],
             client=client,
         )
 

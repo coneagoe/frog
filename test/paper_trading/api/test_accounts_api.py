@@ -95,6 +95,7 @@ def test_create_account_accepts_and_returns_fee_config(monkeypatch, sqlite_sessi
             "min_commission": "3.00",
             "stamp_duty_rate": "0.0004",
             "transfer_fee_rate": "0.00002",
+            "etf_commission_rate": "0.00008",
         },
         headers=headers,
     )
@@ -106,6 +107,7 @@ def test_create_account_accepts_and_returns_fee_config(monkeypatch, sqlite_sessi
     assert body["min_commission"] == "3.0000"
     assert body["stamp_duty_rate"] == "0.00040000"
     assert body["transfer_fee_rate"] == "0.00002000"
+    assert body["etf_commission_rate"] == "0.00008000"
 
 
 def test_create_account_rejects_negative_fee_config(monkeypatch, sqlite_session):
@@ -118,6 +120,19 @@ def test_create_account_rejects_negative_fee_config(monkeypatch, sqlite_session)
     )
 
     assert response.status_code == 422
+
+
+def test_accounts_api_returns_etf_commission_rate(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+
+    response = client.post(
+        "/paper/accounts",
+        json={"name": "etf", "initial_cash": "100000", "etf_commission_rate": "0.00008"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["etf_commission_rate"] == "0.00008000"
 
 
 def test_create_account_rejects_unknown_fee_preset(monkeypatch, sqlite_session):
@@ -150,6 +165,31 @@ def test_update_account_fees_updates_existing_account(monkeypatch, sqlite_sessio
     body = response.json()
     assert body["commission_rate"] == "0.00020000"
     assert body["min_commission"] == "3.0000"
+
+
+def test_update_account_fees_updates_all_market_fee_groups(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+    created = client.post(
+        "/paper/accounts",
+        json={"name": "demo", "initial_cash": "100000.00"},
+        headers=headers,
+    ).json()
+
+    response = client.patch(
+        f"/paper/accounts/{created['id']}",
+        json={
+            "commission_rate": "0.0002",
+            "hk_commission_rate": "0.0003",
+            "etf_commission_rate": "0.00008",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["commission_rate"] == "0.00020000"
+    assert body["hk_commission_rate"] == "0.00030000"
+    assert body["etf_commission_rate"] == "0.00008000"
 
 
 def test_update_account_fees_rejects_negative_fee(monkeypatch, sqlite_session):

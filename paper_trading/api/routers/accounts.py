@@ -41,6 +41,7 @@ def create_account(request: CreateAccountRequest, session: Session = Depends(get
             min_commission=request.min_commission,
             stamp_duty_rate=request.stamp_duty_rate,
             transfer_fee_rate=request.transfer_fee_rate,
+            etf_commission_rate=request.etf_commission_rate,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc

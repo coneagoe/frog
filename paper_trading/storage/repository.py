@@ -259,12 +259,14 @@ class PaperTradingRepository:
         min_commission: Decimal | None = None,
         stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
+        etf_commission_rate: Decimal | None = None,
     ) -> PaperAccount:
         _validate_fee_values(
             commission_rate=commission_rate,
             min_commission=min_commission,
             stamp_duty_rate=stamp_duty_rate,
             transfer_fee_rate=transfer_fee_rate,
+            etf_commission_rate=etf_commission_rate,
         )
         preset_name = FeePreset(fee_preset or DEFAULT_FEE_PRESET)
         preset = get_fee_preset(preset_name)
@@ -278,6 +280,7 @@ class PaperTradingRepository:
             min_commission=min_commission if min_commission is not None else preset.min_commission,
             stamp_duty_rate=stamp_duty_rate if stamp_duty_rate is not None else preset.stamp_duty_rate,
             transfer_fee_rate=transfer_fee_rate if transfer_fee_rate is not None else preset.transfer_fee_rate,
+            etf_commission_rate=etf_commission_rate,
             share_count=initial_shares,
             net_asset_value=initial_nav,
             cumulative_deposit=Decimal(initial_cash).quantize(Decimal("0.0001")),
@@ -392,6 +395,18 @@ class PaperTradingRepository:
             account.hk_afrc_levy_rate = hk_afrc_levy_rate
         if hk_settlement_fee_rate is not None:
             account.hk_settlement_fee_rate = hk_settlement_fee_rate
+        self.session.flush()
+        return account
+
+    def update_account_etf_fees(
+        self, account_id: int, etf_commission_rate: Decimal | None = None
+    ) -> PaperAccount | None:
+        _require_fee_update(etf_commission_rate=etf_commission_rate)
+        _validate_fee_values(etf_commission_rate=etf_commission_rate)
+        account = self.get_account(account_id)
+        if account is None:
+            return None
+        account.etf_commission_rate = etf_commission_rate
         self.session.flush()
         return account
 
