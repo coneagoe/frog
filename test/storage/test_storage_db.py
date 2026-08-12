@@ -3821,14 +3821,14 @@ def test_postgresql_ssf_startup_leaves_table_creation_to_storage_enum_adapter(mo
             assert conn.execute(text("SELECT to_regclass('ssf_change_signals')")).scalar_one() is not None
             assert conn.execute(text("SELECT to_regtype('ssf_change_signal_status')")).scalar_one() is not None
             assert conn.execute(text("SELECT enum_range(NULL::paper_market)::text")).scalar_one() == (
-                "{a_share,hk_connect}"
+                "{a_share,hk_connect,etf}"
             )
 
             from storage.enum_governance import migrate_enums
 
             assert migrate_enums(conn).converted is True
             assert conn.execute(text("SELECT enum_range(NULL::paper_market)::text")).scalar_one() == (
-                "{a_share,hk_connect}"
+                "{a_share,hk_connect,etf}"
             )
     except OperationalError as exc:
         pytest.skip(f"PostgreSQL unavailable: {exc}")

@@ -779,7 +779,7 @@ def _etf_eligibility_symbol_check_ready(connection: Connection) -> bool:
     definition = connection.execute(
         text(
             "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-            "WHERE conrelid = :table_name::regclass AND conname = :constraint_name AND contype = 'c'"
+            "WHERE conrelid = CAST(:table_name AS regclass) AND conname = :constraint_name AND contype = 'c'"
         ),
         {"table_name": tb_name_paper_etf_eligibility, "constraint_name": ETF_ELIGIBILITY_SYMBOL_CHECK_NAME},
     ).scalar_one_or_none()

@@ -720,7 +720,7 @@ WITH expected(type_name, labels) AS (
     ('paper_order_side', ARRAY['buy','sell']),
     ('paper_order_status', ARRAY['new','accepted','partially_filled','filled','cancelled','rejected']),
     ('paper_trade_validity_status', ARRAY['valid','suspicious','invalid','unchecked']),
-    ('paper_market', ARRAY['a_share','hk_connect']),
+    ('paper_market', ARRAY['a_share','hk_connect','etf']),
     ('paper_position_source', ARRAY['trade','imported']),
     ('paper_round_trip_status', ARRAY['open','closed']),
     ('paper_trade_validity_granularity', ARRAY['daily']),
