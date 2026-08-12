@@ -62,6 +62,38 @@ def test_generate_snapshot_values_positions_at_close(tmp_path):
     engine.dispose()
 
 
+def test_snapshot_values_etf_position_from_etf_daily_bar(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_etf.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("etf-demo", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.ETF, "510300", 100, 0, Decimal("300.00"))
+    storage = FakeHistoryStorage(
+        {},
+        {
+            "510300": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["510300"],
+                    COL_DATE: ["2026-08-10"],
+                    COL_OPEN: [3.0],
+                    COL_HIGH: [3.2],
+                    COL_LOW: [2.9],
+                    COL_CLOSE: [3.1],
+                }
+            )
+        },
+    )
+    market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 8, 10)]))
+
+    snapshot = SnapshotService(repo, market_data).generate_snapshot(account.id, date(2026, 8, 10))
+
+    assert snapshot.market_value == Decimal("310.0000")
+    assert storage.etf_calls == [("510300", PeriodType.DAILY, AdjustType.QFQ, "2026-08-10", "2026-08-10")]
+    assert storage.calls == []
+    engine.dispose()
+
+
 def test_generate_snapshot_uses_account_realized_pnl_after_position_is_closed(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_realized_pnl.db'}")
     Base.metadata.create_all(engine)
@@ -246,6 +278,25 @@ def test_missing_exact_date_position_bar_records_valuation_gap(sqlite_session):
     assert gap.missing_symbols == ["300996"]
     assert repo.list_trades(account.id) == []
     assert repo.get_cash_available(account.id) == Decimal("100000.0000")
+
+
+def test_missing_etf_snapshot_bar_creates_etf_qualified_valuation_gap(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("missing-etf", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.ETF, "510300", 100, 0, Decimal("300.00"))
+
+    class MissingETFBarProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError(f"No ETF daily bar for {symbol} on {trade_date}")
+
+    outcome = SnapshotService(repo, MissingETFBarProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 10))
+
+    assert outcome.status == "valuation_gap"
+    assert outcome.valuation_gap is not None
+    assert outcome.valuation_gap.details == [
+        {"symbol": "510300", "market": "etf", "error": "'No ETF daily bar for 510300 on 2026-08-10'"}
+    ]
 
 
 def test_missing_bar_details_support_legacy_position_without_market():

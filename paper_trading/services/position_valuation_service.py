@@ -34,9 +34,10 @@ class PositionValuationService:
     def value_many(self, positions: Iterable) -> list[PositionValuation]:
         rows = list(positions)
         prices: dict[tuple[str, str], object] = {}
-        if rows:
+        quote_rows = [row for row in rows if row.market in {"a_share", "hk_connect"}]
+        if quote_rows:
             try:
-                items = [(row.symbol, self._source_market(row.market)) for row in rows]
+                items = [(row.symbol, self._source_market(row.market)) for row in quote_rows]
                 prices = dict(self.fetch_prices(items))
             except Exception:
                 prices = {}

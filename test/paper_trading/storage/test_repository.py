@@ -1089,6 +1089,41 @@ def test_hk_diagnostic_does_not_select_same_symbol_a_share_order_for_rebuild(sql
     assert order.market == "a_share"
 
 
+def test_eligible_daily_bar_rebuild_orders_include_etf_missing_exact_date(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    etf_account = repo.create_account("etf-retry", Decimal("100000"))
+    hk_account = repo.create_account("hk-retry", Decimal("100000"))
+    etf_order = repo.create_order(
+        etf_account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.100"),
+        date(2026, 8, 10),
+        OrderStatus.ACCEPTED,
+        market=Market.ETF,
+    )
+    hk_order = repo.create_order(
+        hk_account.id,
+        "00700",
+        OrderSide.BUY,
+        100,
+        Decimal("400.000"),
+        date(2026, 8, 10),
+        OrderStatus.ACCEPTED,
+        market=Market.HK_CONNECT,
+    )
+    repo.upsert_daily_bar_diagnostic(
+        etf_order.trade_date, Market.ETF, etf_order.symbol, "qfq", "missing_exact_date", [], resolved=False
+    )
+    repo.upsert_daily_bar_diagnostic(
+        hk_order.trade_date, Market.HK_CONNECT, hk_order.symbol, "bfq", "missing_exact_date", [], resolved=False
+    )
+
+    assert [item.id for item in repo.list_eligible_daily_bar_rebuild_orders()] == [etf_order.id]
+
+
 def test_same_symbol_round_trips_are_isolated_by_market(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

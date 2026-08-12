@@ -169,3 +169,25 @@ def test_value_many_falls_back_per_position_when_batch_quote_is_missing():
     assert result[0].mark_price == Decimal("12")
     assert result[1].mark_price == Decimal("410")
     assert result[1].price_source == "db_close"
+
+
+def test_etf_valuation_bypasses_a_share_live_quotes_and_uses_etf_daily_close():
+    market_data = _FakeMarketData({("510300", "etf"): Decimal("3.10")})
+    live_calls = []
+
+    def fetch_prices(items):
+        live_calls.append(list(items))
+        return {}
+
+    service = PositionValuationService(
+        market_data,
+        fetch_prices=fetch_prices,
+        today=date(2026, 8, 10),
+    )
+
+    result = service.value(_position(symbol="510300", market="etf", total_quantity=100, cost_amount=Decimal("300")))
+
+    assert live_calls == []
+    assert result.mark_price == Decimal("3.10")
+    assert result.price_source == "db_close"
+    assert market_data.calls == [("510300", date(2026, 8, 10), "etf")]

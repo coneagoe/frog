@@ -64,16 +64,25 @@ class StorageMarketDataProvider:
         return self._trade_calendar.next_trade_date(trade_date)
 
     def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
-        """Load a daily bar, routing to HK GGT storage when market is 'hk_connect'."""
+        """Load a daily bar from the storage backing the requested market."""
         stock_id = self._to_storage_stock_id(symbol)
         if market == "hk_connect":
             return self._get_hk_daily_bar(stock_id, symbol, trade_date)
+        if market == "etf":
+            return self._get_etf_daily_bar(stock_id, symbol, trade_date)
         return self._get_a_share_daily_bar(stock_id, symbol, trade_date)
 
     def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
         stock_id = self._to_storage_stock_id(symbol)
         if market == "hk_connect":
             row = self._storage.load_latest_history_data_stock_hk_ggt(stock_id, AdjustType.BFQ, trade_date.isoformat())
+        elif market == "etf":
+            df = self._storage.load_history_data_etf(
+                stock_id, PeriodType.DAILY, AdjustType.QFQ, end_date=trade_date.isoformat()
+            )
+            if df.empty:
+                return None
+            return self._decimal_field(df.iloc[-1], COL_CLOSE, symbol, trade_date)
         else:
             row = self._storage.load_latest_history_data_stock(stock_id, AdjustType.BFQ, trade_date.isoformat())
         if row is None:
@@ -124,6 +133,26 @@ class StorageMarketDataProvider:
             close=self._decimal_field(row, COL_CLOSE, symbol, trade_date),
             up_limit=None,
             down_limit=None,
+        )
+
+    def _get_etf_daily_bar(self, etf_id: str, symbol: str, trade_date: date) -> DailyBar:
+        df = self._storage.load_history_data_etf(
+            etf_id,
+            PeriodType.DAILY,
+            AdjustType.QFQ,
+            start_date=trade_date.isoformat(),
+            end_date=trade_date.isoformat(),
+        )
+        if df.empty:
+            raise KeyError(f"No ETF daily bar for {symbol} on {trade_date.isoformat()}")
+        row = df.iloc[-1]
+        return DailyBar(
+            symbol=symbol,
+            trade_date=trade_date,
+            open=self._decimal_field(row, COL_OPEN, symbol, trade_date),
+            high=self._decimal_field(row, COL_HIGH, symbol, trade_date),
+            low=self._decimal_field(row, COL_LOW, symbol, trade_date),
+            close=self._decimal_field(row, COL_CLOSE, symbol, trade_date),
         )
 
     def _load_limit_prices(self, symbol: str, trade_date: date) -> tuple[Decimal | None, Decimal | None]:

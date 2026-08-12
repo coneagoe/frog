@@ -114,6 +114,98 @@ def test_matching_rebuild_api_replays_eligible_delayed_order(monkeypatch, sqlite
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
 
 
+def test_matching_rebuild_api_replays_only_etf_qfq_missing_date_order(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    trade_date = date(2026, 8, 10)
+    etf_account = repo.create_account("etf-rebuild-api", Decimal("100000.00"))
+    a_share_account = repo.create_account("a-share-qfq-diagnostic", Decimal("100000.00"))
+    hk_account = repo.create_account("hk-qfq-diagnostic", Decimal("100000.00"))
+    etf_order = repo.create_order(
+        etf_account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.100"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("311.0000"),
+        market=Market.ETF,
+    )
+    a_share_order = repo.create_order(
+        a_share_account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.100"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("311.0000"),
+        market=Market.A_SHARE,
+    )
+    hk_order = repo.create_order(
+        hk_account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.100"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("311.0000"),
+        market=Market.HK_CONNECT,
+    )
+    repo.upsert_daily_bar_diagnostic(trade_date, Market.ETF, "510300", "qfq", "missing_exact_date", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.A_SHARE, "510300", "qfq", "missing_exact_date", [], resolved=False
+    )
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.HK_CONNECT, "510300", "qfq", "missing_exact_date", [], resolved=False
+    )
+
+    class MarketData:
+        def __init__(self):
+            self.daily_bar_calls = []
+
+        def get_daily_bar(self, symbol, requested_date, market=None):
+            self.daily_bar_calls.append((symbol, requested_date, market))
+            return DailyBar(
+                symbol,
+                requested_date,
+                Decimal("3.100"),
+                Decimal("3.200"),
+                Decimal("3.000"),
+                Decimal("3.100"),
+            )
+
+        def get_latest_daily_close(self, symbol, requested_date, market=None):
+            return Decimal("3.100")
+
+        def next_trade_date(self, requested_date):
+            return requested_date
+
+    market_data = MarketData()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: sqlite_session
+    app.dependency_overrides[get_market_data_provider] = lambda: market_data
+
+    response = TestClient(app).post("/paper/matching/runs/rebuilds", headers={"Authorization": "Bearer secret"})
+
+    assert response.status_code == 200
+    assert response.json() == {"rebuilt_account_ids": [etf_account.id]}
+    assert len(market_data.daily_bar_calls) >= 2
+    assert set(market_data.daily_bar_calls) == {("510300", trade_date, Market.ETF)}
+    assert repo.get_order(etf_order.id).status == OrderStatus.FILLED.value
+    assert repo.get_order(a_share_order.id).status == OrderStatus.ACCEPTED.value
+    assert repo.get_order(hk_order.id).status == OrderStatus.ACCEPTED.value
+    refreshed_diagnostic = next(
+        item
+        for item in repo.list_daily_bar_diagnostics()
+        if item.market == Market.ETF.value and item.stock_id == "510300"
+    )
+    assert refreshed_diagnostic.resolved is True
+
+
 def test_matching_api_rolls_back_and_hides_persistence_error(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
     Base.metadata.create_all(sqlite_session.get_bind())

@@ -220,11 +220,13 @@ class PaperTradingRepository:
                 (DailyBarDiagnostic.business_date == PaperOrder.trade_date)
                 & (DailyBarDiagnostic.market == PaperOrder.market)
                 & (DailyBarDiagnostic.stock_id == PaperOrder.symbol)
-                & (DailyBarDiagnostic.adjust == "bfq"),
+                & (
+                    ((PaperOrder.market == Market.A_SHARE.value) & (DailyBarDiagnostic.adjust == "bfq"))
+                    | ((PaperOrder.market == Market.ETF.value) & (DailyBarDiagnostic.adjust == "qfq"))
+                ),
             )
             .filter(
                 PaperOrder.status == OrderStatus.ACCEPTED.value,
-                PaperOrder.market == Market.A_SHARE.value,
                 DailyBarDiagnostic.resolved.is_(False),
                 DailyBarDiagnostic.classification == "missing_exact_date",
             )

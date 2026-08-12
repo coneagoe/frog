@@ -163,25 +163,27 @@ class MatchingService:
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
 
     def _record_missing_exact_date_diagnostic(self, order: PaperOrder, error: KeyError) -> None:
+        adjust = "qfq" if order.market == "etf" else "bfq"
         self.repo.upsert_daily_bar_diagnostic(
             order.trade_date,
             order.market,
             order.symbol,
-            "bfq",
+            adjust,
             "missing_exact_date",
             [{"provider": "market_data", "status": "empty", "detail": str(error)}],
             False,
         )
 
     def _resolve_matching_diagnostic(self, order: PaperOrder) -> None:
-        if order.market == "a_share" and self.repo.has_unresolved_daily_bar_diagnostic(
-            order.trade_date, order.market, order.symbol, "bfq"
+        adjust = {"a_share": "bfq", "etf": "qfq"}.get(order.market)
+        if adjust is not None and self.repo.has_unresolved_daily_bar_diagnostic(
+            order.trade_date, order.market, order.symbol, adjust
         ):
             self.repo.upsert_daily_bar_diagnostic(
                 order.trade_date,
                 order.market,
                 order.symbol,
-                "bfq",
+                adjust,
                 "resolved",
                 [{"provider": "market_data", "status": "downloaded"}],
                 True,

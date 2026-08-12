@@ -92,8 +92,6 @@ from common.const import (
 )
 from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
-from paper_trading.services.etf_eligibility_service import ETFEligibilityService
-from paper_trading.storage.repository import PaperTradingRepository
 
 from .config import StorageConfig
 from .domain_enums import SSFChangeSignalStatus, validate_ssf_event_types
@@ -148,6 +146,20 @@ from .model import (
     tb_name_suspend_d_a_stock,
     tb_name_top10_floatholders,
 )
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily expose paper-trading collaborators without an import cycle."""
+    if name == "ETFEligibilityService":
+        from paper_trading.services.etf_eligibility_service import ETFEligibilityService
+
+        return ETFEligibilityService
+    if name == "PaperTradingRepository":
+        from paper_trading.storage.repository import PaperTradingRepository
+
+        return PaperTradingRepository
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 logger = logging.getLogger(__name__)
 
@@ -1917,6 +1929,9 @@ class StorageDb:
 
     def refresh_etf_basic_and_reconcile(self, df: pd.DataFrame) -> bool:
         """Replace ETF basic data and reconcile eligibility atomically."""
+        from paper_trading.services.etf_eligibility_service import ETFEligibilityService
+        from paper_trading.storage.repository import PaperTradingRepository
+
         assert self.Session is not None
         session = self.Session()
         try:
@@ -1942,6 +1957,9 @@ class StorageDb:
 
     def reconcile_etf_eligibility(self) -> None:
         """Reconcile paper-trading eligibility from the persisted ETF snapshot."""
+        from paper_trading.services.etf_eligibility_service import ETFEligibilityService
+        from paper_trading.storage.repository import PaperTradingRepository
+
         assert self.Session is not None
         session = self.Session()
         try:

@@ -118,13 +118,14 @@ account's pre-replay current cash or position; replay creates the appropriate
 historical reservation. Current-date orders retain their normal immediate
 reservation behavior.
 
-After a daily BFQ history download, the daily-history DAG automatically calls
-the delayed-bar rebuild endpoint. It selects accepted A-share orders with an
-unresolved exact-date BFQ diagnostic whose bar is now available, then rebuilds
-each affected account's current derived ledger from the earliest affected
-order. The rebuild preserves manual cash events and cancellations, reapplies
-normal matching rules, and records lightweight rebuild audit metadata. The
-authenticated endpoint is `POST /paper/matching/runs/rebuilds`.
+After a daily history download, the daily-history DAG automatically calls the
+delayed-bar rebuild endpoint. It selects accepted A-share orders with an
+unresolved exact-date BFQ diagnostic or ETF orders with an unresolved exact-date
+QFQ diagnostic whose bar is now available, then rebuilds each affected
+account's current derived ledger from the earliest affected order. The rebuild
+preserves manual cash events and cancellations, reapplies normal matching rules,
+and records lightweight rebuild audit metadata. The authenticated endpoint is
+`POST /paper/matching/runs/rebuilds`.
 
 Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. ETF orders use the account's `etf_commission_rate`, defaulting to `0.00006`; ETF fees are commission-only, with no minimum commission, stamp duty, or transfer fee. Explicit fee flags override the preset values for the new account.
 
@@ -414,15 +415,17 @@ Accounts Positions card:
 
 - `mark_price`: the price used to value the open position, or `null` when no
   usable price is available.
-- `price_source`: `real_time` when a valid real-time quote is available, or
-  `db_close` when valuation falls back to the latest stored BFQ daily close.
+- `price_source`: `real_time` when a valid A-share or HK Connect real-time quote
+  is available, or `db_close` when valuation uses the latest stored market
+  close. ETF positions use the ETF daily close directly.
 - `unrealized_pnl`: `total_quantity * mark_price - cost_amount`, or `null`
   when neither price source is available.
 
-The positions endpoint batches real-time quote retrieval for the account. A
-missing or invalid quote falls back per position to the latest stored BFQ close
-using its A-share or HK Connect market route. This request-time valuation does
-not change persisted realized PnL or snapshot/NAV calculations.
+The positions endpoint batches real-time quote retrieval for A-share and HK
+Connect positions. A missing or invalid quote falls back per position to the
+latest stored BFQ close using its market route. ETF positions bypass the
+real-time quote batch and use the latest stored ETF QFQ close. This request-time
+valuation does not change persisted realized PnL or snapshot/NAV calculations.
 
 ```json
 [

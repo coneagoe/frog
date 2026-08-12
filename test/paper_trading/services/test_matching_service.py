@@ -597,6 +597,51 @@ def test_match_order_missing_exact_date_records_warning_diagnostic(tmp_path):
     engine.dispose()
 
 
+def test_matching_etf_missing_bar_warns_then_same_date_retry_fills(tmp_path):
+    engine, session, repo, order_service, _, trade_date = _services(tmp_path)
+    account = repo.create_account("etf-retry", Decimal("100000.00"))
+    order = order_service.place_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("3.100"), trade_date, market=Market.ETF
+    )
+
+    class RetryETFMarketData:
+        available = False
+
+        def is_trade_date(self, trade_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
+
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            assert market == "etf"
+            if not self.available:
+                raise KeyError(f"No daily bar for {symbol} on {trade_date}")
+            return DailyBar(symbol, trade_date, Decimal("3.100"), Decimal("3.200"), Decimal("3.000"), Decimal("3.100"))
+
+    market_data = RetryETFMarketData()
+    matching = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+
+    assert matching.match_order(order) == "warning"
+    diagnostic = next(
+        item for item in repo.list_daily_bar_diagnostics() if item.market == "etf" and item.stock_id == "510300"
+    )
+    assert (diagnostic.market, diagnostic.stock_id, diagnostic.classification) == (
+        "etf",
+        "510300",
+        "missing_exact_date",
+    )
+    assert diagnostic.adjust.value == "qfq"
+    market_data.available = True
+    assert matching.match_order(order) == "filled"
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    assert diagnostic.resolved is True
+    engine.dispose()
+
+
 @pytest.mark.parametrize(
     ("method_name", "error"),
     [
@@ -716,6 +761,39 @@ def test_matching_fill_resolves_historical_retry_diagnostic(tmp_path):
     )
     assert retry.status == OrderStatus.ACCEPTED.value
     assert retry.rejection_code is None
+    engine.dispose()
+
+
+def test_matching_hk_fill_does_not_resolve_historical_bfq_diagnostic(tmp_path):
+    engine, session, repo, order_service, _, trade_date = _services(tmp_path)
+    account = repo.create_account("hk-historical-retry", Decimal("100000.00"))
+    repo.upsert_daily_bar_diagnostic(
+        trade_date, Market.HK_CONNECT, "00700", "bfq", "missing_exact_date", [], resolved=False
+    )
+    order = order_service.place_order(
+        account.id, "00700", OrderSide.BUY, 100, Decimal("400.00"), trade_date, market=Market.HK_CONNECT
+    )
+
+    class ExactDateMarketData:
+        def is_trade_date(self, trade_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
+
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+            return None
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            return DailyBar(symbol, trade_date, Decimal("400"), Decimal("410"), Decimal("390"), Decimal("400"))
+
+    market_data = ExactDateMarketData()
+    matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+
+    assert matching_service.match_order(order) == "filled"
+    diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "00700")
+    assert diagnostic.resolved is False
+    assert diagnostic.classification == "missing_exact_date"
     engine.dispose()
 
 
