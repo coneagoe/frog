@@ -17,7 +17,14 @@ from common.const import (
     COL_OPEN,
     COL_STOCK_ID,
 )
-from paper_trading.domain.enums import ETFEligibilityStatus, Market, MatchingRunStatus, OrderSide, OrderStatus
+from paper_trading.domain.enums import (
+    CashEventType,
+    ETFEligibilityStatus,
+    Market,
+    MatchingRunStatus,
+    OrderSide,
+    OrderStatus,
+)
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_delete_service import OrderDeleteService
@@ -216,9 +223,9 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     assert repo.get_order(buy.id).status == OrderStatus.FILLED.value
     assert repo.get_order(sell.id).status == OrderStatus.FILLED.value
     trades = repo.list_trades(account.id)
-    assert [(trade.market, trade.side, trade.fees) for trade in trades] == [
-        (Market.ETF, OrderSide.BUY.value, Decimal("0.0315")),
-        (Market.ETF, OrderSide.SELL.value, Decimal("0.0325")),
+    assert [(trade.id, trade.price, trade.amount, trade.fees, trade.trade_date) for trade in trades] == [
+        (trades[0].id, Decimal("3.1500"), Decimal("315.0000"), Decimal("0.0315"), buy_date),
+        (trades[1].id, Decimal("3.2500"), Decimal("325.0000"), Decimal("0.0325"), sell_date),
     ]
     assert market_data.requested_bars == [
         ("510300", sell_date, Market.ETF),
@@ -233,7 +240,14 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     assert len(round_trips) == 1
     assert round_trips[0].market == Market.ETF.value
     assert round_trips[0].status == "closed"
-    assert {event.order_id for event in repo.list_cash_ledger(account.id) if event.order_id} == {buy.id, sell.id}
+    assert [
+        (event.event_type, event.amount, event.order_id, event.trade_id, event.trade_date)
+        for event in repo.list_cash_ledger(account.id)
+        if event.order_id is not None
+    ] == [
+        (CashEventType.FREEZE.value, Decimal("-315.0315"), buy.id, None, buy_date),
+        (CashEventType.TRADE.value, Decimal("324.9675"), sell.id, trades[1].id, sell_date),
+    ]
     assert repo.get_position(account.id, Market.ETF, "510300") is None
     engine.dispose()
 

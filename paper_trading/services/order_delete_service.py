@@ -246,6 +246,7 @@ class OrderDeleteService:
                         CashEventType.FREEZE,
                         -frozen_cash,
                         order_id=order.id,
+                        trade_date=order.trade_date,
                         note="buy_order_freeze",
                     )
                 else:
