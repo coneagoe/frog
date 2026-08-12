@@ -24,6 +24,8 @@ class TradeValidityService:
         market = getattr(order, "market", None) or "a_share"
         if market == "hk_connect":
             return self._analyze_hk_connect(order)
+        if market == "etf":
+            return self._analyze_etf(order)
         return self._analyze_a_share(order)
 
     # ── HK Connect validity ──────────────────────────────────────────
@@ -131,6 +133,64 @@ class TradeValidityService:
             reason_code = "VALID"
             reason_detail = "Price is inside daily range and tick-aligned"
 
+        check = self.repo.create_trade_validity_check(
+            order_id=order.id,
+            account_id=order.account_id,
+            symbol=order.symbol,
+            trade_date=order.trade_date,
+            side=order.side,
+            input_price=price,
+            data_granularity="daily",
+            daily_low=bar.low,
+            daily_high=bar.high,
+            limit_up_price=None,
+            limit_down_price=None,
+            touched_limit_up=None,
+            touched_limit_down=None,
+            price_in_range=price_in_range,
+            status=status.value,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            market=market,
+        )
+        self.repo.update_order_validity(order, check.status, check.reason_code)
+        return check
+
+    def _analyze_etf(self, order: PaperOrder) -> PaperTradeValidityCheck:
+        market = "etf"
+        try:
+            bar = self.market_data.get_daily_bar(order.symbol, order.trade_date, market=market)
+        except (KeyError, ValueError) as exc:
+            check = self.repo.create_trade_validity_check(
+                order_id=order.id,
+                account_id=order.account_id,
+                symbol=order.symbol,
+                trade_date=order.trade_date,
+                side=order.side,
+                input_price=Decimal(order.limit_price),
+                data_granularity="daily",
+                daily_low=None,
+                daily_high=None,
+                limit_up_price=None,
+                limit_down_price=None,
+                touched_limit_up=None,
+                touched_limit_down=None,
+                price_in_range=None,
+                status=TradeValidityStatus.UNCHECKED.value,
+                reason_code="MARKET_DATA_UNAVAILABLE",
+                reason_detail=str(exc),
+                market=market,
+            )
+            self.repo.update_order_validity(order, check.status, check.reason_code)
+            return check
+
+        price = Decimal(order.limit_price)
+        price_in_range = bar.low <= price <= bar.high
+        status = TradeValidityStatus.VALID if price_in_range else TradeValidityStatus.INVALID
+        reason_code = "VALID" if price_in_range else "PRICE_OUT_OF_DAILY_RANGE"
+        reason_detail = (
+            "Price is inside daily range" if price_in_range else "Input price is outside the daily low/high range"
+        )
         check = self.repo.create_trade_validity_check(
             order_id=order.id,
             account_id=order.account_id,

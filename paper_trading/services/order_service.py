@@ -33,6 +33,7 @@ from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperOrder
 from paper_trading.storage.repository import PaperTradingRepository
+from storage.model.etf_basic import ETFBasic
 
 
 class OrderService:
@@ -72,6 +73,12 @@ class OrderService:
                 "INVALID_MARKET",
                 f"Unsupported market: {market}",
                 {"market": market},
+            )
+        if market is None and self._is_known_etf_symbol(symbol):
+            market_error = PaperTradingError(
+                "MARKET_SYMBOL_MISMATCH",
+                f"ETF symbol {symbol} requires market=etf",
+                {"symbol": symbol, "market": Market.A_SHARE.value},
             )
         if idempotency_key:
             existing = self.repo.get_order_by_idempotency_key(account_id, idempotency_key)
@@ -197,6 +204,9 @@ class OrderService:
             and getattr(order, "trade_date") == trade_date
             and getattr(order, "market") == market.value
         )
+
+    def _is_known_etf_symbol(self, symbol: str) -> bool:
+        return bool(re.match(r"^\d{6}$", symbol) and self.repo.session.get(ETFBasic, symbol) is not None)
 
     def _place_hk_order(
         self,

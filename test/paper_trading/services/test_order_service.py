@@ -947,7 +947,8 @@ def test_place_buy_order_uses_account_fee_config(tmp_path):
 def test_etf_order_admission_uses_etf_market_data_and_commission(tmp_path):
     engine, session, repo, _ = _repo_and_service(tmp_path)
     _add_supported_etf(repo)
-    service = _etf_order_service(repo, FakeMarketDataProvider())
+    market_data = Mock(wraps=FakeMarketDataProvider())
+    service = _etf_order_service(repo, market_data)
     account = repo.create_account("etf", Decimal("100000.00"))
 
     order = service.place_order(
@@ -968,6 +969,9 @@ def test_etf_order_admission_uses_etf_market_data_and_commission(tmp_path):
     checks = repo.list_trade_validity_checks(order.id)
     assert len(checks) == 1
     assert checks[0].market == Market.ETF.value
+    assert checks[0].limit_up_price is None
+    assert checks[0].limit_down_price is None
+    market_data.get_daily_bar.assert_called_once_with("510300", date(2026, 6, 16), market="etf")
     engine.dispose()
 
 
@@ -1034,6 +1038,61 @@ def test_etf_order_replays_historical_date_without_a_share_diagnostic(tmp_path, 
 
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.market == Market.ETF.value
+    engine.dispose()
+
+
+def test_etf_sell_reserves_market_qualified_position(tmp_path):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(repo, FakeMarketDataProvider())
+    account = repo.create_account("etf-sell", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.ETF, "510300", 200, 0, Decimal("600.00"))
+    repo.create_position_lot(account.id, Market.ETF, "510300", date(2026, 6, 15), 200, 200, Decimal("3.00"))
+
+    order = service.place_order(
+        account.id, "510300", OrderSide.SELL, 100, Decimal("3.001"), date(2026, 6, 16), market=Market.ETF
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == Market.ETF.value
+    assert order.frozen_quantity == 100
+    position = repo.get_position(account.id, Market.ETF, "510300")
+    assert position is not None
+    assert position.frozen_quantity == 100
+    engine.dispose()
+
+
+def test_etf_sell_rejects_same_day_purchase_under_t1(tmp_path):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(repo, FakeMarketDataProvider())
+    account = repo.create_account("etf-t1", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.ETF, "510300", 100, 0, Decimal("300.00"))
+    repo.create_position_lot(account.id, Market.ETF, "510300", date(2026, 6, 16), 100, 100, Decimal("3.00"))
+
+    order = service.place_order(
+        account.id, "510300", OrderSide.SELL, 100, Decimal("3.001"), date(2026, 6, 16), market=Market.ETF
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "A_SHARE_T1_VIOLATION"
+    engine.dispose()
+
+
+def test_known_etf_symbol_requires_explicit_etf_market(tmp_path):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(repo, FakeMarketDataProvider())
+    account = repo.create_account("etf-market", Decimal("100000.00"))
+
+    order = service.place_order(account.id, "510300", OrderSide.BUY, 100, Decimal("3.001"), date(2026, 6, 16))
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "MARKET_SYMBOL_MISMATCH"
+    assert order.market == Market.A_SHARE.value
     engine.dispose()
 
 
