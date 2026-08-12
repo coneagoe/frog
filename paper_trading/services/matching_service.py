@@ -154,6 +154,7 @@ class MatchingService:
                 CashEventType.RELEASE,
                 Decimal(order.frozen_cash),
                 order_id=order.id,
+                trade_date=order.trade_date,
                 note="reject_order_release",
             )
         if int(order.frozen_quantity or 0) > 0:

@@ -252,6 +252,46 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     engine.dispose()
 
 
+def test_historical_etf_buy_rejection_replay_dates_cash_release(tmp_path, monkeypatch):
+    class ReplayToday(date):
+        @classmethod
+        def today(cls) -> Self:
+            return cls(2026, 6, 17)
+
+    monkeypatch.setattr(order_service_module, "date", ReplayToday)
+    engine, session, repo, _, _, _ = _services(tmp_path)
+    _add_supported_etf(repo)
+    buy_date = date(2026, 6, 15)
+    market_data = FakeMarketDataProvider(
+        {
+            ("510300", buy_date): DailyBar(
+                "510300",
+                buy_date,
+                Decimal("3.100"),
+                Decimal("3.200"),
+                Decimal("3.000"),
+                Decimal("3.150"),
+                suspended=True,
+            )
+        }
+    )
+    order_service = OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
+    account = repo.create_account("historical-etf-rejection", Decimal("100000.00"))
+
+    buy = order_service.place_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("3.150"), buy_date, market=Market.ETF
+    )
+    session.commit()
+
+    assert repo.get_order(buy.id).status == OrderStatus.REJECTED.value
+    assert [
+        (event.event_type, event.order_id, event.trade_date)
+        for event in repo.list_cash_ledger(account.id)
+        if event.event_type == CashEventType.RELEASE.value
+    ] == [(CashEventType.RELEASE, buy.id, buy_date)]
+    engine.dispose()
+
+
 def test_matching_keeps_same_symbol_a_share_and_etf_orders_positions_and_trades_isolated(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
