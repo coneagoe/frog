@@ -8,11 +8,13 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.position_valuation_service import PositionValuationService
 from paper_trading.storage.market_data import (
     MarketDataProvider,
     StorageMarketDataProvider,
 )
+from paper_trading.storage.repository import PaperTradingRepository
 from storage.config import StorageConfig
 from storage.storage_db import get_storage
 
@@ -97,6 +99,10 @@ def get_security_name_provider(session: Session = Depends(get_session)):
     from paper_trading.storage.security_metadata import SecurityNameProvider
 
     return SecurityNameProvider(session)
+
+
+def get_etf_eligibility_service(session: Session = Depends(get_session)) -> ETFEligibilityService:
+    return ETFEligibilityService(PaperTradingRepository(session))
 
 
 def get_position_valuation_service(

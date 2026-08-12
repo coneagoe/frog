@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import (
+    get_etf_eligibility_service,
     get_hk_metadata_provider,
     get_market_data_provider,
     get_security_name_provider,
@@ -17,6 +18,7 @@ from paper_trading.schemas.orders import (
     TradeValidityCheckResponse,
     UpdateOrderCommentRequest,
 )
+from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.order_service import OrderService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
@@ -34,11 +36,12 @@ def create_order(
     session: Session = Depends(get_session),
     market_data: MarketDataProvider = Depends(get_market_data_provider),
     hk_metadata: HkConnectMetadataProvider = Depends(get_hk_metadata_provider),
+    etf_eligibility_service: ETFEligibilityService = Depends(get_etf_eligibility_service),
 ):
     repo = PaperTradingRepository(session)
     if repo.get_account(account_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
-    order_service = OrderService(repo, market_data, hk_metadata=hk_metadata)
+    order_service = OrderService(repo, market_data, hk_metadata=hk_metadata, etf_eligibility=etf_eligibility_service)
     try:
         order = order_service.place_order(
             account_id,

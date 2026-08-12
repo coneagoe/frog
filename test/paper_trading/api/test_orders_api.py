@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Self
 
@@ -10,11 +10,12 @@ import paper_trading.services.order_service as order_service_module
 from common.const import COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_security_name_provider, get_session
-from paper_trading.domain.enums import Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import ETFEligibilityStatus, Market, OrderSide, OrderStatus
 from paper_trading.storage.market_data import StorageMarketDataProvider
 from paper_trading.storage.models import PaperCashLedger, PaperMatchingRun, PaperTrade
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from storage.model.etf_basic import ETFBasic
 from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar, _FakeSecurityNameProvider
 
 
@@ -209,6 +210,92 @@ def test_list_orders_and_trades_include_stock_name(monkeypatch, sqlite_session):
     assert trades.status_code == 200
     assert orders.json()[0]["stock_name"] == "Tencent Holdings"
     assert trades.json()[0]["stock_name"] == "Tencent Holdings"
+
+
+def test_create_etf_order_resolves_etf_names_and_rejects_unreviewed_etf(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    ETFBasic.__table__.create(session.get_bind(), checkfirst=True)
+    repo = PaperTradingRepository(session)
+    session.add_all(
+        [
+            ETFBasic(基金代码="510300", 中文简称="CSI 300 ETF", 交易所="SH", 存续状态="L"),
+            ETFBasic(基金代码="159915", 中文简称="Unreviewed ETF", 交易所="SZ", 存续状态="L"),
+        ]
+    )
+    repo.upsert_etf_eligibility(
+        "510300",
+        "CSI 300 ETF",
+        "SH",
+        "L",
+        datetime(2026, 8, 12, tzinfo=timezone.utc),
+        status=ETFEligibilityStatus.SUPPORTED,
+    )
+    session.commit()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_market_data_provider] = lambda: StorageMarketDataProvider(
+        FakeHistoryStorage({}), FakeTradeCalendar([date(2026, 6, 16)])
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    account_id = client.post(
+        "/paper/accounts", json={"name": "etf", "initial_cash": "100000.00"}, headers=headers
+    ).json()["id"]
+
+    accepted = client.post(
+        f"/paper/accounts/{account_id}/orders",
+        json={
+            "symbol": "510300",
+            "market": "etf",
+            "side": "buy",
+            "quantity": 100,
+            "limit_price": "3.00",
+            "trade_date": "2026-06-16",
+        },
+        headers=headers,
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "accepted"
+    assert accepted.json()["market"] == "etf"
+    order_id = accepted.json()["id"]
+    repo.create_trade(
+        order_id=order_id,
+        account_id=account_id,
+        symbol="510300",
+        side=OrderSide.BUY,
+        quantity=100,
+        price=Decimal("3.00"),
+        amount=Decimal("300.00"),
+        fees=Decimal("0"),
+        trade_date=date(2026, 6, 16),
+        market=Market.ETF,
+    )
+    session.commit()
+
+    orders = client.get(f"/paper/accounts/{account_id}/orders", headers=headers)
+    trades = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
+    assert orders.json()[0]["stock_name"] == "CSI 300 ETF"
+    assert trades.json()[0]["stock_name"] == "CSI 300 ETF"
+
+    rejected = client.post(
+        f"/paper/accounts/{account_id}/orders",
+        json={
+            "symbol": "159915",
+            "market": "etf",
+            "side": "buy",
+            "quantity": 100,
+            "limit_price": "3.00",
+            "trade_date": "2026-06-16",
+        },
+        headers=headers,
+    )
+
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+    assert rejected.json()["rejection_code"] == "ETF_ELIGIBILITY_UNREVIEWED"
 
 
 def test_create_order_returns_validity_summary(monkeypatch, sqlite_session):

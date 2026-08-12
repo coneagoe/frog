@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from storage.model.a_stock_basic import AStockBasic
+from storage.model.etf_basic import ETFBasic
 from storage.model.general_info_ggt import GeneralInfoGGT
 
 
@@ -16,10 +17,13 @@ class SecurityNameProvider:
         requested = set(securities)
         names: dict[tuple[str, str], str] = {}
         a_share_symbols = {symbol for market, symbol in requested if market == "a_share"}
+        etf_symbols = {symbol for market, symbol in requested if market == "etf"}
         hk_symbols = {symbol for market, symbol in requested if market == "hk_connect"}
 
         if a_share_symbols:
             names.update(self._resolve_a_share(a_share_symbols))
+        if etf_symbols:
+            names.update(self._resolve_etf(etf_symbols))
         if hk_symbols:
             names.update(self._resolve_hk_connect(hk_symbols))
         return names
@@ -34,6 +38,18 @@ class SecurityNameProvider:
             ("a_share", cast(str, row.股票代码)): cast(str, row.股票名称)
             for row in rows
             if row.股票名称 and row.股票名称.strip()
+        }
+
+    def _resolve_etf(self, symbols: Collection[str]) -> dict[tuple[str, str], str]:
+        try:
+            with self._session.begin_nested():
+                rows = self._session.query(ETFBasic).filter(ETFBasic.基金代码.in_(symbols)).all()
+        except SQLAlchemyError:
+            return {}
+        return {
+            ("etf", cast(str, row.基金代码)): cast(str, row.中文简称)
+            for row in rows
+            if row.中文简称 and row.中文简称.strip()
         }
 
     def _resolve_hk_connect(self, symbols: Collection[str]) -> dict[tuple[str, str], str]:
