@@ -9,7 +9,7 @@ def ensure_lot_size(quantity: int) -> None:
     if quantity <= 0 or quantity % 100 != 0:
         raise PaperTradingError(
             "INVALID_LOT_SIZE",
-            "A-share orders must use positive 100-share lots",
+            "Orders must use positive 100-unit lots",
             {"quantity": quantity},
         )
 
