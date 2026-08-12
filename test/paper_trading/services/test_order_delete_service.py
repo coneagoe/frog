@@ -1421,6 +1421,7 @@ def test_etf_replay_same_day_sell_uses_etf_t1_policy():
 
     assert ok is False
     assert code == "ETF_T1_VIOLATION"
+    assert reason is not None
     assert "ETF T+1" in reason
 
 
