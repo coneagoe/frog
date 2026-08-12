@@ -89,7 +89,10 @@ class TestDownloadManager:
 
         result = manager.download_forecast(ann_date="2025-01-01")
 
-        assert result == dm.ForecastDownloadResult("2025-01-01", 2, 2, True)
+        assert result.announcement_date == "2025-01-01"
+        assert result.source_rows == 2
+        assert result.a_share_rows == 2
+        assert result.saved is True
         downloader.dl_forecast.assert_called_once_with(ann_date="2025-01-01")
         storage.save_forecasts.assert_called_once_with(forecast)
 
@@ -101,7 +104,10 @@ class TestDownloadManager:
 
         result = manager.download_forecast(ann_date="2025-01-01")
 
-        assert result == dm.ForecastDownloadResult("2025-01-01", 0, 0, True)
+        assert result.announcement_date == "2025-01-01"
+        assert result.source_rows == 0
+        assert result.a_share_rows == 0
+        assert result.saved is True
         storage.save_forecasts.assert_called_once_with(forecast)
 
     def test_download_forecast_reports_unsaved_provider_none(self, monkeypatch):
@@ -110,7 +116,10 @@ class TestDownloadManager:
 
         result = manager.download_forecast(ann_date="2025-01-01")
 
-        assert result == dm.ForecastDownloadResult("2025-01-01", 0, 0, False)
+        assert result.announcement_date == "2025-01-01"
+        assert result.source_rows == 0
+        assert result.a_share_rows == 0
+        assert result.saved is False
         storage.save_forecasts.assert_not_called()
 
     def test_download_forecast_reports_unsaved_provider_error(self, monkeypatch):
@@ -119,7 +128,10 @@ class TestDownloadManager:
 
         result = manager.download_forecast(ann_date="2025-01-01")
 
-        assert result == dm.ForecastDownloadResult("2025-01-01", 0, 0, False)
+        assert result.announcement_date == "2025-01-01"
+        assert result.source_rows == 0
+        assert result.a_share_rows == 0
+        assert result.saved is False
         storage.save_forecasts.assert_not_called()
 
     def test_download_forecast_reports_unsaved_persistence_result(self, monkeypatch):
@@ -130,7 +142,10 @@ class TestDownloadManager:
 
         result = manager.download_forecast(ann_date="2025-01-01")
 
-        assert result == dm.ForecastDownloadResult("2025-01-01", 1, 1, False)
+        assert result.announcement_date == "2025-01-01"
+        assert result.source_rows == 1
+        assert result.a_share_rows == 1
+        assert result.saved is False
         storage.save_forecasts.assert_called_once_with(forecast)
 
     def test_download_forecast_reports_unsaved_persistence_error(self, monkeypatch):
@@ -140,7 +155,10 @@ class TestDownloadManager:
 
         result = manager.download_forecast(ann_date="2025-01-01")
 
-        assert result == dm.ForecastDownloadResult("2025-01-01", 0, 0, False)
+        assert result.announcement_date == "2025-01-01"
+        assert result.source_rows == 0
+        assert result.a_share_rows == 0
+        assert result.saved is False
 
     def test_all_empty_providers_create_missing_market_data_outcome(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
