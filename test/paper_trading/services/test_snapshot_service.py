@@ -287,13 +287,20 @@ def test_missing_etf_snapshot_bar_creates_etf_qualified_valuation_gap(sqlite_ses
     repo.upsert_position(account.id, Market.ETF, "510300", 100, 0, Decimal("300.00"))
 
     class MissingETFBarProvider(FakeMarketDataProvider):
+        def __init__(self):
+            super().__init__()
+            self.calls: list[tuple[str, str | None]] = []
+
         def get_daily_bar(self, symbol, trade_date, market=None):
+            self.calls.append((symbol, market))
             raise KeyError(f"No ETF daily bar for {symbol} on {trade_date}")
 
-    outcome = SnapshotService(repo, MissingETFBarProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 10))
+    market_data = MissingETFBarProvider()
+    outcome = SnapshotService(repo, market_data).generate_snapshot_or_gap(account.id, date(2026, 8, 10))
 
     assert outcome.status == "valuation_gap"
     assert outcome.valuation_gap is not None
+    assert market_data.calls == [("510300", "etf")]
     assert outcome.valuation_gap.details == [
         {"symbol": "510300", "market": "etf", "error": "'No ETF daily bar for 510300 on 2026-08-10'"}
     ]

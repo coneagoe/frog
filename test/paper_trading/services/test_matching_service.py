@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Self, cast
 
@@ -17,13 +17,16 @@ from common.const import (
     COL_OPEN,
     COL_STOCK_ID,
 )
-from paper_trading.domain.enums import Market, MatchingRunStatus, OrderSide, OrderStatus
+from paper_trading.domain.enums import ETFEligibilityStatus, Market, MatchingRunStatus, OrderSide, OrderStatus
+from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.matching_service import MatchingService
+from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from storage.model.etf_basic import ETFBasic
 from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
 
 
@@ -77,6 +80,139 @@ def _services(tmp_path):
     matching_service = MatchingService(repo, market_data, snapshot_service)
     order_service = OrderService(repo, market_data)
     return engine, session, repo, order_service, matching_service, trade_date
+
+
+def _add_supported_etf(repo, symbol: str = "510300") -> None:
+    provider = ETFBasic(基金代码=symbol, 中文简称="CSI 300 ETF", 交易所="SH", 存续状态="L")
+    repo.session.add(provider)
+    repo.session.flush()
+    repo.upsert_etf_eligibility(
+        symbol,
+        provider.中文简称,
+        provider.交易所,
+        provider.存续状态,
+        datetime(2026, 6, 16, tzinfo=timezone.utc),
+        status=ETFEligibilityStatus.SUPPORTED,
+    )
+
+
+def test_etf_workflow_fills_buy_rejects_same_date_sell_and_settles_next_date_sell(tmp_path):
+    engine, session, repo, _, _, trade_date = _services(tmp_path)
+    _add_supported_etf(repo)
+    next_date = date(2026, 6, 17)
+    market_data = FakeMarketDataProvider(
+        {
+            ("510300", trade_date): DailyBar(
+                "510300", trade_date, Decimal("3.100"), Decimal("3.200"), Decimal("3.000"), Decimal("3.150")
+            ),
+            ("510300", next_date): DailyBar(
+                "510300", next_date, Decimal("3.200"), Decimal("3.300"), Decimal("3.100"), Decimal("3.250")
+            ),
+        }
+    )
+    order_service = OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
+    matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+    account = repo.create_account("etf-workflow", Decimal("100000.00"), etf_commission_rate=Decimal("0.0001"))
+
+    buy = order_service.place_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("3.150"), trade_date, market=Market.ETF
+    )
+    buy_run = matching_service.run(trade_date, account.id)
+    assert buy_run.filled_count == 1
+    assert repo.get_order(buy.id).status == OrderStatus.FILLED.value
+    trade = repo.list_trades(account.id)[0]
+    assert (trade.market, trade.fees) == (Market.ETF, Decimal("0.0300"))
+    position = repo.get_position(account.id, Market.ETF, "510300")
+    assert position is not None
+    assert position.total_quantity == 100
+    assert repo.get_lots(account.id, Market.ETF, "510300")[0].remaining_quantity == 100
+    assert repo.list_pending_settlements(account.id) == []
+
+    same_date_sell = order_service.place_order(
+        account.id, "510300", OrderSide.SELL, 100, Decimal("3.150"), trade_date, market=Market.ETF
+    )
+    next_date_sell = order_service.place_order(
+        account.id, "510300", OrderSide.SELL, 100, Decimal("3.250"), next_date, market=Market.ETF
+    )
+    sell_run = matching_service.run(next_date, account.id)
+    session.commit()
+
+    assert same_date_sell.status == OrderStatus.REJECTED.value
+    assert same_date_sell.rejection_code == "A_SHARE_T1_VIOLATION"
+    assert sell_run.filled_count == 1
+    assert repo.get_order(next_date_sell.id).status == OrderStatus.FILLED.value
+    assert repo.get_position(account.id, Market.ETF, "510300") is None
+    assert repo.get_cash_available(account.id) == Decimal("100009.9400")
+    assert repo.list_pending_settlements(account.id) == []
+    engine.dispose()
+
+
+def test_etf_limit_outside_daily_range_stays_accepted_and_skipped(tmp_path):
+    engine, session, repo, _, _, trade_date = _services(tmp_path)
+    _add_supported_etf(repo)
+    market_data = FakeMarketDataProvider(
+        {
+            ("510300", trade_date): DailyBar(
+                "510300", trade_date, Decimal("3.100"), Decimal("3.200"), Decimal("3.000"), Decimal("3.150")
+            )
+        }
+    )
+    order_service = OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
+    matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+    account = repo.create_account("etf-limit", Decimal("100000.00"))
+    order = order_service.place_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("2.900"), trade_date, market=Market.ETF
+    )
+
+    run = matching_service.run(trade_date, account.id)
+    session.commit()
+
+    assert run.skipped_count == 1
+    assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
+    assert repo.list_trades(account.id) == []
+    engine.dispose()
+
+
+def test_etf_missing_bar_becomes_eligible_for_one_rebuild_fill(tmp_path):
+    engine, session, repo, _, _, trade_date = _services(tmp_path)
+    _add_supported_etf(repo)
+    bars: dict[tuple[str, date], DailyBar] = {}
+
+    class DelayedETFMarketData(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            assert market == Market.ETF.value
+            try:
+                return bars[(symbol, trade_date)]
+            except KeyError:
+                raise KeyError(f"No ETF daily bar for {symbol} on {trade_date}") from None
+
+    market_data = DelayedETFMarketData()
+    order_service = OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
+    matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+    account = repo.create_account("etf-rebuild", Decimal("100000.00"))
+    order = order_service.place_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("3.150"), trade_date, market=Market.ETF
+    )
+
+    first_run = matching_service.run(trade_date, account.id)
+    diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "510300")
+    assert first_run.warning_count == 1
+    assert (diagnostic.market, diagnostic.adjust.value, diagnostic.resolved) == ("etf", "qfq", False)
+    assert repo.list_eligible_daily_bar_rebuild_orders() == [order]
+
+    bars[("510300", trade_date)] = DailyBar(
+        "510300", trade_date, Decimal("3.100"), Decimal("3.200"), Decimal("3.000"), Decimal("3.150")
+    )
+    eligible = repo.list_eligible_daily_bar_rebuild_orders()
+    assert [candidate.id for candidate in eligible] == [order.id]
+    OrderDeleteService(repo, market_data).rebuild_account_from(account.id, trade_date, [order.id])
+    session.commit()
+
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    assert len(repo.list_trades(account.id)) == 1
+    assert repo.list_eligible_daily_bar_rebuild_orders() == []
+    assert repo.get_position(account.id, Market.ETF, "510300").total_quantity == 100
+    engine.dispose()
 
 
 def test_matching_fills_buy_order_and_creates_lot(tmp_path):
