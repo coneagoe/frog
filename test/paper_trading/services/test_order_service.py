@@ -1077,7 +1077,9 @@ def test_etf_sell_rejects_same_day_purchase_under_t1(tmp_path):
     session.commit()
 
     assert order.status == OrderStatus.REJECTED.value
-    assert order.rejection_code == "A_SHARE_T1_VIOLATION"
+    assert order.rejection_code == "ETF_T1_VIOLATION"
+    assert "ETF T+1" in order.rejection_reason
+    assert "same-day purchases" in order.rejection_reason
     engine.dispose()
 
 

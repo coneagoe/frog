@@ -138,13 +138,110 @@ def test_etf_workflow_fills_buy_rejects_same_date_sell_and_settles_next_date_sel
     session.commit()
 
     assert same_date_sell.status == OrderStatus.REJECTED.value
-    assert same_date_sell.rejection_code == "A_SHARE_T1_VIOLATION"
+    assert same_date_sell.rejection_code == "ETF_T1_VIOLATION"
+    assert "ETF T+1" in same_date_sell.rejection_reason
+    assert "same-day purchases" in same_date_sell.rejection_reason
     assert sell_run.filled_count == 1
     assert repo.get_order(next_date_sell.id).status == OrderStatus.FILLED.value
     assert repo.get_position(account.id, Market.ETF, "510300") is None
     assert repo.get_cash_available(account.id) == Decimal("100009.9400")
     assert repo.list_pending_settlements(account.id) == []
     engine.dispose()
+
+
+def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path):
+    engine, session, repo, _, _, _ = _services(tmp_path)
+    _add_supported_etf(repo)
+    buy_date = date(2026, 6, 15)
+    sell_date = date(2026, 6, 16)
+    market_data = FakeMarketDataProvider(
+        {
+            ("510300", buy_date): DailyBar(
+                "510300", buy_date, Decimal("3.100"), Decimal("3.200"), Decimal("3.000"), Decimal("3.150")
+            ),
+            ("510300", sell_date): DailyBar(
+                "510300", sell_date, Decimal("3.200"), Decimal("3.300"), Decimal("3.100"), Decimal("3.250")
+            ),
+        }
+    )
+    order_service = OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
+    account = repo.create_account("historical-etf", Decimal("100000.00"), etf_commission_rate=Decimal("0.0001"))
+
+    buy = order_service.place_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("3.150"), buy_date, market=Market.ETF
+    )
+    sell = order_service.place_order(
+        account.id, "510300", OrderSide.SELL, 100, Decimal("3.250"), sell_date, market=Market.ETF
+    )
+    rebuild = OrderDeleteService(repo, market_data).rebuild_account_from(account.id, buy_date, [buy.id, sell.id])
+    session.commit()
+
+    assert rebuild.regenerated_counts == {"trades": 2, "snapshots": 2, "matching_runs": 2}
+    assert repo.get_order(buy.id).status == OrderStatus.FILLED.value
+    assert repo.get_order(sell.id).status == OrderStatus.FILLED.value
+    assert [(trade.market, trade.side) for trade in repo.list_trades(account.id)] == [
+        (Market.ETF, OrderSide.BUY.value),
+        (Market.ETF, OrderSide.SELL.value),
+    ]
+    assert repo.get_position(account.id, Market.ETF, "510300") is None
+    engine.dispose()
+
+
+def test_matching_keeps_same_symbol_a_share_and_etf_orders_positions_and_trades_isolated(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("a-share-etf-collision", Decimal("100000.00"))
+    trade_date = date(2026, 7, 21)
+    a_share_order = repo.create_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.01"),
+        market=Market.A_SHARE.value,
+    )
+    etf_order = repo.create_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.15"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("315.03"),
+        market=Market.ETF.value,
+    )
+    market_data = FakeMarketDataProvider(
+        {
+            ("510300", trade_date): DailyBar(
+                "510300", trade_date, Decimal("3.000"), Decimal("10.500"), Decimal("2.900"), Decimal("3.150")
+            )
+        }
+    )
+    matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+
+    run = matching_service.run(trade_date, account.id)
+
+    assert run.filled_count == 2
+    assert [(order.id, order.market) for order in repo.list_orders(account.id)] == [
+        (a_share_order.id, Market.A_SHARE.value),
+        (etf_order.id, Market.ETF.value),
+    ]
+    assert [(trade.market, trade.symbol) for trade in repo.list_trades(account.id)] == [
+        (Market.A_SHARE, "510300"),
+        (Market.ETF, "510300"),
+    ]
+    a_share_position = repo.get_position(account.id, Market.A_SHARE, "510300")
+    etf_position = repo.get_position(account.id, Market.ETF, "510300")
+    assert a_share_position is not None
+    assert etf_position is not None
+    assert a_share_position.total_quantity == 100
+    assert etf_position.total_quantity == 100
+    assert repo.get_lots(account.id, Market.A_SHARE, "510300")[0].remaining_quantity == 100
+    assert repo.get_lots(account.id, Market.ETF, "510300")[0].remaining_quantity == 100
 
 
 def test_etf_limit_outside_daily_range_stays_accepted_and_skipped(tmp_path):

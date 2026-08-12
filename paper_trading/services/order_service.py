@@ -566,6 +566,19 @@ class OrderService:
         matured_qty = sum(int(lot.remaining_quantity or 0) for lot in lots if lot.buy_trade_date < trade_date)
         sellable_matured = matured_qty - int(position.frozen_quantity or 0)
         if quantity > sellable_matured:
+            if market == Market.ETF:
+                raise PaperTradingError(
+                    "ETF_T1_VIOLATION",
+                    "Insufficient sellable quantity: ETF T+1 prevents same-day purchases from selling",
+                    {
+                        "total_quantity": position.total_quantity,
+                        "frozen_quantity": position.frozen_quantity,
+                        "requested": quantity,
+                        "matured_quantity": matured_qty,
+                        "trade_date": str(trade_date),
+                        "market": market.value,
+                    },
+                )
             raise PaperTradingError(
                 "A_SHARE_T1_VIOLATION",
                 "可卖出数量不足：A股 T+1 规则下当日买入部分不可当日卖出",
