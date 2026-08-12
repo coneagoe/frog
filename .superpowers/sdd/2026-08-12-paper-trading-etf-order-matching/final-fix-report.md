@@ -22,3 +22,23 @@ uv run mypy paper_trading/services/order_service.py
 ```
 
 Final results: 122 affected service tests passed; Ruff format and lint checks passed; mypy passed for `paper_trading/services/order_service.py`.
+
+## Final Verification Fix
+
+The ETF matching workflow test checked substrings against
+`same_date_sell.rejection_reason`, whose mapped type is `str | None`. Added
+the explicit narrowing assertion `assert same_date_sell.rejection_reason is not None`
+immediately before the two substring checks in
+`test/paper_trading/services/test_matching_service.py`.
+
+Commands run:
+
+```sh
+uv run pytest test/paper_trading/services/test_matching_service.py::test_etf_workflow_fills_buy_rejects_same_date_sell_and_settles_next_date_sell
+uv run pre-commit run --files paper_trading/domain/rules.py paper_trading/services/order_service.py paper_trading/services/trade_validity_service.py paper_trading/services/order_delete_service.py paper_trading/api/deps.py paper_trading/api/routers/orders.py paper_trading/storage/security_metadata.py test/paper_trading/services/test_order_service.py test/paper_trading/services/test_trade_validity_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_order_delete_service.py test/paper_trading/storage/test_security_metadata.py test/paper_trading/api/test_orders_api.py
+```
+
+Results:
+
+- Focused matching test: `1 passed in 0.75s`.
+- Exact Task 5 changed-file pre-commit validation: all hooks passed, including mypy.

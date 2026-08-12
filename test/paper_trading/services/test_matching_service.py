@@ -139,6 +139,7 @@ def test_etf_workflow_fills_buy_rejects_same_date_sell_and_settles_next_date_sel
 
     assert same_date_sell.status == OrderStatus.REJECTED.value
     assert same_date_sell.rejection_code == "ETF_T1_VIOLATION"
+    assert same_date_sell.rejection_reason is not None
     assert "ETF T+1" in same_date_sell.rejection_reason
     assert "same-day purchases" in same_date_sell.rejection_reason
     assert sell_run.filled_count == 1
