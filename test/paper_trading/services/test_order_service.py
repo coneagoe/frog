@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Self
 from unittest.mock import Mock
@@ -21,12 +21,14 @@ from common.const import (
     COL_STOCK_ID,
     COL_UP_LIMIT,
 )
-from paper_trading.domain.enums import Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import ETFEligibilityStatus, Market, OrderSide, OrderStatus
+from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.order_service import OrderService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from storage.model.etf_basic import ETFBasic
 from storage.model.general_info_ggt import GeneralInfoGGT
 from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
 
@@ -73,6 +75,24 @@ def _repo_and_service(tmp_path):
     storage = FakeHistoryStorage({})
     market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16), date(2026, 6, 17)]))
     return engine, session, repo, OrderService(repo, market_data)
+
+
+def _add_supported_etf(repo, symbol: str = "510300") -> None:
+    provider = ETFBasic(基金代码=symbol, 中文简称="CSI 300 ETF", 交易所="SH", 存续状态="L")
+    repo.session.add(provider)
+    repo.session.flush()
+    repo.upsert_etf_eligibility(
+        symbol,
+        provider.中文简称,
+        provider.交易所,
+        provider.存续状态,
+        datetime(2026, 6, 16, tzinfo=timezone.utc),
+        status=ETFEligibilityStatus.SUPPORTED,
+    )
+
+
+def _etf_order_service(repo, market_data):
+    return OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
 
 
 def test_place_buy_order_freezes_estimated_cash(tmp_path):
@@ -924,8 +944,10 @@ def test_place_buy_order_uses_account_fee_config(tmp_path):
     engine.dispose()
 
 
-def test_etf_buy_reservation_matches_fill_fee(tmp_path):
-    engine, session, repo, service = _repo_and_service(tmp_path)
+def test_etf_order_admission_uses_etf_market_data_and_commission(tmp_path):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(repo, FakeMarketDataProvider())
     account = repo.create_account("etf", Decimal("100000.00"))
 
     order = service.place_order(
@@ -933,7 +955,7 @@ def test_etf_buy_reservation_matches_fill_fee(tmp_path):
         "510300",
         OrderSide.BUY,
         100,
-        Decimal("10.00"),
+        Decimal("3.001"),
         date(2026, 6, 16),
         market=Market.ETF,
     )
@@ -941,13 +963,84 @@ def test_etf_buy_reservation_matches_fill_fee(tmp_path):
 
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.market == Market.ETF.value
-    assert order.frozen_cash == Decimal("1000.0600")
-    assert repo.get_cash_available(account.id) == Decimal("98999.9400")
+    assert order.frozen_cash == Decimal("300.1200")
+    assert repo.get_cash_available(account.id) == Decimal("99699.8800")
+    checks = repo.list_trade_validity_checks(order.id)
+    assert len(checks) == 1
+    assert checks[0].market == Market.ETF.value
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("symbol", "quantity", "limit_price", "trade_date", "eligible", "code"),
+    [
+        ("510300.SH", 100, Decimal("3.001"), date(2026, 6, 16), True, "INVALID_ETF_SYMBOL"),
+        ("510301", 100, Decimal("3.001"), date(2026, 6, 16), False, "ETF_ELIGIBILITY_UNREVIEWED"),
+        ("510300", 50, Decimal("3.001"), date(2026, 6, 16), True, "INVALID_LOT_SIZE"),
+        ("510300", 100, Decimal("3.0005"), date(2026, 6, 16), True, "INVALID_TICK_SIZE"),
+        ("510300", 100, Decimal("3.001"), date(2026, 6, 14), True, "INVALID_TRADE_DATE"),
+    ],
+)
+def test_etf_order_admission_rejects_invalid_requests(
+    tmp_path, symbol, quantity, limit_price, trade_date, eligible, code
+):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    if eligible:
+        _add_supported_etf(repo)
+    else:
+        session.add(ETFBasic(基金代码=symbol, 中文简称="Unreviewed ETF", 交易所="SH", 存续状态="L"))
+    market_data = (
+        StorageMarketDataProvider(FakeHistoryStorage({}), FakeTradeCalendar([date(2026, 6, 16)]))
+        if code == "INVALID_TRADE_DATE"
+        else FakeMarketDataProvider()
+    )
+    service = _etf_order_service(repo, market_data)
+    account = repo.create_account("etf", Decimal("100000.00"))
+
+    order = service.place_order(account.id, symbol, OrderSide.BUY, quantity, limit_price, trade_date, market=Market.ETF)
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == code
+    assert order.market == Market.ETF.value
+    engine.dispose()
+
+
+def test_etf_order_replays_historical_date_without_a_share_diagnostic(tmp_path, monkeypatch):
+    class HistoricalToday(date):
+        @classmethod
+        def today(cls) -> Self:
+            return cls(2026, 8, 2)
+
+    monkeypatch.setattr(order_service_module, "date", HistoricalToday)
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(
+        repo,
+        StorageMarketDataProvider(FakeHistoryStorage({}), FakeTradeCalendar([date(2026, 6, 16)])),
+    )
+    account = repo.create_account("historical-etf", Decimal("100000.00"))
+
+    order = service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.001"),
+        date(2026, 6, 16),
+        market=Market.ETF,
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert order.market == Market.ETF.value
     engine.dispose()
 
 
 def test_etf_zero_commission_rate_has_no_reservation_or_fill_fee(tmp_path):
-    engine, session, repo, service = _repo_and_service(tmp_path)
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(repo, FakeMarketDataProvider())
     account = repo.create_account("zero-etf-fee", Decimal("100000.00"), etf_commission_rate=Decimal("0"))
 
     order = service.place_order(

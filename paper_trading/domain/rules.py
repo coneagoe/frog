@@ -14,6 +14,16 @@ def ensure_lot_size(quantity: int) -> None:
         )
 
 
+def validate_etf_tick_size(price: Decimal) -> None:
+    tick_size = Decimal("0.001")
+    if price <= 0 or price != price.quantize(tick_size):
+        raise PaperTradingError(
+            "INVALID_TICK_SIZE",
+            "ETF limit price must be a positive multiple of CNY 0.001",
+            {"price": str(price), "tick_size": "0.001"},
+        )
+
+
 def ensure_price_in_daily_range(price: Decimal, low: Decimal, high: Decimal) -> None:
     if price < low or price > high:
         raise PaperTradingError(

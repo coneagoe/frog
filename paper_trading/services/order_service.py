@@ -25,7 +25,9 @@ from paper_trading.domain.rules import (
     ensure_lot_size,
     ensure_sufficient_cash,
     ensure_sufficient_position,
+    validate_etf_tick_size,
 )
+from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.trade_validity_service import TradeValidityService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import MarketDataProvider
@@ -40,11 +42,13 @@ class OrderService:
         market_data: MarketDataProvider,
         validity_service: TradeValidityService | None = None,
         hk_metadata: HkConnectMetadataProvider | None = None,
+        etf_eligibility: ETFEligibilityService | None = None,
     ):
         self.repo = repo
         self.market_data = market_data
         self.validity_service = validity_service or TradeValidityService(repo, market_data, hk_metadata=hk_metadata)
         self.hk_metadata = hk_metadata
+        self.etf_eligibility = etf_eligibility or ETFEligibilityService(repo)
 
     def place_order(
         self,
@@ -94,6 +98,18 @@ class OrderService:
                 raise market_error
             if resolved_market == Market.HK_CONNECT:
                 return self._place_hk_order(
+                    account_id,
+                    symbol,
+                    side,
+                    quantity,
+                    limit_price,
+                    trade_date,
+                    resolved_market,
+                    idempotency_key,
+                    comment,
+                )
+            if resolved_market == Market.ETF:
+                return self._place_etf_order(
                     account_id,
                     symbol,
                     side,
@@ -281,6 +297,94 @@ class OrderService:
         if side == OrderSide.BUY:
             amount = Decimal(quantity) * limit_price
             fees = calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account))
+            frozen_cash = (amount + fees.total).quantize(Decimal("0.0001"))
+
+        order = self.repo.create_order(
+            account_id=account_id,
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            limit_price=limit_price,
+            trade_date=trade_date,
+            status=OrderStatus.ACCEPTED,
+            frozen_cash=frozen_cash,
+            frozen_quantity=quantity if side == OrderSide.SELL else 0,
+            idempotency_key=idempotency_key,
+            comment=comment,
+            market=market.value,
+        )
+        self.validity_service.analyze_order(order)
+
+        from paper_trading.services.order_delete_service import OrderDeleteService
+
+        OrderDeleteService(self.repo, self.market_data, self.hk_metadata).rebuild_account_from(
+            account_id, trade_date, [order.id]
+        )
+        return self.repo.get_order(order.id)
+
+    def _place_etf_order(
+        self,
+        account_id: int,
+        symbol: str,
+        side: OrderSide,
+        quantity: int,
+        limit_price: Decimal,
+        trade_date: date,
+        market: Market,
+        idempotency_key: str | None,
+        comment: str | None,
+    ) -> PaperOrder:
+        validation = self.etf_eligibility.validate_etf_eligibility(symbol)
+        if not validation.eligible:
+            raise PaperTradingError(validation.code, validation.message, {"symbol": symbol, "market": market.value})
+        ensure_lot_size(quantity)
+        validate_etf_tick_size(limit_price)
+        if not self.market_data.is_trade_date(trade_date):
+            raise PaperTradingError(
+                "INVALID_TRADE_DATE",
+                "Trade date is not open",
+                {"trade_date": str(trade_date)},
+            )
+        if trade_date < date.today():
+            return self._place_historical_etf_order(
+                account_id,
+                symbol,
+                side,
+                quantity,
+                limit_price,
+                trade_date,
+                market,
+                idempotency_key,
+                comment,
+            )
+        if side == OrderSide.BUY:
+            return self._accept_buy_order(
+                account_id, symbol, quantity, limit_price, trade_date, market, idempotency_key, comment
+            )
+        return self._accept_sell_order(
+            account_id, symbol, quantity, limit_price, trade_date, market, idempotency_key, comment
+        )
+
+    def _place_historical_etf_order(
+        self,
+        account_id: int,
+        symbol: str,
+        side: OrderSide,
+        quantity: int,
+        limit_price: Decimal,
+        trade_date: date,
+        market: Market,
+        idempotency_key: str | None,
+        comment: str | None,
+    ) -> PaperOrder:
+        account = self.repo.get_account(account_id)
+        if account is None:
+            raise ValueError(f"paper account not found: {account_id}")
+
+        frozen_cash = Decimal("0")
+        if side == OrderSide.BUY:
+            amount = Decimal(quantity) * limit_price
+            fees = calculate_etf_fees(OrderSide.BUY, amount, etf_fee_config_from_account(account))
             frozen_cash = (amount + fees.total).quantize(Decimal("0.0001"))
 
         order = self.repo.create_order(
