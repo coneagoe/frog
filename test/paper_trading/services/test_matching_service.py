@@ -17,7 +17,14 @@ from common.const import (
     COL_OPEN,
     COL_STOCK_ID,
 )
-from paper_trading.domain.enums import ETFEligibilityStatus, Market, MatchingRunStatus, OrderSide, OrderStatus
+from paper_trading.domain.enums import (
+    CashEventType,
+    ETFEligibilityStatus,
+    Market,
+    MatchingRunStatus,
+    OrderSide,
+    OrderStatus,
+)
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_delete_service import OrderDeleteService
@@ -171,6 +178,54 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     buy = order_service.place_order(
         account.id, "510300", OrderSide.BUY, 100, Decimal("3.150"), buy_date, market=Market.ETF
     )
+    buy_trade = repo.list_trades(account.id)[0]
+    buy_position = repo.get_position(account.id, Market.ETF, "510300")
+    buy_lot = repo.get_lots(account.id, Market.ETF, "510300")[0]
+    buy_snapshot = repo.list_snapshots(account.id)[0]
+
+    assert (buy_trade.order_id, buy_trade.price, buy_trade.amount, buy_trade.trade_date) == (
+        buy.id,
+        Decimal("3.1500"),
+        Decimal("315.0000"),
+        buy_date,
+    )
+    assert buy_position is not None
+    assert (buy_position.total_quantity, buy_position.frozen_quantity, buy_position.cost_amount) == (
+        100,
+        0,
+        Decimal("315.0300"),
+    )
+    assert (
+        buy_lot.buy_trade_date,
+        buy_lot.original_quantity,
+        buy_lot.remaining_quantity,
+        buy_lot.cost_price,
+        buy_lot.market,
+    ) == (buy_date, 100, 100, Decimal("3.1500"), Market.ETF.value)
+    assert (
+        buy_snapshot.trade_date,
+        buy_snapshot.cash_available,
+        buy_snapshot.cash_frozen,
+        buy_snapshot.market_value,
+        buy_snapshot.total_assets,
+        buy_snapshot.realized_pnl,
+        buy_snapshot.unrealized_pnl,
+        buy_snapshot.position_count,
+        buy_snapshot.order_count,
+        buy_snapshot.trade_count,
+    ) == (
+        buy_date,
+        Decimal("99684.9700"),
+        Decimal("0.0000"),
+        Decimal("315.0000"),
+        Decimal("99999.9700"),
+        Decimal("0.0000"),
+        Decimal("-0.0300"),
+        1,
+        1,
+        1,
+    )
+
     sell = order_service.place_order(
         account.id, "510300", OrderSide.SELL, 100, Decimal("3.250"), sell_date, market=Market.ETF
     )
@@ -180,10 +235,55 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     assert rebuild.regenerated_counts == {"trades": 2, "snapshots": 2, "matching_runs": 2}
     assert repo.get_order(buy.id).status == OrderStatus.FILLED.value
     assert repo.get_order(sell.id).status == OrderStatus.FILLED.value
-    assert [(trade.market, trade.side) for trade in repo.list_trades(account.id)] == [
-        (Market.ETF, OrderSide.BUY.value),
-        (Market.ETF, OrderSide.SELL.value),
+    trades = repo.list_trades(account.id)
+    assert [(trade.market, trade.side) for trade in trades] == [
+        (Market.ETF.value, OrderSide.BUY.value),
+        (Market.ETF.value, OrderSide.SELL.value),
     ]
+    assert [(trade.order_id, trade.price, trade.amount, trade.trade_date) for trade in trades] == [
+        (buy.id, Decimal("3.1500"), Decimal("315.0000"), buy_date),
+        (sell.id, Decimal("3.2500"), Decimal("325.0000"), sell_date),
+    ]
+    assert [
+        (event.event_type, event.amount, event.order_id, event.trade_id) for event in repo.list_cash_ledger(account.id)
+    ] == [
+        (CashEventType.DEPOSIT.value, Decimal("100000.0000"), None, None),
+        (CashEventType.FREEZE.value, Decimal("-315.0300"), buy.id, None),
+        (CashEventType.TRADE.value, Decimal("324.9700"), sell.id, trades[1].id),
+    ]
+    snapshots = repo.list_snapshots(account.id)
+    assert [
+        (snapshot.trade_date, snapshot.cash_available, snapshot.market_value, snapshot.total_assets)
+        for snapshot in snapshots
+    ] == [
+        (buy_date, Decimal("99684.9700"), Decimal("315.0000"), Decimal("99999.9700")),
+        (sell_date, Decimal("100009.9400"), Decimal("0.0000"), Decimal("100009.9400")),
+    ]
+    assert (
+        snapshots[1].realized_pnl,
+        snapshots[1].unrealized_pnl,
+        snapshots[1].position_count,
+        snapshots[1].order_count,
+        snapshots[1].trade_count,
+    ) == (Decimal("9.9700"), Decimal("0.0000"), 0, 1, 1)
+    round_trip = repo.list_round_trips(account.id)[0]
+    assert (
+        round_trip.status,
+        round_trip.open_trade_id,
+        round_trip.close_trade_id,
+        round_trip.entry_amount,
+        round_trip.exit_amount,
+        round_trip.fees,
+        round_trip.realized_pnl,
+    ) == (
+        "closed",
+        trades[0].id,
+        trades[1].id,
+        Decimal("315.0000"),
+        Decimal("325.0000"),
+        Decimal("0.0600"),
+        Decimal("9.9400"),
+    )
     assert repo.get_position(account.id, Market.ETF, "510300") is None
     engine.dispose()
 
