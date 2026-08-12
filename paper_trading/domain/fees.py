@@ -5,6 +5,7 @@ from typing import Any
 from paper_trading.domain.enums import FeePreset, OrderSide
 
 CENT = Decimal("0.01")
+ETF_FEE_PRECISION = Decimal("0.0001")
 
 
 @dataclass(frozen=True)
@@ -96,7 +97,7 @@ def calculate_etf_fees(side: OrderSide, amount: Decimal, config: EtfFeeConfig | 
     del side
     fee_config = config or EtfFeeConfig()
     return FeeBreakdown(
-        commission=quantize_money(amount * fee_config.commission_rate),
+        commission=(amount * fee_config.commission_rate).quantize(ETF_FEE_PRECISION, rounding=ROUND_HALF_UP),
         stamp_duty=Decimal("0.00"),
         transfer_fee=Decimal("0.00"),
     )

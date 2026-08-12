@@ -964,8 +964,8 @@ def test_etf_order_admission_uses_etf_market_data_and_commission(tmp_path):
 
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.market == Market.ETF.value
-    assert order.frozen_cash == Decimal("300.1200")
-    assert repo.get_cash_available(account.id) == Decimal("99699.8800")
+    assert order.frozen_cash == Decimal("300.1180")
+    assert repo.get_cash_available(account.id) == Decimal("99699.8820")
     checks = repo.list_trade_validity_checks(order.id)
     assert len(checks) == 1
     assert checks[0].market == Market.ETF.value
