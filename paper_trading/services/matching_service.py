@@ -154,6 +154,7 @@ class MatchingService:
                 CashEventType.RELEASE,
                 Decimal(order.frozen_cash),
                 order_id=order.id,
+                trade_date=order.trade_date,
                 note="reject_order_release",
             )
         if int(order.frozen_quantity or 0) > 0:
@@ -274,6 +275,7 @@ class MatchingService:
                 release,
                 order_id=order.id,
                 trade_id=trade_id,
+                trade_date=order.trade_date,
             )
         position = self.repo.get_position(order.account_id, order.market, order.symbol)
         current_quantity = 0 if position is None else int(position.total_quantity or 0)
@@ -305,6 +307,7 @@ class MatchingService:
                 amount - fees,
                 order_id=order.id,
                 trade_id=trade_id,
+                trade_date=order.trade_date,
             )
         position = self.repo.get_position(order.account_id, order.market, order.symbol)
         if position is None:

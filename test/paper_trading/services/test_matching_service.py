@@ -128,7 +128,7 @@ def test_etf_workflow_fills_buy_rejects_same_date_sell_and_settles_next_date_sel
     assert buy_run.filled_count == 1
     assert repo.get_order(buy.id).status == OrderStatus.FILLED.value
     trade = repo.list_trades(account.id)[0]
-    assert (trade.market, trade.fees) == (Market.ETF, Decimal("0.0300"))
+    assert (trade.market, trade.fees) == (Market.ETF, Decimal("0.0315"))
     position = repo.get_position(account.id, Market.ETF, "510300")
     assert position is not None
     assert position.total_quantity == 100
@@ -152,17 +152,33 @@ def test_etf_workflow_fills_buy_rejects_same_date_sell_and_settles_next_date_sel
     assert sell_run.filled_count == 1
     assert repo.get_order(next_date_sell.id).status == OrderStatus.FILLED.value
     assert repo.get_position(account.id, Market.ETF, "510300") is None
-    assert repo.get_cash_available(account.id) == Decimal("100009.9400")
+    assert repo.get_cash_available(account.id) == Decimal("100009.9360")
     assert repo.list_pending_settlements(account.id) == []
     engine.dispose()
 
 
-def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path):
+def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path, monkeypatch):
+    class ReplayToday(date):
+        @classmethod
+        def today(cls) -> Self:
+            return cls(2026, 6, 17)
+
+    monkeypatch.setattr(order_service_module, "date", ReplayToday)
     engine, session, repo, _, _, _ = _services(tmp_path)
     _add_supported_etf(repo)
     buy_date = date(2026, 6, 15)
     sell_date = date(2026, 6, 16)
-    market_data = FakeMarketDataProvider(
+
+    class RecordingETFMarketDataProvider(FakeMarketDataProvider):
+        def __init__(self, bars: dict[tuple[str, date], DailyBar]) -> None:
+            super().__init__(bars)
+            self.requested_bars: list[tuple[str, date, str | None]] = []
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            self.requested_bars.append((symbol, trade_date, market))
+            return super().get_daily_bar(symbol, trade_date, market)
+
+    market_data = RecordingETFMarketDataProvider(
         {
             ("510300", buy_date): DailyBar(
                 "510300", buy_date, Decimal("3.100"), Decimal("3.200"), Decimal("3.000"), Decimal("3.150")
@@ -174,6 +190,15 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     )
     order_service = OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
     account = repo.create_account("historical-etf", Decimal("100000.00"), etf_commission_rate=Decimal("0.0001"))
+    automatic_rebuilds = []
+    original_rebuild_account_from = OrderDeleteService.rebuild_account_from
+
+    def record_automatic_rebuild(service, account_id, start_date, triggering_order_ids):
+        rebuild = original_rebuild_account_from(service, account_id, start_date, triggering_order_ids)
+        automatic_rebuilds.append((account_id, start_date, triggering_order_ids, rebuild.regenerated_counts))
+        return rebuild
+
+    monkeypatch.setattr(OrderDeleteService, "rebuild_account_from", record_automatic_rebuild)
 
     buy = order_service.place_order(
         account.id, "510300", OrderSide.BUY, 100, Decimal("3.150"), buy_date, market=Market.ETF
@@ -193,7 +218,7 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     assert (buy_position.total_quantity, buy_position.frozen_quantity, buy_position.cost_amount) == (
         100,
         0,
-        Decimal("315.0300"),
+        Decimal("315.0315"),
     )
     assert (
         buy_lot.buy_trade_date,
@@ -215,30 +240,66 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         buy_snapshot.trade_count,
     ) == (
         buy_date,
-        Decimal("99684.9700"),
+        Decimal("99684.9685"),
         Decimal("0.0000"),
         Decimal("315.0000"),
-        Decimal("99999.9700"),
+        Decimal("99999.9685"),
         Decimal("0.0000"),
-        Decimal("-0.0300"),
+        Decimal("-0.0315"),
         1,
         1,
         1,
     )
 
+    assert buy.frozen_cash == Decimal("315.0315")
+    assert market_data.requested_bars == [
+        ("510300", buy_date, Market.ETF),
+        ("510300", buy_date, Market.ETF.value),
+        ("510300", buy_date, Market.ETF),
+    ]
+
+    market_data.requested_bars.clear()
     sell = order_service.place_order(
         account.id, "510300", OrderSide.SELL, 100, Decimal("3.250"), sell_date, market=Market.ETF
     )
-    rebuild = OrderDeleteService(repo, market_data).rebuild_account_from(account.id, buy_date, [buy.id, sell.id])
     session.commit()
 
-    assert rebuild.regenerated_counts == {"trades": 2, "snapshots": 2, "matching_runs": 2}
+    assert automatic_rebuilds == [
+        (account.id, buy_date, [buy.id], {"trades": 1, "snapshots": 1, "matching_runs": 1}),
+        (account.id, sell_date, [sell.id], {"trades": 2, "snapshots": 2, "matching_runs": 2}),
+    ]
     assert repo.get_order(buy.id).status == OrderStatus.FILLED.value
     assert repo.get_order(sell.id).status == OrderStatus.FILLED.value
     trades = repo.list_trades(account.id)
     assert [(trade.market, trade.side) for trade in trades] == [
         (Market.ETF.value, OrderSide.BUY.value),
         (Market.ETF.value, OrderSide.SELL.value),
+    ]
+    trades = repo.list_trades(account.id)
+    assert [(trade.id, trade.price, trade.amount, trade.fees, trade.trade_date) for trade in trades] == [
+        (trades[0].id, Decimal("3.1500"), Decimal("315.0000"), Decimal("0.0315"), buy_date),
+        (trades[1].id, Decimal("3.2500"), Decimal("325.0000"), Decimal("0.0325"), sell_date),
+    ]
+    assert market_data.requested_bars == [
+        ("510300", sell_date, Market.ETF),
+        ("510300", buy_date, Market.ETF.value),
+        ("510300", buy_date, Market.ETF),
+        ("510300", sell_date, Market.ETF.value),
+    ]
+    assert repo.get_cash_available(account.id) == Decimal("100009.9360")
+    assert repo.list_pending_settlements(account.id) == []
+    assert [snapshot.trade_date for snapshot in repo.list_snapshots(account.id)] == [buy_date, sell_date]
+    round_trips = repo.list_round_trips(account.id)
+    assert len(round_trips) == 1
+    assert round_trips[0].market == Market.ETF.value
+    assert round_trips[0].status == "closed"
+    assert [
+        (event.event_type, event.amount, event.order_id, event.trade_id, event.trade_date)
+        for event in repo.list_cash_ledger(account.id)
+        if event.order_id is not None
+    ] == [
+        (CashEventType.FREEZE.value, Decimal("-315.0315"), buy.id, None, buy_date),
+        (CashEventType.TRADE.value, Decimal("324.9675"), sell.id, trades[1].id, sell_date),
     ]
     assert [(trade.order_id, trade.price, trade.amount, trade.trade_date) for trade in trades] == [
         (buy.id, Decimal("3.1500"), Decimal("315.0000"), buy_date),
@@ -248,16 +309,16 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         (event.event_type, event.amount, event.order_id, event.trade_id) for event in repo.list_cash_ledger(account.id)
     ] == [
         (CashEventType.DEPOSIT.value, Decimal("100000.0000"), None, None),
-        (CashEventType.FREEZE.value, Decimal("-315.0300"), buy.id, None),
-        (CashEventType.TRADE.value, Decimal("324.9700"), sell.id, trades[1].id),
+        (CashEventType.FREEZE.value, Decimal("-315.0315"), buy.id, None),
+        (CashEventType.TRADE.value, Decimal("324.9675"), sell.id, trades[1].id),
     ]
     snapshots = repo.list_snapshots(account.id)
     assert [
         (snapshot.trade_date, snapshot.cash_available, snapshot.market_value, snapshot.total_assets)
         for snapshot in snapshots
     ] == [
-        (buy_date, Decimal("99684.9700"), Decimal("315.0000"), Decimal("99999.9700")),
-        (sell_date, Decimal("100009.9400"), Decimal("0.0000"), Decimal("100009.9400")),
+        (buy_date, Decimal("99684.9685"), Decimal("315.0000"), Decimal("99999.9685")),
+        (sell_date, Decimal("100009.9360"), Decimal("0.0000"), Decimal("100009.9360")),
     ]
     assert (
         snapshots[1].realized_pnl,
@@ -265,7 +326,7 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         snapshots[1].position_count,
         snapshots[1].order_count,
         snapshots[1].trade_count,
-    ) == (Decimal("9.9700"), Decimal("0.0000"), 0, 1, 1)
+    ) == (Decimal("9.9675"), Decimal("0.0000"), 0, 1, 1)
     round_trip = repo.list_round_trips(account.id)[0]
     assert (
         round_trip.status,
@@ -281,10 +342,50 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         trades[1].id,
         Decimal("315.0000"),
         Decimal("325.0000"),
-        Decimal("0.0600"),
-        Decimal("9.9400"),
+        Decimal("0.0640"),
+        Decimal("9.9360"),
     )
     assert repo.get_position(account.id, Market.ETF, "510300") is None
+    engine.dispose()
+
+
+def test_historical_etf_buy_rejection_replay_dates_cash_release(tmp_path, monkeypatch):
+    class ReplayToday(date):
+        @classmethod
+        def today(cls) -> Self:
+            return cls(2026, 6, 17)
+
+    monkeypatch.setattr(order_service_module, "date", ReplayToday)
+    engine, session, repo, _, _, _ = _services(tmp_path)
+    _add_supported_etf(repo)
+    buy_date = date(2026, 6, 15)
+    market_data = FakeMarketDataProvider(
+        {
+            ("510300", buy_date): DailyBar(
+                "510300",
+                buy_date,
+                Decimal("3.100"),
+                Decimal("3.200"),
+                Decimal("3.000"),
+                Decimal("3.150"),
+                suspended=True,
+            )
+        }
+    )
+    order_service = OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
+    account = repo.create_account("historical-etf-rejection", Decimal("100000.00"))
+
+    buy = order_service.place_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("3.150"), buy_date, market=Market.ETF
+    )
+    session.commit()
+
+    assert repo.get_order(buy.id).status == OrderStatus.REJECTED.value
+    assert [
+        (event.event_type, event.order_id, event.trade_date)
+        for event in repo.list_cash_ledger(account.id)
+        if event.event_type == CashEventType.RELEASE.value
+    ] == [(CashEventType.RELEASE, buy.id, buy_date)]
     engine.dispose()
 
 

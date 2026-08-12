@@ -112,10 +112,10 @@ def test_etf_fees_use_default_rate_without_minimum():
     assert fees.total == Decimal("0.06")
 
 
-def test_etf_fees_round_to_cent_without_minimum():
+def test_etf_fees_round_to_four_decimals_without_minimum():
     fees = calculate_etf_fees(OrderSide.SELL, Decimal("123.45"))
 
-    assert fees.commission == Decimal("0.01")
+    assert fees.commission == Decimal("0.0074")
     assert fees.stamp_duty == Decimal("0.00")
     assert fees.transfer_fee == Decimal("0.00")
 
