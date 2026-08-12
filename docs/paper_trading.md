@@ -82,6 +82,7 @@ uv run tools/paper_trading_cli.py account create --name demo --initial-cash 1000
 uv run tools/paper_trading_cli.py account create --name custom-fee --initial-cash 100000 --fee-preset a_share --commission-rate 0.00025 --min-commission 5.00 --stamp-duty-rate 0.0005 --transfer-fee-rate 0.00001
 uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 000001 --side buy --quantity 100 --limit-price 10.00 --trade-date 2026-07-18 --comment "突破买入"
 uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 00700 --market hk_connect --side buy --quantity 100 --limit-price 400.00 --trade-date 2026-07-18
+uv run tools/paper_trading_cli.py order create --account-id 1 --symbol 510300 --market etf --side buy --quantity 100 --limit-price 4.001 --trade-date 2026-07-18
 uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment "回踩确认后买入"
 uv run tools/paper_trading_cli.py order update-comment --order-id 123 --comment ""
 uv run tools/paper_trading_cli.py order delete --order-id 123
@@ -289,6 +290,26 @@ curl -X POST http://localhost:8000/paper/accounts/1/orders \
 ```
 
 HK Connect support is scoped to ordinary stocks. The backend uses explicit market routing rather than symbol inference: orders, trades, positions, and validity checks persist `market`. State and market-data diagnostics are identified by market and symbol, so records sharing a symbol in different markets remain separate and diagnostics identify the affected market. HK orders use HK GGT daily bars, HK-specific fees, board-lot and tick-size validation, and no A-share limit-up/down validity analysis. HK sell proceeds are not immediately available cash; they remain pending until the T+2 settlement service releases them. Account snapshots include pending settlement in total assets and expose `pending_settlement`.
+
+## ETF Support
+
+Create ETF orders with the explicit `market="etf"` value; ETF symbols are not
+inferred when `market` is omitted. Supported symbols are bare six-digit codes
+that have a currently listed Shanghai or Shenzhen ETF metadata record and an
+eligibility classification of `supported`. Money-market, disabled, unreviewed,
+unknown, and otherwise ineligible ETFs are rejected before order acceptance.
+
+ETF quantity must be a positive multiple of 100 and the limit price must be a
+positive multiple of CNY `0.001`. ETF orders use the account's
+`etf_commission_rate` and charge commission only: no minimum commission, stamp
+duty, or transfer fee applies. ETF buys reserve the notional amount plus this
+commission; ETF sells reserve sellable quantity.
+
+ETF matching and validity checks use ETF daily bars and the daily low/high price
+range, without A-share limit-up/down analysis. ETF holdings are T+1: units
+bought on a trade date cannot be sold until a later trade date, including during
+historical replay. Unlike HK Connect, ETF sell proceeds become available cash
+immediately when the sell fills.
 
 ## Delete Account
 
