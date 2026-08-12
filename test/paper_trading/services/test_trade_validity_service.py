@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.services.trade_validity_service import TradeValidityService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import DailyBar
@@ -200,6 +200,88 @@ def test_analyze_order_still_rejects_out_of_range_when_limit_prices_missing(tmp_
     assert check.reason_code == "PRICE_OUT_OF_DAILY_RANGE"
     assert check.price_in_range is False
     engine.dispose()
+
+
+def test_etf_validity_uses_daily_range_without_stock_limit_metadata(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("etf-validity", Decimal("100000.00"))
+    order = repo.create_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.050"),
+        date(2026, 7, 21),
+        OrderStatus.ACCEPTED,
+        market=Market.ETF,
+    )
+    bar = DailyBar(
+        symbol="510300",
+        trade_date=date(2026, 7, 21),
+        open=Decimal("3.000"),
+        high=Decimal("3.050"),
+        low=Decimal("2.950"),
+        close=Decimal("3.020"),
+        up_limit=Decimal("3.100"),
+        down_limit=Decimal("2.900"),
+    )
+
+    check = TradeValidityService(repo, StaticMarketData(bar)).analyze_order(order)
+
+    assert check.status == "valid"
+    assert check.reason_code == "VALID"
+    assert check.daily_low == Decimal("2.950")
+    assert check.daily_high == Decimal("3.050")
+    assert check.limit_up_price is None
+    assert check.limit_down_price is None
+    assert check.touched_limit_up is None
+    assert check.touched_limit_down is None
+    assert check.market == Market.ETF.value
+
+
+def test_etf_validity_reports_range_failure_and_routes_market(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("etf-range", Decimal("100000.00"))
+    order = repo.create_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.200"),
+        date(2026, 7, 21),
+        OrderStatus.ACCEPTED,
+        market=Market.ETF,
+    )
+
+    class CapturingProvider(StaticMarketData):
+        def __init__(self):
+            super().__init__(
+                DailyBar(
+                    "510300",
+                    date(2026, 7, 21),
+                    Decimal("3.000"),
+                    Decimal("3.050"),
+                    Decimal("2.950"),
+                    Decimal("3.020"),
+                    up_limit=Decimal("3.100"),
+                    down_limit=Decimal("2.900"),
+                )
+            )
+            self.markets: list[str | None] = []
+
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            self.markets.append(market)
+            return super().get_daily_bar(symbol, trade_date, market)
+
+    provider = CapturingProvider()
+    check = TradeValidityService(repo, provider).analyze_order(order)
+
+    assert check.status == "invalid"
+    assert check.reason_code == "PRICE_OUT_OF_DAILY_RANGE"
+    assert check.price_in_range is False
+    assert provider.markets == [Market.ETF.value]
 
 
 # ── HK Connect validity tests ──────────────────────────────────────────

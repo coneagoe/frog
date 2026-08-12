@@ -193,6 +193,7 @@ class OrderDeleteService:
         lots: list,
         order_trade_date: date,
         frozen_qty: int,
+        market: str,
     ) -> tuple[bool, str | None, str | None]:
         """Check whether a sell reservation can be restored.
 
@@ -200,8 +201,8 @@ class OrderDeleteService:
         can proceed, False if the order should be rejected with *code* /
         *reason*.
 
-        Distinguishes A-share T+1 violations (matured sellable < requested)
-        from plain insufficient position (total available < requested).
+        Distinguishes market-specific T+1 violations (matured sellable <
+        requested) from plain insufficient position (total available < requested).
         """
         total_available = int(position.total_quantity or 0) - int(position.frozen_quantity or 0)
         if total_available < frozen_qty:
@@ -217,6 +218,13 @@ class OrderDeleteService:
         if sellable >= frozen_qty:
             return True, None, None
 
+        if market == "etf":
+            return (
+                False,
+                "ETF_T1_VIOLATION",
+                f"{REPLAY_REJECTION_MARKER} Insufficient sellable quantity: "
+                "ETF T+1 prevents same-day purchases from selling",
+            )
         return (
             False,
             "A_SHARE_T1_VIOLATION",
@@ -260,6 +268,7 @@ class OrderDeleteService:
                         lots,
                         order.trade_date,
                         frozen_qty,
+                        order.market,
                     )
                     if ok:
                         position.frozen_quantity = int(position.frozen_quantity or 0) + frozen_qty

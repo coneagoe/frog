@@ -1407,6 +1407,23 @@ def test_delete_same_date_buy_then_sell_t1_rejects_if_no_matured_lot(session):
     assert trades[0].side == OrderSide.BUY.value
 
 
+def test_etf_replay_same_day_sell_uses_etf_t1_policy():
+    position = type("Position", (), {"total_quantity": 100, "frozen_quantity": 0})()
+    lots = [type("Lot", (), {"remaining_quantity": 100, "buy_trade_date": date(2026, 7, 21)})()]
+
+    ok, code, reason = OrderDeleteService._check_sell_reservation(
+        position,
+        lots,
+        date(2026, 7, 21),
+        100,
+        market=Market.ETF.value,
+    )
+
+    assert ok is False
+    assert code == "ETF_T1_VIOLATION"
+    assert "ETF T+1" in reason
+
+
 def test_replay_rejected_order_reconsidered_on_later_delete(session):
     """A replay-induced rejection must not be sticky across subsequent deletes.
     If delete #1 rejects a BUY due to removed funding, and delete #2 removes
