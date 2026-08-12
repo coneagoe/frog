@@ -81,17 +81,66 @@ class TestDownloadManager:
         assert result is False
         storage.refresh_etf_basic_and_reconcile.assert_not_called()
 
-    def test_download_forecast_saves_provider_result(self, monkeypatch):
+    def test_download_forecast_reports_saved_rows(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
-        forecast = pd.DataFrame({"股票代码": ["600001"]})
+        forecast = pd.DataFrame({"股票代码": ["600001", "000001"]})
         downloader.dl_forecast.return_value = forecast
         storage.save_forecasts.return_value = True
 
         result = manager.download_forecast(ann_date="2025-01-01")
 
+        assert result == dm.ForecastDownloadResult("2025-01-01", 2, 2, True)
         downloader.dl_forecast.assert_called_once_with(ann_date="2025-01-01")
         storage.save_forecasts.assert_called_once_with(forecast)
-        assert result is True
+
+    def test_download_forecast_reports_saved_empty_result(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        forecast = pd.DataFrame()
+        downloader.dl_forecast.return_value = forecast
+        storage.save_forecasts.return_value = True
+
+        result = manager.download_forecast(ann_date="2025-01-01")
+
+        assert result == dm.ForecastDownloadResult("2025-01-01", 0, 0, True)
+        storage.save_forecasts.assert_called_once_with(forecast)
+
+    def test_download_forecast_reports_unsaved_provider_none(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        downloader.dl_forecast.return_value = None
+
+        result = manager.download_forecast(ann_date="2025-01-01")
+
+        assert result == dm.ForecastDownloadResult("2025-01-01", 0, 0, False)
+        storage.save_forecasts.assert_not_called()
+
+    def test_download_forecast_reports_unsaved_provider_error(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        downloader.dl_forecast.side_effect = RuntimeError("provider unavailable")
+
+        result = manager.download_forecast(ann_date="2025-01-01")
+
+        assert result == dm.ForecastDownloadResult("2025-01-01", 0, 0, False)
+        storage.save_forecasts.assert_not_called()
+
+    def test_download_forecast_reports_unsaved_persistence_result(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        forecast = pd.DataFrame({"股票代码": ["600001"]})
+        downloader.dl_forecast.return_value = forecast
+        storage.save_forecasts.return_value = False
+
+        result = manager.download_forecast(ann_date="2025-01-01")
+
+        assert result == dm.ForecastDownloadResult("2025-01-01", 1, 1, False)
+        storage.save_forecasts.assert_called_once_with(forecast)
+
+    def test_download_forecast_reports_unsaved_persistence_error(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        downloader.dl_forecast.return_value = pd.DataFrame({"股票代码": ["600001"]})
+        storage.save_forecasts.side_effect = RuntimeError("database unavailable")
+
+        result = manager.download_forecast(ann_date="2025-01-01")
+
+        assert result == dm.ForecastDownloadResult("2025-01-01", 0, 0, False)
 
     def test_all_empty_providers_create_missing_market_data_outcome(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)

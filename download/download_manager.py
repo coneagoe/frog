@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
@@ -141,16 +142,26 @@ def _save_etf_daily_wrapper(
     return get_storage().save_etf_daily(df)
 
 
+@dataclass(frozen=True)
+class ForecastDownloadResult:
+    announcement_date: str
+    source_rows: int
+    a_share_rows: int
+    saved: bool
+
+
 class DownloadManager:
-    def download_forecast(self, ann_date: str) -> bool:
+    def download_forecast(self, ann_date: str) -> ForecastDownloadResult:
         try:
             df = self.downloader.dl_forecast(ann_date=ann_date)
             if df is None:
                 raise ValueError("forecast provider returned None")
-            return get_storage().save_forecasts(df)
+            source_rows = len(df)
+            saved = get_storage().save_forecasts(df)
+            return ForecastDownloadResult(ann_date, source_rows, len(df), saved)
         except Exception as exc:
             logging.error("下载业绩预告数据失败: %s", exc)
-            return False
+            return ForecastDownloadResult(ann_date, 0, 0, False)
 
     def __init__(self):
         self.downloader = Downloader()
