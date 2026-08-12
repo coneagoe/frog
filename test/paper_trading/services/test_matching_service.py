@@ -212,6 +212,18 @@ def test_etf_missing_bar_becomes_eligible_for_one_rebuild_fill(tmp_path):
     assert len(repo.list_trades(account.id)) == 1
     assert repo.list_eligible_daily_bar_rebuild_orders() == []
     assert repo.get_position(account.id, Market.ETF, "510300").total_quantity == 100
+
+    trade_count = len(repo.list_trades(account.id))
+    cash_event_count = len(repo.list_cash_ledger(account.id))
+    cash_available = repo.get_cash_available(account.id)
+    filled_quantity = repo.get_order(order.id).filled_quantity
+    OrderDeleteService(repo, market_data).rebuild_account_from(account.id, trade_date, [order.id])
+    session.commit()
+
+    assert repo.get_order(order.id).filled_quantity == filled_quantity == 100
+    assert len(repo.list_trades(account.id)) == trade_count == 1
+    assert len(repo.list_cash_ledger(account.id)) == cash_event_count
+    assert repo.get_cash_available(account.id) == cash_available
     engine.dispose()
 
 
