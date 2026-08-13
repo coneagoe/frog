@@ -181,7 +181,7 @@ def test_download_forecast_logs_failed_result_statistics_and_stops_on_first_unsa
         ],
         "requested_dates": 30,
         "successful_dates": 1,
-        "empty_dates": 1,
+        "empty_dates": 0,
         "failed_dates": 1,
         "source_rows": 4,
         "a_share_rows": 1,

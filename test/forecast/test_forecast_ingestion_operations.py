@@ -50,7 +50,7 @@ def daily_module(monkeypatch):
 
 
 def local_window_context():
-    return {"data_interval_end": FakeAirflowDateTime(2026, 8, 10, 10, tzinfo=timezone.utc)}
+    return {"data_interval_end": FakeAirflowDateTime(2026, 8, 9, 18, tzinfo=timezone.utc)}
 
 
 def test_workflows_aggregate_saved_and_empty_results_consistently(monkeypatch, daily_module, capsys):
