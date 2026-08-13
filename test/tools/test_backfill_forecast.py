@@ -64,6 +64,8 @@ def test_main_returns_zero_for_successful_empty_results(monkeypatch, capsys):
         ["--start-date", "2026-08-01"],
         ["--start-date", "2026-08-03", "--end-date", "2026-08-01"],
         ["--start-date", "2026-08-01", "--end-date", "2026-08-32"],
+        ["--start-date", "20260801", "--end-date", "2026-08-03"],
+        ["--start-date", "2026-W31-6", "--end-date", "2026-08-03"],
     ],
 )
 def test_main_rejects_invalid_date_range_arguments(argv):

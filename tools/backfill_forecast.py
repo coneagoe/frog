@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -16,6 +17,8 @@ from download import DownloadManager  # noqa: E402
 
 
 def _parse_date(value: str) -> date:
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        raise argparse.ArgumentTypeError(f"invalid ISO date: {value}")
     try:
         return date.fromisoformat(value)
     except ValueError as exc:
