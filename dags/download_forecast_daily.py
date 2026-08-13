@@ -39,16 +39,17 @@ def download_forecast(**context: Any) -> dict[str, Any]:
 
     for announcement_date in announcement_dates:
         result = manager.download_forecast(ann_date=announcement_date.strftime("%Y%m%d"))
+        summary["source_rows"] += result.source_rows
+        summary["a_share_rows"] += result.a_share_rows
+        if result.source_rows == 0 or result.a_share_rows == 0:
+            summary["empty_dates"] += 1
+
         if not result.saved:
             summary["failed_dates"] += 1
             logging.error("Daily forecast download failed: summary=%s", summary)
             raise RuntimeError(f"forecast download failed for {result.announcement_date}")
 
         summary["successful_dates"] += 1
-        summary["source_rows"] += result.source_rows
-        summary["a_share_rows"] += result.a_share_rows
-        if result.source_rows == 0 or result.a_share_rows == 0:
-            summary["empty_dates"] += 1
 
     logging.info("Daily forecast download completed: summary=%s", summary)
     return summary

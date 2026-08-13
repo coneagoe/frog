@@ -158,15 +158,33 @@ def test_download_forecast_accepts_zero_a_share_rows_as_empty_success(monkeypatc
     assert result["a_share_rows"] == 0
 
 
-def test_download_forecast_raises_on_first_unsaved_date(monkeypatch, forecast_module):
+def test_download_forecast_logs_failed_result_statistics_and_stops_on_first_unsaved_date(
+    monkeypatch, caplog, forecast_module
+):
     manager = MagicMock()
     manager.download_forecast.side_effect = [
         types.SimpleNamespace(announcement_date="20260712", source_rows=1, a_share_rows=1, saved=True),
-        types.SimpleNamespace(announcement_date="20260713", source_rows=0, a_share_rows=0, saved=False),
+        types.SimpleNamespace(announcement_date="20260713", source_rows=3, a_share_rows=0, saved=False),
     ]
     monkeypatch.setattr(forecast_module, "DownloadManager", lambda: manager)
 
-    with pytest.raises(RuntimeError, match="20260713"):
-        forecast_module.download_forecast(**local_window_context())
+    with caplog.at_level("ERROR"):
+        with pytest.raises(RuntimeError, match="20260713"):
+            forecast_module.download_forecast(**local_window_context())
+
+    assert caplog.records[-1].args == {
+        "announcement_dates": [
+            "20260712",
+            "20260713",
+            *[f"202607{day:02d}" for day in range(14, 32)],
+            *[f"202608{day:02d}" for day in range(1, 11)],
+        ],
+        "requested_dates": 30,
+        "successful_dates": 1,
+        "empty_dates": 1,
+        "failed_dates": 1,
+        "source_rows": 4,
+        "a_share_rows": 1,
+    }
 
     assert manager.download_forecast.call_count == 2
