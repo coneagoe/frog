@@ -29,7 +29,7 @@ from storage.model.paper_trading import DailyBarDiagnostic
 def test_daily_bar_diagnostic_scalar_columns_use_value_enums():
     assert DailyBarDiagnostic.__table__.c.adjust.type.name == "daily_bar_diagnostic_adjust"
     assert DailyBarDiagnostic.__table__.c.classification.type.name == "daily_bar_diagnostic_classification"
-    assert tuple(member.value for member in DailyBarDiagnosticAdjust) == ("bfq", "qfq", "hfq")
+    assert tuple(member.value for member in DailyBarDiagnosticAdjust) == ("bfq", "qfq", "hfq", "raw")
     assert tuple(member.value for member in DailyBarDiagnosticClassification) == (
         "missing_market_data",
         "missing_exact_date",

@@ -18,6 +18,7 @@ class DailyBarDiagnosticAdjust(StrEnum):
     BFQ = "bfq"
     QFQ = "qfq"
     HFQ = "hfq"
+    RAW = "raw"
 
 
 class DailyBarDiagnosticClassification(StrEnum):

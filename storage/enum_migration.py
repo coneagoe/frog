@@ -95,6 +95,7 @@ STORAGE_ENUM_GROUPS = (
 )
 
 _GOVERNED_TABLES = (BlackroomRecord.__table__, DailyBarDiagnostic.__table__, SSFChangeSignal.__table__)
+_PRE_RAW_DAILY_BAR_DIAGNOSTIC_ADJUST_LABELS = ("bfq", "qfq", "hfq")
 _PROVIDER_CHECK_NAME = "ck_daily_bar_diagnostics_provider_outcome_status"
 _PROVIDER_CHECK_SQL = (
     "CHECK (((jsonb_typeof((provider_outcomes)::jsonb) = 'array'::text) AND "
@@ -121,18 +122,25 @@ def _result(
 
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
+    if not rollback:
+        _upgrade_daily_bar_diagnostic_adjust_labels(connection)
     missing = _preflight(connection, rollback=rollback)
     if missing and len(missing) != len(_GOVERNED_TABLES):
         raise StorageEnumMigrationError(f"partially missing governed tables: {sorted(missing)}")
 
 
 def _adapter_apply(connection: Connection) -> bool:
+    labels_changed = _upgrade_daily_bar_diagnostic_adjust_labels(connection)
     _adapter_preflight(connection, rollback=False)
     missing = _preflight(connection, rollback=False)
-    changed = bool(missing) or any(
-        not _column_has_type(connection, column, group.type_name)
-        for group in STORAGE_ENUM_GROUPS
-        for column in group.columns
+    changed = (
+        labels_changed
+        or bool(missing)
+        or any(
+            not _column_has_type(connection, column, group.type_name)
+            for group in STORAGE_ENUM_GROUPS
+            for column in group.columns
+        )
     )
     for group in STORAGE_ENUM_GROUPS:
         _create_type(connection, group)
@@ -308,6 +316,8 @@ def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
             _validate_default(connection, group, column, rollback=facts[0] != group.type_name)
             if not rollback and facts[0] != group.type_name:
                 _validate_values(connection, group, column)
+            if rollback and group.type_name == "daily_bar_diagnostic_adjust" and facts[0] == group.type_name:
+                _validate_values(connection, group, column, _PRE_RAW_DAILY_BAR_DIAGNOSTIC_ADJUST_LABELS)
     if "daily_bar_diagnostics" not in missing:
         _validate_json(connection, "daily_bar_diagnostics", "provider_outcomes", validate_provider_outcomes)
     if "ssf_change_signals" not in missing:
@@ -346,13 +356,17 @@ def _validate_json(connection: Connection, table_name: str, column_name: str, va
             raise StorageEnumMigrationError(f"{column_name} for {table_name}.id={row_id}: {error}") from error
 
 
-def _validate_values(connection: Connection, group: StorageEnumGroup, column: StorageEnumColumn) -> None:
+def _validate_values(
+    connection: Connection, group: StorageEnumGroup, column: StorageEnumColumn, labels: tuple[str, ...] | None = None
+) -> None:
+    labels = group.labels if labels is None else labels
     values = (
         connection.execute(
             text(
-                f"SELECT DISTINCT {column.column_name} FROM {column.table_name} WHERE {column.column_name} IS NULL OR {column.column_name} NOT IN :labels"
+                f"SELECT DISTINCT {column.column_name}::text FROM {column.table_name} "
+                f"WHERE {column.column_name} IS NULL OR {column.column_name}::text NOT IN :labels"
             ).bindparams(bindparam("labels", expanding=True)),
-            {"labels": group.labels},
+            {"labels": labels},
         )
         .scalars()
         .all()
@@ -393,6 +407,17 @@ def _create_type(connection: Connection, group: StorageEnumGroup) -> None:
         connection.execute(
             text(f"CREATE TYPE {group.type_name} AS ENUM ({', '.join(repr(label) for label in group.labels)})")
         )
+
+
+def _upgrade_daily_bar_diagnostic_adjust_labels(connection: Connection) -> bool:
+    labels = _enum_labels(connection, "daily_bar_diagnostic_adjust")
+    expected = _labels(DailyBarDiagnosticAdjust)
+    if not labels or labels == expected:
+        return False
+    if labels != _PRE_RAW_DAILY_BAR_DIAGNOSTIC_ADJUST_LABELS:
+        raise StorageEnumMigrationError(f"daily_bar_diagnostic_adjust: unexpected enum labels {labels}")
+    connection.execute(text("ALTER TYPE daily_bar_diagnostic_adjust ADD VALUE IF NOT EXISTS 'raw'"))
+    return True
 
 
 def _alter_group(connection: Connection, group: StorageEnumGroup, *, rollback: bool) -> None:
