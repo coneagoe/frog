@@ -36,10 +36,10 @@ def daily_module(monkeypatch):
     monkeypatch.syspath_prepend(str(DAGS_DIR))
     monkeypatch.setenv("FROG_PROJECT_ROOT", str(ROOT))
     airflow = types.ModuleType("airflow")
-    airflow.DAG = FakeDAG
+    setattr(airflow, "DAG", FakeDAG)
     airflow_operators = types.ModuleType("airflow.operators")
     airflow_python = types.ModuleType("airflow.operators.python")
-    airflow_python.PythonOperator = FakePythonOperator
+    setattr(airflow_python, "PythonOperator", FakePythonOperator)
     monkeypatch.setitem(sys.modules, "airflow", airflow)
     monkeypatch.setitem(sys.modules, "airflow.operators", airflow_operators)
     monkeypatch.setitem(sys.modules, "airflow.operators.python", airflow_python)
