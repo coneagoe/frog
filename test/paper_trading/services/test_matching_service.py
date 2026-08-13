@@ -496,7 +496,7 @@ def test_etf_missing_bar_becomes_eligible_for_one_rebuild_fill(tmp_path):
     first_run = matching_service.run(trade_date, account.id)
     diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "510300")
     assert first_run.warning_count == 1
-    assert (diagnostic.market, diagnostic.adjust.value, diagnostic.resolved) == ("etf", "qfq", False)
+    assert (diagnostic.market, diagnostic.adjust.value, diagnostic.resolved) == ("etf", "raw", False)
     assert repo.list_eligible_daily_bar_rebuild_orders() == [order]
 
     bars[("510300", trade_date)] = DailyBar(
@@ -523,6 +523,53 @@ def test_etf_missing_bar_becomes_eligible_for_one_rebuild_fill(tmp_path):
     assert len(repo.list_trades(account.id)) == trade_count == 1
     assert len(repo.list_cash_ledger(account.id)) == cash_event_count
     assert repo.get_cash_available(account.id) == cash_available
+    engine.dispose()
+
+
+def test_matching_fills_etf_order_from_raw_etf_daily_without_adjusted_fallback(tmp_path, monkeypatch):
+    class MatchingToday(date):
+        @classmethod
+        def today(cls) -> Self:
+            return cls(2026, 8, 7)
+
+    monkeypatch.setattr(order_service_module, "date", MatchingToday)
+    engine = create_engine(f"sqlite:///{tmp_path / 'raw-etf.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    trade_date = date(2026, 8, 7)
+    _add_supported_etf(repo, "518880")
+    storage = FakeHistoryStorage(
+        {},
+        etf_daily_data={
+            "518880": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["518880"],
+                    COL_DATE: [trade_date.isoformat()],
+                    COL_OPEN: [8.800],
+                    COL_HIGH: [8.892],
+                    COL_LOW: [8.774],
+                    COL_CLOSE: [8.818],
+                }
+            )
+        },
+    )
+    market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([trade_date]))
+    order_service = OrderService(repo, market_data, etf_eligibility=ETFEligibilityService(repo))
+    matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
+    account = repo.create_account("raw-etf-daily", Decimal("100000.00"))
+    order = order_service.place_order(
+        account.id, "518880", OrderSide.BUY, 100, Decimal("8.818"), trade_date, market=Market.ETF
+    )
+
+    run = matching_service.run(trade_date, account.id)
+
+    assert run.filled_count == 1
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    assert len(repo.list_trades(account.id)) == 1
+    assert storage.etf_daily_calls
+    assert storage.etf_calls == []
+    assert storage.calls == []
     engine.dispose()
 
 
@@ -1081,7 +1128,7 @@ def test_matching_etf_missing_bar_warns_then_same_date_retry_fills(tmp_path):
         "510300",
         "missing_exact_date",
     )
-    assert diagnostic.adjust.value == "qfq"
+    assert diagnostic.adjust.value == "raw"
     market_data.available = True
     assert matching.match_order(order) == "filled"
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value

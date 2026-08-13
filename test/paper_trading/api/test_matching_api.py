@@ -114,12 +114,13 @@ def test_matching_rebuild_api_replays_eligible_delayed_order(monkeypatch, sqlite
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
 
 
-def test_matching_rebuild_api_replays_only_etf_qfq_missing_date_order(monkeypatch, sqlite_session):
+def test_matching_rebuild_api_replays_only_etf_raw_missing_date_order(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     trade_date = date(2026, 8, 10)
     etf_account = repo.create_account("etf-rebuild-api", Decimal("100000.00"))
+    legacy_etf_account = repo.create_account("etf-qfq-diagnostic", Decimal("100000.00"))
     a_share_account = repo.create_account("a-share-qfq-diagnostic", Decimal("100000.00"))
     hk_account = repo.create_account("hk-qfq-diagnostic", Decimal("100000.00"))
     etf_order = repo.create_order(
@@ -144,6 +145,17 @@ def test_matching_rebuild_api_replays_only_etf_qfq_missing_date_order(monkeypatc
         frozen_cash=Decimal("311.0000"),
         market=Market.A_SHARE,
     )
+    legacy_etf_order = repo.create_order(
+        legacy_etf_account.id,
+        "510500",
+        OrderSide.BUY,
+        100,
+        Decimal("3.100"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("311.0000"),
+        market=Market.ETF,
+    )
     hk_order = repo.create_order(
         hk_account.id,
         "510300",
@@ -155,7 +167,8 @@ def test_matching_rebuild_api_replays_only_etf_qfq_missing_date_order(monkeypatc
         frozen_cash=Decimal("311.0000"),
         market=Market.HK_CONNECT,
     )
-    repo.upsert_daily_bar_diagnostic(trade_date, Market.ETF, "510300", "qfq", "missing_exact_date", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(trade_date, Market.ETF, "510300", "raw", "missing_exact_date", [], resolved=False)
+    repo.upsert_daily_bar_diagnostic(trade_date, Market.ETF, "510500", "qfq", "missing_exact_date", [], resolved=False)
     repo.upsert_daily_bar_diagnostic(
         trade_date, Market.A_SHARE, "510300", "qfq", "missing_exact_date", [], resolved=False
     )
@@ -196,6 +209,7 @@ def test_matching_rebuild_api_replays_only_etf_qfq_missing_date_order(monkeypatc
     assert len(market_data.daily_bar_calls) >= 2
     assert set(market_data.daily_bar_calls) == {("510300", trade_date, Market.ETF)}
     assert repo.get_order(etf_order.id).status == OrderStatus.FILLED.value
+    assert repo.get_order(legacy_etf_order.id).status == OrderStatus.ACCEPTED.value
     assert repo.get_order(a_share_order.id).status == OrderStatus.ACCEPTED.value
     assert repo.get_order(hk_order.id).status == OrderStatus.ACCEPTED.value
     refreshed_diagnostic = next(

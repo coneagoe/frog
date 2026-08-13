@@ -222,7 +222,7 @@ class PaperTradingRepository:
                 & (DailyBarDiagnostic.stock_id == PaperOrder.symbol)
                 & (
                     ((PaperOrder.market == Market.A_SHARE.value) & (DailyBarDiagnostic.adjust == "bfq"))
-                    | ((PaperOrder.market == Market.ETF.value) & (DailyBarDiagnostic.adjust == "qfq"))
+                    | ((PaperOrder.market == Market.ETF.value) & (DailyBarDiagnostic.adjust == "raw"))
                 ),
             )
             .filter(

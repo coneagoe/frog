@@ -181,7 +181,6 @@ def test_upsert_daily_bar_diagnostic_reuses_business_date_symbol_adjustment(sqli
 @pytest.mark.parametrize(
     ("adjust", "classification", "outcomes"),
     [
-        ("raw", "downloaded", []),
         ("bfq", "partial", []),
         ("bfq", "downloaded", [{"provider": "tushare", "status": "partial"}]),
         ("bfq", "downloaded", {"provider": "tushare", "status": "downloaded"}),
@@ -1095,6 +1094,7 @@ def test_eligible_daily_bar_rebuild_orders_include_etf_missing_exact_date(sqlite
     repo = PaperTradingRepository(sqlite_session)
     etf_account = repo.create_account("etf-retry", Decimal("100000"))
     hk_account = repo.create_account("hk-retry", Decimal("100000"))
+    legacy_etf_account = repo.create_account("etf-qfq-diagnostic", Decimal("100000"))
     etf_order = repo.create_order(
         etf_account.id,
         "510300",
@@ -1115,8 +1115,27 @@ def test_eligible_daily_bar_rebuild_orders_include_etf_missing_exact_date(sqlite
         OrderStatus.ACCEPTED,
         market=Market.HK_CONNECT,
     )
+    legacy_etf_order = repo.create_order(
+        legacy_etf_account.id,
+        "510500",
+        OrderSide.BUY,
+        100,
+        Decimal("3.100"),
+        date(2026, 8, 10),
+        OrderStatus.ACCEPTED,
+        market=Market.ETF,
+    )
     repo.upsert_daily_bar_diagnostic(
-        etf_order.trade_date, Market.ETF, etf_order.symbol, "qfq", "missing_exact_date", [], resolved=False
+        etf_order.trade_date, Market.ETF, etf_order.symbol, "raw", "missing_exact_date", [], resolved=False
+    )
+    repo.upsert_daily_bar_diagnostic(
+        legacy_etf_order.trade_date,
+        Market.ETF,
+        legacy_etf_order.symbol,
+        "qfq",
+        "missing_exact_date",
+        [],
+        resolved=False,
     )
     repo.upsert_daily_bar_diagnostic(
         hk_order.trade_date, Market.HK_CONNECT, hk_order.symbol, "bfq", "missing_exact_date", [], resolved=False
