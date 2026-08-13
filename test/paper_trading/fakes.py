@@ -9,12 +9,19 @@ from paper_trading.storage.market_data import DailyBar
 
 
 class FakeHistoryStorage:
-    def __init__(self, data: dict[str, pd.DataFrame], etf_data: dict[str, pd.DataFrame] | None = None):
+    def __init__(
+        self,
+        data: dict[str, pd.DataFrame],
+        etf_data: dict[str, pd.DataFrame] | None = None,
+        etf_daily_data: dict[str, pd.DataFrame] | None = None,
+    ):
         self._data = data
         self._etf_data = etf_data or {}
+        self._etf_daily_data = etf_daily_data or {}
         self.calls: list[tuple[Any, ...]] = []
         self.hk_calls: list[tuple[Any, ...]] = []
         self.etf_calls: list[tuple[Any, ...]] = []
+        self.etf_daily_calls: list[tuple[Any, ...]] = []
 
     def load_history_data_stock(self, stock_id, period, adjust, start_date=None, end_date=None):
         self.calls.append((stock_id, period, adjust, start_date, end_date))
@@ -41,6 +48,17 @@ class FakeHistoryStorage:
     def load_history_data_etf(self, etf_id, period, adjust, start_date=None, end_date=None):
         self.etf_calls.append((etf_id, period, adjust, start_date, end_date))
         df = self._etf_data.get(etf_id, pd.DataFrame()).copy()
+        if df.empty:
+            return df
+        if start_date:
+            df = df[df[COL_DATE] >= start_date]
+        if end_date:
+            df = df[df[COL_DATE] <= end_date]
+        return df
+
+    def load_etf_daily(self, etf_id, start_date=None, end_date=None):
+        self.etf_daily_calls.append((etf_id, start_date, end_date))
+        df = self._etf_daily_data.get(etf_id, pd.DataFrame()).copy()
         if df.empty:
             return df
         if start_date:

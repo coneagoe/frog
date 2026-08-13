@@ -65,49 +65,64 @@ def _etf_frame(symbol: str, trade_date: str, close: float) -> pd.DataFrame:
     )
 
 
-def test_etf_daily_bar_reads_etf_history_without_stock_or_limit_queries():
-    trade_date = date(2026, 8, 10)
+def test_etf_daily_bar_reads_raw_etf_daily_without_other_market_queries():
+    trade_date = date(2026, 8, 7)
     storage = FakeHistoryStorage(
         {},
-        etf_data={
-            "510300": pd.DataFrame(
+        etf_daily_data={
+            "518880": pd.DataFrame(
                 {
-                    COL_STOCK_ID: ["510300"],
+                    COL_STOCK_ID: ["518880"],
                     COL_DATE: [trade_date.isoformat()],
-                    COL_OPEN: [3.001],
-                    COL_HIGH: [3.125],
-                    COL_LOW: [2.999],
-                    COL_CLOSE: [3.100],
+                    COL_OPEN: [8.775],
+                    COL_HIGH: [8.892],
+                    COL_LOW: [8.774],
+                    COL_CLOSE: [8.892],
                 }
             )
         },
     )
     provider = StorageMarketDataProvider(storage, FakeTradeCalendar([trade_date]))
 
-    bar = provider.get_daily_bar("510300", trade_date, market="etf")
+    bar = provider.get_daily_bar("518880", trade_date, market="etf")
 
-    assert bar == DailyBar("510300", trade_date, Decimal("3.001"), Decimal("3.125"), Decimal("2.999"), Decimal("3.1"))
-    assert storage.etf_calls == [("510300", PeriodType.DAILY, AdjustType.QFQ, "2026-08-10", "2026-08-10")]
+    assert bar == DailyBar("518880", trade_date, Decimal("8.775"), Decimal("8.892"), Decimal("8.774"), Decimal("8.892"))
+    assert storage.etf_daily_calls == [("518880", "2026-08-07", "2026-08-07")]
+    assert storage.etf_calls == []
     assert storage.calls == []
     assert storage.hk_calls == []
 
 
-def test_etf_latest_close_reads_qfq_etf_history_without_stock_fallback():
+def test_etf_latest_close_reads_last_raw_etf_daily_close_through_requested_date():
     trade_date = date(2026, 8, 10)
-    storage = FakeHistoryStorage({}, etf_data={"510300": _etf_frame("510300", "2026-08-08", 3.1)})
+    storage = FakeHistoryStorage(
+        {},
+        etf_daily_data={
+            "518880": pd.concat(
+                [_etf_frame("518880", "2026-08-08", 8.8), _etf_frame("518880", "2026-08-10", 8.9)]
+            )
+        },
+    )
     provider = StorageMarketDataProvider(storage, FakeTradeCalendar([trade_date]))
 
-    assert provider.get_latest_daily_close("510300", trade_date, market="etf") == Decimal("3.1")
-    assert storage.etf_calls == [("510300", PeriodType.DAILY, AdjustType.QFQ, None, "2026-08-10")]
+    assert provider.get_latest_daily_close("518880", trade_date, market="etf") == Decimal("8.9")
+    assert storage.etf_daily_calls == [("518880", None, "2026-08-10")]
+    assert storage.etf_calls == []
     assert storage.calls == []
     assert storage.hk_calls == []
 
 
-def test_missing_etf_bar_raises_without_stock_or_fund_fallback():
-    provider = StorageMarketDataProvider(FakeHistoryStorage({}, etf_data={}), FakeTradeCalendar([]))
+def test_missing_etf_bar_raises_without_other_market_fallback():
+    storage = FakeHistoryStorage({}, etf_daily_data={})
+    provider = StorageMarketDataProvider(storage, FakeTradeCalendar([]))
 
     with pytest.raises(KeyError, match="No ETF daily bar for 510300"):
         provider.get_daily_bar("510300", date(2026, 8, 10), market="etf")
+
+    assert storage.etf_daily_calls == [("510300", "2026-08-10", "2026-08-10")]
+    assert storage.etf_calls == []
+    assert storage.calls == []
+    assert storage.hk_calls == []
 
 
 def test_storage_market_data_provider_loads_daily_bfq_bar_by_unadjusted_db_code():

@@ -2,8 +2,13 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pandas as pd
+
 import paper_trading.services.position_valuation_service as valuation_module
+from common.const import COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN, COL_STOCK_ID
 from paper_trading.services.position_valuation_service import PositionValuationService
+from paper_trading.storage.market_data import StorageMarketDataProvider
+from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
 
 
 def _position(**overrides):
@@ -172,7 +177,22 @@ def test_value_many_falls_back_per_position_when_batch_quote_is_missing():
 
 
 def test_etf_valuation_bypasses_a_share_live_quotes_and_uses_etf_daily_close():
-    market_data = _FakeMarketData({("510300", "etf"): Decimal("3.10")})
+    storage = FakeHistoryStorage(
+        {},
+        etf_daily_data={
+            "510300": pd.DataFrame(
+                {
+                    COL_STOCK_ID: ["510300", "510300"],
+                    COL_DATE: ["2026-08-08", "2026-08-10"],
+                    COL_OPEN: [3.0, 3.1],
+                    COL_HIGH: [3.1, 3.2],
+                    COL_LOW: [2.9, 3.0],
+                    COL_CLOSE: [3.05, 3.10],
+                }
+            )
+        },
+    )
+    market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 8, 10)]))
     live_calls = []
 
     def fetch_prices(items):
@@ -190,4 +210,7 @@ def test_etf_valuation_bypasses_a_share_live_quotes_and_uses_etf_daily_close():
     assert live_calls == []
     assert result.mark_price == Decimal("3.10")
     assert result.price_source == "db_close"
-    assert market_data.calls == [("510300", date(2026, 8, 10), "etf")]
+    assert storage.etf_daily_calls == [("510300", None, "2026-08-10")]
+    assert storage.etf_calls == []
+    assert storage.calls == []
+    assert storage.hk_calls == []
