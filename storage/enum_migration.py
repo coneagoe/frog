@@ -122,8 +122,6 @@ def _result(
 
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
-    if not rollback:
-        _upgrade_daily_bar_diagnostic_adjust_labels(connection)
     missing = _preflight(connection, rollback=rollback)
     if missing and len(missing) != len(_GOVERNED_TABLES):
         raise StorageEnumMigrationError(f"partially missing governed tables: {sorted(missing)}")
@@ -302,7 +300,12 @@ def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
     missing = {table.name for table in _GOVERNED_TABLES if not _table_exists(connection, table.name)}
     for group in STORAGE_ENUM_GROUPS:
         labels = _enum_labels(connection, group.type_name)
-        if labels and labels != group.labels:
+        known_legacy_adjust_labels = (
+            not rollback
+            and group.type_name == "daily_bar_diagnostic_adjust"
+            and labels == _PRE_RAW_DAILY_BAR_DIAGNOSTIC_ADJUST_LABELS
+        )
+        if labels and labels != group.labels and not known_legacy_adjust_labels:
             raise StorageEnumMigrationError(f"{group.type_name}: unexpected enum labels {labels}")
         for column in group.columns:
             if column.table_name in missing:

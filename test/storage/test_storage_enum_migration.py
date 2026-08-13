@@ -246,18 +246,31 @@ def test_apply_adds_raw_to_existing_daily_bar_diagnostic_adjust(postgres_schema)
                 )
         assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq")
 
+        STORAGE_ENUM_ADAPTER.preflight(connection, rollback=False)
+        assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq")
+        assert migrate_storage_enums(connection, dry_run=True).dry_run is True
+        assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq")
         assert migrate_storage_enums(connection).converted is True
         assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq", "raw")
+        connection.commit()
         connection.execute(
             text("INSERT INTO daily_bar_diagnostics VALUES (1, 'raw', 'missing_exact_date', '[]'::jsonb)")
         )
         assert migrate_storage_enums(connection).converted is False
+
+        with pytest.raises(StorageEnumMigrationError, match="daily_bar_diagnostic_adjust"):
+            migrate_storage_enums(connection, rollback=True)
+
+        connection.execute(text("DELETE FROM daily_bar_diagnostics WHERE id = 1"))
+        assert migrate_storage_enums(connection, rollback=True).rolled_back is True
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "character varying(10)"
 
 
 def test_rollback_rejects_raw_daily_bar_diagnostic_adjust_value(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
         assert migrate_storage_enums(connection).converted is True
+        connection.commit()
         connection.execute(
             text("INSERT INTO daily_bar_diagnostics VALUES (1, 'raw', 'missing_exact_date', '[]'::jsonb)")
         )
