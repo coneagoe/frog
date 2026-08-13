@@ -445,7 +445,7 @@ Accounts Positions card:
 The positions endpoint batches real-time quote retrieval for A-share and HK
 Connect positions. A missing or invalid quote falls back per position to the
 latest stored BFQ close using its market route. ETF positions bypass the
-real-time quote batch and use the latest stored ETF QFQ close. This request-time
+real-time quote batch and use the latest stored raw `etf_daily` close. This request-time
 valuation does not change persisted realized PnL or snapshot/NAV calculations.
 
 ```json
