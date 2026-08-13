@@ -63,7 +63,7 @@ def _create_legacy_schema(connection: Connection) -> None:
         text(
             "CREATE TABLE stock_monitor_targets ("
             "id integer primary key, stock_code varchar(10) NOT NULL, market varchar(5) NOT NULL DEFAULT 'A', "
-            "condition jsonb NOT NULL, frequency varchar(10) NOT NULL DEFAULT 'daily', "
+            "condition json NOT NULL, frequency varchar(10) NOT NULL DEFAULT 'daily', "
             "reset_mode varchar(10) NOT NULL DEFAULT 'auto')"
         )
     )
@@ -157,7 +157,7 @@ def test_adapter_preflight_validates_legacy_condition_without_ddl(postgres_schem
         assert not _check_exists(connection)
 
 
-def test_adapter_apply_creates_types_and_condition_check_after_preflight(postgres_schema):
+def test_adapter_apply_legacy_json_condition_creates_types_and_condition_check(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
         MONITOR_ENUM_ADAPTER.preflight(connection, rollback=False)
@@ -212,14 +212,20 @@ def test_apply_bootstraps_missing_governed_tables_after_creating_types(postgres_
     with _connection(engine, schema) as connection:
         connection.execute(text("DROP TABLE forecast_ssf_candidates, stock_monitor_targets"))
 
-        result = migrate_monitor_enums(connection)
+        assert migrate_monitor_enums(connection).converted is True
 
-        assert result.converted is True
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         for group in MONITOR_ENUM_GROUPS:
             for column in group.columns:
                 assert _column_type(connection, column.table_name, column.column_name) == group.type_name
+        assert _column_type(connection, "stock_monitor_targets", "condition") == "jsonb"
         assert _check_exists(connection)
+        assert migrate_monitor_enums(connection).converted is False
+        _assert_insert_rejected(
+            connection,
+            "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
+            "VALUES (1, '600001', 'A', '[]'::jsonb, 'daily', 'auto')",
+        )
 
 
 def test_unknown_legacy_label_aborts_before_any_ddl(postgres_schema):
@@ -282,7 +288,8 @@ def test_conflicting_named_condition_check_aborts_before_any_ddl(postgres_schema
         connection.execute(
             text(
                 "ALTER TABLE stock_monitor_targets ADD CONSTRAINT ck_stock_monitor_targets_condition_type "
-                "CHECK (jsonb_typeof(condition) = 'object' AND condition->>'type' IN ('price_threshold', 'unknown'))"
+                "CHECK (jsonb_typeof(condition::jsonb) = 'object' "
+                "AND condition::jsonb->>'type' IN ('price_threshold', 'unknown'))"
             )
         )
 

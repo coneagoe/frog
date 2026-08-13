@@ -164,7 +164,27 @@ def _assert_rejected(connection: Connection, statement: str) -> None:
 def test_apply_converts_storage_values_and_enforces_json_contracts(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics VALUES "
+                "(1, 'bfq', 'provider_error', "
+                '\'[{"provider": "akshare", "status": "error"}]\'::jsonb)'
+            )
+        )
+
         assert STORAGE_ENUM_ADAPTER.apply(connection) is True
+
+        assert (
+            connection.execute(text("SELECT classification::text FROM daily_bar_diagnostics WHERE id = 1")).scalar_one()
+            == "provider_error"
+        )
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics VALUES "
+                "(2, 'bfq', 'provider_error', "
+                '\'[{"provider": "akshare", "status": "error"}]\'::jsonb)'
+            )
+        )
 
         for group in STORAGE_ENUM_GROUPS:
             assert _enum_labels(connection, group.type_name) == group.labels
@@ -218,6 +238,23 @@ def test_preflight_rejects_invalid_legacy_provider_outcomes_before_creating_type
         )
 
         with pytest.raises(StorageEnumMigrationError, match="daily_bar_diagnostics.id=1"):
+            STORAGE_ENUM_ADAPTER.preflight(connection, rollback=False)
+
+        assert _enum_types(connection) == set()
+
+
+def test_preflight_rejects_unknown_legacy_classification_before_creating_types(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics VALUES "
+                "(1, 'bfq', 'unknown', "
+                '\'[{"provider": "akshare", "status": "error"}]\'::jsonb)'
+            )
+        )
+
+        with pytest.raises(StorageEnumMigrationError, match="daily_bar_diagnostic_classification"):
             STORAGE_ENUM_ADAPTER.preflight(connection, rollback=False)
 
         assert _enum_types(connection) == set()

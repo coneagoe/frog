@@ -33,6 +33,7 @@ def test_daily_bar_diagnostic_scalar_columns_use_value_enums():
     assert tuple(member.value for member in DailyBarDiagnosticClassification) == (
         "missing_market_data",
         "missing_exact_date",
+        "provider_error",
         "downloaded",
         "resolved",
     )

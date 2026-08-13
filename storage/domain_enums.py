@@ -23,6 +23,7 @@ class DailyBarDiagnosticAdjust(StrEnum):
 class DailyBarDiagnosticClassification(StrEnum):
     MISSING_MARKET_DATA = "missing_market_data"
     MISSING_EXACT_DATE = "missing_exact_date"
+    PROVIDER_ERROR = "provider_error"
     DOWNLOADED = "downloaded"
     RESOLVED = "resolved"
 

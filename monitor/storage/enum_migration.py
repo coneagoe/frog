@@ -129,8 +129,8 @@ MONITOR_ENUM_GROUPS = (
 _GOVERNED_TABLES = (StockMonitorTarget.__table__, ForecastSSFCandidate.__table__)
 _CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
 _CONDITION_CHECK_SQL = (
-    "CHECK (jsonb_typeof(condition) = 'object' AND condition ? 'type' "
-    "AND condition->>'type' IS NOT NULL AND condition->>'type' IN "
+    "CHECK (jsonb_typeof(condition::jsonb) = 'object' AND condition::jsonb ? 'type' "
+    "AND condition::jsonb->>'type' IS NOT NULL AND condition::jsonb->>'type' IN "
     "('price_threshold', 'price_cross_ma', 'price_vs_ma', 'ma_cross', 'change_pct', 'rsi'))"
 )
 _NORMALIZED_CONDITION_CHECK = (
@@ -616,7 +616,9 @@ def _validate_condition_check(connection: Connection, *, required: bool) -> None
         if required:
             raise MonitorEnumMigrationError(f"missing condition constraint: {_CONDITION_CHECK_NAME}")
         return
-    normalized = _normalize_expression(definition).replace("::text", "").replace("(", "").replace(")", "")
+    normalized = (
+        _normalize_expression(definition).replace("::text", "").replace("::jsonb", "").replace("(", "").replace(")", "")
+    )
     if normalized != _NORMALIZED_CONDITION_CHECK:
         raise MonitorEnumMigrationError(f"conflicting condition constraint: {_CONDITION_CHECK_NAME}")
 
