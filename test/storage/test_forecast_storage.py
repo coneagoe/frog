@@ -38,3 +38,33 @@ def test_load_active_forecast_candidates_keeps_latest_announcement(tmp_path):
     assert result[["股票代码", "公告日期", "增长下限"]].to_dict("records") == [
         {"股票代码": "600001", "公告日期": date(2025, 1, 5), "增长下限": 50.0}
     ]
+
+
+def test_save_forecasts_is_idempotent_for_repeated_normalized_rows(tmp_path):
+    db = StorageDb.__new__(StorageDb)
+    db.engine = create_engine(f"sqlite:///{tmp_path}/forecast.db")
+    db.Session = None
+    Base.metadata.create_all(db.engine)
+    db.ensure_forecasts_table()
+    forecast = pd.DataFrame(
+        {
+            "股票代码": ["600001.SH"],
+            "公告日期": ["2025-01-05"],
+            "截止日期": ["2024-12-31"],
+            "预告类型": ["预增"],
+            "增长下限": [50.0],
+            "增长上限": [70.0],
+        }
+    )
+
+    assert db.save_forecasts(forecast) is True
+    assert db.save_forecasts(forecast) is True
+
+    with db.engine.connect() as conn:
+        rows = (
+            conn.execute(text('SELECT "股票代码", "公告日期", "截止日期", "增长下限" FROM forecasts')).mappings().all()
+        )
+
+    assert len(rows) == 1
+    assert rows[0]["股票代码"] == "600001"
+    assert rows[0]["增长下限"] == 50.0
