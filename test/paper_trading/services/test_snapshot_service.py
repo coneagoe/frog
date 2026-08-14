@@ -71,7 +71,7 @@ def test_snapshot_values_etf_position_from_etf_daily_bar(tmp_path):
     repo.upsert_position(account.id, Market.ETF, "510300", 100, 0, Decimal("300.00"))
     storage = FakeHistoryStorage(
         {},
-        {
+        etf_daily_data={
             "510300": pd.DataFrame(
                 {
                     COL_STOCK_ID: ["510300"],
@@ -89,8 +89,10 @@ def test_snapshot_values_etf_position_from_etf_daily_bar(tmp_path):
     snapshot = SnapshotService(repo, market_data).generate_snapshot(account.id, date(2026, 8, 10))
 
     assert snapshot.market_value == Decimal("310.0000")
-    assert storage.etf_calls == [("510300", PeriodType.DAILY, AdjustType.QFQ, "2026-08-10", "2026-08-10")]
+    assert storage.etf_daily_calls == [("510300", "2026-08-10", "2026-08-10")]
+    assert storage.etf_calls == []
     assert storage.calls == []
+    assert storage.hk_calls == []
     engine.dispose()
 
 

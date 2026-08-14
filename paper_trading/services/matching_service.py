@@ -164,7 +164,7 @@ class MatchingService:
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
 
     def _record_missing_exact_date_diagnostic(self, order: PaperOrder, error: KeyError) -> None:
-        adjust = "qfq" if order.market == "etf" else "bfq"
+        adjust = self._diagnostic_adjust(order.market)
         self.repo.upsert_daily_bar_diagnostic(
             order.trade_date,
             order.market,
@@ -176,8 +176,8 @@ class MatchingService:
         )
 
     def _resolve_matching_diagnostic(self, order: PaperOrder) -> None:
-        adjust = {"a_share": "bfq", "etf": "qfq"}.get(order.market)
-        if adjust is not None and self.repo.has_unresolved_daily_bar_diagnostic(
+        adjust = self._diagnostic_adjust(order.market)
+        if order.market in {"a_share", "etf"} and self.repo.has_unresolved_daily_bar_diagnostic(
             order.trade_date, order.market, order.symbol, adjust
         ):
             self.repo.upsert_daily_bar_diagnostic(
@@ -189,6 +189,10 @@ class MatchingService:
                 [{"provider": "market_data", "status": "downloaded"}],
                 True,
             )
+
+    @staticmethod
+    def _diagnostic_adjust(market: str) -> str:
+        return "raw" if market == "etf" else "bfq"
 
     def _next_trade_date(self, trade_date: date, n: int) -> date:
         """Return the n-th future trade date after trade_date via market_data."""

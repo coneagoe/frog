@@ -77,9 +77,7 @@ class StorageMarketDataProvider:
         if market == "hk_connect":
             row = self._storage.load_latest_history_data_stock_hk_ggt(stock_id, AdjustType.BFQ, trade_date.isoformat())
         elif market == "etf":
-            df = self._storage.load_history_data_etf(
-                stock_id, PeriodType.DAILY, AdjustType.QFQ, end_date=trade_date.isoformat()
-            )
+            df = self._storage.load_etf_daily(stock_id, end_date=trade_date.isoformat())
             if df.empty:
                 return None
             return self._decimal_field(df.iloc[-1], COL_CLOSE, symbol, trade_date)
@@ -136,10 +134,8 @@ class StorageMarketDataProvider:
         )
 
     def _get_etf_daily_bar(self, etf_id: str, symbol: str, trade_date: date) -> DailyBar:
-        df = self._storage.load_history_data_etf(
+        df = self._storage.load_etf_daily(
             etf_id,
-            PeriodType.DAILY,
-            AdjustType.QFQ,
             start_date=trade_date.isoformat(),
             end_date=trade_date.isoformat(),
         )

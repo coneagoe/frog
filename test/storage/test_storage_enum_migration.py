@@ -199,7 +199,9 @@ def test_apply_converts_storage_values_and_enforces_json_contracts(postgres_sche
 
         _assert_rejected(connection, "INSERT INTO blackroom_records (id, market, source) VALUES (1, 'US', 'manual')")
         _assert_rejected(connection, "INSERT INTO blackroom_records (id, market, source) VALUES (1, 'A', 'unknown')")
-        _assert_rejected(connection, "INSERT INTO daily_bar_diagnostics VALUES (1, 'raw', 'downloaded', '[]'::jsonb)")
+        _assert_rejected(
+            connection, "INSERT INTO daily_bar_diagnostics VALUES (1, 'adjusted', 'downloaded', '[]'::jsonb)"
+        )
         _assert_rejected(connection, "INSERT INTO daily_bar_diagnostics VALUES (1, 'bfq', 'unknown', '[]'::jsonb)")
         _assert_rejected(connection, "INSERT INTO ssf_change_signals VALUES (1, 'unknown', '[]'::jsonb)")
         _assert_rejected(
@@ -225,6 +227,69 @@ def test_apply_converts_storage_values_and_enforces_json_contracts(postgres_sche
         _assert_rejected(connection, "INSERT INTO ssf_change_signals VALUES (1, 'signal', '{}'::jsonb)")
         _assert_rejected(connection, "INSERT INTO ssf_change_signals VALUES (1, 'signal', '[1]'::jsonb)")
         _assert_rejected(connection, "INSERT INTO ssf_change_signals VALUES (1, 'signal', '[\"split\"]'::jsonb)")
+
+
+def test_apply_adds_raw_to_existing_daily_bar_diagnostic_adjust(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        for group in STORAGE_ENUM_GROUPS:
+            labels = ("bfq", "qfq", "hfq") if group.type_name == "daily_bar_diagnostic_adjust" else group.labels
+            connection.execute(
+                text(f"CREATE TYPE {group.type_name} AS ENUM ({', '.join(repr(label) for label in labels)})")
+            )
+            for column in group.columns:
+                if column.default_sql is not None:
+                    connection.execute(
+                        text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} DROP DEFAULT")
+                    )
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} "
+                        f"TYPE {group.type_name} USING {column.column_name}::text::{group.type_name}"
+                    )
+                )
+                if column.default_sql is not None:
+                    default = f"{column.default_sql.partition('::')[0]}::{group.type_name}"
+                    connection.execute(
+                        text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} SET DEFAULT {default}")
+                    )
+        assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq")
+
+        STORAGE_ENUM_ADAPTER.preflight(connection, rollback=False)
+        assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq")
+        assert migrate_storage_enums(connection, dry_run=True).dry_run is True
+        assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq")
+        assert migrate_storage_enums(connection).converted is True
+        assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq", "raw")
+        connection.commit()
+        connection.execute(
+            text("INSERT INTO daily_bar_diagnostics VALUES (1, 'raw', 'missing_exact_date', '[]'::jsonb)")
+        )
+        assert migrate_storage_enums(connection).converted is False
+
+        with pytest.raises(StorageEnumMigrationError, match="daily_bar_diagnostic_adjust"):
+            migrate_storage_enums(connection, rollback=True)
+
+        connection.execute(text("DELETE FROM daily_bar_diagnostics WHERE id = 1"))
+        assert migrate_storage_enums(connection, rollback=True).rolled_back is True
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "character varying(10)"
+
+
+def test_rollback_rejects_raw_daily_bar_diagnostic_adjust_value(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_storage_enums(connection).converted is True
+        connection.commit()
+        connection.execute(
+            text("INSERT INTO daily_bar_diagnostics VALUES (1, 'raw', 'missing_exact_date', '[]'::jsonb)")
+        )
+
+        with pytest.raises(StorageEnumMigrationError, match="daily_bar_diagnostic_adjust"):
+            migrate_storage_enums(connection, rollback=True)
+
+        connection.execute(text("DELETE FROM daily_bar_diagnostics WHERE id = 1"))
+        assert migrate_storage_enums(connection, rollback=True).rolled_back is True
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "character varying(10)"
 
 
 def test_preflight_rejects_invalid_legacy_provider_outcomes_before_creating_types(postgres_schema) -> None:
