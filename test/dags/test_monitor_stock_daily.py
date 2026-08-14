@@ -1,10 +1,11 @@
 import importlib
 import sys
 import types
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -143,12 +144,30 @@ def test_shareholder_sync_is_not_downstream_of_daily_monitor():
 def test_daily_monitor_has_no_forecast_sync_upstream(monitor_stock_daily_module):
     tasks = {operator.task_id: operator for operator in FakePythonOperator.instances}
 
-    assert "sync_forecast_ssf_targets" not in tasks
+    assert set(tasks) == {
+        "run_daily_monitor",
+        "sync_shareholder_selling_blackroom",
+        "countdown_blackroom_records",
+    }
     assert tasks["run_daily_monitor"].upstream == []
+    assert tasks["sync_shareholder_selling_blackroom"].upstream == []
     assert tasks["countdown_blackroom_records"].upstream == [
         tasks["sync_shareholder_selling_blackroom"],
         tasks["run_daily_monitor"],
     ]
+    assert tasks["run_daily_monitor"].downstream == [tasks["countdown_blackroom_records"]]
+    assert tasks["sync_shareholder_selling_blackroom"].downstream == [tasks["countdown_blackroom_records"]]
+
+
+def test_run_daily_monitor_forwards_china_local_interval_end(monkeypatch, monitor_stock_daily_module):
+    monitor = MagicMock(return_value=types.SimpleNamespace(total=1, triggered=0, skipped=0, errors=0))
+    monkeypatch.setattr("monitor.monitor_runner.run_monitor", monitor)
+    monkeypatch.setattr("monitor_stock_daily.is_a_market_open_today", lambda: True)
+
+    interval_end = datetime(2026, 6, 3, 16, 30, tzinfo=ZoneInfo("UTC"))
+    monitor_stock_daily_module.run_daily_monitor(data_interval_end=interval_end)
+
+    monitor.assert_called_once_with(frequency="daily", as_of_date=date(2026, 6, 4))
 
 
 def test_dag_runs_every_calendar_day(monitor_stock_daily_module):

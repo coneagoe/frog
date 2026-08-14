@@ -3,8 +3,8 @@
 import json
 import os
 import sys
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from typing import Any, cast
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -16,7 +16,7 @@ if os.path.isdir(project_root):
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from dags.common_dags import get_default_args  # noqa: E402, I001
+from dags.common_dags import LOCAL_TZ, get_default_args  # noqa: E402, I001
 
 from stock.market import is_a_market_open_today  # noqa: E402
 
@@ -28,7 +28,7 @@ def run_daily_monitor(**context):
 
     from monitor.monitor_runner import run_monitor
 
-    summary = run_monitor(frequency="daily")
+    summary = run_monitor(frequency="daily", as_of_date=_monitor_as_of_date(context))
     msg = (
         f"每日监控完成: 共{summary.total}个目标, "
         f"触发{summary.triggered}个, 跳过{summary.skipped}个, 错误{summary.errors}个"
@@ -36,6 +36,24 @@ def run_daily_monitor(**context):
     if summary.errors:
         raise Exception(f"{msg}\n错误详情: {summary.error_details}")
     return msg
+
+
+def _monitor_as_of_date(context: dict[str, Any]) -> date:
+    data_interval_end = context.get("data_interval_end")
+    if data_interval_end is not None:
+        if hasattr(data_interval_end, "in_timezone"):
+            return cast(date, data_interval_end.in_timezone(LOCAL_TZ).date())
+        if isinstance(data_interval_end, datetime):
+            return data_interval_end.astimezone(LOCAL_TZ).date()
+
+    logical_date = context.get("logical_date") or context.get("execution_date")
+    if logical_date is not None:
+        if hasattr(logical_date, "in_timezone"):
+            return cast(date, logical_date.in_timezone(LOCAL_TZ).date())
+        if isinstance(logical_date, datetime):
+            return logical_date.astimezone(LOCAL_TZ).date()
+
+    return datetime.now(LOCAL_TZ).date()
 
 
 def _format_logical_date(context: dict[str, Any]) -> str:
