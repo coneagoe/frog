@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from paper_trading.api.routers import accounts, analytics, etf_eligibility, matching, orders, snapshots
+from paper_trading.api.routers import accounts, analytics, etf_eligibility, matching, orders, repairs, snapshots
 from storage.storage_db import get_storage
 
 
@@ -24,4 +24,5 @@ def create_app() -> FastAPI:
     app.include_router(snapshots.router)
     app.include_router(analytics.router)
     app.include_router(etf_eligibility.router)
+    app.include_router(repairs.router)
     return app

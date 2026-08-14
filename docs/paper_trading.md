@@ -90,6 +90,7 @@ uv run tools/paper_trading_cli.py matching run --trade-date 2026-06-16 --account
 uv run tools/paper_trading_cli.py etf_eligibility list --status unknown
 uv run tools/paper_trading_cli.py etf_eligibility get --symbol 510300
 uv run tools/paper_trading_cli.py etf_eligibility classify --symbol 510300 --status supported --reviewed-by alice
+uv run tools/paper_trading_cli.py repair etf-markets
 ```
 
 The `order update-comment` command with `--comment ""` clears the stored comment to `NULL` on the order and all linked trades.
@@ -127,6 +128,30 @@ affected account from the earliest affected order. The rebuild preserves manual
 cash events and cancellations, reapplies normal matching rules, and records
 lightweight rebuild audit metadata. The authenticated endpoint is
 `POST /paper/matching/runs/rebuilds`.
+
+### Repair Historical ETF Markets
+
+Use the explicit repair operation when historical orders were persisted with
+`market="a_share"` even though their bare six-digit symbols are present in the
+ETF catalogue. The command defaults to a dry run and reports all candidates
+without writes:
+
+```bash
+uv run tools/paper_trading_cli.py repair etf-markets
+```
+
+After reviewing the result, apply the repair explicitly:
+
+```bash
+uv run tools/paper_trading_cli.py repair etf-markets --apply
+```
+
+The authenticated API endpoint is `POST /paper/repairs/etf-markets`; its body
+defaults to `{"apply": false}`. Applied repairs process one account at a time,
+lock the account, change currently qualifying orders to `etf`, and rebuild from
+that account's earliest corrected order date. A failed account rolls back while
+completed account repairs remain committed. The operation does not remove prior
+A-share missing-date diagnostics.
 
 Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. ETF orders use the account's `etf_commission_rate`, defaulting to `0.00006`; ETF fees are commission-only, with no minimum commission, stamp duty, or transfer fee. Explicit fee flags override the preset values for the new account.
 
@@ -293,11 +318,13 @@ HK Connect support is scoped to ordinary stocks. The backend uses explicit marke
 
 ## ETF Support
 
-Create ETF orders with the explicit `market="etf"` value; ETF symbols are not
-inferred when `market` is omitted. Supported symbols are bare six-digit codes
-that have a currently listed Shanghai or Shenzhen ETF metadata record and an
-eligibility classification of `supported`. Money-market, disabled, unreviewed,
-unknown, and otherwise ineligible ETFs are rejected before order acceptance.
+For a bare six-digit symbol present in the ETF catalogue, order creation assigns
+`market="etf"` whether `market` is omitted, set to `a_share`, or set to `etf`.
+Symbols absent from the catalogue retain the requested or default market. The
+catalogue determines market identity only: supported ETF orders still require a
+currently listed Shanghai or Shenzhen ETF metadata record and an eligibility
+classification of `supported`. Money-market, disabled, unreviewed, unknown, and
+otherwise ineligible ETFs are rejected before order acceptance.
 
 ETF quantity must be a positive multiple of 100 and the limit price must be a
 positive multiple of CNY `0.001`. ETF orders use the account's

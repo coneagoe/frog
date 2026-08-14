@@ -49,6 +49,7 @@ from storage.domain_enums import (
     DailyBarDiagnosticClassification,
     validate_provider_outcomes,
 )
+from storage.model.etf_basic import ETFBasic
 
 _BARE_ETF_SYMBOL = re.compile(r"^\d{6}$")
 
@@ -576,6 +577,36 @@ class PaperTradingRepository:
             .order_by(PaperOrder.id.asc())
             .all()
         )
+
+    def list_catalogue_etf_a_share_orders(self, account_id: int | None = None) -> list[PaperOrder]:
+        query = (
+            self.session.query(PaperOrder)
+            .join(ETFBasic, PaperOrder.symbol == ETFBasic.基金代码)
+            .filter(
+                PaperOrder.market == Market.A_SHARE.value,
+                func.length(PaperOrder.symbol) == 6,
+            )
+        )
+        if account_id is not None:
+            query = query.filter(PaperOrder.account_id == account_id)
+        return [
+            order
+            for order in query.order_by(
+                PaperOrder.account_id.asc(), PaperOrder.trade_date.asc(), PaperOrder.id.asc()
+            ).all()
+            if order.symbol.isdigit()
+        ]
+
+    def update_orders_market(self, order_ids: list[int], market: Market) -> int:
+        if not order_ids:
+            return 0
+        changed = (
+            self.session.query(PaperOrder)
+            .filter(PaperOrder.id.in_(order_ids))
+            .update({PaperOrder.market: market.value}, synchronize_session=False)
+        )
+        self.session.flush()
+        return int(changed)
 
     def list_cash_ledger(self, account_id: int) -> list[PaperCashLedger]:
         return list(

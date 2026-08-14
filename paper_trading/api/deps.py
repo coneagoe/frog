@@ -1,5 +1,5 @@
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from datetime import date, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
@@ -33,7 +33,7 @@ def require_api_token(authorization: str | None = Header(default=None)) -> None:
         )
 
 
-def _session_factory():
+def get_session_factory() -> Callable[[], Session]:
     config = StorageConfig()
     url = (
         f"postgresql://{config.get_db_username()}:{config.get_db_password()}"
@@ -43,7 +43,7 @@ def _session_factory():
 
 
 def get_session() -> Generator[Session, None, None]:
-    session = _session_factory()()
+    session = get_session_factory()()
     try:
         yield session
     finally:

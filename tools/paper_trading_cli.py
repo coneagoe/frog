@@ -26,10 +26,11 @@ Commands:
   matching run --trade-date YYYY-MM-DD [--account-id ID]
   matching list
   matching get --run-id ID
-  snapshot list --account-id ID
-  etf_eligibility list [--status STATUS]
-  etf_eligibility get --symbol SYMBOL
-  etf_eligibility classify --symbol SYMBOL --status supported|money_market --reviewed-by NAME
+   snapshot list --account-id ID
+   etf_eligibility list [--status STATUS]
+   etf_eligibility get --symbol SYMBOL
+   etf_eligibility classify --symbol SYMBOL --status supported|money_market --reviewed-by NAME
+   repair etf-markets [--apply]
 
 Exit codes:
   0  success
@@ -249,6 +250,9 @@ class PaperTradingApiClient:
     def rebuild_delayed_daily_bar_orders(self) -> dict[str, Any]:
         return self._request("POST", "/paper/matching/runs/rebuilds")
 
+    def repair_historical_etf_markets(self, apply: bool = False) -> dict[str, Any]:
+        return self._request("POST", "/paper/repairs/etf-markets", json={"apply": apply})
+
     def list_etf_eligibility(self, status: str | None = None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
         if status is not None:
@@ -398,6 +402,15 @@ def _add_etf_eligibility_subparsers(subparsers: Any) -> None:
     p_classify.add_argument("--reviewed-by", required=True, help="Reviewer name")
 
 
+def _add_repair_subparsers(subparsers: Any) -> None:
+    repair = subparsers.add_parser("repair", help="Run explicit paper trading repairs")
+    repair_sub = repair.add_subparsers(dest="repair_command", required=True, parser_class=_SafeParser)
+    etf_markets = repair_sub.add_parser(
+        "etf-markets", help="Preview or repair historical catalogue ETF market identity"
+    )
+    etf_markets.add_argument("--apply", action="store_true", help="Apply the repair; default is dry run")
+
+
 def build_parser() -> _SafeParser:
     parser = _SafeParser(
         description="Paper trading API CLI",
@@ -413,6 +426,7 @@ def build_parser() -> _SafeParser:
     _add_matching_subparsers(subparsers)
     _add_snapshot_subparsers(subparsers)
     _add_etf_eligibility_subparsers(subparsers)
+    _add_repair_subparsers(subparsers)
     return parser
 
 
@@ -670,6 +684,12 @@ def _handle_etf_eligibility(client: PaperTradingApiClient, args: argparse.Namesp
     raise _ParserError(f"unknown ETF eligibility command: {cmd}")
 
 
+def _handle_repair(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:
+    if args.repair_command == "etf-markets":
+        return client.repair_historical_etf_markets(apply=args.apply)
+    raise _ParserError(f"unknown repair command: {args.repair_command}")
+
+
 _HANDLERS: dict[str, Any] = {
     "account": _handle_account,
     "order": _handle_order,
@@ -677,6 +697,7 @@ _HANDLERS: dict[str, Any] = {
     "matching": _handle_matching,
     "snapshot": _handle_snapshot,
     "etf_eligibility": _handle_etf_eligibility,
+    "repair": _handle_repair,
 }
 
 
@@ -734,6 +755,7 @@ def _get_subcommand(args: argparse.Namespace) -> str | None:
         "matching_command",
         "snapshot_command",
         "etf_eligibility_command",
+        "repair_command",
     ):
         val = getattr(args, attr, None)
         if val is not None:

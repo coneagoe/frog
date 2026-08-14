@@ -23,6 +23,7 @@ from storage.domain_enums import (
     validate_provider_outcomes,
 )
 from storage.model.base import Base
+from storage.model.etf_basic import ETFBasic
 from storage.model.paper_trading import DailyBarDiagnostic
 
 
@@ -296,6 +297,80 @@ def test_create_order_persists_accepted_order(tmp_path):
 
     assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
     engine.dispose()
+
+
+def test_list_catalogue_etf_a_share_orders_excludes_non_candidates_and_filters_account(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("catalogue-candidate", Decimal("100000.00"))
+    other_account = repo.create_account("other-account", Decimal("100000.00"))
+    sqlite_session.add(ETFBasic(基金代码="510300", 中文简称="CSI 300 ETF", 交易所="SH", 存续状态="L"))
+    sqlite_session.add(ETFBasic(基金代码="ABCDEF", 中文简称="Malformed ETF", 交易所="SH", 存续状态="L"))
+    sqlite_session.flush()
+
+    a_share_etf = repo.create_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("3.10"), date(2026, 8, 10), OrderStatus.ACCEPTED
+    )
+    repo.create_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.10"),
+        date(2026, 8, 10),
+        OrderStatus.ACCEPTED,
+        market=Market.ETF,
+    )
+    repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), date(2026, 8, 10), OrderStatus.ACCEPTED
+    )
+    repo.create_order(
+        account.id,
+        "510300.SH",
+        OrderSide.BUY,
+        100,
+        Decimal("3.10"),
+        date(2026, 8, 10),
+        OrderStatus.ACCEPTED,
+    )
+    repo.create_order(
+        account.id, "ABCDEF", OrderSide.BUY, 100, Decimal("3.10"), date(2026, 8, 10), OrderStatus.ACCEPTED
+    )
+
+    candidates = repo.list_catalogue_etf_a_share_orders()
+
+    assert [order.id for order in candidates] == [a_share_etf.id]
+    assert repo.list_catalogue_etf_a_share_orders(other_account.id) == []
+
+
+def test_update_orders_market_updates_only_targeted_orders(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("market-update", Decimal("100000.00"))
+    a_share_order = repo.create_order(
+        account.id, "510300", OrderSide.BUY, 100, Decimal("3.10"), date(2026, 8, 10), OrderStatus.ACCEPTED
+    )
+    existing_etf_order = repo.create_order(
+        account.id,
+        "510500",
+        OrderSide.BUY,
+        100,
+        Decimal("3.10"),
+        date(2026, 8, 10),
+        OrderStatus.ACCEPTED,
+        market=Market.ETF,
+    )
+    untargeted_a_share_order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), date(2026, 8, 10), OrderStatus.ACCEPTED
+    )
+
+    changed = repo.update_orders_market([a_share_order.id], Market.ETF)
+
+    assert changed == 1
+    sqlite_session.expunge_all()
+    assert repo.get_order(a_share_order.id).market == Market.ETF.value
+    assert repo.get_order(existing_etf_order.id).market == Market.ETF.value
+    assert repo.get_order(untargeted_a_share_order.id).market == Market.A_SHARE.value
 
 
 def test_get_order_by_idempotency_key_returns_existing_order(sqlite_session):

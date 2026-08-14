@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from tools.paper_trading_cli import EXIT_CODES, main, run_paper_trading_matching
+from tools.paper_trading_cli import EXIT_CODES, PaperTradingApiClient, main, run_paper_trading_matching
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1724,6 +1724,62 @@ class TestSnapshotList:
     def test_list_snapshots_missing_account_id(self):
         exit_code = main(["snapshot", "list"])
         assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+
+# ---------------------------------------------------------------------------
+# Historical ETF market repair command
+# ---------------------------------------------------------------------------
+
+
+class TestRepairHistoricalEtfMarkets:
+    def test_repair_etf_markets_defaults_to_dry_run(self):
+        """Catch an omitted --apply flag being sent as anything but false."""
+        client = _mock_client()
+        client.repair_historical_etf_markets.return_value = {
+            "dry_run": True,
+            "updated_order_count": 0,
+        }
+
+        code = main(["repair", "etf-markets"], client=client)
+
+        assert code == EXIT_CODES["OK"]
+        client.repair_historical_etf_markets.assert_called_once_with(apply=False)
+
+    def test_repair_etf_markets_forwards_apply_flag(self):
+        """Catch --apply being dropped before the repair request."""
+        client = _mock_client()
+        client.repair_historical_etf_markets.return_value = {
+            "dry_run": False,
+            "updated_order_count": 2,
+        }
+
+        code = main(["repair", "etf-markets", "--apply"], client=client)
+
+        assert code == EXIT_CODES["OK"]
+        client.repair_historical_etf_markets.assert_called_once_with(apply=True)
+
+    def test_repair_etf_markets_json_output(self, capsys):
+        """Catch repair output that does not preserve the API dry-run response."""
+        client = _mock_client()
+        client.repair_historical_etf_markets.return_value = {
+            "dry_run": True,
+            "updated_order_count": 0,
+        }
+
+        code = main(["--json", "repair", "etf-markets"], client=client)
+
+        assert code == EXIT_CODES["OK"]
+        assert json.loads(capsys.readouterr().out)["dry_run"] is True
+
+    @pytest.mark.parametrize("apply", [False, True])
+    def test_repair_historical_etf_markets_sends_explicit_apply_body(self, apply):
+        """Catch repair requests that omit or invert the explicit apply body."""
+        with patch.dict(os.environ, {"PAPER_TRADING_API_TOKEN": "tok"}, clear=True):
+            client = PaperTradingApiClient()
+        client._request = MagicMock(return_value={"dry_run": not apply})
+
+        assert client.repair_historical_etf_markets(apply=apply) == {"dry_run": not apply}
+        client._request.assert_called_once_with("POST", "/paper/repairs/etf-markets", json={"apply": apply})
 
 
 # ---------------------------------------------------------------------------
