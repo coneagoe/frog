@@ -238,12 +238,21 @@ def test_apply_adds_raw_to_existing_daily_bar_diagnostic_adjust(postgres_schema)
                 text(f"CREATE TYPE {group.type_name} AS ENUM ({', '.join(repr(label) for label in labels)})")
             )
             for column in group.columns:
+                if column.default_sql is not None:
+                    connection.execute(
+                        text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} DROP DEFAULT")
+                    )
                 connection.execute(
                     text(
                         f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} "
                         f"TYPE {group.type_name} USING {column.column_name}::text::{group.type_name}"
                     )
                 )
+                if column.default_sql is not None:
+                    default = f"{column.default_sql.partition('::')[0]}::{group.type_name}"
+                    connection.execute(
+                        text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} SET DEFAULT {default}")
+                    )
         assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq")
 
         STORAGE_ENUM_ADAPTER.preflight(connection, rollback=False)
