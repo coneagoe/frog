@@ -71,6 +71,7 @@ def _create_legacy_schema(connection: Connection) -> None:
     statements = (
         "CREATE TABLE blackroom_records (id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', source varchar(50) NOT NULL DEFAULT 'manual')",
         "CREATE TABLE daily_bar_diagnostics (id integer primary key, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL)",
+        "CREATE TABLE forecast_snapshot_runs (id integer primary key, report_end_date date NOT NULL, announcement_start_date date NOT NULL, announcement_end_date date NOT NULL, attempt integer NOT NULL, status varchar(16) NOT NULL)",
         "CREATE TABLE ssf_change_signals (id integer primary key, status varchar(20) NOT NULL DEFAULT 'signal', event_types jsonb NOT NULL)",
     )
     for statement in statements:

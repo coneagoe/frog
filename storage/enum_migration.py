@@ -14,12 +14,13 @@ from storage.domain_enums import (
     BlackroomSource,
     DailyBarDiagnosticAdjust,
     DailyBarDiagnosticClassification,
+    ForecastSnapshotStatus,
     SSFChangeSignalStatus,
     validate_provider_outcomes,
     validate_ssf_event_types,
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
-from storage.model import BlackroomRecord, DailyBarDiagnostic, SSFChangeSignal
+from storage.model import BlackroomRecord, DailyBarDiagnostic, ForecastSnapshotRun, SSFChangeSignal
 
 
 class StorageEnumMigrationError(RuntimeError):
@@ -92,9 +93,19 @@ STORAGE_ENUM_GROUPS = (
         _labels(SSFChangeSignalStatus),
         (_column("ssf_change_signals", "status", "VARCHAR(20)", "'signal'"),),
     ),
+    StorageEnumGroup(
+        "forecast_snapshot_status",
+        _labels(ForecastSnapshotStatus),
+        (_column("forecast_snapshot_runs", "status", "VARCHAR(16)"),),
+    ),
 )
 
-_GOVERNED_TABLES = (BlackroomRecord.__table__, DailyBarDiagnostic.__table__, SSFChangeSignal.__table__)
+_GOVERNED_TABLES = (
+    BlackroomRecord.__table__,
+    DailyBarDiagnostic.__table__,
+    ForecastSnapshotRun.__table__,
+    SSFChangeSignal.__table__,
+)
 _PRE_RAW_DAILY_BAR_DIAGNOSTIC_ADJUST_LABELS = ("bfq", "qfq", "hfq")
 _PROVIDER_CHECK_NAME = "ck_daily_bar_diagnostics_provider_outcome_status"
 _PROVIDER_CHECK_SQL = (
@@ -139,6 +150,7 @@ def _adapter_apply(connection: Connection) -> bool:
             for group in STORAGE_ENUM_GROUPS
             for column in group.columns
         )
+        or not _index_exists(connection, "uq_forecast_snapshot_running_range")
     )
     for group in STORAGE_ENUM_GROUPS:
         _create_type(connection, group)
@@ -147,6 +159,7 @@ def _adapter_apply(connection: Connection) -> bool:
     else:
         for group in STORAGE_ENUM_GROUPS:
             _alter_group(connection, group, rollback=False)
+        _create_snapshot_indexes(connection)
     _add_checks(connection)
     return changed
 
@@ -351,6 +364,11 @@ def _create_missing_tables(connection: Connection, missing: set[str]) -> None:
         tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
 
 
+def _create_snapshot_indexes(connection: Connection) -> None:
+    for index in ForecastSnapshotRun.__table__.indexes:
+        index.create(connection, checkfirst=True)
+
+
 def _validate_json(connection: Connection, table_name: str, column_name: str, validator: object) -> None:
     for row_id, value in connection.execute(text(f"SELECT id, {column_name} FROM {table_name}")):
         try:
@@ -450,6 +468,9 @@ def _add_checks(connection: Connection) -> None:
 
 def _rollback(connection: Connection) -> bool:
     changed = False
+    if _index_exists(connection, "uq_forecast_snapshot_running_range"):
+        connection.execute(text("DROP INDEX uq_forecast_snapshot_running_range"))
+        changed = True
     for group in STORAGE_ENUM_GROUPS:
         if any(_column_has_type(connection, column, group.type_name) for column in group.columns):
             _alter_group(connection, group, rollback=True)
@@ -482,6 +503,12 @@ def _verify(connection: Connection, *, rollback: bool) -> None:
 def _table_exists(connection: Connection, table_name: str) -> bool:
     return (
         connection.execute(text("SELECT to_regclass(:table_name)"), {"table_name": table_name}).scalar_one() is not None
+    )
+
+
+def _index_exists(connection: Connection, index_name: str) -> bool:
+    return (
+        connection.execute(text("SELECT to_regclass(:index_name)"), {"index_name": index_name}).scalar_one() is not None
     )
 
 
@@ -588,7 +615,7 @@ def _type_dependencies(connection: Connection, group: StorageEnumGroup) -> tuple
             text(
                 "WITH managed(table_name, column_name) AS (VALUES "
                 + managed
-                + ") SELECT DISTINCT COALESCE('view ' || v.relname, pg_describe_object(d.classid, d.objid, d.objsubid)) FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid LEFT JOIN pg_class vc ON vc.oid = d.objid AND vc.relkind = 'v' LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid LEFT JOIN pg_class v ON v.oid = COALESCE(vc.oid, r.ev_class) WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') AND NOT EXISTS (SELECT 1 FROM managed m JOIN pg_class c ON c.relname = m.table_name JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = m.column_name LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum WHERE n.nspname = current_schema() AND ((d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.objsubid = a.attnum) OR (d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid))) ORDER BY 1"
+                + ") SELECT DISTINCT COALESCE('view ' || v.relname, pg_describe_object(d.classid, d.objid, d.objsubid)) FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid LEFT JOIN pg_class vc ON vc.oid = d.objid AND vc.relkind = 'v' LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid LEFT JOIN pg_class v ON v.oid = COALESCE(vc.oid, r.ev_class) WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') AND NOT (t.typname = 'forecast_snapshot_status' AND d.classid = 'pg_class'::regclass AND d.objid = to_regclass('uq_forecast_snapshot_running_range')) AND NOT EXISTS (SELECT 1 FROM managed m JOIN pg_class c ON c.relname = m.table_name JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = m.column_name LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum WHERE n.nspname = current_schema() AND ((d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.objsubid = a.attnum) OR (d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid))) ORDER BY 1"
             ),
             parameters,
         ).scalars()
