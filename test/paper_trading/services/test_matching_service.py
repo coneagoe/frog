@@ -559,8 +559,14 @@ def test_matching_fills_etf_order_from_raw_etf_daily_without_adjusted_fallback(t
     matching_service = MatchingService(repo, market_data, SnapshotService(repo, market_data))
     account = repo.create_account("raw-etf-daily", Decimal("100000.00"))
     order = order_service.place_order(
-        account.id, "518880", OrderSide.BUY, 100, Decimal("8.818"), trade_date, market=Market.ETF
+        account.id,
+        "518880",
+        OrderSide.BUY,
+        100,
+        Decimal("8.818"),
+        trade_date,
     )
+    assert order.market == Market.ETF.value
 
     run = matching_service.run(trade_date, account.id)
 

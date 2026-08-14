@@ -1083,18 +1083,140 @@ def test_etf_sell_rejects_same_day_purchase_under_t1(tmp_path):
     engine.dispose()
 
 
-def test_known_etf_symbol_requires_explicit_etf_market(tmp_path):
+def test_catalogue_etf_without_market_resolves_to_etf(tmp_path):
     engine, session, repo, _ = _repo_and_service(tmp_path)
     _add_supported_etf(repo)
     service = _etf_order_service(repo, FakeMarketDataProvider())
-    account = repo.create_account("etf-market", Decimal("100000.00"))
+    account = repo.create_account("catalogue-etf", Decimal("100000.00"))
 
-    order = service.place_order(account.id, "510300", OrderSide.BUY, 100, Decimal("3.001"), date(2026, 6, 16))
+    order = service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.001"),
+        date(2026, 6, 16),
+    )
     session.commit()
 
-    assert order.status == OrderStatus.REJECTED.value
-    assert order.rejection_code == "MARKET_SYMBOL_MISMATCH"
-    assert order.market == Market.A_SHARE.value
+    assert (order.status, order.market) == (OrderStatus.ACCEPTED.value, Market.ETF.value)
+    assert repo.list_trade_validity_checks(order.id)[0].market == Market.ETF.value
+    engine.dispose()
+
+
+def test_catalogue_etf_overrides_explicit_a_share_market(tmp_path):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(repo, FakeMarketDataProvider())
+    account = repo.create_account("catalogue-etf-override", Decimal("100000.00"))
+
+    order = service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.001"),
+        date(2026, 6, 16),
+        market=Market.A_SHARE,
+    )
+    session.commit()
+
+    assert (order.status, order.market) == (OrderStatus.ACCEPTED.value, Market.ETF.value)
+    engine.dispose()
+
+
+def test_catalogue_etf_rejects_invalid_supplied_market_as_a_share(tmp_path):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(repo, FakeMarketDataProvider())
+    account = repo.create_account("catalogue-etf-invalid-market", Decimal("100000.00"))
+
+    order = service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.001"),
+        date(2026, 6, 16),
+        market="unknown_market",
+    )
+    session.commit()
+
+    assert (order.status, order.market) == (OrderStatus.REJECTED.value, Market.A_SHARE.value)
+    assert order.rejection_code == "INVALID_MARKET"
+    engine.dispose()
+
+
+def test_unreviewed_catalogue_etf_rejection_persists_etf_market(tmp_path):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    session.add(ETFBasic(基金代码="510301", 中文简称="Unreviewed ETF", 交易所="SH", 存续状态="L"))
+    session.flush()
+    service = _etf_order_service(repo, FakeMarketDataProvider())
+    account = repo.create_account("unreviewed-catalogue-etf", Decimal("100000.00"))
+
+    order = service.place_order(
+        account.id,
+        "510301",
+        OrderSide.BUY,
+        100,
+        Decimal("3.001"),
+        date(2026, 6, 16),
+        market=Market.A_SHARE,
+    )
+    session.commit()
+
+    assert (order.status, order.market) == (OrderStatus.REJECTED.value, Market.ETF.value)
+    assert order.rejection_code == "ETF_ELIGIBILITY_UNREVIEWED"
+    engine.dispose()
+
+
+def test_six_digit_symbol_absent_from_etf_catalogue_remains_a_share(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("non-catalogue-six-digit", Decimal("100000.00"))
+
+    order = service.place_order(
+        account.id,
+        "510399",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert (order.status, order.market) == (OrderStatus.ACCEPTED.value, Market.A_SHARE.value)
+    engine.dispose()
+
+
+def test_catalogue_etf_idempotency_reuses_order_across_omitted_and_a_share_market(tmp_path):
+    engine, session, repo, _ = _repo_and_service(tmp_path)
+    _add_supported_etf(repo)
+    service = _etf_order_service(repo, FakeMarketDataProvider())
+    account = repo.create_account("catalogue-etf-idempotency", Decimal("100000.00"))
+
+    first = service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.001"),
+        date(2026, 6, 16),
+        idempotency_key="catalogue-etf-order",
+    )
+    second = service.place_order(
+        account.id,
+        "510300",
+        OrderSide.BUY,
+        100,
+        Decimal("3.001"),
+        date(2026, 6, 16),
+        idempotency_key="catalogue-etf-order",
+        market=Market.A_SHARE,
+    )
+    session.commit()
+
+    assert (first.id, first.market) == (second.id, Market.ETF.value)
+    assert len(repo.list_orders(account.id)) == 1
     engine.dispose()
 
 
