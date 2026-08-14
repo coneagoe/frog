@@ -19,6 +19,11 @@ from storage.enum_governance import migrate_enums
 
 EXPECTED_TYPE_NAMES = {group.type_name for group in MONITOR_ENUM_GROUPS}
 CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
+LEGACY_CONDITION_CHECK_SQL = (
+    "CHECK (jsonb_typeof(condition::jsonb) = 'object' AND condition::jsonb ? 'type' "
+    "AND condition::jsonb->>'type' IS NOT NULL AND condition::jsonb->>'type' IN "
+    "('price_threshold', 'price_cross_ma', 'price_vs_ma', 'ma_cross', 'change_pct', 'rsi'))"
+)
 MANAGED_INDEX_NAMES = (
     "ix_stock_monitor_targets_market",
     "ix_stock_monitor_targets_frequency",
@@ -378,6 +383,30 @@ def test_apply_accepts_a_share_daily_close_cross_ma_condition(postgres_schema):
             )
         )
 
+        assert connection.execute(text("SELECT count(*) FROM stock_monitor_targets")).scalar_one() == 1
+
+
+def test_apply_replaces_legacy_condition_check_and_remains_idempotent(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                f"ALTER TABLE stock_monitor_targets ADD CONSTRAINT {CONDITION_CHECK_NAME} {LEGACY_CONDITION_CHECK_SQL}"
+            )
+        )
+
+        assert migrate_monitor_enums(connection).converted is True
+
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
+                "VALUES (1, '600001', 'A', "
+                '\'{"type": "close_cross_ma", "direction": "above", "period": 20}\'::jsonb, '
+                "'daily', 'auto')"
+            )
+        )
+
+        assert migrate_monitor_enums(connection).converted is False
         assert connection.execute(text("SELECT count(*) FROM stock_monitor_targets")).scalar_one() == 1
 
 
