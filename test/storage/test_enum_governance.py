@@ -139,6 +139,19 @@ def _create_storage_legacy_schema(connection: Connection) -> None:
         connection.execute(text(statement))
 
 
+def _add_complete_paper_market_keys(connection: Connection) -> None:
+    statements = (
+        "ALTER TABLE paper_positions ADD COLUMN account_id integer NOT NULL DEFAULT 1",
+        "ALTER TABLE paper_positions ADD COLUMN symbol varchar(20) NOT NULL DEFAULT '000001'",
+        "ALTER TABLE paper_positions ADD CONSTRAINT uq_paper_positions_account_symbol UNIQUE (account_id, symbol)",
+        "ALTER TABLE daily_bar_diagnostics ADD COLUMN business_date date NOT NULL DEFAULT '2026-08-07'",
+        "ALTER TABLE daily_bar_diagnostics ADD COLUMN stock_id varchar(20) NOT NULL DEFAULT '000001'",
+        "ALTER TABLE daily_bar_diagnostics ADD CONSTRAINT uq_daily_bar_diagnostics_business_key UNIQUE (business_date, stock_id, adjust)",
+    )
+    for statement in statements:
+        connection.execute(text(statement))
+
+
 def _create_legacy_diagnostics_only_schema(connection: Connection) -> None:
     _create_monitor_legacy_schema(connection)
     statements = (
@@ -193,7 +206,7 @@ def _constraint_columns(connection: Connection, table_name: str, constraint_name
                 "SELECT a.attname FROM pg_constraint c "
                 "JOIN unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true "
                 "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key.attnum "
-                "WHERE c.conrelid = :table_name::regclass AND c.conname = :constraint_name "
+                "WHERE c.conrelid = CAST(:table_name AS regclass) AND c.conname = :constraint_name "
                 "ORDER BY key.ordinality"
             ),
             {"table_name": table_name, "constraint_name": constraint_name},
@@ -515,6 +528,92 @@ def test_global_migration_upgrades_legacy_diagnostics_when_paper_tables_are_miss
         assert _column_type(connection, "paper_orders", "side") == "paper_order_side"
 
 
+def test_global_migration_and_rollback_support_reduced_paper_key_schemas(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+
+        assert migrate_enums(connection).converted is True
+        assert _column_type(connection, "paper_positions", "market") == "paper_market"
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert _constraint_columns(connection, "paper_positions", "uq_paper_positions_account_market_symbol") == ()
+        assert _constraint_columns(connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key") == ()
+
+        assert migrate_enums(connection, rollback=True).rolled_back is True
+        assert _all_managed_enum_types(connection) == set()
+        assert (
+            connection.execute(
+                text(
+                    "SELECT 1 FROM pg_attribute a "
+                    "JOIN pg_class c ON c.oid = a.attrelid "
+                    "WHERE c.relnamespace = current_schema()::regnamespace "
+                    "AND c.relname = 'daily_bar_diagnostics' AND a.attname = 'market'"
+                )
+            ).scalar_one_or_none()
+            is None
+        )
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "character varying(10)"
+        assert _column_type(connection, "daily_bar_diagnostics", "classification") == "character varying(50)"
+        assert _column_type(connection, "daily_bar_diagnostics", "provider_outcomes") == "jsonb"
+
+
+def test_unified_migration_upgrades_complete_market_keys_and_rejects_rollback_collisions(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        _add_complete_paper_market_keys(connection)
+
+        assert migrate_enums(connection).converted is True
+        assert _constraint_columns(connection, "paper_positions", "uq_paper_positions_account_market_symbol") == (
+            "account_id",
+            "market",
+            "symbol",
+        )
+        assert _constraint_columns(connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key") == (
+            "business_date",
+            "market",
+            "stock_id",
+            "adjust",
+        )
+
+        connection.execute(
+            text(
+                "INSERT INTO paper_positions (id, account_id, symbol, market) VALUES "
+                "(1, 7, '000001', 'a_share'), (2, 7, '000001', 'hk_connect')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics "
+                "(id, business_date, stock_id, market, adjust, classification, provider_outcomes) VALUES "
+                "(1, '2026-08-07', '000001', 'a_share', 'bfq', 'downloaded', '[]'::jsonb), "
+                "(2, '2026-08-07', '000001', 'hk_connect', 'bfq', 'downloaded', '[]'::jsonb)"
+            )
+        )
+
+        with pytest.raises(EnumGovernanceError, match="paper_trading rollback failed") as caught:
+            migrate_enums(connection, rollback=True)
+
+        assert caught.value.__cause__ is not None
+        assert "legacy uniqueness collision in paper positions" in str(caught.value.__cause__)
+        assert _column_type(connection, "paper_positions", "market") == "paper_market"
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "monitor_market"
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "daily_bar_diagnostic_adjust"
+
+        connection.execute(text("DELETE FROM paper_positions"))
+
+        with pytest.raises(EnumGovernanceError, match="paper_trading rollback failed") as caught:
+            migrate_enums(connection, rollback=True)
+
+        assert caught.value.__cause__ is not None
+        assert "legacy uniqueness collision in daily bar diagnostics" in str(caught.value.__cause__)
+        assert _column_type(connection, "paper_positions", "market") == "paper_market"
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert _column_type(connection, "stock_monitor_targets", "market") == "monitor_market"
+        assert _column_type(connection, "daily_bar_diagnostics", "adjust") == "daily_bar_diagnostic_adjust"
+
+
 def test_dry_run_reports_all_schema_readiness_facts(postgres_schema) -> None:
     engine, schema = postgres_schema
     with engine.begin() as connection:
@@ -536,7 +635,15 @@ def test_dry_run_reports_all_schema_readiness_facts(postgres_schema) -> None:
         "ck_daily_bar_diagnostics_provider_outcome_status",
         "ck_ssf_change_signals_event_types",
     }
-    assert all(audit.ready for audit in result.audits)
+    paper_market = next(group for group in audits["paper_trading"].groups if group.type_name == "paper_market")
+    round_trips_market = next(
+        column
+        for column in paper_market.columns
+        if (column.table_name, column.column_name) == ("paper_position_round_trips", "market")
+    )
+    assert round_trips_market.observed_type is None
+    assert round_trips_market.ready is False
+    assert audits["paper_trading"].ready is False
 
 
 def test_dry_run_reports_converted_schema_labels_checks_and_values(postgres_schema) -> None:
@@ -684,8 +791,27 @@ def test_unified_rollback_restores_all_domains_and_removes_checks(postgres_schem
         assert result.rolled_back is True
         assert _all_managed_enum_types(connection) == set()
         assert _managed_check_names(connection) == set()
+        absent_columns = {
+            ("paper_position_round_trips", "market"),
+            ("daily_bar_diagnostics", "market"),
+        }
+        for table_name, column_name in absent_columns:
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT 1 FROM pg_attribute a "
+                        "JOIN pg_class c ON c.oid = a.attrelid "
+                        "WHERE c.relnamespace = current_schema()::regnamespace "
+                        "AND c.relname = :table_name AND a.attname = :column_name"
+                    ),
+                    {"table_name": table_name, "column_name": column_name},
+                ).scalar_one_or_none()
+                is None
+            )
         for group in _all_enum_groups():
             for column in group.columns:
+                if (column.table_name, column.column_name) in absent_columns:
+                    continue
                 assert _column_type(connection, column.table_name, column.column_name) == _normalized_legacy_type(
                     column.legacy_type_sql
                 )

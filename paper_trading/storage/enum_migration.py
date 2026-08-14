@@ -862,8 +862,21 @@ def _replace_unique_constraint(connection: Connection, table_name: str, old_name
     connection.execute(text(f"ALTER TABLE {table_name} ADD CONSTRAINT {old_name} UNIQUE ({columns})"))
 
 
+_MARKET_QUALIFIED_KEY_COLUMNS = {
+    "paper_positions": ("account_id", "market", "symbol"),
+    "daily_bar_diagnostics": ("business_date", "market", "stock_id", "adjust"),
+}
+
+
+def _has_market_qualified_key_columns(connection: Connection, table_name: str) -> bool:
+    return _table_exists(connection, table_name) and all(
+        _column_facts(connection, PaperTradingEnumColumn(table_name, column_name, "", None, False)) is not None
+        for column_name in _MARKET_QUALIFIED_KEY_COLUMNS[table_name]
+    )
+
+
 def _upgrade_market_qualified_keys(connection: Connection) -> None:
-    if _table_exists(connection, "paper_positions") and not _constraint_exists(
+    if _has_market_qualified_key_columns(connection, "paper_positions") and not _constraint_exists(
         connection, "paper_positions", "uq_paper_positions_account_market_symbol"
     ):
         if _constraint_exists(connection, "paper_positions", "uq_paper_positions_account_symbol"):
@@ -874,7 +887,7 @@ def _upgrade_market_qualified_keys(connection: Connection) -> None:
                 "UNIQUE (account_id, market, symbol)"
             )
         )
-    if _table_exists(connection, "daily_bar_diagnostics") and _constraint_columns(
+    if _has_market_qualified_key_columns(connection, "daily_bar_diagnostics") and _constraint_columns(
         connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key"
     ) != ("business_date", "market", "stock_id", "adjust"):
         _replace_unique_constraint(
@@ -891,7 +904,7 @@ def _reject_legacy_key_collisions(connection: Connection) -> None:
         ("daily_bar_diagnostics", "business_date, stock_id, adjust", "daily bar diagnostics"),
     )
     for table_name, columns, description in checks:
-        if not _table_exists(connection, table_name):
+        if not _has_market_qualified_key_columns(connection, table_name):
             continue
         duplicate = connection.execute(
             text(f"SELECT 1 FROM {table_name} GROUP BY {columns} HAVING count(*) > 1 LIMIT 1")
@@ -901,7 +914,7 @@ def _reject_legacy_key_collisions(connection: Connection) -> None:
 
 
 def _restore_legacy_market_qualified_keys(connection: Connection) -> None:
-    if _table_exists(connection, "paper_positions"):
+    if _has_market_qualified_key_columns(connection, "paper_positions"):
         if _constraint_exists(connection, "paper_positions", "uq_paper_positions_account_market_symbol"):
             connection.execute(
                 text("ALTER TABLE paper_positions DROP CONSTRAINT uq_paper_positions_account_market_symbol")
@@ -912,23 +925,21 @@ def _restore_legacy_market_qualified_keys(connection: Connection) -> None:
                     "UNIQUE (account_id, symbol)"
                 )
             )
-    if _table_exists(connection, "daily_bar_diagnostics"):
-        if (
-            _column_facts(
-                connection, PaperTradingEnumColumn("daily_bar_diagnostics", "market", "VARCHAR(20)", None, False)
+    if _has_market_qualified_key_columns(connection, "daily_bar_diagnostics"):
+        connection.execute(
+            text("ALTER TABLE daily_bar_diagnostics DROP CONSTRAINT uq_daily_bar_diagnostics_business_key")
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE daily_bar_diagnostics ADD CONSTRAINT uq_daily_bar_diagnostics_business_key "
+                "UNIQUE (business_date, stock_id, adjust)"
             )
-            is not None
-        ):
-            connection.execute(
-                text("ALTER TABLE daily_bar_diagnostics DROP CONSTRAINT uq_daily_bar_diagnostics_business_key")
-            )
-            connection.execute(
-                text(
-                    "ALTER TABLE daily_bar_diagnostics ADD CONSTRAINT uq_daily_bar_diagnostics_business_key "
-                    "UNIQUE (business_date, stock_id, adjust)"
-                )
-            )
-            connection.execute(text("ALTER TABLE daily_bar_diagnostics DROP COLUMN market"))
+        )
+    if (
+        _column_facts(connection, PaperTradingEnumColumn("daily_bar_diagnostics", "market", "VARCHAR(20)", None, False))
+        is not None
+    ):
+        connection.execute(text("ALTER TABLE daily_bar_diagnostics DROP COLUMN market"))
     if _table_exists(connection, "paper_position_round_trips"):
         connection.execute(text("ALTER TABLE paper_position_round_trips DROP COLUMN market"))
 
@@ -959,7 +970,7 @@ def _verify_market_qualified_keys(connection: Connection) -> None:
         ),
     }
     for table_name, (constraint_name, columns) in expected.items():
-        if not _table_exists(connection, table_name):
+        if not _has_market_qualified_key_columns(connection, table_name):
             continue
         if _constraint_columns(connection, table_name, constraint_name) != columns:
             raise PaperTradingEnumMigrationError(f"missing or invalid market-qualified key {constraint_name}")

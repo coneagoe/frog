@@ -109,6 +109,15 @@ def _create_legacy_diagnostics_table(connection: Connection) -> None:
     )
 
 
+def _drop_reduced_schema_key_columns(connection: Connection) -> None:
+    connection.execute(text("ALTER TABLE paper_positions DROP CONSTRAINT uq_paper_positions_account_symbol"))
+    connection.execute(text("ALTER TABLE paper_positions DROP COLUMN account_id"))
+    connection.execute(text("ALTER TABLE paper_positions DROP COLUMN symbol"))
+    connection.execute(text("ALTER TABLE daily_bar_diagnostics DROP CONSTRAINT uq_daily_bar_diagnostics_business_key"))
+    connection.execute(text("ALTER TABLE daily_bar_diagnostics DROP COLUMN business_date"))
+    connection.execute(text("ALTER TABLE daily_bar_diagnostics DROP COLUMN stock_id"))
+
+
 def _enum_types(connection: Connection) -> set[str]:
     return (
         set(
@@ -156,7 +165,7 @@ def _constraint_columns(connection: Connection, table_name: str, constraint_name
                 "SELECT a.attname FROM pg_constraint c "
                 "JOIN unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true "
                 "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key.attnum "
-                "WHERE c.conrelid = :table_name::regclass AND c.conname = :constraint_name "
+                "WHERE c.conrelid = CAST(:table_name AS regclass) AND c.conname = :constraint_name "
                 "ORDER BY key.ordinality"
             ),
             {"table_name": table_name, "constraint_name": constraint_name},
@@ -169,7 +178,7 @@ def _check_constraint_exists(connection: Connection, table_name: str, constraint
         connection.execute(
             text(
                 "SELECT EXISTS (SELECT 1 FROM pg_constraint "
-                "WHERE conrelid = :table_name::regclass AND conname = :constraint_name AND contype = 'c')"
+                "WHERE conrelid = CAST(:table_name AS regclass) AND conname = :constraint_name AND contype = 'c')"
             ),
             {"table_name": table_name, "constraint_name": constraint_name},
         ).scalar_one()
@@ -307,7 +316,7 @@ def test_apply_leaves_preconverted_group_columns_defaults_and_indexes_untouched(
     engine, schema = postgres_schema
     statements: list[str] = []
     with _connection(engine, schema) as connection:
-        connection.execute(text("CREATE TYPE paper_market AS ENUM ('a_share', 'hk_connect')"))
+        connection.execute(text("CREATE TYPE paper_market AS ENUM ('a_share', 'hk_connect', 'etf')"))
         for table_name, index_name in (
             ("paper_orders", "ix_paper_orders_market"),
             ("paper_positions", "ix_paper_positions_market"),
@@ -603,6 +612,39 @@ def test_apply_upgrades_legacy_diagnostics_when_paper_tables_are_missing(empty_p
                 if column.table_name != "daily_bar_diagnostics":
                     assert _table_exists(connection, column.table_name)
                     assert _column_type(connection, column.table_name, column.column_name) == group.type_name
+
+
+def test_reduced_schemas_skip_market_qualified_keys_during_apply_verify_and_rollback(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        _drop_reduced_schema_key_columns(connection)
+        connection.execute(text("INSERT INTO paper_positions (id, source, market) VALUES (1, 'trade', 'a_share')"))
+        connection.execute(
+            text(
+                "INSERT INTO daily_bar_diagnostics "
+                "(id, adjust, classification, provider_outcomes) VALUES "
+                "(1, 'bfq', 'downloaded', '[]'::jsonb)"
+            )
+        )
+
+        PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=False)
+        assert PAPER_TRADING_ENUM_ADAPTER.apply(connection) is True
+        PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=False)
+        assert _column_type(connection, "paper_positions", "market") == "paper_market"
+        assert _column_type(connection, "daily_bar_diagnostics", "market") == "paper_market"
+        assert connection.execute(text("SELECT market FROM paper_positions WHERE id = 1")).scalar_one() == "a_share"
+        assert (
+            connection.execute(text("SELECT market FROM daily_bar_diagnostics WHERE id = 1")).scalar_one() == "a_share"
+        )
+        assert _constraint_columns(connection, "paper_positions", "uq_paper_positions_account_market_symbol") == ()
+        assert _constraint_columns(connection, "daily_bar_diagnostics", "uq_daily_bar_diagnostics_business_key") == ()
+
+        PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=True)
+        assert PAPER_TRADING_ENUM_ADAPTER.rollback(connection) is True
+        PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=True)
+        assert _column_type(connection, "paper_positions", "market") == "character varying(20)"
+        assert _column_type(connection, "daily_bar_diagnostics", "market") is None
+        assert connection.execute(text("SELECT market FROM paper_positions WHERE id = 1")).scalar_one() == "a_share"
 
 
 def test_rollback_rejects_rows_colliding_on_legacy_marketless_keys(postgres_schema):
