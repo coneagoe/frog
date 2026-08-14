@@ -95,6 +95,24 @@ def _index_predicate(connection: Connection, index_name: str) -> str:
     )
 
 
+def _index_definition(connection: Connection, index_name: str) -> tuple[bool, tuple[str, ...], str | None]:
+    row = connection.execute(
+        text(
+            "SELECT i.indisunique, array_agg(a.attname ORDER BY key.ordinality), "
+            "pg_get_expr(i.indpred, i.indrelid) "
+            "FROM pg_index i "
+            "JOIN pg_class c ON c.oid = i.indexrelid "
+            "JOIN pg_class t ON t.oid = i.indrelid "
+            "JOIN unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality) ON key.ordinality <= i.indnkeyatts "
+            "JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key.attnum "
+            "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :index_name "
+            "GROUP BY i.indexrelid, i.indisunique, i.indpred"
+        ),
+        {"index_name": index_name},
+    ).one()
+    return bool(row[0]), tuple(row[1]), None if row[2] is None else str(row[2])
+
+
 def test_migration_converts_snapshot_status_and_creates_running_range_index(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -134,3 +152,17 @@ def test_migration_rejects_unknown_snapshot_status_without_conversion(postgres_s
             migrate_enums(connection)
 
         assert _column_type(connection, "forecast_snapshot_runs", "status") == "character varying(16)"
+
+
+def test_migration_repairs_malformed_running_range_index(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("CREATE INDEX uq_forecast_snapshot_running_range ON forecast_snapshot_runs (attempt)"))
+
+        assert migrate_enums(connection).converted is True
+
+        assert _index_definition(connection, "uq_forecast_snapshot_running_range") == (
+            True,
+            ("report_end_date", "announcement_start_date", "announcement_end_date"),
+            "(status = 'running'::forecast_snapshot_status)",
+        )

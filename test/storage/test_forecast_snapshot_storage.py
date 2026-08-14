@@ -32,3 +32,52 @@ def test_snapshot_record_source_order_is_unique_within_a_provider_response() -> 
         connection.execute(ForecastSnapshotRecord.__table__.insert().values(row))
         with pytest.raises(IntegrityError):
             connection.execute(ForecastSnapshotRecord.__table__.insert().values(row))
+
+
+def test_snapshot_run_attempt_is_unique_within_a_range() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        row = {
+            "report_end_date": date(2026, 6, 30),
+            "announcement_start_date": date(2026, 7, 1),
+            "announcement_end_date": date(2026, 7, 1),
+            "attempt": 1,
+            "status": ForecastSnapshotStatus.RUNNING.value,
+        }
+        connection.execute(ForecastSnapshotRun.__table__.insert().values(row))
+        with pytest.raises(IntegrityError):
+            connection.execute(ForecastSnapshotRun.__table__.insert().values(row))
+
+
+def test_snapshot_run_allows_only_one_running_range() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        range_values = {
+            "report_end_date": date(2026, 6, 30),
+            "announcement_start_date": date(2026, 7, 1),
+            "announcement_end_date": date(2026, 7, 1),
+        }
+        connection.execute(
+            ForecastSnapshotRun.__table__.insert().values(
+                **range_values,
+                attempt=1,
+                status=ForecastSnapshotStatus.RUNNING.value,
+            )
+        )
+        connection.execute(
+            ForecastSnapshotRun.__table__.insert().values(
+                **range_values,
+                attempt=2,
+                status=ForecastSnapshotStatus.COMPLETED.value,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                ForecastSnapshotRun.__table__.insert().values(
+                    **range_values,
+                    attempt=3,
+                    status=ForecastSnapshotStatus.RUNNING.value,
+                )
+            )

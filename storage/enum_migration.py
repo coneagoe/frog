@@ -150,7 +150,7 @@ def _adapter_apply(connection: Connection) -> bool:
             for group in STORAGE_ENUM_GROUPS
             for column in group.columns
         )
-        or not _index_exists(connection, "uq_forecast_snapshot_running_range")
+        or not _snapshot_running_range_index_matches(connection)
     )
     for group in STORAGE_ENUM_GROUPS:
         _create_type(connection, group)
@@ -366,6 +366,8 @@ def _create_missing_tables(connection: Connection, missing: set[str]) -> None:
 
 def _create_snapshot_indexes(connection: Connection) -> None:
     for index in ForecastSnapshotRun.__table__.indexes:
+        if _index_exists(connection, index.name) and not _snapshot_running_range_index_matches(connection):
+            connection.execute(text(f"DROP INDEX {index.name}"))
         index.create(connection, checkfirst=True)
 
 
@@ -509,6 +511,28 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
 def _index_exists(connection: Connection, index_name: str) -> bool:
     return (
         connection.execute(text("SELECT to_regclass(:index_name)"), {"index_name": index_name}).scalar_one() is not None
+    )
+
+
+def _snapshot_running_range_index_matches(connection: Connection) -> bool:
+    row = connection.execute(
+        text(
+            "SELECT i.indisunique, array_agg(a.attname ORDER BY key.ordinality), "
+            "pg_get_expr(i.indpred, i.indrelid) "
+            "FROM pg_index i "
+            "JOIN pg_class c ON c.oid = i.indexrelid "
+            "JOIN pg_class t ON t.oid = i.indrelid "
+            "JOIN unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality) ON key.ordinality <= i.indnkeyatts "
+            "JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key.attnum "
+            "WHERE c.relnamespace = current_schema()::regnamespace "
+            "AND c.relname = 'uq_forecast_snapshot_running_range' "
+            "GROUP BY i.indexrelid, i.indisunique, i.indpred"
+        )
+    ).one_or_none()
+    return row == (
+        True,
+        ["report_end_date", "announcement_start_date", "announcement_end_date"],
+        "(status = 'running'::forecast_snapshot_status)",
     )
 
 

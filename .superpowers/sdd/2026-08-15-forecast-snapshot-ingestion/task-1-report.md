@@ -115,3 +115,65 @@ Result: formatting and lint passed; shell syntax check exited successfully.
 - The full repository suite was not run. Verification is scoped to the new
   SQLite/PostgreSQL contracts, the adjacent storage enum-migration regression
   suite, lint/formatting, and shell syntax.
+
+## Review Fix Round 1/5
+
+### Changes
+
+- `storage/enum_migration.py`: replaced the presence-only index check with a
+  PostgreSQL catalog comparison of `indisunique`, ordered indexed columns, and
+  `pg_get_expr(indpred, indrelid)`. A mismatched same-named managed index is
+  dropped before SQLAlchemy recreates the model-defined unique partial index.
+- `test/storage/test_forecast_snapshot_enum_migration.py`: added a malformed
+  same-named index regression that verifies migration restores uniqueness,
+  ordered range columns, and the enum-typed `running` predicate.
+- `test/storage/test_forecast_snapshot_storage.py`: added independent SQLite
+  tests for range-plus-attempt uniqueness and the single-running-range partial
+  uniqueness invariant.
+- This task report: appended review-fix evidence. No repository documentation
+  required an update because the existing Issue #60 design and plan already
+  state the intended constraints.
+
+### TDD Evidence
+
+RED command:
+
+```bash
+tools/run_tests.sh test/storage/test_forecast_snapshot_enum_migration.py::test_migration_repairs_malformed_running_range_index -v
+```
+
+RED result: `1 failed`. Migration returned converted while retaining the
+malformed index definition: `(False, ('attempt',), None)` rather than the
+required unique three-column partial index.
+
+GREEN commands:
+
+```bash
+uv run pytest test/storage/test_forecast_snapshot_storage.py -v
+tools/run_tests.sh test/storage/test_forecast_snapshot_enum_migration.py -v
+```
+
+GREEN results: `3 passed` for SQLite model constraints and `3 passed` for
+PostgreSQL snapshot enum/index migration behavior.
+
+### Covering Verification
+
+```bash
+tools/run_tests.sh test/storage/test_storage_enum_migration.py -v
+```
+
+Result: `15 passed`.
+
+```bash
+uv run ruff format --check storage/enum_migration.py test/storage/test_forecast_snapshot_storage.py test/storage/test_forecast_snapshot_enum_migration.py
+uv run ruff check storage/enum_migration.py test/storage/test_forecast_snapshot_storage.py test/storage/test_forecast_snapshot_enum_migration.py
+bash -n tools/db_common.sh
+```
+
+Result: formatting and lint passed; shell syntax check exited successfully.
+
+### Remaining Concern
+
+- The full repository suite was not run. Verification covers the expanded
+  snapshot SQLite contract, PostgreSQL snapshot migration and repair tests,
+  the adjacent storage enum-migration suite, Ruff, and shell syntax.
