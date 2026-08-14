@@ -131,11 +131,11 @@ _CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
 _CONDITION_CHECK_SQL = (
     "CHECK (jsonb_typeof(condition::jsonb) = 'object' AND condition::jsonb ? 'type' "
     "AND condition::jsonb->>'type' IS NOT NULL AND condition::jsonb->>'type' IN "
-    "('price_threshold', 'price_cross_ma', 'price_vs_ma', 'ma_cross', 'change_pct', 'rsi'))"
+    "('price_threshold', 'price_cross_ma', 'price_vs_ma', 'close_cross_ma', 'ma_cross', 'change_pct', 'rsi'))"
 )
 _NORMALIZED_CONDITION_CHECK = (
     "checkjsonb_typeofcondition='object'andcondition?'type'andcondition->>'type'isnotnullandcondition->>'type'=anyarray["
-    "'price_threshold','price_cross_ma','price_vs_ma','ma_cross','change_pct','rsi']"
+    "'price_threshold','price_cross_ma','price_vs_ma','close_cross_ma','ma_cross','change_pct','rsi']"
 )
 
 

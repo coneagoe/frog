@@ -308,6 +308,56 @@ def test_final_close_non_a_target_skips_without_provider_or_state_update():
     assert summary.skipped == 1
 
 
+def test_final_close_intraday_target_skips_without_provider_or_state_update():
+    target = _make_target(
+        frequency="intraday",
+        last_state=True,
+        condition={"type": "close_cross_ma", "direction": "above", "period": 20},
+    )
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_final_close_history_df") as fetch_final,
+        patch("monitor.monitor_runner.fetch_current_price") as realtime,
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(frequency="intraday")
+
+    fetch_final.assert_not_called()
+    realtime.assert_not_called()
+    email.assert_not_called()
+    storage.update_monitor_target_state.assert_not_called()
+    assert summary.skipped == 1
+
+
+def test_final_close_without_as_of_date_uses_current_shanghai_date(monkeypatch):
+    target = _make_target(condition={"type": "close_cross_ma", "direction": "above", "period": 20})
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 4, 0, 30, tzinfo=tz)
+
+    monkeypatch.setattr("monitor.monitor_runner.datetime", FrozenDateTime)
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=None) as fetch_final,
+        patch("monitor.monitor_runner.fetch_current_price") as realtime,
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(frequency="daily")
+
+    fetch_final.assert_called_once_with("600519", date(2026, 6, 4), min_periods=21)
+    realtime.assert_not_called()
+    email.assert_not_called()
+    storage.update_monitor_target_state.assert_not_called()
+    assert summary.skipped == 1
+
+
 def test_final_close_missing_close_skips_without_email_or_state_update():
     target = _make_target(
         last_state=True,

@@ -364,6 +364,23 @@ def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schem
         )
 
 
+def test_apply_accepts_a_share_daily_close_cross_ma_condition(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_monitor_enums(connection)
+
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
+                "VALUES (1, '600001', 'A', "
+                '\'{"type": "close_cross_ma", "direction": "above", "period": 20}\'::jsonb, '
+                "'daily', 'auto')"
+            )
+        )
+
+        assert connection.execute(text("SELECT count(*) FROM stock_monitor_targets")).scalar_one() == 1
+
+
 def test_second_apply_is_idempotent(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
