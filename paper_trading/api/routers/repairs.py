@@ -26,9 +26,7 @@ def repair_historical_etf_markets(
     result = HistoricalEtfMarketRepairService(session_factory, market_data).run(request.apply)
     return HistoricalEtfMarketRepairResponse(
         dry_run=result.dry_run,
-        candidates=[
-            RepairCandidateResponse.model_validate(item, from_attributes=True) for item in result.candidates
-        ],
+        candidates=[RepairCandidateResponse.model_validate(item, from_attributes=True) for item in result.candidates],
         corrected_orders=[
             RepairCandidateResponse.model_validate(item, from_attributes=True) for item in result.corrected_orders
         ],

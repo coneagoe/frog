@@ -1,6 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -13,6 +14,20 @@ def test_resolve_dates_uses_default_start_and_seven_day_lag():
     assert dates[0] == date(2026, 1, 1)
     assert dates[-1] == date(2026, 8, 6)
     assert len(dates) == 218
+
+
+def test_resolve_dates_uses_china_local_today_by_default(monkeypatch):
+    class ChinaLocalClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            assert tz == ZoneInfo("Asia/Shanghai")
+            return cls(2026, 8, 13, 0, 30, tzinfo=tz)
+
+    monkeypatch.setattr(command, "datetime", ChinaLocalClock)
+
+    dates = command.resolve_dates()
+
+    assert dates[-1] == date(2026, 8, 6)
 
 
 def test_resolve_dates_includes_explicit_boundaries():

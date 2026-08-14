@@ -1776,10 +1776,11 @@ class TestRepairHistoricalEtfMarkets:
         """Catch repair requests that omit or invert the explicit apply body."""
         with patch.dict(os.environ, {"PAPER_TRADING_API_TOKEN": "tok"}, clear=True):
             client = PaperTradingApiClient()
-        client._request = MagicMock(return_value={"dry_run": not apply})
+        request = MagicMock(return_value={"dry_run": not apply})
 
-        assert client.repair_historical_etf_markets(apply=apply) == {"dry_run": not apply}
-        client._request.assert_called_once_with("POST", "/paper/repairs/etf-markets", json={"apply": apply})
+        with patch.object(client, "_request", request):
+            assert client.repair_historical_etf_markets(apply=apply) == {"dry_run": not apply}
+        request.assert_called_once_with("POST", "/paper/repairs/etf-markets", json={"apply": apply})
 
 
 # ---------------------------------------------------------------------------

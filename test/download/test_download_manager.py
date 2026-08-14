@@ -84,13 +84,14 @@ class TestDownloadManager:
     def test_download_forecast_reports_saved_rows(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         forecast = pd.DataFrame({"股票代码": ["600001", "000001"]})
+        forecast.attrs["source_rows"] = 3
         downloader.dl_forecast.return_value = forecast
         storage.save_forecasts.return_value = True
 
         result = manager.download_forecast(ann_date="2025-01-01")
 
         assert result.announcement_date == "2025-01-01"
-        assert result.source_rows == 2
+        assert result.source_rows == 3
         assert result.a_share_rows == 2
         assert result.saved is True
         downloader.dl_forecast.assert_called_once_with(ann_date="2025-01-01")
@@ -108,6 +109,18 @@ class TestDownloadManager:
         assert result.source_rows == 0
         assert result.a_share_rows == 0
         assert result.saved is True
+        storage.save_forecasts.assert_called_once_with(forecast)
+
+    def test_download_forecast_reports_source_rows_when_normalization_excludes_all_records(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        forecast = pd.DataFrame()
+        forecast.attrs["source_rows"] = 3
+        downloader.dl_forecast.return_value = forecast
+        storage.save_forecasts.return_value = True
+
+        result = manager.download_forecast(ann_date="2025-01-01")
+
+        assert result == dm.ForecastDownloadResult("2025-01-01", 3, 0, True)
         storage.save_forecasts.assert_called_once_with(forecast)
 
     def test_download_forecast_reports_unsaved_provider_none(self, monkeypatch):

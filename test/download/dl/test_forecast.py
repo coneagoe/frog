@@ -24,4 +24,26 @@ def test_download_forecast_normalizes_supported_a_share_records(monkeypatch):
 
     assert result["股票代码"].tolist() == ["600001", "000001"]
     assert result["预告类型"].tolist() == ["预增", "预增"]
+    assert result.attrs["source_rows"] == 3
     pro.forecast.assert_called_once_with(ann_date="20250101", fields=ANY)
+
+
+def test_download_forecast_preserves_source_count_without_a_share_records(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "token")
+    pro = MagicMock()
+    pro.forecast.return_value = pd.DataFrame(
+        {
+            "ts_code": ["430001.BJ"],
+            "ann_date": ["20250101"],
+            "end_date": ["20241231"],
+            "type": ["预增"],
+            "p_change_min": [100.0],
+            "p_change_max": [110.0],
+        }
+    )
+    monkeypatch.setattr(downloader_tushare, "_create_pro_client", lambda: pro)
+
+    result = downloader_tushare.download_forecast(ann_date="20250101")
+
+    assert result.empty
+    assert result.attrs["source_rows"] == 1

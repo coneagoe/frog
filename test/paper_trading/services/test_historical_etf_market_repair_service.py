@@ -103,7 +103,9 @@ def test_apply_applies_catalogue_etf_order_and_rebuilds_derived_state(tmp_path):
     assert persisted_order.market == Market.ETF.value
     assert persisted_order.status == OrderStatus.FILLED.value
     assert all(item.market == Market.ETF.value for item in repo.list_trades(account.id))
-    assert repo.get_position(account.id, Market.ETF, "518880").total_quantity == 100
+    position = repo.get_position(account.id, Market.ETF, "518880")
+    assert position is not None
+    assert position.total_quantity == 100
     assert all(item.market == Market.ETF.value for item in repo.get_lots(account.id, Market.ETF, "518880"))
     assert repo.list_cash_ledger(account.id)
     assert repo.list_round_trips(account.id)

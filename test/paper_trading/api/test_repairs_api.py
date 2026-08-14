@@ -71,7 +71,9 @@ def _client(monkeypatch, sqlite_factory, market_data) -> TestClient:
 def _reload_order(sqlite_factory, order_id: int) -> PaperOrder:
     session = sqlite_factory()
     try:
-        return session.get(PaperOrder, order_id)
+        order = session.get(PaperOrder, order_id)
+        assert isinstance(order, PaperOrder)
+        return order
     finally:
         session.close()
 
@@ -117,9 +119,7 @@ def test_repair_api_applies_and_serializes_outcomes(monkeypatch, sqlite_factory,
         "dry_run": False,
         "candidates": [candidate],
         "corrected_orders": [candidate],
-        "repaired_accounts": [
-            {"account_id": account_id, "order_ids": [order_id], "replay_start_date": "2026-08-07"}
-        ],
+        "repaired_accounts": [{"account_id": account_id, "order_ids": [order_id], "replay_start_date": "2026-08-07"}],
         "skipped_accounts": [],
         "failed_accounts": [],
     }

@@ -843,6 +843,7 @@ def download_forecast(ann_date: str = "", pro: Any | None = None) -> pd.DataFram
     if missing:
         raise ValueError(f"forecast 缺少字段: {sorted(missing)}")
 
+    source_rows = len(df)
     result = df[df["ts_code"].astype(str).str.endswith((".SH", ".SZ"))].copy()
     result["ts_code"] = result["ts_code"].str.split(".").str[0]
     result = result.rename(
@@ -859,7 +860,9 @@ def download_forecast(ann_date: str = "", pro: Any | None = None) -> pd.DataFram
         result[column] = pd.to_datetime(result[column], format="%Y%m%d", errors="raise").dt.date
     for column in ["增长下限", "增长上限"]:
         result[column] = pd.to_numeric(result[column], errors="coerce")
-    return result[["股票代码", "公告日期", "截止日期", "预告类型", "增长下限", "增长上限"]]
+    result = result[["股票代码", "公告日期", "截止日期", "预告类型", "增长下限", "增长上限"]]
+    result.attrs["source_rows"] = source_rows
+    return result
 
 
 @retrying.retry(

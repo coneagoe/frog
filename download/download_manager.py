@@ -156,7 +156,7 @@ class DownloadManager:
             df = self.downloader.dl_forecast(ann_date=ann_date)
             if df is None:
                 raise ValueError("forecast provider returned None")
-            source_rows = len(df)
+            source_rows = int(df.attrs.get("source_rows", len(df)))
             saved = get_storage().save_forecasts(df)
             return ForecastDownloadResult(ann_date, source_rows, len(df), saved)
         except Exception as exc:

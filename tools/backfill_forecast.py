@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -35,7 +37,7 @@ def resolve_dates(
         raise ValueError("--start-date and --end-date must be supplied together")
     if start_date is None:
         start_date = date(2026, 1, 1)
-        end_date = (today or date.today()) - timedelta(days=7)
+        end_date = (today or datetime.now(LOCAL_TZ).date()) - timedelta(days=7)
     assert end_date is not None
     if start_date > end_date:
         raise ValueError("--start-date must not be later than --end-date")

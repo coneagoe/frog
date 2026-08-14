@@ -55,13 +55,14 @@ def forecast_module(monkeypatch):
 
 
 def local_window_context() -> dict[str, Any]:
-    return {"data_interval_end": FakeAirflowDateTime(2026, 8, 10, 10, 0, tzinfo=timezone.utc)}
+    return {"data_interval_end": FakeAirflowDateTime(2026, 8, 9, 17, 0, tzinfo=timezone.utc)}
 
 
 def test_forecast_dag_schedule_and_single_task(forecast_module):
     tasks = {task.task_id: task for task in FakePythonOperator.instances}
 
     assert forecast_module.dag.kwargs["schedule"] == "0 18 * * *"
+    assert str(forecast_module.dag.kwargs["default_args"]["start_date"].tzinfo) == "Asia/Shanghai"
     assert forecast_module.dag.kwargs["max_active_runs"] == 1
     assert set(tasks) == {"download_forecast"}
 
