@@ -27,6 +27,12 @@ def test_validate_condition_accepts_typed_workflow_price_vs_ma_condition():
     assert validate_condition(condition) == condition
 
 
+def test_validate_condition_accepts_close_cross_ma():
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+
+    assert validate_condition(condition) == condition
+
+
 @pytest.mark.parametrize(
     ("condition", "message"),
     [

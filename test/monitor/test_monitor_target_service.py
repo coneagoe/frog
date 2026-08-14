@@ -6,6 +6,7 @@ from monitor.monitor_target_service import (
     MonitorTargetService,
     TargetNotFoundError,
     TargetValidationError,
+    format_monitor_target_label,
 )
 
 
@@ -320,6 +321,18 @@ def test_add_target_accepts_price_vs_ma_condition():
     )
 
     assert result["success"] is True
+
+
+def test_empty_note_close_cross_ma_target_uses_final_close_label():
+    assert (
+        format_monitor_target_label(
+            stock_code=None,
+            stock_name=None,
+            condition={"type": "close_cross_ma", "direction": "above", "period": 20},
+            note="",
+        )
+        == "收盘价上穿20日均线"
+    )
 
 
 def test_custom_errors_are_exposed_for_validation_and_not_found_paths():

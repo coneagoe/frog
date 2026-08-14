@@ -50,6 +50,8 @@ def _format_condition_summary(condition: dict[str, Any] | None) -> str:
     if ctype == "price_vs_ma":
         prefix = "价格低于" if direction == "below" else "价格高于"
         return f"{prefix}{condition.get('period')}日均线"
+    if ctype == "close_cross_ma":
+        return f"收盘价上穿{condition.get('period')}日均线"
     if ctype == "ma_cross":
         prefix = "下穿" if direction == "death" else "上穿"
         return f"{condition.get('fast')}日均线{prefix}{condition.get('slow')}日均线"
