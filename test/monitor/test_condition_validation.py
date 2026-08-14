@@ -40,6 +40,7 @@ def test_validate_condition_accepts_close_cross_ma():
         ({"type": "ma_cross", "direction": "above", "fast": 5, "slow": 20}, "condition.direction"),
         ({"type": "price_threshold", "direction": "above"}, "condition.value"),
         ({"type": "price_vs_ma", "direction": "above", "period": 0}, "condition.period"),
+        ({"type": "close_cross_ma", "direction": "below", "period": 20}, "condition.direction"),
         ({"workflow": "forecast_ssf_ma20"}, "condition.type"),
     ],
 )
