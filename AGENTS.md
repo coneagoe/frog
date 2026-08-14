@@ -23,7 +23,7 @@ uv run pre-commit install
 
 # CI gates, in order
 uv run pre-commit run --all-files
-uv run pytest test
+tools/run_tests.sh
 
 # Focused checks
 uv run ruff format .
@@ -36,7 +36,16 @@ uv run pytest test/path/to/test_file.py::TestClass::test_method
 # Focused subsystem test examples
 uv run pytest test/dags/test_common_dags.py
 uv run pytest test/monitor/test_monitor_runner.py
+
+# PostgreSQL-dependent tests and the full suite
+# The runner starts isolated test_db and supplies TEST_POSTGRESQL_URL to pytest.
+tools/run_tests.sh
+tools/run_tests.sh test/storage/test_storage_enum_migration.py -v
 ```
+
+Use `tools/run_tests.sh` instead of direct `uv run pytest` whenever a test
+requires PostgreSQL integration coverage. Direct pytest commands do not start
+`test_db` or set `TEST_POSTGRESQL_URL`.
 
 ## Architecture
 - `download/`: data source orchestration (akshare, baostock, tushare) via `DownloadManager` and `download/dl/downloader.py` (the provider switchboard).
