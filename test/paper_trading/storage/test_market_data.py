@@ -98,9 +98,7 @@ def test_etf_latest_close_reads_last_raw_etf_daily_close_through_requested_date(
     storage = FakeHistoryStorage(
         {},
         etf_daily_data={
-            "518880": pd.concat(
-                [_etf_frame("518880", "2026-08-08", 8.8), _etf_frame("518880", "2026-08-10", 8.9)]
-            )
+            "518880": pd.concat([_etf_frame("518880", "2026-08-08", 8.8), _etf_frame("518880", "2026-08-10", 8.9)])
         },
     )
     provider = StorageMarketDataProvider(storage, FakeTradeCalendar([trade_date]))
