@@ -162,6 +162,20 @@ def test_close_cross_ma_allows_previous_equality_but_rejects_current_equality():
     assert evaluate_condition(condition, None, _make_prices([10.0] * 21)) == ConditionResult.NOT_TRIGGERED
 
 
+def test_close_cross_ma_rejects_a_price_already_above_its_ma():
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+    history = _make_prices([10.0] * 19 + [11.0, 12.0])
+
+    assert evaluate_condition(condition, None, history) == ConditionResult.NOT_TRIGGERED
+
+
+def test_close_cross_ma_uses_only_the_final_period_plus_one_closes():
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+    history = _make_prices([100.0] * 5 + [10.0] * 20 + [11.0])
+
+    assert evaluate_condition(condition, None, history) == ConditionResult.TRIGGERED
+
+
 def test_close_cross_ma_rejects_missing_or_short_close_series():
     condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
 
