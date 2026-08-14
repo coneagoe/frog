@@ -2,16 +2,17 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from common.const import COL_CLOSE
+from common.const import COL_CLOSE, COL_DATE
 from monitor.blackroom_service import BlackroomService
 from monitor.condition import ConditionResult, evaluate_condition, is_missing_number
 from monitor.monitor_target_service import format_monitor_target_label, resolve_stock_name
-from monitor.price_fetcher import fetch_current_price, fetch_history_df
+from monitor.price_fetcher import fetch_current_price, fetch_final_close_history_df, fetch_history_df
 from storage import get_storage
 from utility import send_email
 
@@ -71,7 +72,9 @@ def _resolve_current_price(
     return float(latest_close)
 
 
-def run_monitor(frequency: str = "daily", workflow: str | None = None) -> MonitorSummary:
+def run_monitor(
+    frequency: str = "daily", workflow: str | None = None, as_of_date: date | None = None
+) -> MonitorSummary:
     """
     Load all enabled monitoring targets for the given frequency,
     evaluate their conditions, and send email alerts on edge triggers.
@@ -94,22 +97,54 @@ def run_monitor(frequency: str = "daily", workflow: str | None = None) -> Monito
     for target in targets:
         try:
             condition = target.condition
-            history_df = _build_history_for_condition(condition, target.stock_code, target.market)
-            current_price: Optional[float] = fetch_current_price(target.stock_code, target.market)
-            current_price = _resolve_current_price(frequency, condition, current_price, history_df)
-
+            ctype = condition.get("type")
+            history_df = None
+            current_price: Optional[float] = None
             change_pct = None
-            if condition.get("type") == "change_pct":
-                hist_for_pct = fetch_history_df(target.stock_code, target.market, min_periods=2)
-                if current_price is not None:
-                    change_pct = _compute_change_pct(current_price, hist_for_pct)
+            if ctype == "close_cross_ma":
+                if frequency != "daily" or target.market != "A":
+                    result = ConditionResult.INSUFFICIENT_DATA
+                else:
+                    evaluation_date = as_of_date or datetime.now(ZoneInfo("Asia/Shanghai")).date()
+                    period = int(condition["period"])
+                    history_df = fetch_final_close_history_df(
+                        target.stock_code, evaluation_date, min_periods=period + 1
+                    )
+                    if history_df is None or COL_DATE not in history_df or COL_CLOSE not in history_df:
+                        result = ConditionResult.INSUFFICIENT_DATA
+                    else:
+                        history_dates = pd.to_datetime(history_df[COL_DATE], errors="coerce")
+                        if history_dates.isna().any() or history_dates.iloc[-1].normalize().date() != evaluation_date:
+                            result = ConditionResult.INSUFFICIENT_DATA
+                        else:
+                            latest_close = pd.to_numeric(
+                                pd.Series([history_df[COL_CLOSE].iloc[-1]]), errors="coerce"
+                            ).iloc[0]
+                            if pd.isna(latest_close):
+                                result = ConditionResult.INSUFFICIENT_DATA
+                            else:
+                                current_price = float(latest_close)
+                                result = evaluate_condition(
+                                    condition,
+                                    current_price=None,
+                                    history_df=history_df,
+                                )
+            else:
+                history_df = _build_history_for_condition(condition, target.stock_code, target.market)
+                current_price = fetch_current_price(target.stock_code, target.market)
+                current_price = _resolve_current_price(frequency, condition, current_price, history_df)
 
-            result = evaluate_condition(
-                condition,
-                current_price=current_price,
-                history_df=history_df,
-                change_pct=change_pct,
-            )
+                if ctype == "change_pct":
+                    hist_for_pct = fetch_history_df(target.stock_code, target.market, min_periods=2)
+                    if current_price is not None:
+                        change_pct = _compute_change_pct(current_price, hist_for_pct)
+
+                result = evaluate_condition(
+                    condition,
+                    current_price=current_price,
+                    history_df=history_df,
+                    change_pct=change_pct,
+                )
 
             if result == ConditionResult.INSUFFICIENT_DATA:
                 logger.warning(f"[monitor] {target.stock_code} 数据不足，跳过条件评估. condition={condition}")

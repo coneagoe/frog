@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 
-from common.const import COL_CLOSE
+from common.const import COL_CLOSE, COL_DATE
 from monitor.monitor_runner import run_monitor
 
 
@@ -239,6 +239,96 @@ def test_run_daily_monitor_uses_final_close_for_price_vs_ma():
 
     assert summary.triggered == 1
     assert "当前价格: 28.0" in mock_email.call_args.args[1]
+
+
+def test_final_close_runner_uses_hfq_storage_and_never_fetches_realtime_price():
+    target = _make_target(condition={"type": "close_cross_ma", "direction": "above", "period": 20})
+    history = pd.DataFrame({COL_DATE: pd.date_range(end="2026-06-03", periods=21), COL_CLOSE: [10.0] * 20 + [11.0]})
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=history) as fetch_final,
+        patch("monitor.monitor_runner.fetch_current_price") as realtime,
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(frequency="daily", as_of_date=date(2026, 6, 3))
+
+    fetch_final.assert_called_once_with("600519", date(2026, 6, 3), min_periods=21)
+    realtime.assert_not_called()
+    email.assert_called_once()
+    assert summary.triggered == 1
+
+
+def test_final_close_stale_bar_preserves_state_and_sends_no_email():
+    target = _make_target(
+        last_state=True,
+        condition={"type": "close_cross_ma", "direction": "above", "period": 20},
+    )
+    stale_history = pd.DataFrame({COL_DATE: pd.date_range("2026-05-05", periods=21), COL_CLOSE: [10.0] * 20 + [11.0]})
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=stale_history),
+        patch("monitor.monitor_runner.fetch_current_price") as realtime,
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(frequency="daily", as_of_date=date(2026, 6, 3))
+
+    realtime.assert_not_called()
+    email.assert_not_called()
+    storage.update_monitor_target_state.assert_not_called()
+    assert summary.skipped == 1
+
+
+def test_final_close_non_a_target_skips_without_provider_or_state_update():
+    target = _make_target(
+        market="HK",
+        last_state=True,
+        condition={"type": "close_cross_ma", "direction": "above", "period": 20},
+    )
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_final_close_history_df") as fetch_final,
+        patch("monitor.monitor_runner.fetch_current_price") as realtime,
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(frequency="daily", as_of_date=date(2026, 6, 3))
+
+    fetch_final.assert_not_called()
+    realtime.assert_not_called()
+    email.assert_not_called()
+    storage.update_monitor_target_state.assert_not_called()
+    assert summary.skipped == 1
+
+
+def test_final_close_missing_close_skips_without_email_or_state_update():
+    target = _make_target(
+        last_state=True,
+        condition={"type": "close_cross_ma", "direction": "above", "period": 20},
+    )
+    history = pd.DataFrame({COL_DATE: pd.date_range(end="2026-06-03", periods=21), COL_CLOSE: [10.0] * 20 + [None]})
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=history),
+        patch("monitor.monitor_runner.fetch_current_price") as realtime,
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        summary = run_monitor(frequency="daily", as_of_date=date(2026, 6, 3))
+
+    realtime.assert_not_called()
+    email.assert_not_called()
+    storage.update_monitor_target_state.assert_not_called()
+    assert summary.skipped == 1
 
 
 def test_run_monitor_manual_mode_does_not_auto_reset():
