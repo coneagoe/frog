@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import cast
 
 import pytest
@@ -6,6 +6,14 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
+from common.const import (
+    COL_ANN_DATE,
+    COL_END_DATE,
+    COL_FORECAST_CHANGE_MAX,
+    COL_FORECAST_CHANGE_MIN,
+    COL_FORECAST_TYPE,
+    COL_STOCK_ID,
+)
 from storage.domain_enums import ForecastSnapshotStatus
 from storage.model import Base, ForecastSnapshotRecord, ForecastSnapshotRun
 from storage.storage_db import StorageDb, StorageError
@@ -15,8 +23,134 @@ from storage.storage_db import StorageDb, StorageError
 def db(tmp_path):
     storage = StorageDb.__new__(StorageDb)
     storage.engine = create_engine(f"sqlite:///{tmp_path}/forecast_snapshot.db")
-    storage.Session = sessionmaker(bind=storage.engine)
+    storage.Session = sessionmaker(bind=storage.engine, expire_on_commit=False)
     return storage
+
+
+def _complete_run(db, end: date, completed_at: datetime) -> ForecastSnapshotRun:
+    db.ensure_forecast_snapshot_tables()
+    assert db.Session is not None
+    with db.Session.begin() as session:
+        attempt = (
+            session.query(ForecastSnapshotRun)
+            .filter_by(
+                report_end_date=date(2026, 6, 30),
+                announcement_start_date=end,
+                announcement_end_date=end,
+            )
+            .count()
+            + 1
+        )
+        run = ForecastSnapshotRun(
+            report_end_date=date(2026, 6, 30),
+            announcement_start_date=end,
+            announcement_end_date=end,
+            attempt=attempt,
+            status=ForecastSnapshotStatus.COMPLETED.value,
+            completed_at=completed_at,
+        )
+        session.add(run)
+        session.flush()
+        return run
+
+
+def _create_running_run(db, end: date) -> ForecastSnapshotRun:
+    db.ensure_forecast_snapshot_tables()
+    assert db.Session is not None
+    with db.Session.begin() as session:
+        run = ForecastSnapshotRun(
+            report_end_date=date(2026, 6, 30),
+            announcement_start_date=end,
+            announcement_end_date=end,
+            attempt=1,
+            status=ForecastSnapshotStatus.RUNNING.value,
+        )
+        session.add(run)
+        session.flush()
+        return run
+
+
+def _create_failed_run(db, end: date) -> ForecastSnapshotRun:
+    db.ensure_forecast_snapshot_tables()
+    assert db.Session is not None
+    with db.Session.begin() as session:
+        run = ForecastSnapshotRun(
+            report_end_date=date(2026, 3, 31),
+            announcement_start_date=end,
+            announcement_end_date=end,
+            attempt=1,
+            status=ForecastSnapshotStatus.FAILED.value,
+        )
+        session.add(run)
+        session.flush()
+        return run
+
+
+def _record(ts_code: str, announcement_date: date, source_order: int, growth_min: float) -> dict[str, object]:
+    return {
+        "ts_code": ts_code,
+        "announcement_date": announcement_date,
+        "report_end_date": date(2026, 6, 30),
+        "forecast_type": "increase",
+        "growth_min": growth_min,
+        "growth_max": growth_min + 10,
+        "source_order": source_order,
+    }
+
+
+def _complete_snapshot_with_records(db, records: list[dict[str, object]]) -> ForecastSnapshotRun:
+    run = _complete_run(db, date(2026, 7, 3), datetime(2026, 7, 3, tzinfo=UTC))
+    assert db.Session is not None
+    with db.Session.begin() as session:
+        session.execute(ForecastSnapshotRecord.__table__.insert(), [dict(record, run_id=run.id) for record in records])
+    return run
+
+
+def test_latest_completed_snapshot_excludes_future_running_and_failed_runs(db) -> None:
+    future = _complete_run(db, end=date(2026, 7, 11), completed_at=datetime(2026, 7, 11, tzinfo=UTC))
+    earlier = _complete_run(db, end=date(2026, 7, 9), completed_at=datetime(2026, 7, 10, tzinfo=UTC))
+    later_completion = _complete_run(db, end=date(2026, 7, 9), completed_at=datetime(2026, 7, 11, tzinfo=UTC))
+    same_time_higher_id = _complete_run(db, end=date(2026, 7, 9), completed_at=datetime(2026, 7, 11, tzinfo=UTC))
+    _create_running_run(db, end=date(2026, 7, 10))
+    _create_failed_run(db, end=date(2026, 7, 10))
+
+    selected = db.get_latest_completed_forecast_snapshot_run(date(2026, 7, 10))
+
+    assert selected is not None
+    assert selected.id == same_time_higher_id.id
+    assert selected.id not in {future.id, earlier.id, later_completion.id}
+
+
+def test_selected_snapshot_records_choose_latest_announcement_then_final_source_order(db) -> None:
+    run = _complete_snapshot_with_records(
+        db,
+        [
+            _record("600001.SH", date(2026, 7, 1), 0, growth_min=80),
+            _record("600001.SH", date(2026, 7, 2), 0, growth_min=60),
+            _record("600001.SH", date(2026, 7, 2), 1, growth_min=40),
+            _record("600002.SH", date(2026, 7, 3), 0, growth_min=90),
+        ],
+    )
+
+    records = db.load_selected_forecast_snapshot_records(run.id, date(2026, 7, 2))
+
+    assert records[[COL_STOCK_ID, COL_ANN_DATE, "source_order", COL_FORECAST_CHANGE_MIN]].to_dict("records") == [
+        {
+            COL_STOCK_ID: "600001",
+            COL_ANN_DATE: date(2026, 7, 2),
+            "source_order": 1,
+            COL_FORECAST_CHANGE_MIN: 40.0,
+        }
+    ]
+    assert list(records.columns) == [
+        COL_STOCK_ID,
+        COL_END_DATE,
+        COL_ANN_DATE,
+        COL_FORECAST_TYPE,
+        COL_FORECAST_CHANGE_MIN,
+        COL_FORECAST_CHANGE_MAX,
+        "source_order",
+    ]
 
 
 def test_snapshot_record_source_order_is_unique_within_a_provider_response() -> None:

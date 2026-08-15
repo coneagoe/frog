@@ -1692,6 +1692,78 @@ class StorageDb:
                 session, report_end_date, announcement_start_date, announcement_end_date
             )
 
+    def get_latest_completed_forecast_snapshot_run(self, as_of_date: date) -> ForecastSnapshotRun | None:
+        self.ensure_forecast_snapshot_tables()
+        assert self.Session is not None
+        with self.Session() as session:
+            return (
+                session.query(ForecastSnapshotRun)
+                .filter(
+                    ForecastSnapshotRun.status == ForecastSnapshotStatus.COMPLETED.value,
+                    ForecastSnapshotRun.announcement_end_date <= as_of_date,
+                )
+                .order_by(
+                    ForecastSnapshotRun.announcement_end_date.desc(),
+                    ForecastSnapshotRun.completed_at.desc(),
+                    ForecastSnapshotRun.id.desc(),
+                )
+                .first()
+            )
+
+    def load_selected_forecast_snapshot_records(self, run_id: int, as_of_date: date) -> pd.DataFrame:
+        self.ensure_forecast_snapshot_tables()
+        columns = [
+            COL_STOCK_ID,
+            COL_END_DATE,
+            COL_ANN_DATE,
+            COL_FORECAST_TYPE,
+            COL_FORECAST_CHANGE_MIN,
+            COL_FORECAST_CHANGE_MAX,
+            "source_order",
+        ]
+        sql = text(
+            f"""
+            WITH ranked AS (
+                SELECT r.*, ROW_NUMBER() OVER (
+                    PARTITION BY r.ts_code
+                    ORDER BY r.announcement_date DESC, r.source_order DESC
+                ) AS revision_rank
+                FROM {tb_name_forecast_snapshot_record} r
+                JOIN {tb_name_forecast_snapshot_run} run ON run.id = r.run_id
+                WHERE r.run_id = :run_id
+                  AND r.report_end_date = run.report_end_date
+                  AND r.announcement_date <= :as_of_date
+            )
+            SELECT
+                ts_code,
+                report_end_date,
+                announcement_date,
+                forecast_type,
+                growth_min,
+                growth_max,
+                source_order
+            FROM ranked
+            WHERE revision_rank = 1
+            ORDER BY ts_code
+            """
+        )
+        params: dict[str, int | date] = {"run_id": run_id, "as_of_date": as_of_date}
+        records = pd.read_sql(sql, self.engine, params=params).rename(
+            columns={
+                "ts_code": COL_STOCK_ID,
+                "report_end_date": COL_END_DATE,
+                "announcement_date": COL_ANN_DATE,
+                "forecast_type": COL_FORECAST_TYPE,
+                "growth_min": COL_FORECAST_CHANGE_MIN,
+                "growth_max": COL_FORECAST_CHANGE_MAX,
+            }
+        )
+        records = records.reindex(columns=columns)
+        records[COL_STOCK_ID] = records[COL_STOCK_ID].astype(str).str.split(".").str[0]
+        for column in [COL_END_DATE, COL_ANN_DATE]:
+            records[column] = pd.to_datetime(records[column], errors="raise").dt.date
+        return records
+
     def list_forecast_snapshot_records(self, run_id: int) -> list[ForecastSnapshotRecord]:
         self.ensure_forecast_snapshot_tables()
         assert self.Session is not None
