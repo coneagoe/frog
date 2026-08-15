@@ -84,7 +84,7 @@ def _target(target_id: int = 1, enabled: bool = True, paused: bool = False) -> S
     return SimpleNamespace(id=target_id, enabled=enabled, paused=paused)
 
 
-def _candidate(target_id: int = 17, state: str = "eligible") -> SimpleNamespace:
+def _candidate(target_id: int | None = 17, state: str = "eligible") -> SimpleNamespace:
     return SimpleNamespace(
         stock_code="600001",
         report_end_date=date(2025, 12, 31),
@@ -126,6 +126,51 @@ def test_sync_continues_after_one_transition_failure_then_raises_structured_part
         }
     ]
     assert storage.transition_forecast_ssf_candidate_with_workflow_target.call_count == 2
+
+
+def test_sync_continues_after_new_target_creation_failure_then_raises_structured_partial_failure() -> None:
+    storage = _storage(_forecasts("600001", "600002"))
+    storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "全国社保基金一一八组合")
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.side_effect = [RuntimeError("write failed"), _target(18)]
+
+    with pytest.raises(ForecastSSFMonitorSyncPartialFailure) as raised:
+        ForecastSSFMonitorSyncService(storage, MagicMock(is_banned=lambda *_: _blackroom())).sync(date(2026, 1, 20))
+
+    assert raised.value.summary["errors"] == [
+        {
+            "stock_code": "600001",
+            "state": "eligible",
+            "reason": "ssf_holder_match",
+            "exception_type": "RuntimeError",
+            "message": "write failed",
+        }
+    ]
+    assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_count == 2
+
+
+def test_sync_continues_after_unlinked_candidate_persistence_failure_then_raises_partial_failure() -> None:
+    storage = _storage(_forecasts("600001", "600002"))
+    storage.list_forecast_ssf_candidates.return_value = [_candidate(target_id=None)]
+    storage.load_latest_top10_floatholders.side_effect = [
+        _holders(date(2026, 1, 10), "普通股东"),
+        _holders(date(2026, 1, 10), "全国社保基金一一八组合"),
+    ]
+    storage.upsert_forecast_ssf_candidate.side_effect = RuntimeError("write failed")
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.return_value = _target(18)
+
+    with pytest.raises(ForecastSSFMonitorSyncPartialFailure) as raised:
+        ForecastSSFMonitorSyncService(storage, MagicMock(is_banned=lambda *_: _blackroom())).sync(date(2026, 1, 20))
+
+    assert raised.value.summary["errors"] == [
+        {
+            "stock_code": "600001",
+            "state": "ineligible",
+            "reason": "ssf_holder_not_found",
+            "exception_type": "RuntimeError",
+            "message": "write failed",
+        }
+    ]
+    assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["stock_code"] == "600002"
 
 
 def test_sync_requalification_reuses_disabled_target_without_resetting_last_state() -> None:

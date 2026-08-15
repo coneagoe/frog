@@ -79,7 +79,7 @@ class ForecastSSFMonitorSyncService:
             row for row in selected_rows if self._qualifies(row, listing_by_code.get(str(row[COL_STOCK_ID])))
         ]
         current_stock_codes = {str(row[COL_STOCK_ID]) for row in current_rows}
-        summary = {
+        summary: dict[str, Any] = {
             "forecast_candidates": len(current_rows),
             "blackroom_excluded": 0,
             "ssf_matched": 0,
@@ -126,7 +126,7 @@ class ForecastSSFMonitorSyncService:
         current_stock_codes: set[str],
         previous_candidates: dict[str, Any],
         as_of_date: date,
-        summary: dict[str, int],
+        summary: dict[str, Any],
         listing_by_code: dict[str, Any],
         snapshot: Any,
         selected_rows_by_code: dict[str, dict[str, Any]],
@@ -165,7 +165,7 @@ class ForecastSSFMonitorSyncService:
         as_of_date: date,
         banned: bool,
         previous_candidate: Any | None,
-        summary: dict[str, int],
+        summary: dict[str, Any],
         snapshot: Any,
     ) -> None:
         stock_code = str(row[COL_STOCK_ID])
@@ -225,7 +225,6 @@ class ForecastSSFMonitorSyncService:
                     evidence,
                     target,
                     False,
-                    False,
                     summary,
                     previous_candidate,
                     as_of_date,
@@ -239,7 +238,6 @@ class ForecastSSFMonitorSyncService:
                     evidence,
                     target,
                     True,
-                    False,
                     summary,
                     previous_candidate,
                     as_of_date,
@@ -257,7 +255,6 @@ class ForecastSSFMonitorSyncService:
                     evidence,
                     target,
                     False,
-                    False,
                     summary,
                     previous_candidate,
                     as_of_date,
@@ -271,7 +268,6 @@ class ForecastSSFMonitorSyncService:
                     evidence,
                     target,
                     True,
-                    False,
                     summary,
                     previous_candidate,
                     as_of_date,
@@ -290,7 +286,6 @@ class ForecastSSFMonitorSyncService:
                     evidence,
                     target,
                     False,
-                    False,
                     summary,
                     previous_candidate,
                     as_of_date,
@@ -304,7 +299,6 @@ class ForecastSSFMonitorSyncService:
                     evidence,
                     target,
                     True,
-                    False,
                     summary,
                     previous_candidate,
                     as_of_date,
@@ -353,8 +347,9 @@ class ForecastSSFMonitorSyncService:
                 "ssf_holder_match",
                 evidence,
                 None,
-                previous_candidate,
-                as_of_date,
+                summary=summary,
+                previous_candidate=previous_candidate,
+                as_of_date=as_of_date,
             )
             return
         effective_state = "paused" if getattr(target, "paused", False) else "eligible"
@@ -377,20 +372,17 @@ class ForecastSSFMonitorSyncService:
             else:
                 summary["updated"] += 1
             return
-        updated_target = self.storage.upsert_forecast_ssf_candidate_with_workflow_target(
-            stock_code=stock_code,
-            market="A",
-            report_end_date=report_end_date,
-            state=state,
-            state_reason=reason,
-            evidence=evidence,
-            workflow=WORKFLOW_NAME,
-            frequency="daily",
-            condition=_CONDITION,
-            note=_NOTE,
-            target_enabled=False if getattr(target, "paused", False) else True,
-            reset_last_state=False,
+        updated_target = self._persist_target_creation(
+            stock_code,
+            report_end_date,
+            state,
+            reason,
+            evidence,
+            False if getattr(target, "paused", False) else True,
+            summary,
         )
+        if updated_target is None:
+            return
         target_id = updated_target.id
         if target is None:
             summary["created"] += 1
@@ -405,7 +397,7 @@ class ForecastSSFMonitorSyncService:
         state_reason: str,
         evidence: dict[str, Any],
         target: Any | None,
-        summary: dict[str, int],
+        summary: dict[str, Any],
         previous_candidate: Any | None = None,
         as_of_date: date | None = None,
     ) -> None:
@@ -421,7 +413,7 @@ class ForecastSSFMonitorSyncService:
             if self._transition(stock_code, report_end_date, state, state_reason, evidence, False, summary) is not None:
                 summary["disabled"] += 1
             return
-        self._persist(stock_code, report_end_date, state, state_reason, evidence, None)
+        self._persist(stock_code, report_end_date, state, state_reason, evidence, None, summary=summary)
 
     def _transition(
         self,
@@ -456,8 +448,7 @@ class ForecastSSFMonitorSyncService:
         evidence: dict[str, Any],
         target: Any | None,
         target_enabled: bool,
-        reset_last_state: bool,
-        summary: dict[str, int],
+        summary: dict[str, Any],
         previous_candidate: Any | None = None,
         as_of_date: date | None = None,
     ) -> None:
@@ -474,7 +465,15 @@ class ForecastSSFMonitorSyncService:
             return
         if target is None:
             self._persist(
-                stock_code, report_end_date, state, state_reason, evidence, None, previous_candidate, as_of_date
+                stock_code,
+                report_end_date,
+                state,
+                state_reason,
+                evidence,
+                None,
+                summary=summary,
+                previous_candidate=previous_candidate,
+                as_of_date=as_of_date,
             )
             return
         automatic_state, automatic_reason = state, state_reason
@@ -490,20 +489,44 @@ class ForecastSSFMonitorSyncService:
                     "new_report_end_date": report_end_date.isoformat(),
                 }
             )
-        self.storage.upsert_forecast_ssf_candidate_with_workflow_target(
-            stock_code=stock_code,
-            market="A",
-            report_end_date=report_end_date,
-            state=state,
-            state_reason=state_reason,
-            evidence=evidence,
-            frequency="daily",
-            workflow=WORKFLOW_NAME,
-            condition=_CONDITION,
-            note=_NOTE,
-            target_enabled=target_enabled,
-            reset_last_state=reset_last_state,
+        self._persist_target_creation(
+            stock_code,
+            report_end_date,
+            state,
+            state_reason,
+            evidence,
+            target_enabled,
+            summary,
         )
+
+    def _persist_target_creation(
+        self,
+        stock_code: str,
+        report_end_date: date,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+        target_enabled: bool,
+        summary: dict[str, Any],
+    ) -> Any | None:
+        try:
+            return self.storage.upsert_forecast_ssf_candidate_with_workflow_target(
+                stock_code=stock_code,
+                market="A",
+                report_end_date=report_end_date,
+                state=state,
+                state_reason=state_reason,
+                evidence=evidence,
+                frequency="daily",
+                workflow=WORKFLOW_NAME,
+                condition=_CONDITION,
+                note=_NOTE,
+                target_enabled=target_enabled,
+                reset_last_state=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _record_transition_error(summary, stock_code, state, state_reason, exc)
+            return None
 
     def _persist(
         self,
@@ -513,20 +536,24 @@ class ForecastSSFMonitorSyncService:
         state_reason: str,
         evidence: dict[str, Any],
         monitor_target_id: int | None,
+        summary: dict[str, Any],
         previous_candidate: Any | None = None,
         as_of_date: date | None = None,
     ) -> None:
         if as_of_date is not None:
             evidence = self._with_lifecycle(previous_candidate, evidence, as_of_date, state, state_reason)
-        self.storage.upsert_forecast_ssf_candidate(
-            stock_code=stock_code,
-            market="A",
-            report_end_date=report_end_date,
-            state=state,
-            state_reason=state_reason,
-            evidence=evidence,
-            monitor_target_id=monitor_target_id,
-        )
+        try:
+            self.storage.upsert_forecast_ssf_candidate(
+                stock_code=stock_code,
+                market="A",
+                report_end_date=report_end_date,
+                state=state,
+                state_reason=state_reason,
+                evidence=evidence,
+                monitor_target_id=monitor_target_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _record_transition_error(summary, stock_code, state, state_reason, exc)
 
     def _with_lifecycle(
         self, previous_candidate: Any | None, evidence: dict[str, Any], as_of_date: date, state: str, reason: str
