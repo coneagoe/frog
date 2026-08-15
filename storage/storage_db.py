@@ -1733,6 +1733,8 @@ class StorageDb:
                 WHERE r.run_id = :run_id
                   AND r.report_end_date = run.report_end_date
                   AND r.announcement_date <= :as_of_date
+                  AND run.status = 'completed'
+                  AND run.announcement_end_date <= :as_of_date
             )
             SELECT
                 ts_code,

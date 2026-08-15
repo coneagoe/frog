@@ -99,11 +99,29 @@ def _record(ts_code: str, announcement_date: date, source_order: int, growth_min
 
 
 def _complete_snapshot_with_records(db, records: list[dict[str, object]]) -> ForecastSnapshotRun:
-    run = _complete_run(db, date(2026, 7, 3), datetime(2026, 7, 3, tzinfo=UTC))
+    run = _complete_run(db, date(2026, 7, 2), datetime(2026, 7, 2, tzinfo=UTC))
     assert db.Session is not None
     with db.Session.begin() as session:
         session.execute(ForecastSnapshotRecord.__table__.insert(), [dict(record, run_id=run.id) for record in records])
     return run
+
+
+def _save_snapshot_record(db, run: ForecastSnapshotRun) -> None:
+    assert db.Session is not None
+    with db.Session.begin() as session:
+        session.execute(
+            ForecastSnapshotRecord.__table__.insert(),
+            {
+                "run_id": run.id,
+                "source_order": 0,
+                "ts_code": "600001.SH",
+                "announcement_date": date(2026, 7, 10),
+                "report_end_date": run.report_end_date,
+                "forecast_type": "increase",
+                "growth_min": 80,
+                "growth_max": 90,
+            },
+        )
 
 
 def test_latest_completed_snapshot_excludes_future_running_and_failed_runs(db) -> None:
@@ -151,6 +169,25 @@ def test_selected_snapshot_records_choose_latest_announcement_then_final_source_
         COL_FORECAST_CHANGE_MAX,
         "source_order",
     ]
+
+
+@pytest.mark.parametrize("run_factory", [_create_running_run, _create_failed_run])
+def test_selected_snapshot_records_exclude_non_completed_run(db, run_factory) -> None:
+    run = run_factory(db, date(2026, 7, 10))
+    _save_snapshot_record(db, run)
+
+    records = db.load_selected_forecast_snapshot_records(run.id, date(2026, 7, 10))
+
+    assert records.empty
+
+
+def test_selected_snapshot_records_exclude_future_ending_run(db) -> None:
+    run = _complete_run(db, date(2026, 7, 11), datetime(2026, 7, 11, tzinfo=UTC))
+    _save_snapshot_record(db, run)
+
+    records = db.load_selected_forecast_snapshot_records(run.id, date(2026, 7, 10))
+
+    assert records.empty
 
 
 def test_snapshot_record_source_order_is_unique_within_a_provider_response() -> None:
