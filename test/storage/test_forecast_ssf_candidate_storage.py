@@ -8,7 +8,14 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from common.const import COL_ANN_DATE, COL_DELISTING_DATE, COL_FLOAT_HOLDER_NAME, COL_LIST_STATUS, COL_STOCK_ID
+from common.const import (
+    COL_ANN_DATE,
+    COL_DELISTING_DATE,
+    COL_FLOAT_HOLDER_NAME,
+    COL_LIST_STATUS,
+    COL_STOCK_ID,
+    COL_STOCK_NAME,
+)
 from storage import storage_db as storage_db_module
 from storage.model import AStockBasic, Base, ForecastSSFCandidate
 from storage.storage_db import StorageDb
@@ -408,11 +415,11 @@ def test_load_a_stock_listing_status_returns_requested_rows_and_omits_absent_cod
     try:
         session.add_all(
             [
-                AStockBasic(**{COL_STOCK_ID: "600001", "股票名称": "active", COL_LIST_STATUS: "L"}),
+                AStockBasic(**{COL_STOCK_ID: "600001", COL_STOCK_NAME: "active", COL_LIST_STATUS: "L"}),
                 AStockBasic(
                     **{
                         COL_STOCK_ID: "600002",
-                        "股票名称": "delisted",
+                        COL_STOCK_NAME: "delisted",
                         COL_LIST_STATUS: "D",
                         COL_DELISTING_DATE: date(2026, 1, 1),
                     }
@@ -425,8 +432,9 @@ def test_load_a_stock_listing_status_returns_requested_rows_and_omits_absent_cod
 
     result = db.load_a_stock_listing_status(["600001", "600002", "600003"])
 
-    assert list(result.columns) == [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
+    assert list(result.columns) == [COL_STOCK_ID, COL_STOCK_NAME, COL_LIST_STATUS, COL_DELISTING_DATE]
     assert result[COL_STOCK_ID].tolist() == ["600001", "600002"]
+    assert result[COL_STOCK_NAME].tolist() == ["active", "delisted"]
     assert result.loc[result[COL_STOCK_ID] == "600001", COL_LIST_STATUS].item() == "L"
     assert str(result.loc[result[COL_STOCK_ID] == "600002", COL_DELISTING_DATE].item()) == "2026-01-01"
 
@@ -436,7 +444,7 @@ def test_load_a_stock_listing_status_empty_input_returns_schema_only(tmp_path):
 
     result = db.load_a_stock_listing_status([])
 
-    assert list(result.columns) == [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
+    assert list(result.columns) == [COL_STOCK_ID, COL_STOCK_NAME, COL_LIST_STATUS, COL_DELISTING_DATE]
     assert result.empty
 
 

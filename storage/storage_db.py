@@ -1949,11 +1949,11 @@ class StorageDb:
         return matches[0] if matches else None
 
     def load_a_stock_listing_status(self, stock_codes: list[str]) -> pd.DataFrame:
-        columns = [COL_STOCK_ID, COL_LIST_STATUS, COL_DELISTING_DATE]
+        columns = [COL_STOCK_ID, COL_STOCK_NAME, COL_LIST_STATUS, COL_DELISTING_DATE]
         if not stock_codes:
             return pd.DataFrame(columns=columns)
         stmt = text(
-            f'SELECT "{COL_STOCK_ID}", "{COL_LIST_STATUS}", "{COL_DELISTING_DATE}" '
+            f'SELECT "{COL_STOCK_ID}", "{COL_STOCK_NAME}", "{COL_LIST_STATUS}", "{COL_DELISTING_DATE}" '
             f'FROM {tb_name_a_stock_basic} WHERE "{COL_STOCK_ID}" IN :stock_codes'
         ).bindparams(bindparam("stock_codes", expanding=True))
         return pd.read_sql(stmt, self.engine, params={"stock_codes": stock_codes})  # type: ignore[arg-type]

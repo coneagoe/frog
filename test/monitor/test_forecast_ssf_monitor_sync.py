@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from common.const import (
     COL_ANN_DATE,
@@ -14,8 +16,11 @@ from common.const import (
     COL_FORECAST_TYPE,
     COL_LIST_STATUS,
     COL_STOCK_ID,
+    COL_STOCK_NAME,
 )
 from monitor.forecast_ssf_monitor_sync import ForecastSSFMonitorSyncService, NoEligibleForecastSnapshotError
+from storage.model import AStockBasic, Base
+from storage.storage_db import StorageDb
 
 
 def _forecasts(*stock_codes: str) -> pd.DataFrame:
@@ -173,6 +178,39 @@ def test_sync_nonqualifying_snapshot_rows_cannot_create_target(
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
     storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
+
+
+def test_sync_real_listing_output_keeps_st_named_stock_target_disabled(tmp_path) -> None:
+    storage = StorageDb.__new__(StorageDb)
+    storage.engine = create_engine(f"sqlite:///{tmp_path}/sync_listing.db")
+    storage.Session = sessionmaker(bind=storage.engine)
+    Base.metadata.create_all(storage.engine)
+    target = storage.create_monitor_target(
+        "600001",
+        "A",
+        {"type": "close_cross_ma", "direction": "above", "period": 20, "workflow": "forecast_ssf_ma20"},
+        "workflow target",
+        enabled=False,
+    )
+    storage.upsert_forecast_ssf_candidate(
+        "600001", "A", date(2025, 12, 31), "ineligible", "forecast_no_longer_qualified", {}, target.id
+    )
+    session = storage.Session()
+    try:
+        session.add(AStockBasic(**{COL_STOCK_ID: "600001", COL_STOCK_NAME: "*ST test", COL_LIST_STATUS: "L"}))
+        session.commit()
+    finally:
+        session.close()
+    storage.get_latest_completed_forecast_snapshot_run = MagicMock(return_value=_snapshot())
+    storage.load_selected_forecast_snapshot_records = MagicMock(return_value=_records("600001"))
+    blackroom = MagicMock()
+
+    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
+
+    assert result["data"]["forecast_candidates"] == 0
+    assert storage.get_monitor_target(target.id).enabled is False
+    assert storage.list_forecast_ssf_candidates()[0].state == "ineligible"
+    blackroom.is_banned.assert_not_called()
 
 
 def test_sync_later_nonqualifying_snapshot_revision_does_not_preserve_older_qualifying_record() -> None:
