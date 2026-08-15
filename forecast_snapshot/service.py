@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
 from math import isfinite
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, TypedDict
 
 import pandas as pd
 
@@ -21,6 +21,16 @@ class ForecastSnapshotStorage(Protocol):
     def complete_forecast_snapshot_run(self, run_id: int, counts: dict[str, int]) -> Any: ...
 
     def fail_forecast_snapshot_run(self, run_id: int, failure_detail: str) -> Any: ...
+
+
+class ForecastSnapshotRecord(TypedDict):
+    ts_code: object
+    announcement_date: date
+    report_end_date: date
+    forecast_type: object
+    growth_min: float | None
+    growth_max: float | None
+    source_order: int
 
 
 @dataclass(frozen=True)
@@ -104,7 +114,14 @@ class ForecastSnapshotService:
                 counts["source_row_count"] += len(records)
                 counts["record_count"] += len(records)
                 for record in records:
-                    record_tuple = tuple(record[field] for field in record if field != "source_order")
+                    record_tuple = (
+                        record["ts_code"],
+                        record["announcement_date"],
+                        record["report_end_date"],
+                        record["forecast_type"],
+                        record["growth_min"],
+                        record["growth_max"],
+                    )
                     if record_tuple in normalized_records:
                         counts["duplicate_record_count"] += 1
                     normalized_records.add(record_tuple)
@@ -112,7 +129,7 @@ class ForecastSnapshotService:
                     if conflict_key in same_day_codes:
                         counts["same_day_conflict_count"] += 1
                     same_day_codes.add(conflict_key)
-                self._storage.save_forecast_snapshot_records(run.id, records, counts)
+                self._storage.save_forecast_snapshot_records(run.id, [dict(record) for record in records], counts)
                 announcement_date += timedelta(days=1)
             return self._summary_from_run(self._storage.complete_forecast_snapshot_run(run.id, counts))
         except Exception as exc:
@@ -120,12 +137,12 @@ class ForecastSnapshotService:
             return self._summary_from_run(self._storage.fail_forecast_snapshot_run(run.id, detail))
 
     @staticmethod
-    def _normalize_records(frame: pd.DataFrame, requested_announcement_date: date) -> list[dict[str, object]]:
+    def _normalize_records(frame: pd.DataFrame, requested_announcement_date: date) -> list[ForecastSnapshotRecord]:
         missing = set(forecast_fields) - set(frame.columns)
         if missing:
             raise ValueError(f"forecast response is missing fields: {sorted(missing)}")
 
-        records: list[dict[str, object]] = []
+        records: list[ForecastSnapshotRecord] = []
         for source_order, row in enumerate(frame.loc[:, forecast_fields].to_dict("records")):
             announcement_date = pd.to_datetime(row["ann_date"], format="%Y%m%d", errors="raise").date()
             if announcement_date != requested_announcement_date:
@@ -149,9 +166,10 @@ class ForecastSnapshotService:
 
     @staticmethod
     def _optional_numeric(value: object) -> float | None:
-        if pd.isna(value):
+        values = pd.Series([value])
+        if bool(pd.isna(values).iloc[0]):
             return None
-        numeric_value = float(pd.to_numeric(value, errors="raise"))
+        numeric_value = float(pd.to_numeric(values, errors="raise").iloc[0])
         if not isfinite(numeric_value):
             raise ValueError("forecast numeric value must be finite")
         return numeric_value

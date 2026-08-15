@@ -100,6 +100,7 @@ def test_missing_required_schema_marks_running_run_failed(frame: pd.DataFrame) -
 
     assert summary.status == "failed"
     assert storage.failed_run_ids == [1]
+    assert summary.failure_detail is not None
     assert "2026-07-01" in summary.failure_detail
     assert "ValueError" in summary.failure_detail
 
@@ -114,6 +115,7 @@ def test_mismatched_returned_announcement_date_marks_run_failed() -> None:
     )
 
     assert summary.status == "failed"
+    assert summary.failure_detail is not None
     assert "2026-07-01" in summary.failure_detail
     assert "ValueError" in summary.failure_detail
 
@@ -133,6 +135,7 @@ def test_invalid_numeric_value_marks_run_failed(invalid_numeric_value: str) -> N
 
     assert summary.status == "failed"
     assert storage.failed_run_ids == [1]
+    assert summary.failure_detail is not None
     assert "2026-07-01" in summary.failure_detail
     assert "ValueError" in summary.failure_detail
 
@@ -148,6 +151,7 @@ def test_provider_exception_marks_run_failed_without_processing_later_dates() ->
 
     assert summary.status == "failed"
     assert provider.call_args_list == [call("20260701")]
+    assert summary.failure_detail is not None
     assert "2026-07-01" in summary.failure_detail
     assert "ConnectionError" in summary.failure_detail
 

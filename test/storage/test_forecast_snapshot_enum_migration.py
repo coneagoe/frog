@@ -22,6 +22,7 @@ def _engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if url is None:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
     return create_engine(url)
 
 

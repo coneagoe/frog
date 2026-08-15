@@ -55,7 +55,7 @@ fee_rate = 0.0003
 use_plotly = True
 
 
-df_data = []
+df_data: list[Any] = []
 
 
 g_start_date = "2020-01-01"

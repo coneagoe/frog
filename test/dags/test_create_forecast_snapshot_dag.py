@@ -38,10 +38,10 @@ def snapshot_module(monkeypatch):
     monkeypatch.setenv("FROG_PROJECT_ROOT", str(ROOT))
 
     airflow_module = types.ModuleType("airflow")
-    airflow_module.DAG = FakeDAG
+    airflow_module.__dict__["DAG"] = FakeDAG
     airflow_operators = types.ModuleType("airflow.operators")
     airflow_python = types.ModuleType("airflow.operators.python")
-    airflow_python.PythonOperator = FakePythonOperator
+    airflow_python.__dict__["PythonOperator"] = FakePythonOperator
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
     monkeypatch.setitem(sys.modules, "airflow.operators", airflow_operators)
     monkeypatch.setitem(sys.modules, "airflow.operators.python", airflow_python)
