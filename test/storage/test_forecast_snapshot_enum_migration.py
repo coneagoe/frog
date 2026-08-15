@@ -5,6 +5,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from threading import Event
+from time import monotonic
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -277,12 +278,15 @@ def test_postgresql_acquisition_waits_for_locked_completion_before_active_check(
     db.Session = sessionmaker(bind=db.engine)
     first = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
     completion_ready = Event()
-    acquisition_lock_attempted = Event()
+    acquisition_lock_called = Event()
     release_completion = Event()
     original_lock = StorageDb._lock_forecast_snapshot_range
+    backend_pids: dict[str, int] = {}
 
     def observe_acquisition_lock(*args, **kwargs):
-        acquisition_lock_attempted.set()
+        session = args[0]
+        backend_pids["acquisition"] = session.execute(text("SELECT pg_backend_pid()")).scalar_one()
+        acquisition_lock_called.set()
         return original_lock(*args, **kwargs)
 
     monkeypatch.setattr(StorageDb, "_lock_forecast_snapshot_range", staticmethod(observe_acquisition_lock))
@@ -293,6 +297,7 @@ def test_postgresql_acquisition_waits_for_locked_completion_before_active_check(
             run = session.get(ForecastSnapshotRun, first.id)
             assert run is not None
             original_lock(session, run.report_end_date, run.announcement_start_date, run.announcement_end_date)
+            backend_pids["completion"] = session.execute(text("SELECT pg_backend_pid()")).scalar_one()
             run.status = "completed"
             session.flush()
             completion_ready.set()
@@ -308,7 +313,25 @@ def test_postgresql_acquisition_waits_for_locked_completion_before_active_check(
             date(2026, 7, 1),
         )
         try:
-            assert acquisition_lock_attempted.wait(timeout=10)
+            assert acquisition_lock_called.wait(timeout=10)
+            deadline = monotonic() + 10
+            with engine.connect() as connection:
+                while not connection.execute(
+                    text(
+                        "SELECT EXISTS ("
+                        "SELECT FROM pg_locks waiting JOIN pg_locks holding "
+                        "ON waiting.locktype = holding.locktype "
+                        "AND waiting.database IS NOT DISTINCT FROM holding.database "
+                        "AND waiting.classid IS NOT DISTINCT FROM holding.classid "
+                        "AND waiting.objid IS NOT DISTINCT FROM holding.objid "
+                        "AND waiting.objsubid IS NOT DISTINCT FROM holding.objsubid "
+                        "WHERE waiting.locktype = 'advisory' AND NOT waiting.granted "
+                        "AND holding.granted AND waiting.pid = :acquisition_pid "
+                        "AND holding.pid = :completion_pid)"
+                    ),
+                    {"acquisition_pid": backend_pids["acquisition"], "completion_pid": backend_pids["completion"]},
+                ).scalar_one():
+                    assert monotonic() < deadline, "acquisition never waited on completion advisory lock"
         finally:
             release_completion.set()
         completion.result(timeout=10)
