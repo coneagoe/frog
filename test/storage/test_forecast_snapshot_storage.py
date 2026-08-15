@@ -123,6 +123,41 @@ def test_snapshot_acquisition_rejects_an_active_range(db) -> None:
         db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
 
 
+def test_snapshot_acquisition_reuses_run_completed_after_initial_lookup(db, monkeypatch) -> None:
+    first = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+    original_completed_lookup = StorageDb._get_completed_forecast_snapshot_run
+    lookup_count = 0
+
+    def complete_in_race_window(*args, **kwargs):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 1:
+            db.complete_forecast_snapshot_run(
+                first.id,
+                {
+                    "covered_date_count": 1,
+                    "source_row_count": 0,
+                    "record_count": 0,
+                    "duplicate_record_count": 0,
+                    "same_day_conflict_count": 0,
+                },
+            )
+            return None
+        return original_completed_lookup(*args, **kwargs)
+
+    monkeypatch.setattr(
+        StorageDb,
+        "_get_completed_forecast_snapshot_run",
+        staticmethod(complete_in_race_window),
+    )
+
+    reused = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+
+    assert reused.id == first.id
+    with db.engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM forecast_snapshot_runs")).scalar_one() == 1
+
+
 def test_snapshot_records_list_by_announcement_date_then_source_order(db) -> None:
     run = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 2))
     db.save_forecast_snapshot_records(
@@ -194,9 +229,12 @@ def test_snapshot_completion_rejects_incomplete_or_mismatched_counts(db, counts)
         db.complete_forecast_snapshot_run(run.id, counts)
 
     with db.engine.connect() as connection:
-        assert connection.execute(
-            text("SELECT status FROM forecast_snapshot_runs WHERE id = :run_id"), {"run_id": run.id}
-        ).scalar_one() == "running"
+        assert (
+            connection.execute(
+                text("SELECT status FROM forecast_snapshot_runs WHERE id = :run_id"), {"run_id": run.id}
+            ).scalar_one()
+            == "running"
+        )
 
 
 def test_failed_snapshot_attempt_retains_diagnostic_and_records_after_retry(db) -> None:

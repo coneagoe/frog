@@ -1555,40 +1555,49 @@ class StorageDb:
         self.ensure_forecast_snapshot_tables()
         assert self.Session is not None
 
-        completed = self.get_completed_forecast_snapshot_run(
-            report_end_date, announcement_start_date, announcement_end_date
-        )
-        if completed is not None:
-            return completed
-
+        completed_run_id: int | None = None
         try:
             with self.Session.begin() as session:
-                active_run = self._get_active_forecast_snapshot_run(
+                completed = self._get_completed_forecast_snapshot_run(
                     session, report_end_date, announcement_start_date, announcement_end_date
                 )
-                if active_run is not None:
-                    raise StorageError("forecast snapshot is already running for requested range")
-
-                max_attempt = (
-                    session.query(func.max(ForecastSnapshotRun.attempt))
-                    .filter_by(
-                        report_end_date=report_end_date,
-                        announcement_start_date=announcement_start_date,
-                        announcement_end_date=announcement_end_date,
+                if completed is not None:
+                    completed_run_id = run_id = completed.id
+                else:
+                    active_run = self._get_active_forecast_snapshot_run(
+                        session, report_end_date, announcement_start_date, announcement_end_date
                     )
-                    .scalar()
-                )
-                run = ForecastSnapshotRun(
-                    report_end_date=report_end_date,
-                    announcement_start_date=announcement_start_date,
-                    announcement_end_date=announcement_end_date,
-                    attempt=(max_attempt or 0) + 1,
-                    status=ForecastSnapshotStatus.RUNNING.value,
-                    requested_date_count=(announcement_end_date - announcement_start_date).days + 1,
-                )
-                session.add(run)
-                session.flush()
-                run_id = run.id
+                    if active_run is not None:
+                        raise StorageError("forecast snapshot is already running for requested range")
+
+                    # A concurrent completion after the first lookup must be reused,
+                    # rather than creating a needless new attempt.
+                    completed = self._get_completed_forecast_snapshot_run(
+                        session, report_end_date, announcement_start_date, announcement_end_date
+                    )
+                    if completed is not None:
+                        completed_run_id = run_id = completed.id
+                    else:
+                        max_attempt = (
+                            session.query(func.max(ForecastSnapshotRun.attempt))
+                            .filter_by(
+                                report_end_date=report_end_date,
+                                announcement_start_date=announcement_start_date,
+                                announcement_end_date=announcement_end_date,
+                            )
+                            .scalar()
+                        )
+                        run = ForecastSnapshotRun(
+                            report_end_date=report_end_date,
+                            announcement_start_date=announcement_start_date,
+                            announcement_end_date=announcement_end_date,
+                            attempt=(max_attempt or 0) + 1,
+                            status=ForecastSnapshotStatus.RUNNING.value,
+                            requested_date_count=(announcement_end_date - announcement_start_date).days + 1,
+                        )
+                        session.add(run)
+                        session.flush()
+                        run_id = run.id
         except IntegrityError:
             completed = self.get_completed_forecast_snapshot_run(
                 report_end_date, announcement_start_date, announcement_end_date
@@ -1597,7 +1606,7 @@ class StorageDb:
                 return completed
             raise StorageError("forecast snapshot is already running for requested range") from None
 
-        return self._get_forecast_snapshot_run(run_id)
+        return self._get_forecast_snapshot_run(completed_run_id or run_id)
 
     def save_forecast_snapshot_records(
         self, run_id: int, records: list[dict[str, object]], counts: dict[str, int]
@@ -1658,25 +1667,20 @@ class StorageDb:
         self.ensure_forecast_snapshot_tables()
         assert self.Session is not None
         with self.Session() as session:
-            return (
-                session.query(ForecastSnapshotRun)
-                .filter_by(
-                    report_end_date=report_end_date,
-                    announcement_start_date=announcement_start_date,
-                    announcement_end_date=announcement_end_date,
-                    status=ForecastSnapshotStatus.COMPLETED.value,
-                )
-                .order_by(ForecastSnapshotRun.completed_at.desc(), ForecastSnapshotRun.id.desc())
-                .first()
+            return self._get_completed_forecast_snapshot_run(
+                session, report_end_date, announcement_start_date, announcement_end_date
             )
 
     def list_forecast_snapshot_records(self, run_id: int) -> list[ForecastSnapshotRecord]:
         self.ensure_forecast_snapshot_tables()
         assert self.Session is not None
         with self.Session() as session:
-            return session.query(ForecastSnapshotRecord).filter_by(run_id=run_id).order_by(
-                ForecastSnapshotRecord.announcement_date, ForecastSnapshotRecord.source_order
-            ).all()
+            return (
+                session.query(ForecastSnapshotRecord)
+                .filter_by(run_id=run_id)
+                .order_by(ForecastSnapshotRecord.announcement_date, ForecastSnapshotRecord.source_order)
+                .all()
+            )
 
     @staticmethod
     def _set_forecast_snapshot_counts(run: ForecastSnapshotRun, counts: dict[str, int]) -> None:
@@ -1704,6 +1708,23 @@ class StorageDb:
             raise StorageError(f"forecast snapshot final counts are missing: {', '.join(missing_fields)}")
 
     @staticmethod
+    def _get_completed_forecast_snapshot_run(
+        session: Any, report_end_date: date, announcement_start_date: date, announcement_end_date: date
+    ) -> ForecastSnapshotRun | None:
+        return cast(
+            ForecastSnapshotRun | None,
+            session.query(ForecastSnapshotRun)
+            .filter_by(
+                report_end_date=report_end_date,
+                announcement_start_date=announcement_start_date,
+                announcement_end_date=announcement_end_date,
+                status=ForecastSnapshotStatus.COMPLETED.value,
+            )
+            .order_by(ForecastSnapshotRun.completed_at.desc(), ForecastSnapshotRun.id.desc())
+            .first(),
+        )
+
+    @staticmethod
     def _get_active_forecast_snapshot_run(
         session: Any, report_end_date: date, announcement_start_date: date, announcement_end_date: date
     ) -> ForecastSnapshotRun | None:
@@ -1716,7 +1737,7 @@ class StorageDb:
                 announcement_end_date=announcement_end_date,
                 status=ForecastSnapshotStatus.RUNNING.value,
             )
-            .first()
+            .first(),
         )
 
     def _get_forecast_snapshot_run(self, run_id: int) -> ForecastSnapshotRun:

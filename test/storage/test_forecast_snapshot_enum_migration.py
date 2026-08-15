@@ -145,6 +145,23 @@ def _index_definition(connection: Connection, index_name: str) -> tuple[bool, tu
     return bool(row[0]), tuple(row[1]), None if row[2] is None else str(row[2])
 
 
+def _column_contract(connection: Connection, table_name: str) -> dict[str, tuple[bool, str | None]]:
+    return {
+        str(name): (bool(nullable), None if default is None else str(default))
+        for name, nullable, default in connection.execute(
+            text(
+                "SELECT a.attname, NOT a.attnotnull, pg_get_expr(d.adbin, d.adrelid) "
+                "FROM pg_attribute a "
+                "JOIN pg_class c ON c.oid = a.attrelid "
+                "LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum "
+                "WHERE c.relnamespace = current_schema()::regnamespace "
+                "AND c.relname = :table_name AND a.attnum > 0 AND NOT a.attisdropped"
+            ),
+            {"table_name": table_name},
+        )
+    }
+
+
 def test_migration_converts_snapshot_status_and_creates_running_range_index(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -169,6 +186,73 @@ def test_migration_converts_snapshot_status_and_creates_running_range_index(post
         )
         assert migrate_enums(connection, rollback=True).rolled_back is True
         assert _column_type(connection, "forecast_snapshot_runs", "status") == "character varying(16)"
+
+
+def test_migration_upgrades_complete_legacy_snapshot_pair_for_storage_lifecycle(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_enums(connection).converted is True
+        run_columns = _column_contract(connection, "forecast_snapshot_runs")
+        assert run_columns["requested_date_count"] == (False, "0")
+        assert run_columns["covered_date_count"] == (False, "0")
+        assert run_columns["source_row_count"] == (False, "0")
+        assert run_columns["record_count"] == (False, "0")
+        assert run_columns["duplicate_record_count"] == (False, "0")
+        assert run_columns["same_day_conflict_count"] == (False, "0")
+        assert run_columns["created_at"][0] is False
+        assert set(_index_definition(connection, "uq_forecast_snapshot_running_range")[1]) == {
+            "report_end_date",
+            "announcement_start_date",
+            "announcement_end_date",
+        }
+        assert _foreign_key_target(connection, "forecast_snapshot_records") == "forecast_snapshot_runs"
+        assert connection.execute(
+            text(
+                "SELECT conname FROM pg_constraint WHERE connamespace = current_schema()::regnamespace "
+                "AND conname IN ('uq_forecast_snapshot_attempt', 'uq_forecast_snapshot_record_source_order')"
+            )
+        ).scalars().all() == ["uq_forecast_snapshot_attempt", "uq_forecast_snapshot_record_source_order"]
+        connection.commit()
+
+    db = StorageDb.__new__(StorageDb)
+    db.engine = engine.execution_options(schema_translate_map={None: schema})
+    db.Session = sessionmaker(bind=db.engine)
+    run = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+    db.save_forecast_snapshot_records(
+        run.id,
+        [
+            {
+                "ts_code": "600001.SH",
+                "announcement_date": date(2026, 7, 1),
+                "report_end_date": date(2026, 6, 30),
+                "forecast_type": "increase",
+                "source_order": 0,
+            }
+        ],
+        {"source_row_count": 1, "record_count": 1},
+    )
+    completed = db.complete_forecast_snapshot_run(
+        run.id,
+        {
+            "covered_date_count": 1,
+            "source_row_count": 1,
+            "record_count": 1,
+            "duplicate_record_count": 0,
+            "same_day_conflict_count": 0,
+        },
+    )
+
+    assert completed.status == "completed"
+
+
+def test_snapshot_schema_audit_reports_incomplete_legacy_pair(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        result = migrate_enums(connection, dry_run=True, adapters=(STORAGE_ENUM_ADAPTER,))
+
+    audit = result.audits[0]
+    assert audit.ready is False
+    assert any(check.name == "forecast_snapshot_schema_contract" and not check.ready for check in audit.checks)
 
 
 def test_migration_creates_both_snapshot_tables_in_a_fresh_schema() -> None:
@@ -363,5 +447,5 @@ def test_postgresql_recovers_full_attempt_collision_during_concurrent_snapshot_r
 
     assert sum(isinstance(result, int) for result in acquired) == 1
     assert "forecast snapshot is already running for requested range" in acquired
-    assert completed_lookup_count == 3
+    assert completed_lookup_count == 1
     assert runs == [("failed", 1), ("running", 2)]

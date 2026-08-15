@@ -19,6 +19,7 @@ STORAGE_ENUM_TYPES = {
     "blackroom_source",
     "daily_bar_diagnostic_adjust",
     "daily_bar_diagnostic_classification",
+    "forecast_snapshot_status",
     "ssf_change_signal_status",
 }
 STORAGE_ENUM_LABELS = {group.type_name: group.labels for group in STORAGE_ENUM_GROUPS}
