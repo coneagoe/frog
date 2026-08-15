@@ -18,7 +18,11 @@ from common.const import (
     COL_STOCK_ID,
     COL_STOCK_NAME,
 )
-from monitor.forecast_ssf_monitor_sync import ForecastSSFMonitorSyncService, NoEligibleForecastSnapshotError
+from monitor.forecast_ssf_monitor_sync import (
+    ForecastSSFMonitorSyncPartialFailure,
+    ForecastSSFMonitorSyncService,
+    NoEligibleForecastSnapshotError,
+)
 from storage.model import AStockBasic, Base
 from storage.storage_db import StorageDb
 
@@ -88,6 +92,54 @@ def _candidate(target_id: int = 17, state: str = "eligible") -> SimpleNamespace:
         monitor_target_id=target_id,
         evidence={},
     )
+
+
+def test_sync_continues_after_one_transition_failure_then_raises_structured_partial_failure() -> None:
+    storage = _storage(_forecasts("600001", "600002"))
+    storage.list_forecast_ssf_candidates.return_value = [
+        _candidate(target_id=17),
+        SimpleNamespace(
+            stock_code="600002",
+            report_end_date=date(2025, 12, 31),
+            state="eligible",
+            monitor_target_id=18,
+            evidence={},
+        ),
+    ]
+    storage.find_workflow_monitor_target.side_effect = [_target(17), _target(18)]
+    storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "全国社保基金一一八组合")
+    storage.transition_forecast_ssf_candidate_with_workflow_target.side_effect = [
+        RuntimeError("write failed"),
+        _target(18),
+    ]
+
+    with pytest.raises(ForecastSSFMonitorSyncPartialFailure) as raised:
+        ForecastSSFMonitorSyncService(storage, MagicMock(is_banned=lambda *_: _blackroom())).sync(date(2026, 1, 20))
+
+    assert raised.value.summary["errors"] == [
+        {
+            "stock_code": "600001",
+            "state": "eligible",
+            "reason": "ssf_holder_match",
+            "exception_type": "RuntimeError",
+            "message": "write failed",
+        }
+    ]
+    assert storage.transition_forecast_ssf_candidate_with_workflow_target.call_count == 2
+
+
+def test_sync_requalification_reuses_disabled_target_without_resetting_last_state() -> None:
+    storage = _storage(_forecasts("600001"))
+    storage.list_forecast_ssf_candidates.return_value = [_candidate(target_id=17, state="blackroom")]
+    storage.find_workflow_monitor_target.return_value = _target(17, enabled=False)
+    storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "全国社保基金一一八组合")
+    storage.transition_forecast_ssf_candidate_with_workflow_target.return_value = _target(17, enabled=True)
+
+    ForecastSSFMonitorSyncService(storage, MagicMock(is_banned=lambda *_: _blackroom())).sync(date(2026, 1, 20))
+
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["target_enabled"]) == ("600001", "eligible", True)
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
 
 
 def _storage(forecasts: pd.DataFrame) -> MagicMock:
@@ -222,20 +274,22 @@ def test_sync_later_nonqualifying_snapshot_revision_does_not_preserve_older_qual
     storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
 
 
-def test_sync_nonqualifying_snapshot_row_disables_previous_candidate_with_provenance() -> None:
+def test_sync_nonqualifying_snapshot_row_retains_previous_target_with_provenance() -> None:
     storage = _storage(_records("600001", **{COL_FORECAST_CHANGE_MIN: 40.0}))
     storage.list_forecast_ssf_candidates.return_value = [_candidate()]
     storage.find_workflow_monitor_target.return_value = _target(17)
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
-    evidence = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[3]
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["target_enabled"]) == ("600001", False)
+    evidence = call["evidence"]
     assert evidence["snapshot"]["id"] == 42
     assert evidence["forecast"]["source_order"] == 3
     assert evidence["forecast"]["p_change_min"] == 40.0
 
 
-def test_sync_nonnumeric_snapshot_row_disables_existing_target_and_persists_evidence() -> None:
+def test_sync_nonnumeric_snapshot_row_disables_existing_target_and_retains_link() -> None:
     storage = _storage(_records("600001", **{COL_FORECAST_CHANGE_MIN: "not numeric"}))
     storage.list_forecast_ssf_candidates.return_value = [_candidate()]
     storage.find_workflow_monitor_target.return_value = _target(17)
@@ -243,9 +297,14 @@ def test_sync_nonnumeric_snapshot_row_disables_existing_target_and_persists_evid
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
     assert result["data"]["disabled"] == 1
-    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args
-    assert call.args[:3] == (17, "ineligible", "forecast_no_longer_qualified")
-    assert call.args[3]["forecast"] == {
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["state_reason"], call["target_enabled"]) == (
+        "600001",
+        "ineligible",
+        "forecast_no_longer_qualified",
+        False,
+    )
+    assert call["evidence"]["forecast"] == {
         "report_end_date": "2025-12-31",
         "ann_date": "2026-01-15",
         "type": "预增",
@@ -278,10 +337,10 @@ def test_sync_absent_selected_row_marks_current_forecast_provenance_absent() -> 
 
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
-    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
     assert result["data"]["disabled"] == 1
-    assert call.args[:3] == (17, "ineligible", "forecast_no_longer_qualified")
-    evidence = call.args[3]
+    assert (call["stock_code"], call["state"], call["target_enabled"]) == ("600001", "ineligible", False)
+    evidence = call["evidence"]
     assert evidence["snapshot"] == _snapshot_evidence()
     assert evidence["forecast"] == {"selected": False, "ann_date": None, "source_order": None}
     assert evidence["lifecycle"]["reason"] == "forecast_no_longer_qualified"
@@ -309,7 +368,8 @@ def test_sync_creates_target_and_persists_matching_evidence():
         "updated": 0,
         "disabled": 0,
         "unchanged": 0,
-        "errors": 0,
+        "errors": [],
+        "error_count": 0,
     }
     storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_called_once_with(
         stock_code="600001",
@@ -341,14 +401,14 @@ def test_sync_creates_target_and_persists_matching_evidence():
             "lifecycle": {"as_of_date": "2026-01-20", "state": "eligible", "reason": "ssf_holder_match"},
         },
         target_enabled=True,
-        reset_last_state=True,
+        reset_last_state=False,
     )
     assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["state"] == "eligible"
     assert storage.upsert_forecast_ssf_candidate.call_args.kwargs["state"] == "ineligible"
     assert storage.upsert_forecast_ssf_candidate.call_args.kwargs["monitor_target_id"] is None
 
 
-def test_sync_blackroom_deletes_only_existing_marked_target():
+def test_sync_blackroom_disables_only_existing_marked_target():
     storage = _storage(_forecasts("600001"))
     storage.list_forecast_ssf_candidates.return_value = [_candidate()]
     storage.find_workflow_monitor_target.return_value = _target(17, enabled=True)
@@ -359,7 +419,8 @@ def test_sync_blackroom_deletes_only_existing_marked_target():
 
     assert result["data"]["blackroom_excluded"] == 1
     assert result["data"]["disabled"] == 1
-    storage.disable_forecast_ssf_target_with_candidate_transition.assert_called_once()
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["target_enabled"]) == ("600001", "blackroom", False)
 
 
 @pytest.mark.parametrize("holders", [pd.DataFrame(), _holders(date(2025, 11, 19), "全国社保基金一一八组合")])
@@ -375,11 +436,11 @@ def test_sync_defers_absent_or_stale_disclosure_without_disabling_target(holders
 
     assert result["data"]["deferred"] == 1
     storage.upsert_workflow_monitor_target.assert_not_called()
-    assert storage.upsert_forecast_ssf_candidate.call_args.kwargs["state"] == "deferred"
-    assert storage.upsert_forecast_ssf_candidate.call_args.kwargs["monitor_target_id"] == 17
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["target_enabled"]) == ("600001", "deferred", True)
 
 
-def test_sync_current_unlisted_candidate_deletes_linked_target():
+def test_sync_current_unlisted_candidate_disables_linked_target():
     storage = _storage(_forecasts("600001"))
     storage.list_forecast_ssf_candidates.return_value = [_candidate()]
     storage.find_workflow_monitor_target.return_value = _target(17, enabled=True)
@@ -390,14 +451,16 @@ def test_sync_current_unlisted_candidate_deletes_linked_target():
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
-    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[:3] == (
-        17,
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["state_reason"], call["target_enabled"]) == (
+        "600001",
         "delisted_or_unlisted",
         "delisted_or_unlisted",
+        False,
     )
 
 
-def test_sync_current_candidate_with_stale_target_link_does_not_mutate_or_relink_target():
+def test_sync_current_candidate_with_stale_target_link_reports_partial_failure_without_mutation():
     storage = _storage(_forecasts("600001"))
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(
@@ -411,17 +474,18 @@ def test_sync_current_candidate_with_stale_target_link_does_not_mutate_or_relink
     storage.find_workflow_monitor_target.return_value = _target(18, enabled=True)
     storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "普通股东")
 
-    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())).sync(
-        date(2026, 1, 20)
-    )
+    storage.transition_forecast_ssf_candidate_with_workflow_target.side_effect = ValueError("invalid target")
+    with pytest.raises(ForecastSSFMonitorSyncPartialFailure):
+        service = ForecastSSFMonitorSyncService(
+            storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
+        )
+        service.sync(date(2026, 1, 20))
 
     storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
-    call = storage.upsert_forecast_ssf_candidate.call_args.kwargs
-    assert call["monitor_target_id"] is None
-    assert call["state"] == "ineligible"
+    storage.upsert_forecast_ssf_candidate.assert_not_called()
 
 
-def test_sync_current_eligible_candidate_with_stale_target_link_does_not_create_or_enable_target():
+def test_sync_current_eligible_candidate_with_stale_target_link_reports_partial_failure():
     storage = _storage(_forecasts("600001"))
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(
@@ -434,13 +498,15 @@ def test_sync_current_eligible_candidate_with_stale_target_link_does_not_create_
     ]
     storage.find_workflow_monitor_target.return_value = _target(18, enabled=False)
     storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "全国社保基金一一八组合")
+    storage.transition_forecast_ssf_candidate_with_workflow_target.side_effect = ValueError("invalid target")
 
-    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())).sync(
-        date(2026, 1, 20)
-    )
+    with pytest.raises(ForecastSSFMonitorSyncPartialFailure):
+        ForecastSSFMonitorSyncService(
+            storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
+        ).sync(date(2026, 1, 20))
 
     storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
-    assert storage.upsert_forecast_ssf_candidate.call_args.kwargs["monitor_target_id"] is None
+    storage.upsert_forecast_ssf_candidate.assert_not_called()
 
 
 def test_sync_fresh_ssf_match_with_orphan_target_persists_candidate_without_target_mutation():
@@ -499,7 +565,7 @@ def test_sync_unlinked_candidate_non_ssf_result_does_not_disable_or_relink_orpha
     ],
     ids=["query_failed", "missing", "stale"],
 )
-def test_sync_current_deferred_candidate_with_stale_target_link_does_not_relink_candidate(holders, reason):
+def test_sync_current_deferred_candidate_with_stale_target_link_reports_partial_failure(holders, reason):
     storage = _storage(_forecasts("600001"))
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(
@@ -516,16 +582,19 @@ def test_sync_current_deferred_candidate_with_stale_target_link_does_not_relink_
     else:
         storage.load_latest_top10_floatholders.return_value = holders
 
-    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())).sync(
-        date(2026, 1, 20)
-    )
+    storage.transition_forecast_ssf_candidate_with_workflow_target.side_effect = ValueError("invalid target")
+    with pytest.raises(ForecastSSFMonitorSyncPartialFailure) as raised:
+        service = ForecastSSFMonitorSyncService(
+            storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
+        )
+        service.sync(date(2026, 1, 20))
 
     storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
-    call = storage.upsert_forecast_ssf_candidate.call_args.kwargs
-    assert (call["state"], call["state_reason"], call["monitor_target_id"]) == ("deferred", reason, None)
+    assert raised.value.summary["errors"][0]["reason"] == reason
+    storage.upsert_forecast_ssf_candidate.assert_not_called()
 
 
-def test_sync_non_ssf_deletes_existing_owned_target():
+def test_sync_non_ssf_disables_existing_owned_target():
     storage = _storage(_forecasts("600001"))
     storage.list_forecast_ssf_candidates.return_value = [_candidate()]
     storage.find_workflow_monitor_target.return_value = _target(17, enabled=True)
@@ -536,10 +605,12 @@ def test_sync_non_ssf_deletes_existing_owned_target():
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
     assert result["data"]["disabled"] == 1
-    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[:3] == (
-        17,
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["state_reason"], call["target_enabled"]) == (
+        "600001",
         "ineligible",
         "ssf_holder_not_found",
+        False,
     )
 
 
@@ -571,7 +642,6 @@ def test_sync_repeated_eligible_target_is_unchanged_without_reset():
     storage = _storage(_forecasts("600001"))
     storage.load_latest_top10_floatholders.return_value = _holders(date(2026, 1, 10), "全国社保基金一一八组合")
     storage.find_workflow_monitor_target.return_value = _target(17, enabled=True)
-    storage.upsert_forecast_ssf_candidate_with_workflow_target.return_value = _target(17)
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(state="eligible", monitor_target_id=17, stock_code="600001")
     ]
@@ -581,7 +651,8 @@ def test_sync_repeated_eligible_target_is_unchanged_without_reset():
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
     assert result["data"]["unchanged"] == 1
-    assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["reset_last_state"] is False
+    storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
+    storage.transition_forecast_ssf_candidate_with_workflow_target.assert_called_once()
 
 
 def test_sync_snapshot_record_load_failure_mutates_nothing():
@@ -636,7 +707,7 @@ def test_sync_holder_failure_defers_one_stock_and_enables_another():
 
     assert result["data"]["deferred"] == 1
     assert result["data"]["ssf_matched"] == 1
-    assert result["data"]["errors"] == 1
+    assert result["data"]["errors"] == []
     assert storage.upsert_forecast_ssf_candidate.call_args_list[0].kwargs["state"] == "deferred"
     assert storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs["state"] == "eligible"
 
@@ -666,43 +737,28 @@ def test_sync_retires_absent_daily_workflow_candidate_with_lifecycle_evidence():
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
     assert result["data"]["disabled"] == 1
-    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args == (
-        17,
-        "ineligible",
-        "forecast_no_longer_qualified",
-        {
-            "forecast": {"selected": False, "ann_date": None, "source_order": None},
-            "snapshot": _snapshot_evidence(),
-            "lifecycle": {
-                "as_of_date": "2026-01-20",
-                "state": "ineligible",
-                "reason": "forecast_no_longer_qualified",
-            },
-        },
-    )
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["target_enabled"]) == ("600001", "ineligible", False)
+    assert call["evidence"]["forecast"] == {"selected": False, "ann_date": None, "source_order": None}
 
 
-def test_sync_empty_universe_retires_only_matching_daily_workflow_targets():
+def test_sync_empty_universe_retires_all_linked_candidates_through_transition():
     storage = _storage(_forecasts())
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(stock_code="600001", report_end_date=date(2025, 12, 31), monitor_target_id=17, evidence={}),
         SimpleNamespace(stock_code="600002", report_end_date=date(2025, 12, 31), monitor_target_id=18, evidence={}),
         SimpleNamespace(stock_code="600003", report_end_date=date(2025, 12, 31), monitor_target_id=19, evidence={}),
     ]
-    storage.find_workflow_monitor_target.side_effect = [_target(17, enabled=True), None, None]
-
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
-    assert result["data"]["disabled"] == 1
-    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_count == 1
-    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[0] == 17
-    assert [call.kwargs["stock_code"] for call in storage.upsert_forecast_ssf_candidate.call_args_list] == [
+    assert result["data"]["disabled"] == 3
+    assert storage.transition_forecast_ssf_candidate_with_workflow_target.call_count == 3
+    transition_calls = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args_list
+    assert [call.kwargs["stock_code"] for call in transition_calls] == [
+        "600001",
         "600002",
         "600003",
     ]
-    assert all(
-        call.kwargs["monitor_target_id"] is None for call in storage.upsert_forecast_ssf_candidate.call_args_list
-    )
 
 
 def test_sync_retires_unlinked_absent_candidate_without_creating_target():
@@ -759,6 +815,7 @@ def test_sync_retires_absent_candidate_with_stale_target_link(daily_target):
         )
     ]
     storage.find_workflow_monitor_target.return_value = daily_target
+    storage.transition_forecast_ssf_candidate_with_workflow_target.side_effect = ValueError("invalid target")
     storage.load_a_stock_listing_status.return_value = pd.DataFrame(
         {
             COL_STOCK_ID: ["600001"],
@@ -767,30 +824,15 @@ def test_sync_retires_absent_candidate_with_stale_target_link(daily_target):
         }
     )
 
-    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+    with pytest.raises(ForecastSSFMonitorSyncPartialFailure) as raised:
+        ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
-    assert result["data"]["disabled"] == 0
+    assert raised.value.summary["errors"][0]["stock_code"] == "600001"
     storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
-    assert storage.upsert_forecast_ssf_candidate.call_args.kwargs == {
-        "stock_code": "600001",
-        "market": "A",
-        "report_end_date": date(2025, 12, 31),
-        "state": "ineligible",
-        "state_reason": "forecast_no_longer_qualified",
-        "evidence": {
-            "forecast": {"selected": False, "ann_date": None, "source_order": None},
-            "snapshot": _snapshot_evidence(),
-            "lifecycle": {
-                "as_of_date": "2026-01-20",
-                "state": "ineligible",
-                "reason": "forecast_no_longer_qualified",
-            },
-        },
-        "monitor_target_id": None,
-    }
+    storage.upsert_forecast_ssf_candidate.assert_not_called()
 
 
-def test_sync_repeated_retirement_deletes_linked_target():
+def test_sync_repeated_retirement_disables_linked_target():
     storage = _storage(_forecasts())
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(stock_code="600001", report_end_date=date(2025, 12, 31), monitor_target_id=17, evidence={})
@@ -800,7 +842,7 @@ def test_sync_repeated_retirement_deletes_linked_target():
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
     assert result["data"]["disabled"] == 1
-    storage.disable_forecast_ssf_target_with_candidate_transition.assert_called_once()
+    storage.transition_forecast_ssf_candidate_with_workflow_target.assert_called_once()
 
 
 def test_sync_paused_eligible_candidate_keeps_target_disabled_and_records_evaluated_outcome():
@@ -811,7 +853,7 @@ def test_sync_paused_eligible_candidate_keeps_target_disabled_and_records_evalua
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())).sync(
         date(2026, 1, 20)
     )
-    call = storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
     assert (call["state"], call["target_enabled"]) == ("paused", False)
     assert call["evidence"]["evaluation"]["state"] == "eligible"
 
@@ -835,7 +877,7 @@ def test_sync_listing_preflight_failure_mutates_nothing():
     storage.upsert_forecast_ssf_candidate_with_workflow_target.assert_not_called()
 
 
-def test_sync_reporting_period_promotion_deletes_without_evaluating_new_period():
+def test_sync_reporting_period_promotion_disables_without_evaluating_new_period():
     storage = _storage(_forecasts("600001"))
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(
@@ -846,14 +888,15 @@ def test_sync_reporting_period_promotion_deletes_without_evaluating_new_period()
     result = ForecastSSFMonitorSyncService(
         storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
     ).sync(date(2026, 1, 20))
-    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
     assert result["data"]["disabled"] == 1
-    assert call[:3] == (
-        17,
+    assert (call["stock_code"], call["state"], call["state_reason"], call["target_enabled"]) == (
+        "600001",
         "ineligible",
         "reporting_period_superseded",
+        False,
     )
-    assert call[3]["lifecycle"]["new_report_end_date"] == "2025-12-31"
+    assert call["evidence"]["lifecycle"]["new_report_end_date"] == "2025-12-31"
     storage.load_latest_top10_floatholders.assert_not_called()
 
 
@@ -887,7 +930,7 @@ def test_sync_blackroom_recovery_reenables_eligible_target_after_expiry():
         storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom(banned=False))
     ).sync(date(2026, 1, 20))
 
-    call = storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
     assert result["data"]["updated"] == 1
     assert (call["state"], call["target_enabled"]) == ("eligible", True)
     assert call["evidence"]["lifecycle"]["previous_state"] == "blackroom"
@@ -947,7 +990,7 @@ def test_sync_repeated_paused_eligible_candidate_does_not_increment_updated_coun
     ],
     ids=["listing", "blackroom", "ineligible"],
 )
-def test_sync_paused_conclusive_outcomes_delete_linked_target(
+def test_sync_paused_conclusive_outcomes_disable_linked_target(
     listed, banned, holders, automatic_state, automatic_reason
 ):
     storage = _storage(_forecasts("600001"))
@@ -965,9 +1008,14 @@ def test_sync_paused_conclusive_outcomes_delete_linked_target(
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
-    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args
-    assert call[:3] == (17, automatic_state, automatic_reason)
-    assert call[3]["lifecycle"] == {
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["state_reason"], call["target_enabled"]) == (
+        "600001",
+        automatic_state,
+        automatic_reason,
+        False,
+    )
+    assert call["evidence"]["lifecycle"] == {
         "as_of_date": "2026-01-20",
         "state": automatic_state,
         "reason": automatic_reason,
@@ -997,7 +1045,7 @@ def test_sync_paused_deferred_outcome_preserves_pause_and_records_evaluation(hol
         storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
     ).sync(date(2026, 1, 20))
 
-    call = storage.upsert_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
     assert (call["state"], call["state_reason"], call["target_enabled"]) == ("paused", "manual_pause", False)
     assert call["evidence"]["lifecycle"] == {
         "as_of_date": "2026-01-20",
@@ -1009,7 +1057,7 @@ def test_sync_paused_deferred_outcome_preserves_pause_and_records_evaluation(hol
     assert result["data"]["disabled"] == 0
 
 
-def test_sync_active_blackroom_deletes_before_newer_reporting_period_supersession():
+def test_sync_active_blackroom_disables_before_newer_reporting_period_supersession():
     storage = _storage(_forecasts("600001"))
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(
@@ -1021,10 +1069,11 @@ def test_sync_active_blackroom_deletes_before_newer_reporting_period_supersessio
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
-    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args
-    assert call[:3] == (
-        17,
+    call = storage.transition_forecast_ssf_candidate_with_workflow_target.call_args.kwargs
+    assert (call["stock_code"], call["state"], call["state_reason"], call["target_enabled"]) == (
+        "600001",
         "blackroom",
         "active_blackroom",
+        False,
     )
-    assert "new_report_end_date" not in call[3]["lifecycle"]
+    assert "new_report_end_date" not in call["evidence"]["lifecycle"]
