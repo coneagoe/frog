@@ -12,7 +12,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from storage.enum_governance import EnumGovernanceError, migrate_enums
-from storage.enum_migration import STORAGE_ENUM_ADAPTER
+from storage.enum_migration import STORAGE_ENUM_ADAPTER, StorageEnumMigrationError
 from storage.model import ForecastSnapshotRecord, ForecastSnapshotRun
 from storage.storage_db import StorageDb, StorageError
 
@@ -201,13 +201,21 @@ def test_migration_rejects_run_without_snapshot_records() -> None:
         connection.execute(text(f'SET search_path TO "{schema}"'))
         _create_legacy_schema(connection)
         connection.execute(text("DROP TABLE forecast_snapshot_records"))
+        connection.execute(text("CREATE TYPE daily_bar_diagnostic_adjust AS ENUM ('bfq', 'qfq', 'hfq')"))
+        connection.execute(
+            text(
+                "ALTER TABLE daily_bar_diagnostics ALTER COLUMN adjust TYPE daily_bar_diagnostic_adjust "
+                "USING adjust::daily_bar_diagnostic_adjust"
+            )
+        )
     try:
         with _connection(engine, schema) as connection:
-            with pytest.raises(EnumGovernanceError, match="partially missing forecast snapshot tables"):
-                migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+            with pytest.raises(StorageEnumMigrationError, match="partially missing forecast snapshot tables"):
+                STORAGE_ENUM_ADAPTER.apply(connection)
 
             assert not _table_exists(connection, "forecast_snapshot_records")
             assert _column_type(connection, "forecast_snapshot_runs", "status") == "character varying(16)"
+            assert _enum_labels(connection, "daily_bar_diagnostic_adjust") == ("bfq", "qfq", "hfq")
     finally:
         with engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))

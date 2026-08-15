@@ -149,8 +149,8 @@ def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
 
 
 def _adapter_apply(connection: Connection) -> bool:
-    labels_changed = _upgrade_daily_bar_diagnostic_adjust_labels(connection)
     _adapter_preflight(connection, rollback=False)
+    labels_changed = _upgrade_daily_bar_diagnostic_adjust_labels(connection)
     missing = _preflight(connection, rollback=False)
     changed = (
         labels_changed
