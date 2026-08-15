@@ -20,7 +20,7 @@ from storage.storage_db import StorageDb, StorageError
 
 def _engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
-    if not url:
+    if url is None:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
     return create_engine(url)
 
@@ -108,9 +108,9 @@ def _index_predicate(connection: Connection, index_name: str) -> str:
 
 
 def _table_exists(connection: Connection, table_name: str) -> bool:
-    return connection.execute(
-        text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}
-    ).scalar_one()
+    return bool(
+        connection.execute(text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}).scalar_one()
+    )
 
 
 def _foreign_key_target(connection: Connection, table_name: str) -> str:

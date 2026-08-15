@@ -1,4 +1,5 @@
 from datetime import date
+from typing import cast
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -22,7 +23,7 @@ def test_snapshot_record_source_order_is_unique_within_a_provider_response() -> 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with engine.begin() as connection:
-        run_id = connection.execute(
+        inserted_primary_key = connection.execute(
             ForecastSnapshotRun.__table__.insert().values(
                 report_end_date=date(2026, 6, 30),
                 announcement_start_date=date(2026, 7, 1),
@@ -30,7 +31,11 @@ def test_snapshot_record_source_order_is_unique_within_a_provider_response() -> 
                 attempt=1,
                 status=ForecastSnapshotStatus.RUNNING.value,
             )
-        ).inserted_primary_key[0]
+        ).inserted_primary_key
+        assert inserted_primary_key is not None
+        raw_run_id = inserted_primary_key[0]
+        assert raw_run_id is not None
+        run_id = cast(int, raw_run_id)
         row = {
             "run_id": run_id,
             "source_order": 0,
