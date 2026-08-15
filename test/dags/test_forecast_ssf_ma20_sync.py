@@ -136,3 +136,17 @@ def test_sync_task_propagates_no_eligible_snapshot_failure(monkeypatch, sync_mod
 
     with pytest.raises(NoEligibleForecastSnapshotError, match="no completed forecast snapshot eligible"):
         sync_module.sync_forecast_ssf_targets(**monday_sync_context())
+
+
+def test_sync_task_propagates_partial_failure(monkeypatch, sync_module):
+    from monitor.forecast_ssf_monitor_sync import ForecastSSFMonitorSyncPartialFailure
+
+    monkeypatch.setattr(sync_module, "is_a_share_trade_date", lambda _: True)
+    service = MagicMock()
+    service.return_value.sync.side_effect = ForecastSSFMonitorSyncPartialFailure(
+        {"errors": [{"stock_code": "600001"}]}
+    )
+    monkeypatch.setattr("monitor.forecast_ssf_monitor_sync.ForecastSSFMonitorSyncService", service)
+
+    with pytest.raises(ForecastSSFMonitorSyncPartialFailure):
+        sync_module.sync_forecast_ssf_targets(**monday_sync_context())

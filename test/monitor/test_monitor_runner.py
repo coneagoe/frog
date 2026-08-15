@@ -575,10 +575,7 @@ def test_workflow_alert_includes_candidate_evidence():
     storage.load_monitor_targets.return_value = [target]
     storage.get_forecast_ssf_candidate_for_target.return_value = _candidate_evidence()
     blackroom = MagicMock()
-    blackroom.is_banned.side_effect = [
-        {"success": True, "data": {"banned": False}},
-        {"success": True, "data": {"banned": False}},
-    ]
+    blackroom.is_banned.return_value = {"success": True, "data": {"banned": False}}
 
     with (
         patch("monitor.monitor_runner.get_storage", return_value=storage),
@@ -594,17 +591,14 @@ def test_workflow_alert_includes_candidate_evidence():
         assert value in body
 
 
-def test_workflow_final_blackroom_recheck_suppresses_email_after_evidence_lookup():
+def test_workflow_alert_loads_evidence_after_one_clear_blackroom_check():
     target = _make_target(last_state=False)
     target.workflow = "forecast_ssf_ma20"
     storage = MagicMock()
     storage.load_monitor_targets.return_value = [target]
     storage.get_forecast_ssf_candidate_for_target.return_value = _candidate_evidence()
     blackroom = MagicMock()
-    blackroom.is_banned.side_effect = [
-        {"success": True, "data": {"banned": False}},
-        {"success": True, "data": {"banned": True}},
-    ]
+    blackroom.is_banned.return_value = {"success": True, "data": {"banned": False}}
 
     with (
         patch("monitor.monitor_runner.get_storage", return_value=storage),
@@ -615,10 +609,9 @@ def test_workflow_final_blackroom_recheck_suppresses_email_after_evidence_lookup
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
-    email.assert_not_called()
-    storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
-    storage.update_monitor_target_state.assert_not_called()
-    assert summary.skipped == 1
+    email.assert_called_once()
+    assert blackroom.is_banned.call_count == 1
+    assert summary.triggered == 1
 
 
 def test_workflow_blackroom_disable_failure_counts_as_error():

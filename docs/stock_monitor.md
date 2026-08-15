@@ -36,6 +36,8 @@ Tushare `forecast` 数据可经 `DownloadManager.download_forecast(ann_date=...)
 
 没有符合条件的已完成快照时，同步服务会在修改候选或目标前失败。已确认不符合条件的工作流目标会被禁用并保留候选链接；暂时无法确认的证据会标记为 `deferred` 并保留目标。
 
+单只股票的生命周期持久化失败不会阻止其他股票完成同步，但会使 DAG 以包含每只失败股票详细信息的结构化错误失败。
+
 ### 黑屋管理（全局禁买）
 
 - `stock-monitor blackroom ban --stock-code ... --market ... --ban-days ... [--note ...]`
