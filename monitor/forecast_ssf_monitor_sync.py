@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
+from math import isfinite
 from typing import Any, cast
 
 import pandas as pd
@@ -15,14 +17,20 @@ from common.const import (
     COL_FORECAST_TYPE,
     COL_LIST_STATUS,
     COL_STOCK_ID,
+    COL_STOCK_NAME,
 )
 from monitor.blackroom_service import BlackroomService
 from storage import get_storage
 from top10_floatholder.ssf_detector import is_social_security_holder
 
 WORKFLOW_NAME = "forecast_ssf_ma20"
-_CONDITION = {"type": "price_vs_ma", "direction": "above", "period": 20, "workflow": WORKFLOW_NAME}
+_CONDITION = {"type": "close_cross_ma", "direction": "above", "period": 20, "workflow": WORKFLOW_NAME}
 _NOTE = "业绩预增+社保基金+MA20"
+_SUPPORTED_A_SHARE_CODE = re.compile(r"^[036]\d{5}$")
+
+
+class NoEligibleForecastSnapshotError(RuntimeError):
+    """Raised when synchronization has no completed immutable forecast input."""
 
 
 class ForecastSSFMonitorSyncService:
@@ -33,23 +41,34 @@ class ForecastSSFMonitorSyncService:
         )
 
     def sync(self, as_of_date: date) -> dict[str, Any]:
-        forecasts = self.storage.load_active_forecast_candidates(as_of_date)
-        current_rows = [cast(dict[str, Any], row) for row in forecasts.to_dict("records")]
+        snapshot = self.storage.get_latest_completed_forecast_snapshot_run(as_of_date)
+        if snapshot is None:
+            raise NoEligibleForecastSnapshotError(
+                f"no completed forecast snapshot eligible as of {as_of_date.isoformat()}"
+            )
+        forecasts = self.storage.load_selected_forecast_snapshot_records(snapshot.id, as_of_date)
+        selected_rows = [cast(dict[str, Any], row) for row in forecasts.to_dict("records")]
         previous_candidates = {
             candidate.stock_code: candidate for candidate in self.storage.list_forecast_ssf_candidates()
         }
-        current_stock_codes = {str(row[COL_STOCK_ID]) for row in current_rows}
-        all_stock_codes = current_stock_codes | set(previous_candidates)
+        selected_stock_codes = {str(row[COL_STOCK_ID]) for row in selected_rows}
+        all_stock_codes = selected_stock_codes | set(previous_candidates)
         listing = self.storage.load_a_stock_listing_status(sorted(all_stock_codes))
-        listing_by_code = {str(row[COL_STOCK_ID]): row for row in listing.to_dict("records")}
+        listing_by_code: dict[str, dict[str, Any]] = {
+            str(row[COL_STOCK_ID]): cast(dict[str, Any], row) for row in listing.to_dict("records")
+        }
+        current_rows = [
+            row for row in selected_rows if self._qualifies(row, listing_by_code.get(str(row[COL_STOCK_ID])))
+        ]
+        current_stock_codes = {str(row[COL_STOCK_ID]) for row in current_rows}
         summary = {
-            "forecast_candidates": len(forecasts),
+            "forecast_candidates": len(current_rows),
             "blackroom_excluded": 0,
             "ssf_matched": 0,
             "deferred": 0,
             "created": 0,
             "updated": 0,
-            "deleted": 0,
+            "disabled": 0,
             "unchanged": 0,
             "errors": 0,
         }
@@ -67,8 +86,7 @@ class ForecastSSFMonitorSyncService:
                 banned=blackroom_results[str(row[COL_STOCK_ID])],
                 previous_candidate=previous_candidates.get(str(row[COL_STOCK_ID])),
                 summary=summary,
-                listed=str(row[COL_STOCK_ID]) in listing_by_code
-                and listing_by_code[str(row[COL_STOCK_ID])].get(COL_LIST_STATUS) == "L",
+                snapshot=snapshot,
             )
         self._retire_absent_candidates(
             current_stock_codes=current_stock_codes,
@@ -76,6 +94,8 @@ class ForecastSSFMonitorSyncService:
             as_of_date=as_of_date,
             summary=summary,
             listing_by_code=listing_by_code,
+            snapshot=snapshot,
+            selected_rows_by_code={str(row[COL_STOCK_ID]): row for row in selected_rows},
         )
         return {"success": True, "code": "OK", "message": "forecast SSF monitor targets synchronized", "data": summary}
 
@@ -86,6 +106,8 @@ class ForecastSSFMonitorSyncService:
         as_of_date: date,
         summary: dict[str, int],
         listing_by_code: dict[str, Any],
+        snapshot: Any,
+        selected_rows_by_code: dict[str, dict[str, Any]],
     ) -> None:
         for stock_code, candidate in previous_candidates.items():
             if stock_code in current_stock_codes:
@@ -96,7 +118,11 @@ class ForecastSSFMonitorSyncService:
                 else "forecast_no_longer_qualified"
             )
             state = "delisted_or_unlisted" if reason == "delisted_or_unlisted" else "ineligible"
-            evidence = self._with_lifecycle(candidate, {}, as_of_date, state, reason)
+            evidence = self._snapshot_evidence(snapshot)
+            selected_row = selected_rows_by_code.get(stock_code)
+            if selected_row is not None:
+                evidence["forecast"] = self._forecast_evidence(selected_row)
+            evidence = self._with_lifecycle(candidate, evidence, as_of_date, state, reason)
             target_id = getattr(candidate, "monitor_target_id", None)
             if target_id is None:
                 self._persist(
@@ -142,17 +168,13 @@ class ForecastSSFMonitorSyncService:
         banned: bool,
         previous_candidate: Any | None,
         summary: dict[str, int],
-        listed: bool,
+        snapshot: Any,
     ) -> None:
         stock_code = str(row[COL_STOCK_ID])
         report_end_date = self._as_date(row[COL_END_DATE])
         evidence: dict[str, Any] = {
-            "forecast": {
-                "report_end_date": report_end_date.isoformat(),
-                "ann_date": self._as_date(row[COL_ANN_DATE]).isoformat(),
-                "type": str(row[COL_FORECAST_TYPE]),
-                "p_change_min": float(row[COL_FORECAST_CHANGE_MIN]),
-            },
+            **self._snapshot_evidence(snapshot),
+            "forecast": self._forecast_evidence(row),
             "shareholder": {"ann_date": None, "matched_holder": None},
             "blackroom": {"banned": banned},
         }
@@ -162,19 +184,6 @@ class ForecastSSFMonitorSyncService:
         if previous_candidate is None or getattr(previous_candidate, "monitor_target_id", None) != target_id:
             target = None
             target_id = None
-        if not listed:
-            self._delete_target_or_persist(
-                stock_code,
-                report_end_date,
-                "delisted_or_unlisted",
-                "delisted_or_unlisted",
-                evidence,
-                target,
-                summary,
-                previous_candidate,
-                as_of_date,
-            )
-            return
         if banned:
             summary["blackroom_excluded"] += 1
             self._delete_target_or_persist(
@@ -386,7 +395,7 @@ class ForecastSSFMonitorSyncService:
         if target is not None and self.storage.disable_forecast_ssf_target_with_candidate_transition(
             target.id, state, state_reason, evidence
         ):
-            summary["deleted"] += 1
+            summary["disabled"] += 1
             return
         self._persist(stock_code, report_end_date, state, state_reason, evidence, None)
 
@@ -471,6 +480,44 @@ class ForecastSSFMonitorSyncService:
             lifecycle["previous_state"] = previous_state
         result["lifecycle"] = lifecycle
         return result
+
+    @staticmethod
+    def _qualifies(row: dict[str, Any], listing: dict[str, Any] | None) -> bool:
+        stock_code = str(row.get(COL_STOCK_ID, ""))
+        if _SUPPORTED_A_SHARE_CODE.fullmatch(stock_code) is None:
+            return False
+        if listing is None or listing.get(COL_LIST_STATUS) != "L":
+            return False
+        if "ST" in str(listing.get(COL_STOCK_NAME, "")).upper():
+            return False
+        if row.get(COL_FORECAST_TYPE) != "预增":
+            return False
+        try:
+            growth_min = float(row[COL_FORECAST_CHANGE_MIN])
+        except (KeyError, TypeError, ValueError):
+            return False
+        return isfinite(growth_min) and growth_min >= 50
+
+    @staticmethod
+    def _snapshot_evidence(snapshot: Any) -> dict[str, Any]:
+        return {
+            "snapshot": {
+                "id": snapshot.id,
+                "report_end_date": snapshot.report_end_date.isoformat(),
+                "announcement_start_date": snapshot.announcement_start_date.isoformat(),
+                "announcement_end_date": snapshot.announcement_end_date.isoformat(),
+                "completed_at": snapshot.completed_at.isoformat(),
+            }
+        }
+
+    def _forecast_evidence(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "report_end_date": self._as_date(row[COL_END_DATE]).isoformat(),
+            "ann_date": self._as_date(row[COL_ANN_DATE]).isoformat(),
+            "type": str(row[COL_FORECAST_TYPE]),
+            "p_change_min": float(row[COL_FORECAST_CHANGE_MIN]),
+            "source_order": int(row["source_order"]),
+        }
 
     @staticmethod
     def _as_date(value: Any) -> date:
