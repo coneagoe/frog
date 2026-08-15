@@ -638,6 +638,7 @@ def test_dry_run_reports_all_schema_readiness_facts(postgres_schema) -> None:
     assert {check.name for check in audits["storage"].checks} == {
         "ck_daily_bar_diagnostics_provider_outcome_status",
         "ck_ssf_change_signals_event_types",
+        "forecast_snapshot_schema_contract",
     }
     paper_market = next(group for group in audits["paper_trading"].groups if group.type_name == "paper_market")
     round_trips_market = next(
