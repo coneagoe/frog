@@ -8,7 +8,7 @@ from typing import Iterable, Optional, cast
 import numpy as np
 import pandas as pd
 
-from common.const import AdjustType, PeriodType
+from common.const import COL_DATE, AdjustType, PeriodType
 from storage import get_storage
 
 # How many calendar days to fetch per requested trading period
@@ -188,6 +188,21 @@ def fetch_price(stock_code: str, market: str) -> float:
 
 def fetch_current_price(stock_code: str, market: str) -> float:
     return fetch_price(stock_code, market)
+
+
+def fetch_final_close_history_df(stock_code: str, as_of_date: date, min_periods: int) -> Optional[pd.DataFrame]:
+    """Load the final close history exclusively from daily HFQ storage."""
+    start_day = as_of_date - timedelta(days=min_periods * _CALENDAR_MULTIPLIER)
+    df = get_storage().load_history_data_stock(
+        stock_id=stock_code,
+        period=PeriodType.DAILY,
+        adjust=AdjustType.HFQ,
+        start_date=start_day.isoformat(),
+        end_date=as_of_date.isoformat(),
+    )
+    if df is None or len(df) < min_periods:
+        return None
+    return df.sort_values(by=COL_DATE).reset_index(drop=True)
 
 
 def fetch_history_df(

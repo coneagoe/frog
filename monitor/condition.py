@@ -100,6 +100,23 @@ def evaluate_condition(
         triggered = float(close) > ma if direction == "above" else float(close) < ma
         return ConditionResult.TRIGGERED if triggered else ConditionResult.NOT_TRIGGERED
 
+    elif ctype == "close_cross_ma":
+        period = int(condition["period"])
+        if history_df is None or len(history_df) < period + 1:
+            return ConditionResult.INSUFFICIENT_DATA
+        closes = pd.to_numeric(history_df[COL_CLOSE], errors="coerce").iloc[-(period + 1) :]
+        if closes.isna().any():
+            return ConditionResult.INSUFFICIENT_DATA
+        previous_close = float(closes.iloc[-2])
+        current_close = float(closes.iloc[-1])
+        previous_ma = float(closes.iloc[:-1].mean())
+        current_ma = float(closes.iloc[1:].mean())
+        return (
+            ConditionResult.TRIGGERED
+            if previous_close <= previous_ma and current_close > current_ma
+            else ConditionResult.NOT_TRIGGERED
+        )
+
     elif ctype == "ma_cross":
         fast = int(condition["fast"])
         slow = int(condition["slow"])

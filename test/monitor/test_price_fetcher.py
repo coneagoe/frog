@@ -1,10 +1,19 @@
 import sys
+from datetime import date
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
+import pytest
 
-from monitor.price_fetcher import fetch_current_price, fetch_history_df, fetch_price
+from common.const import COL_CLOSE, COL_DATE, AdjustType, PeriodType
+from monitor.price_fetcher import (
+    fetch_current_price,
+    fetch_final_close_history_df,
+    fetch_history_df,
+    fetch_price,
+)
 
 
 def _install_tushare_stub(monkeypatch, pro_client):
@@ -105,3 +114,37 @@ def test_fetch_history_df_prefers_tushare_daily_for_a_share(monkeypatch):
     assert result is not None
     assert list(result["日期"]) == ["20260601", "20260602", "20260603"]
     assert list(result["收盘"]) == [25.0, 26.0, 27.0]
+
+
+def test_fetch_final_close_history_uses_hfq_storage_only(monkeypatch):
+    storage = SimpleNamespace(
+        load_history_data_stock=MagicMock(
+            return_value=pd.DataFrame({COL_DATE: ["2026-06-03", "2026-06-02"], COL_CLOSE: [11.0, 10.0]})
+        )
+    )
+    monkeypatch.setattr("monitor.price_fetcher.get_storage", lambda: storage)
+    monkeypatch.setattr(
+        "monitor.price_fetcher._fetch_a_share_daily_history_from_tushare",
+        lambda *_args: pytest.fail("final-close history must not call Tushare"),
+    )
+
+    result = fetch_final_close_history_df("600519", date(2026, 6, 3), min_periods=2)
+
+    storage.load_history_data_stock.assert_called_once_with(
+        stock_id="600519",
+        period=PeriodType.DAILY,
+        adjust=AdjustType.HFQ,
+        start_date="2026-05-28",
+        end_date="2026-06-03",
+    )
+    assert result is not None
+    assert list(result[COL_DATE]) == ["2026-06-02", "2026-06-03"]
+
+
+def test_fetch_final_close_history_returns_none_for_short_storage_result(monkeypatch):
+    storage = SimpleNamespace(
+        load_history_data_stock=MagicMock(return_value=pd.DataFrame({COL_DATE: ["2026-06-03"], COL_CLOSE: [11.0]}))
+    )
+    monkeypatch.setattr("monitor.price_fetcher.get_storage", lambda: storage)
+
+    assert fetch_final_close_history_df("600519", date(2026, 6, 3), min_periods=2) is None

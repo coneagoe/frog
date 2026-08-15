@@ -50,6 +50,8 @@ def _format_condition_summary(condition: dict[str, Any] | None) -> str:
     if ctype == "price_vs_ma":
         prefix = "价格低于" if direction == "below" else "价格高于"
         return f"{prefix}{condition.get('period')}日均线"
+    if ctype == "close_cross_ma":
+        return f"收盘价上穿{condition.get('period')}日均线"
     if ctype == "ma_cross":
         prefix = "下穿" if direction == "death" else "上穿"
         return f"{condition.get('fast')}日均线{prefix}{condition.get('slow')}日均线"
@@ -113,6 +115,7 @@ class MonitorTargetService:
             self._validate_stock_code(stock_code)
             self._validate_market(market)
             self._validate_frequency(frequency)
+            self._validate_condition_scope(parsed_condition, market, frequency)
             self._validate_reset_mode(reset_mode)
             self._validate_bool(enabled, "enabled")
             self._validate_bool(last_state, "last_state")
@@ -148,6 +151,15 @@ class MonitorTargetService:
                 updates["condition"] = self._parse_and_validate_condition(updates["condition"])
             if "frequency" in updates:
                 self._validate_frequency(updates["frequency"])
+            if {"condition", "market", "frequency"} & set(updates):
+                existing_target = self.storage.get_monitor_target(target_id)
+                if existing_target is None:
+                    raise TargetNotFoundError(f"monitor target not found: {target_id}")
+                self._validate_condition_scope(
+                    updates.get("condition", existing_target.condition),
+                    updates.get("market", existing_target.market),
+                    updates.get("frequency", existing_target.frequency),
+                )
             if "reset_mode" in updates:
                 self._validate_reset_mode(updates["reset_mode"])
             if "enabled" in updates:
@@ -292,6 +304,11 @@ class MonitorTargetService:
     def _validate_frequency(self, frequency: Any) -> None:
         if not isinstance(frequency, str) or frequency not in MonitorFrequency:
             raise TargetValidationError(f"frequency 必须是 {sorted(MonitorFrequency)} 之一")
+
+    @staticmethod
+    def _validate_condition_scope(condition: dict[str, Any], market: str, frequency: str) -> None:
+        if condition.get("type") == "close_cross_ma" and (market != "A" or frequency != "daily"):
+            raise TargetValidationError("close_cross_ma 仅支持 A 股日频监控")
 
     def _validate_reset_mode(self, reset_mode: Any) -> None:
         if not isinstance(reset_mode, str) or reset_mode not in MonitorResetMode:

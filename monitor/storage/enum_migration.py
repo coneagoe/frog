@@ -131,9 +131,13 @@ _CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
 _CONDITION_CHECK_SQL = (
     "CHECK (jsonb_typeof(condition::jsonb) = 'object' AND condition::jsonb ? 'type' "
     "AND condition::jsonb->>'type' IS NOT NULL AND condition::jsonb->>'type' IN "
-    "('price_threshold', 'price_cross_ma', 'price_vs_ma', 'ma_cross', 'change_pct', 'rsi'))"
+    "('price_threshold', 'price_cross_ma', 'price_vs_ma', 'close_cross_ma', 'ma_cross', 'change_pct', 'rsi'))"
 )
 _NORMALIZED_CONDITION_CHECK = (
+    "checkjsonb_typeofcondition='object'andcondition?'type'andcondition->>'type'isnotnullandcondition->>'type'=anyarray["
+    "'price_threshold','price_cross_ma','price_vs_ma','close_cross_ma','ma_cross','change_pct','rsi']"
+)
+_NORMALIZED_LEGACY_CONDITION_CHECK = (
     "checkjsonb_typeofcondition='object'andcondition?'type'andcondition->>'type'isnotnullandcondition->>'type'=anyarray["
     "'price_threshold','price_cross_ma','price_vs_ma','ma_cross','change_pct','rsi']"
 )
@@ -169,7 +173,7 @@ def _adapter_apply(connection: Connection) -> bool:
         for group in MONITOR_ENUM_GROUPS
         for column in group.columns
     )
-    changed = changed or bool(missing_tables)
+    changed = changed or bool(missing_tables) or _condition_check_is_legacy(connection)
     if missing_tables:
         for group in MONITOR_ENUM_GROUPS:
             _create_type(connection, group)
@@ -366,7 +370,8 @@ def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
                 if dependencies:
                     raise MonitorEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
     else:
-        _validate_condition_check(connection, required=False)
+        if not _condition_check_is_legacy(connection):
+            _validate_condition_check(connection, required=False)
     return missing_tables
 
 
@@ -467,11 +472,17 @@ def _alter_group(connection: Connection, group: MonitorEnumGroup, *, rollback: b
 
 
 def _add_condition_check(connection: Connection) -> None:
-    if _condition_check_definition(connection) is not None:
+    definition = _condition_check_definition(connection)
+    if definition is None:
+        connection.execute(
+            text(f"ALTER TABLE stock_monitor_targets ADD CONSTRAINT {_CONDITION_CHECK_NAME} {_CONDITION_CHECK_SQL}")
+        )
         return
-    connection.execute(
-        text(f"ALTER TABLE stock_monitor_targets ADD CONSTRAINT {_CONDITION_CHECK_NAME} {_CONDITION_CHECK_SQL}")
-    )
+    if _normalize_condition_check(definition) == _NORMALIZED_LEGACY_CONDITION_CHECK:
+        connection.execute(text(f"ALTER TABLE stock_monitor_targets DROP CONSTRAINT {_CONDITION_CHECK_NAME}"))
+        connection.execute(
+            text(f"ALTER TABLE stock_monitor_targets ADD CONSTRAINT {_CONDITION_CHECK_NAME} {_CONDITION_CHECK_SQL}")
+        )
 
 
 def _rollback(connection: Connection) -> bool:
@@ -616,11 +627,19 @@ def _validate_condition_check(connection: Connection, *, required: bool) -> None
         if required:
             raise MonitorEnumMigrationError(f"missing condition constraint: {_CONDITION_CHECK_NAME}")
         return
-    normalized = (
+    if _normalize_condition_check(definition) != _NORMALIZED_CONDITION_CHECK:
+        raise MonitorEnumMigrationError(f"conflicting condition constraint: {_CONDITION_CHECK_NAME}")
+
+
+def _condition_check_is_legacy(connection: Connection) -> bool:
+    definition = _condition_check_definition(connection)
+    return definition is not None and _normalize_condition_check(definition) == _NORMALIZED_LEGACY_CONDITION_CHECK
+
+
+def _normalize_condition_check(definition: str) -> str:
+    return (
         _normalize_expression(definition).replace("::text", "").replace("::jsonb", "").replace("(", "").replace(")", "")
     )
-    if normalized != _NORMALIZED_CONDITION_CHECK:
-        raise MonitorEnumMigrationError(f"conflicting condition constraint: {_CONDITION_CHECK_NAME}")
 
 
 def _ensure_indexes(connection: Connection) -> None:

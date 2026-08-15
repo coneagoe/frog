@@ -6,6 +6,7 @@ from monitor.monitor_target_service import (
     MonitorTargetService,
     TargetNotFoundError,
     TargetValidationError,
+    format_monitor_target_label,
 )
 
 
@@ -320,6 +321,46 @@ def test_add_target_accepts_price_vs_ma_condition():
     )
 
     assert result["success"] is True
+
+
+def test_add_target_rejects_close_cross_ma_outside_a_share_daily_scope():
+    storage = MagicMock()
+    service = MonitorTargetService(storage=storage)
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+
+    non_a = service.add_target(stock_code="600519", market="HK", condition=condition)
+    intraday = service.add_target(stock_code="600519", market="A", condition=condition, frequency="intraday")
+
+    assert non_a["code"] == "VALIDATION_ERROR"
+    assert intraday["code"] == "VALIDATION_ERROR"
+    storage.create_monitor_target.assert_not_called()
+
+
+def test_update_target_rejects_close_cross_ma_scope_changes():
+    storage = MagicMock()
+    storage.get_monitor_target.return_value = _make_target(
+        condition={"type": "close_cross_ma", "direction": "above", "period": 20}
+    )
+    service = MonitorTargetService(storage=storage)
+
+    market_result = service.update_target(1, market="HK")
+    frequency_result = service.update_target(1, frequency="intraday")
+
+    assert market_result["code"] == "VALIDATION_ERROR"
+    assert frequency_result["code"] == "VALIDATION_ERROR"
+    storage.update_monitor_target.assert_not_called()
+
+
+def test_empty_note_close_cross_ma_target_uses_final_close_label():
+    assert (
+        format_monitor_target_label(
+            stock_code=None,
+            stock_name=None,
+            condition={"type": "close_cross_ma", "direction": "above", "period": 20},
+            note="",
+        )
+        == "收盘价上穿20日均线"
+    )
 
 
 def test_custom_errors_are_exposed_for_validation_and_not_found_paths():

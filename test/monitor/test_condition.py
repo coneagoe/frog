@@ -148,6 +148,44 @@ def test_price_vs_ma_requires_complete_daily_history():
     assert result == ConditionResult.INSUFFICIENT_DATA
 
 
+def test_close_cross_ma_requires_a_real_upward_crossover():
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+    history = _make_prices([10.0] * 20 + [11.0])
+
+    assert evaluate_condition(condition, current_price=None, history_df=history) == ConditionResult.TRIGGERED
+
+
+def test_close_cross_ma_allows_previous_equality_but_rejects_current_equality():
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+
+    assert evaluate_condition(condition, None, _make_prices([10.0] * 20 + [11.0])) == ConditionResult.TRIGGERED
+    assert evaluate_condition(condition, None, _make_prices([10.0] * 21)) == ConditionResult.NOT_TRIGGERED
+
+
+def test_close_cross_ma_rejects_a_price_already_above_its_ma():
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+    history = _make_prices([10.0] * 19 + [11.0, 12.0])
+
+    assert evaluate_condition(condition, None, history) == ConditionResult.NOT_TRIGGERED
+
+
+def test_close_cross_ma_uses_only_the_final_period_plus_one_closes():
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+    history = _make_prices([100.0] * 5 + [10.0] * 20 + [11.0])
+
+    assert evaluate_condition(condition, None, history) == ConditionResult.TRIGGERED
+
+
+def test_close_cross_ma_rejects_missing_or_short_close_series():
+    condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
+
+    assert evaluate_condition(condition, None, _make_prices([10.0] * 20)) == ConditionResult.INSUFFICIENT_DATA
+    assert (
+        evaluate_condition(condition, None, _make_prices([10.0] * 20 + [float("nan")]))
+        == ConditionResult.INSUFFICIENT_DATA
+    )
+
+
 def test_ma_cross_golden_triggers():
     # fast MA(3) > slow MA(5) → golden cross
     closes = [10.0, 10.0, 10.0, 10.0, 10.0, 20.0, 20.0, 20.0]
