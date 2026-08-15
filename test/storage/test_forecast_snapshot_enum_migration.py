@@ -4,6 +4,7 @@ import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from threading import Event
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -265,7 +266,7 @@ def test_migration_advances_legacy_snapshot_run_identity_sequence(postgres_schem
     assert acquired.id > 500
 
 
-def test_postgresql_acquisition_reuses_completion_after_final_lookup(postgres_schema, monkeypatch) -> None:
+def test_postgresql_acquisition_waits_for_locked_completion_before_active_check(postgres_schema, monkeypatch) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
         assert migrate_enums(connection).converted is True
@@ -275,31 +276,46 @@ def test_postgresql_acquisition_reuses_completion_after_final_lookup(postgres_sc
     db.engine = engine.execution_options(schema_translate_map={None: schema})
     db.Session = sessionmaker(bind=db.engine)
     first = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
-    original_completed_lookup = StorageDb._get_completed_forecast_snapshot_run
-    lookup_count = 0
+    completion_ready = Event()
+    acquisition_lock_attempted = Event()
+    release_completion = Event()
+    original_lock = StorageDb._lock_forecast_snapshot_range
 
-    def complete_after_final_lookup(*args, **kwargs):
-        nonlocal lookup_count
-        lookup_count += 1
-        if lookup_count == 2:
-            db.complete_forecast_snapshot_run(
-                first.id,
-                {
-                    "covered_date_count": 1,
-                    "source_row_count": 0,
-                    "record_count": 0,
-                    "duplicate_record_count": 0,
-                    "same_day_conflict_count": 0,
-                },
-            )
-            return None
-        return original_completed_lookup(*args, **kwargs)
+    def observe_acquisition_lock(*args, **kwargs):
+        acquisition_lock_attempted.set()
+        return original_lock(*args, **kwargs)
 
-    monkeypatch.setattr(StorageDb, "_get_completed_forecast_snapshot_run", staticmethod(complete_after_final_lookup))
-    reused = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+    monkeypatch.setattr(StorageDb, "_lock_forecast_snapshot_range", staticmethod(observe_acquisition_lock))
+
+    def complete_in_independent_transaction() -> None:
+        assert db.Session is not None
+        with db.Session.begin() as session:
+            run = session.get(ForecastSnapshotRun, first.id)
+            assert run is not None
+            original_lock(session, run.report_end_date, run.announcement_start_date, run.announcement_end_date)
+            run.status = "completed"
+            session.flush()
+            completion_ready.set()
+            assert release_completion.wait(timeout=10)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        completion = executor.submit(complete_in_independent_transaction)
+        assert completion_ready.wait(timeout=10)
+        acquired = executor.submit(
+            db.acquire_forecast_snapshot_run,
+            date(2026, 6, 30),
+            date(2026, 7, 1),
+            date(2026, 7, 1),
+        )
+        try:
+            assert acquisition_lock_attempted.wait(timeout=10)
+        finally:
+            release_completion.set()
+        completion.result(timeout=10)
+        reused = acquired.result(timeout=10)
 
     assert reused.id == first.id
-    with db.engine.connect() as connection:
+    with _connection(engine, schema) as connection:
         assert connection.execute(text("SELECT count(*) FROM forecast_snapshot_runs")).scalar_one() == 1
 
 
