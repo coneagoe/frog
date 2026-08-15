@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import UTC, date, datetime
 from threading import Event
 from time import monotonic
 
@@ -245,6 +245,45 @@ def test_migration_upgrades_complete_legacy_snapshot_pair_for_storage_lifecycle(
     )
 
     assert completed.status == "completed"
+
+
+def test_postgresql_selects_latest_eligible_completed_snapshot_run(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_enums(connection).converted is True
+        for announcement_end_date, status, completed_at in (
+            (date(2026, 7, 11), "completed", datetime(2026, 7, 11, tzinfo=UTC)),
+            (date(2026, 7, 9), "completed", datetime(2026, 7, 10, tzinfo=UTC)),
+            (date(2026, 7, 9), "completed", datetime(2026, 7, 11, tzinfo=UTC)),
+            (date(2026, 7, 9), "completed", datetime(2026, 7, 11, tzinfo=UTC)),
+            (date(2026, 7, 10), "running", None),
+            (date(2026, 7, 10), "failed", None),
+        ):
+            connection.execute(
+                text(
+                    "INSERT INTO forecast_snapshot_runs "
+                    "(report_end_date, announcement_start_date, announcement_end_date, attempt, status, completed_at) "
+                    "VALUES ('2026-06-30', :announcement_end_date, :announcement_end_date, "
+                    "(SELECT COALESCE(MAX(attempt), 0) + 1 FROM forecast_snapshot_runs), :status, :completed_at)"
+                ),
+                {
+                    "announcement_end_date": announcement_end_date,
+                    "status": status,
+                    "completed_at": completed_at,
+                },
+            )
+        connection.commit()
+
+    db = StorageDb.__new__(StorageDb)
+    db.engine = engine.execution_options(schema_translate_map={None: schema})
+    db.Session = sessionmaker(bind=db.engine)
+
+    selected = db.get_latest_completed_forecast_snapshot_run(date(2026, 7, 10))
+
+    assert selected is not None
+    assert selected.announcement_end_date == date(2026, 7, 9)
+    assert selected.completed_at == datetime(2026, 7, 11, tzinfo=UTC)
+    assert selected.id == 4
 
 
 def test_migration_advances_legacy_snapshot_run_identity_sequence(postgres_schema) -> None:
