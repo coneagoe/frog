@@ -88,7 +88,32 @@ def test_snapshot_callable_builds_parsed_request_and_returns_completed_summary(m
     ("context", "parameter"),
     [
         ({}, "dag_run"),
-        ({"dag_run": SimpleNamespace(conf={})}, "report_end_date"),
+        *(
+            (
+                {
+                    "dag_run": SimpleNamespace(
+                        conf={key: value for key, value in valid_context()["dag_run"].conf.items() if key != parameter}
+                    )
+                },
+                parameter,
+            )
+            for parameter in ("report_end_date", "announcement_start_date", "announcement_end_date")
+        ),
+        *(
+            (
+                {
+                    "dag_run": SimpleNamespace(
+                        conf={
+                            **valid_context()["dag_run"].conf,
+                            parameter: value,
+                        }
+                    )
+                },
+                parameter,
+            )
+            for parameter in ("report_end_date", "announcement_start_date", "announcement_end_date")
+            for value in (None, 20260701)
+        ),
         (
             {
                 "dag_run": SimpleNamespace(

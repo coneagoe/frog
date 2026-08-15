@@ -28,7 +28,11 @@ def test_main_prints_completed_snapshot_summary(monkeypatch, capsys):
         == 0
     )
     assert service.create_snapshot.call_args.args[0].report_end_date == date(2026, 6, 30)
-    assert "run_id=7 attempt=1 status=completed requested_date_count=2" in capsys.readouterr().out
+    assert capsys.readouterr().out == (
+        "run_id=7 attempt=1 status=completed requested_date_count=2 covered_date_count=2 "
+        "source_row_count=3 record_count=3 duplicate_record_count=0 same_day_conflict_count=0 "
+        "failure_detail=\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -96,7 +100,9 @@ def test_main_prints_failed_snapshot_diagnostic_and_returns_one(monkeypatch, cap
         == 1
     )
 
-    output = capsys.readouterr().out
-    assert "status=failed" in output
-    assert "failure_detail=2026-07-02: RuntimeError: unavailable" in output
+    assert capsys.readouterr().out == (
+        "run_id=8 attempt=2 status=failed requested_date_count=2 covered_date_count=1 "
+        "source_row_count=3 record_count=3 duplicate_record_count=0 same_day_conflict_count=0 "
+        "failure_detail=2026-07-02: RuntimeError: unavailable\n"
+    )
     parse_config.assert_called_once_with()

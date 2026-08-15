@@ -87,6 +87,20 @@ docker compose down
 否则会删除数据卷导致数据丢失。
 更多细节见 [docker.md](docker.md)。
 
+### 6. 手动创建业绩预告快照
+
+在 Airflow UI 手动触发 `create_forecast_snapshot` DAG，并在运行配置中填写公告日期范围：
+
+```json
+{
+  "report_end_date": "2026-06-30",
+  "announcement_start_date": "2026-07-01",
+  "announcement_end_date": "2026-07-31"
+}
+```
+
+该 DAG 只处理显式指定的范围，不会改变现有的滚动业绩预告下载或回填任务。
+
 ## 工作原理
 
 1. **权限初始化容器** (`airflow-init-permissions`):
