@@ -217,7 +217,8 @@ def test_sync_nonnumeric_snapshot_row_disables_existing_target_and_persists_evid
 
 
 def test_sync_absent_selected_row_marks_current_forecast_provenance_absent() -> None:
-    storage = _storage(_forecasts())
+    storage = _storage(_forecasts("600001"))
+    storage.load_selected_forecast_snapshot_records.return_value = _forecasts()
     storage.list_forecast_ssf_candidates.return_value = [
         SimpleNamespace(
             stock_code="600001",
@@ -237,9 +238,12 @@ def test_sync_absent_selected_row_marks_current_forecast_provenance_absent() -> 
         {COL_STOCK_ID: ["600001"], COL_LIST_STATUS: ["L"], COL_DELISTING_DATE: [None]}
     )
 
-    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
-    evidence = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[3]
+    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args
+    assert result["data"]["disabled"] == 1
+    assert call.args[:3] == (17, "ineligible", "forecast_no_longer_qualified")
+    evidence = call.args[3]
     assert evidence["snapshot"] == _snapshot_evidence()
     assert evidence["forecast"] == {"selected": False, "ann_date": None, "source_order": None}
     assert evidence["lifecycle"]["reason"] == "forecast_no_longer_qualified"
