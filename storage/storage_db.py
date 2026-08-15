@@ -1621,6 +1621,7 @@ class StorageDb:
                 raise DataNotFoundError(f"forecast snapshot run {run_id} not found")
             if run.status != ForecastSnapshotStatus.RUNNING.value:
                 raise StorageError("forecast snapshot run is not running")
+            self._validate_forecast_snapshot_final_counts(counts)
             if counts["covered_date_count"] != run.requested_date_count:
                 raise StorageError("forecast snapshot coverage does not match requested date count")
             self._set_forecast_snapshot_counts(run, counts)
@@ -1684,6 +1685,19 @@ class StorageDb:
         ):
             if field in counts:
                 setattr(run, field, counts[field])
+
+    @staticmethod
+    def _validate_forecast_snapshot_final_counts(counts: dict[str, int]) -> None:
+        required_fields = (
+            "covered_date_count",
+            "source_row_count",
+            "record_count",
+            "duplicate_record_count",
+            "same_day_conflict_count",
+        )
+        missing_fields = [field for field in required_fields if field not in counts]
+        if missing_fields:
+            raise StorageError(f"forecast snapshot final counts are missing: {', '.join(missing_fields)}")
 
     @staticmethod
     def _get_active_forecast_snapshot_run(

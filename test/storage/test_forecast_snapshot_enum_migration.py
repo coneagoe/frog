@@ -203,3 +203,38 @@ def test_postgresql_allows_only_one_running_equivalent_snapshot(postgres_schema)
 
     assert sum(run_id is not None for run_id in acquired) == 1
     assert runs == [("running", 1)]
+
+
+def test_postgresql_allows_only_one_concurrent_snapshot_retry(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(text("DROP TABLE forecast_snapshot_runs"))
+        connection.execute(text("CREATE TYPE forecast_snapshot_status AS ENUM ('running', 'completed', 'failed')"))
+        ForecastSnapshotRun.__table__.create(connection, checkfirst=True)
+        ForecastSnapshotRecord.__table__.create(connection, checkfirst=True)
+
+    first = StorageDb.__new__(StorageDb)
+    first.engine = engine.execution_options(schema_translate_map={None: schema})
+    first.Session = sessionmaker(bind=first.engine)
+    second = StorageDb.__new__(StorageDb)
+    second.engine = engine.execution_options(schema_translate_map={None: schema})
+    second.Session = sessionmaker(bind=second.engine)
+
+    initial = first.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+    first.fail_forecast_snapshot_run(initial.id, "provider unavailable")
+
+    def acquire(db: StorageDb) -> int | None:
+        try:
+            return db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1)).id
+        except StorageError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        acquired = list(executor.map(acquire, (first, second)))
+
+    with _connection(engine, schema) as connection:
+        runs = connection.execute(text("SELECT status, attempt FROM forecast_snapshot_runs ORDER BY attempt")).all()
+
+    assert sum(run_id is not None for run_id in acquired) == 1
+    assert runs == [("failed", 1), ("running", 2)]

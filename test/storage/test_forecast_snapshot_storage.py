@@ -1,7 +1,7 @@
 from datetime import date
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -167,3 +167,65 @@ def test_get_completed_snapshot_run_excludes_running_and_failed_runs(db) -> None
 
     db.fail_forecast_snapshot_run(running.id, "provider unavailable")
     assert db.get_completed_forecast_snapshot_run(report_end_date, date(2026, 7, 1), date(2026, 7, 1)) is None
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [
+        {
+            "covered_date_count": 1,
+            "source_row_count": 0,
+            "record_count": 0,
+            "duplicate_record_count": 0,
+        },
+        {
+            "covered_date_count": 2,
+            "source_row_count": 0,
+            "record_count": 0,
+            "duplicate_record_count": 0,
+            "same_day_conflict_count": 0,
+        },
+    ],
+)
+def test_snapshot_completion_rejects_incomplete_or_mismatched_counts(db, counts) -> None:
+    run = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+
+    with pytest.raises(StorageError):
+        db.complete_forecast_snapshot_run(run.id, counts)
+
+    with db.engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT status FROM forecast_snapshot_runs WHERE id = :run_id"), {"run_id": run.id}
+        ).scalar_one() == "running"
+
+
+def test_failed_snapshot_attempt_retains_diagnostic_and_records_after_retry(db) -> None:
+    first = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+    db.save_forecast_snapshot_records(
+        first.id,
+        [
+            {
+                "ts_code": "600001.SH",
+                "announcement_date": date(2026, 7, 1),
+                "report_end_date": date(2026, 6, 30),
+                "forecast_type": "increase",
+                "source_order": 0,
+            }
+        ],
+        {"source_row_count": 1, "record_count": 1},
+    )
+    db.fail_forecast_snapshot_run(first.id, "provider unavailable")
+    retry = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+
+    with db.engine.connect() as connection:
+        old_attempt = connection.execute(
+            text("SELECT status, failure_detail FROM forecast_snapshot_runs WHERE id = :run_id"), {"run_id": first.id}
+        ).one()
+        records = connection.execute(
+            text("SELECT ts_code, source_order FROM forecast_snapshot_records WHERE run_id = :run_id"),
+            {"run_id": first.id},
+        ).all()
+
+    assert retry.attempt == 2
+    assert old_attempt == ("failed", "provider unavailable")
+    assert records == [("600001.SH", 0)]
