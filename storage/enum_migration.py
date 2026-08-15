@@ -20,7 +20,13 @@ from storage.domain_enums import (
     validate_ssf_event_types,
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
-from storage.model import BlackroomRecord, DailyBarDiagnostic, ForecastSnapshotRun, SSFChangeSignal
+from storage.model import (
+    BlackroomRecord,
+    DailyBarDiagnostic,
+    ForecastSnapshotRecord,
+    ForecastSnapshotRun,
+    SSFChangeSignal,
+)
 
 
 class StorageEnumMigrationError(RuntimeError):
@@ -160,6 +166,7 @@ def _adapter_apply(connection: Connection) -> bool:
         for group in STORAGE_ENUM_GROUPS:
             _alter_group(connection, group, rollback=False)
         _create_snapshot_indexes(connection)
+    ForecastSnapshotRecord.__table__.create(connection, checkfirst=True)
     _add_checks(connection)
     return changed
 

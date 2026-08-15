@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from storage.enum_governance import EnumGovernanceError, migrate_enums
+from storage.enum_migration import STORAGE_ENUM_ADAPTER
 from storage.model import ForecastSnapshotRecord, ForecastSnapshotRun
 from storage.storage_db import StorageDb, StorageError
 
@@ -101,6 +102,27 @@ def _index_predicate(connection: Connection, index_name: str) -> str:
     )
 
 
+def _table_exists(connection: Connection, table_name: str) -> bool:
+    return connection.execute(
+        text("SELECT to_regclass(:table_name) IS NOT NULL"), {"table_name": table_name}
+    ).scalar_one()
+
+
+def _foreign_key_target(connection: Connection, table_name: str) -> str:
+    return str(
+        connection.execute(
+            text(
+                "SELECT ccu.table_name FROM information_schema.table_constraints tc "
+                "JOIN information_schema.constraint_column_usage ccu "
+                "ON ccu.constraint_name = tc.constraint_name AND ccu.constraint_schema = tc.constraint_schema "
+                "WHERE tc.table_schema = current_schema() AND tc.table_name = :table_name "
+                "AND tc.constraint_type = 'FOREIGN KEY'"
+            ),
+            {"table_name": table_name},
+        ).scalar_one()
+    )
+
+
 def _index_definition(connection: Connection, index_name: str) -> tuple[bool, tuple[str, ...], str | None]:
     row = connection.execute(
         text(
@@ -135,12 +157,36 @@ def test_migration_converts_snapshot_status_and_creates_running_range_index(post
         assert migrate_enums(connection).converted is True
 
         assert _column_type(connection, "forecast_snapshot_runs", "status") == "forecast_snapshot_status"
+        assert _table_exists(connection, "forecast_snapshot_records")
+        assert _foreign_key_target(connection, "forecast_snapshot_records") == "forecast_snapshot_runs"
         assert _enum_labels(connection, "forecast_snapshot_status") == ("running", "completed", "failed")
         assert _index_predicate(connection, "uq_forecast_snapshot_running_range") == (
             "(status = 'running'::forecast_snapshot_status)"
         )
         assert migrate_enums(connection, rollback=True).rolled_back is True
         assert _column_type(connection, "forecast_snapshot_runs", "status") == "character varying(16)"
+
+
+def test_migration_creates_both_snapshot_tables_in_a_fresh_schema() -> None:
+    engine = _engine()
+    schema = f"forecast_snapshot_fresh_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    try:
+        with _connection(engine, schema) as connection:
+            assert migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,)).converted is True
+
+            assert _table_exists(connection, "forecast_snapshot_runs")
+            assert _table_exists(connection, "forecast_snapshot_records")
+            assert _foreign_key_target(connection, "forecast_snapshot_records") == "forecast_snapshot_runs"
+            assert _column_type(connection, "forecast_snapshot_runs", "status") == "forecast_snapshot_status"
+            assert _index_predicate(connection, "uq_forecast_snapshot_running_range") == (
+                "(status = 'running'::forecast_snapshot_status)"
+            )
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
 
 
 def test_migration_rejects_unknown_snapshot_status_without_conversion(postgres_schema) -> None:
