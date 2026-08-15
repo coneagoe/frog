@@ -182,6 +182,11 @@ def _create_legacy_storage_tables(connection: Connection) -> None:
         "CREATE TABLE forecast_snapshot_runs ("
         "id integer primary key, report_end_date date NOT NULL, announcement_start_date date NOT NULL, "
         "announcement_end_date date NOT NULL, attempt integer NOT NULL, status varchar(16) NOT NULL)",
+        "CREATE TABLE forecast_snapshot_records ("
+        "id integer primary key, run_id integer NOT NULL REFERENCES forecast_snapshot_runs(id), "
+        "ts_code varchar(32) NOT NULL, "
+        "announcement_date date NOT NULL, report_end_date date NOT NULL, forecast_type varchar(20) NOT NULL, "
+        "growth_min double precision, growth_max double precision, source_order integer NOT NULL)",
         "CREATE TABLE ssf_change_signals ("
         "id integer primary key, status varchar(20) NOT NULL DEFAULT 'signal', "
         "event_types jsonb NOT NULL)",

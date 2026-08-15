@@ -57,6 +57,10 @@ def _create_legacy_schema(connection: Connection) -> None:
         "CREATE TABLE forecast_snapshot_runs (id integer primary key, report_end_date date NOT NULL, "
         "announcement_start_date date NOT NULL, announcement_end_date date NOT NULL, "
         "attempt integer NOT NULL, status varchar(16) NOT NULL)",
+        "CREATE TABLE forecast_snapshot_records (id integer primary key, run_id integer NOT NULL "
+        "REFERENCES forecast_snapshot_runs(id), ts_code varchar(32) NOT NULL, announcement_date date NOT NULL, "
+        "report_end_date date NOT NULL, forecast_type varchar(20) NOT NULL, growth_min double precision, "
+        "growth_max double precision, source_order integer NOT NULL)",
     )
     for statement in statements:
         connection.execute(text(statement))
@@ -189,6 +193,49 @@ def test_migration_creates_both_snapshot_tables_in_a_fresh_schema() -> None:
         engine.dispose()
 
 
+def test_migration_rejects_run_without_snapshot_records() -> None:
+    engine = _engine()
+    schema = f"forecast_snapshot_run_only_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        _create_legacy_schema(connection)
+        connection.execute(text("DROP TABLE forecast_snapshot_records"))
+    try:
+        with _connection(engine, schema) as connection:
+            with pytest.raises(EnumGovernanceError, match="partially missing forecast snapshot tables"):
+                migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+
+            assert not _table_exists(connection, "forecast_snapshot_records")
+            assert _column_type(connection, "forecast_snapshot_runs", "status") == "character varying(16)"
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
+
+
+def test_migration_rejects_snapshot_records_without_run() -> None:
+    engine = _engine()
+    schema = f"forecast_snapshot_records_only_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        _create_legacy_schema(connection)
+        connection.execute(text("DROP TABLE forecast_snapshot_records"))
+        connection.execute(text("DROP TABLE forecast_snapshot_runs"))
+        connection.execute(text("CREATE TABLE forecast_snapshot_records (id integer primary key)"))
+    try:
+        with _connection(engine, schema) as connection:
+            with pytest.raises(EnumGovernanceError, match="partially missing forecast snapshot tables"):
+                migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+
+            assert not _table_exists(connection, "forecast_snapshot_runs")
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
+
+
 def test_migration_rejects_unknown_snapshot_status_without_conversion(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -224,6 +271,7 @@ def test_postgresql_allows_only_one_running_equivalent_snapshot(postgres_schema)
     engine, schema = postgres_schema
     with engine.begin() as connection:
         connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(text("DROP TABLE forecast_snapshot_records"))
         connection.execute(text("DROP TABLE forecast_snapshot_runs"))
         connection.execute(text("CREATE TYPE forecast_snapshot_status AS ENUM ('running', 'completed', 'failed')"))
         ForecastSnapshotRun.__table__.create(connection, checkfirst=True)
@@ -258,6 +306,7 @@ def test_postgresql_recovers_full_attempt_collision_during_concurrent_snapshot_r
     engine, schema = postgres_schema
     with engine.begin() as connection:
         connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(text("DROP TABLE forecast_snapshot_records"))
         connection.execute(text("DROP TABLE forecast_snapshot_runs"))
         connection.execute(text("CREATE TYPE forecast_snapshot_status AS ENUM ('running', 'completed', 'failed')"))
         ForecastSnapshotRun.__table__.create(connection, checkfirst=True)

@@ -139,6 +139,10 @@ def _result(
 
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
+    snapshot_tables = (ForecastSnapshotRun.__table__, ForecastSnapshotRecord.__table__)
+    snapshot_table_count = sum(_table_exists(connection, table.name) for table in snapshot_tables)
+    if snapshot_table_count == 1:
+        raise StorageEnumMigrationError("partially missing forecast snapshot tables")
     missing = _preflight(connection, rollback=rollback)
     if missing and len(missing) != len(_GOVERNED_TABLES):
         raise StorageEnumMigrationError(f"partially missing governed tables: {sorted(missing)}")
