@@ -116,7 +116,7 @@ def test_unfiltered_daily_run_rechecks_workflow_target_blackroom_before_email():
         summary = run_monitor(frequency="daily")
 
     email.assert_not_called()
-    storage.delete_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
+    storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
     assert summary.skipped == 1
 
 
@@ -540,7 +540,7 @@ def test_banned_workflow_target_is_disabled_without_email():
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
     email.assert_not_called()
-    storage.delete_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
+    storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
 
@@ -616,17 +616,17 @@ def test_workflow_final_blackroom_recheck_suppresses_email_after_evidence_lookup
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
     email.assert_not_called()
-    storage.delete_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
+    storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
 
 
-def test_workflow_blackroom_deletion_failure_counts_as_error():
+def test_workflow_blackroom_disable_failure_counts_as_error():
     target = _make_target(last_state=False)
     target.workflow = "forecast_ssf_ma20"
     storage = MagicMock()
     storage.load_monitor_targets.return_value = [target]
-    storage.delete_forecast_ssf_target_for_blackroom.return_value = False
+    storage.disable_forecast_ssf_target_for_blackroom.return_value = False
     blackroom = MagicMock()
     blackroom.is_banned.return_value = {"success": True, "data": {"banned": True}}
 
@@ -642,7 +642,7 @@ def test_workflow_blackroom_deletion_failure_counts_as_error():
     email.assert_not_called()
     assert summary.skipped == 0
     assert summary.errors == 1
-    assert "failed to delete forecast SSF target" in summary.error_details[0]
+    assert "failed to disable forecast SSF target" in summary.error_details[0]
 
 
 def test_workflow_email_failure_does_not_update_triggered_state():

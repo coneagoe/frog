@@ -2461,22 +2461,25 @@ class StorageDb:
             df[COL_ANN_DATE] = pd.to_datetime(df[COL_ANN_DATE])
         return df
 
-    def load_latest_top10_floatholders(self, stock_id: str) -> pd.DataFrame:
+    def load_latest_top10_floatholders(self, stock_id: str, as_of_date: date) -> pd.DataFrame:
         sql = text(
             f'''\
             SELECT *
             FROM {tb_name_top10_floatholders}
             WHERE "{COL_STOCK_ID}" = :stock_id
+              AND "{COL_ANN_DATE}" <= :as_of_date
               AND "{COL_ANN_DATE}" = (
                   SELECT MAX("{COL_ANN_DATE}")
                   FROM {tb_name_top10_floatholders}
                   WHERE "{COL_STOCK_ID}" = :stock_id
+                    AND "{COL_ANN_DATE}" <= :as_of_date
               )
             ORDER BY "{COL_FLOAT_HOLDER_NAME}"
             '''
         )
         assert self.engine is not None
-        df = pd.read_sql(sql, self.engine, params={"stock_id": stock_id})
+        params: dict[str, str | date] = {"stock_id": stock_id, "as_of_date": as_of_date}
+        df = pd.read_sql(sql, self.engine, params=params)
         if COL_ANN_DATE in df.columns:
             df[COL_ANN_DATE] = pd.to_datetime(df[COL_ANN_DATE])
         return df
@@ -2776,21 +2779,21 @@ class StorageDb:
         """
         return self.list_monitor_targets(frequency=frequency, enabled=True, workflow=workflow)
 
-    def delete_forecast_ssf_target_with_candidate_transition(
+    def disable_forecast_ssf_target_with_candidate_transition(
         self,
         target_id: int,
         state: str,
         state_reason: str,
         evidence: dict[str, Any],
     ) -> bool:
-        return self._delete_forecast_ssf_target_with_candidate_transition(
+        return self._disable_forecast_ssf_target_with_candidate_transition(
             target_id,
             state,
             state_reason,
             lambda _candidate: evidence,
         )
 
-    def _delete_forecast_ssf_target_with_candidate_transition(
+    def _disable_forecast_ssf_target_with_candidate_transition(
         self,
         target_id: int,
         state: str,
@@ -2819,9 +2822,7 @@ class StorageDb:
                 candidate.state = state
                 candidate.state_reason = state_reason
                 candidate.evidence = evidence
-                candidate.monitor_target_id = None
-                session.flush()
-                self._delete_workflow_target_in_transaction(session, target)
+                self._disable_workflow_target_in_transaction(session, target)
             return True
         except Exception:
             session.rollback()
@@ -2829,11 +2830,11 @@ class StorageDb:
         finally:
             session.close()
 
-    def _delete_workflow_target_in_transaction(self, session: Any, target: Any) -> None:
-        session.delete(target)
+    def _disable_workflow_target_in_transaction(self, session: Any, target: Any) -> None:
+        target.enabled = False
         session.flush()
 
-    def delete_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
+    def disable_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
         def build_evidence(candidate: Any) -> dict[str, Any]:
             evidence = dict(candidate.evidence or {})
             evidence["lifecycle"] = {
@@ -2844,15 +2845,12 @@ class StorageDb:
             }
             return evidence
 
-        return self._delete_forecast_ssf_target_with_candidate_transition(
+        return self._disable_forecast_ssf_target_with_candidate_transition(
             target_id,
             "blackroom",
             reason,
             build_evidence,
         )
-
-    def disable_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
-        return self.delete_forecast_ssf_target_for_blackroom(target_id, reason)
 
     def find_workflow_monitor_target(self, stock_code: str, market: str, frequency: str, workflow: str) -> Any | None:
         from .model.stock_monitor_target import StockMonitorTarget

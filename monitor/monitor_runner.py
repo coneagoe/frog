@@ -164,9 +164,9 @@ def run_monitor(
                     if not ban_result.get("success"):
                         raise RuntimeError(ban_result.get("message") or "blackroom lookup failed")
                     if ban_result.get("data", {}).get("banned"):
-                        deleted = storage.delete_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
-                        if not deleted:
-                            raise RuntimeError("failed to delete forecast SSF target for active blackroom")
+                        disabled = storage.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+                        if not disabled:
+                            raise RuntimeError("failed to disable forecast SSF target for active blackroom")
                         summary.skipped += 1
                         continue
                     candidate = storage.get_forecast_ssf_candidate_for_target(target.id)
@@ -175,9 +175,9 @@ def run_monitor(
                     if not ban_result.get("success"):
                         raise RuntimeError(ban_result.get("message") or "blackroom lookup failed")
                     if ban_result.get("data", {}).get("banned"):
-                        deleted = storage.delete_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
-                        if not deleted:
-                            raise RuntimeError("failed to delete forecast SSF target for active blackroom")
+                        disabled = storage.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+                        if not disabled:
+                            raise RuntimeError("failed to disable forecast SSF target for active blackroom")
                         summary.skipped += 1
                         continue
                 _send_alert(target, current_price, change_pct, evidence=evidence)

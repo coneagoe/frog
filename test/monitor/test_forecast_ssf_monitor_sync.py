@@ -131,7 +131,7 @@ def test_sync_blackroom_deletes_only_existing_marked_target():
 
     assert result["data"]["blackroom_excluded"] == 1
     assert result["data"]["deleted"] == 1
-    storage.delete_forecast_ssf_target_with_candidate_transition.assert_called_once()
+    storage.disable_forecast_ssf_target_with_candidate_transition.assert_called_once()
 
 
 @pytest.mark.parametrize("holders", [pd.DataFrame(), _holders(date(2025, 11, 19), "全国社保基金一一八组合")])
@@ -162,7 +162,7 @@ def test_sync_current_unlisted_candidate_deletes_linked_target():
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
-    assert storage.delete_forecast_ssf_target_with_candidate_transition.call_args.args[:3] == (
+    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[:3] == (
         17,
         "delisted_or_unlisted",
         "delisted_or_unlisted",
@@ -308,7 +308,7 @@ def test_sync_non_ssf_deletes_existing_owned_target():
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
     assert result["data"]["deleted"] == 1
-    assert storage.delete_forecast_ssf_target_with_candidate_transition.call_args.args[:3] == (
+    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[:3] == (
         17,
         "ineligible",
         "ssf_holder_not_found",
@@ -437,7 +437,7 @@ def test_sync_retires_absent_daily_workflow_candidate_with_lifecycle_evidence():
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
     assert result["data"]["deleted"] == 1
-    assert storage.delete_forecast_ssf_target_with_candidate_transition.call_args.args == (
+    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args == (
         17,
         "ineligible",
         "forecast_no_longer_qualified",
@@ -464,8 +464,8 @@ def test_sync_empty_universe_retires_only_matching_daily_workflow_targets():
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
     assert result["data"]["deleted"] == 1
-    assert storage.delete_forecast_ssf_target_with_candidate_transition.call_count == 1
-    assert storage.delete_forecast_ssf_target_with_candidate_transition.call_args.args[0] == 17
+    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_count == 1
+    assert storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[0] == 17
     assert [call.kwargs["stock_code"] for call in storage.upsert_forecast_ssf_candidate.call_args_list] == [
         "600002",
         "600003",
@@ -567,7 +567,7 @@ def test_sync_repeated_retirement_deletes_linked_target():
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
 
     assert result["data"]["deleted"] == 1
-    storage.delete_forecast_ssf_target_with_candidate_transition.assert_called_once()
+    storage.disable_forecast_ssf_target_with_candidate_transition.assert_called_once()
 
 
 def test_sync_paused_eligible_candidate_keeps_target_disabled_and_records_evaluated_outcome():
@@ -613,7 +613,7 @@ def test_sync_reporting_period_promotion_deletes_without_evaluating_new_period()
     result = ForecastSSFMonitorSyncService(
         storage=storage, blackroom_service=MagicMock(is_banned=lambda *_: _blackroom())
     ).sync(date(2026, 1, 20))
-    call = storage.delete_forecast_ssf_target_with_candidate_transition.call_args.args
+    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args
     assert result["data"]["deleted"] == 1
     assert call[:3] == (
         17,
@@ -732,7 +732,7 @@ def test_sync_paused_conclusive_outcomes_delete_linked_target(
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
-    call = storage.delete_forecast_ssf_target_with_candidate_transition.call_args.args
+    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args
     assert call[:3] == (17, automatic_state, automatic_reason)
     assert call[3]["lifecycle"] == {
         "as_of_date": "2026-01-20",
@@ -788,7 +788,7 @@ def test_sync_active_blackroom_deletes_before_newer_reporting_period_supersessio
 
     ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
-    call = storage.delete_forecast_ssf_target_with_candidate_transition.call_args.args
+    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args
     assert call[:3] == (
         17,
         "blackroom",

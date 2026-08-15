@@ -206,7 +206,7 @@ class ForecastSSFMonitorSyncService:
             return
 
         try:
-            holders = self.storage.load_latest_top10_floatholders(stock_code)
+            holders = self.storage.load_latest_top10_floatholders(stock_code, as_of_date)
         except Exception:  # noqa: BLE001
             summary["errors"] += 1
             summary["deferred"] += 1
@@ -383,7 +383,7 @@ class ForecastSSFMonitorSyncService:
                     "new_report_end_date": report_end_date.isoformat(),
                 }
             )
-        if target is not None and self.storage.delete_forecast_ssf_target_with_candidate_transition(
+        if target is not None and self.storage.disable_forecast_ssf_target_with_candidate_transition(
             target.id, state, state_reason, evidence
         ):
             summary["deleted"] += 1
