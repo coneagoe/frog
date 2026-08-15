@@ -4,12 +4,11 @@ import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
-from threading import Barrier
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 from storage.enum_governance import EnumGovernanceError, migrate_enums
 from storage.enum_migration import STORAGE_ENUM_ADAPTER, StorageEnumMigrationError
@@ -245,6 +244,109 @@ def test_migration_upgrades_complete_legacy_snapshot_pair_for_storage_lifecycle(
     assert completed.status == "completed"
 
 
+def test_migration_advances_legacy_snapshot_run_identity_sequence(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO forecast_snapshot_runs "
+                "(id, report_end_date, announcement_start_date, announcement_end_date, attempt, status) "
+                "VALUES (500, '2026-06-30', '2026-07-01', '2026-07-01', 1, 'failed')"
+            )
+        )
+        assert migrate_enums(connection).converted is True
+        connection.commit()
+
+    db = StorageDb.__new__(StorageDb)
+    db.engine = engine.execution_options(schema_translate_map={None: schema})
+    db.Session = sessionmaker(bind=db.engine)
+    acquired = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+
+    assert acquired.id > 500
+
+
+def test_postgresql_acquisition_reuses_completion_after_final_lookup(postgres_schema, monkeypatch) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_enums(connection).converted is True
+        connection.commit()
+
+    db = StorageDb.__new__(StorageDb)
+    db.engine = engine.execution_options(schema_translate_map={None: schema})
+    db.Session = sessionmaker(bind=db.engine)
+    first = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+    original_completed_lookup = StorageDb._get_completed_forecast_snapshot_run
+    lookup_count = 0
+
+    def complete_after_final_lookup(*args, **kwargs):
+        nonlocal lookup_count
+        lookup_count += 1
+        if lookup_count == 2:
+            db.complete_forecast_snapshot_run(
+                first.id,
+                {
+                    "covered_date_count": 1,
+                    "source_row_count": 0,
+                    "record_count": 0,
+                    "duplicate_record_count": 0,
+                    "same_day_conflict_count": 0,
+                },
+            )
+            return None
+        return original_completed_lookup(*args, **kwargs)
+
+    monkeypatch.setattr(StorageDb, "_get_completed_forecast_snapshot_run", staticmethod(complete_after_final_lookup))
+    reused = db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
+
+    assert reused.id == first.id
+    with db.engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM forecast_snapshot_runs")).scalar_one() == 1
+
+
+@pytest.mark.parametrize(
+    "statements",
+    (
+        (
+            "ALTER TABLE forecast_snapshot_records DROP CONSTRAINT forecast_snapshot_records_run_id_fkey",
+            "ALTER TABLE forecast_snapshot_runs DROP CONSTRAINT forecast_snapshot_runs_pkey",
+        ),
+        ("ALTER TABLE forecast_snapshot_records DROP CONSTRAINT forecast_snapshot_records_pkey",),
+        ("ALTER TABLE forecast_snapshot_runs ALTER COLUMN requested_date_count DROP DEFAULT",),
+        ("ALTER TABLE forecast_snapshot_records ALTER COLUMN ts_code SET DEFAULT 'unexpected'",),
+        (
+            "ALTER TABLE forecast_snapshot_records DROP CONSTRAINT forecast_snapshot_records_run_id_fkey",
+            "ALTER TABLE forecast_snapshot_records ADD CONSTRAINT forecast_snapshot_records_run_id_fkey "
+            "FOREIGN KEY (run_id) REFERENCES forecast_snapshot_records(id)",
+        ),
+        (
+            "ALTER TABLE forecast_snapshot_runs DROP CONSTRAINT uq_forecast_snapshot_attempt",
+            "ALTER TABLE forecast_snapshot_runs ADD CONSTRAINT uq_forecast_snapshot_attempt UNIQUE (attempt)",
+        ),
+        (
+            "ALTER TABLE forecast_snapshot_records DROP CONSTRAINT uq_forecast_snapshot_record_source_order",
+            "ALTER TABLE forecast_snapshot_records ADD CONSTRAINT uq_forecast_snapshot_record_source_order "
+            "UNIQUE (source_order)",
+        ),
+        (
+            "DROP INDEX uq_forecast_snapshot_running_range",
+            "CREATE UNIQUE INDEX uq_forecast_snapshot_running_range ON forecast_snapshot_runs "
+            "(report_end_date, announcement_start_date, announcement_end_date) WHERE status = 'completed'",
+        ),
+    ),
+)
+def test_snapshot_schema_audit_and_verify_reject_malformed_contract(postgres_schema, statements) -> None:
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_enums(connection).converted is True
+        for sql in statements:
+            connection.execute(text(sql))
+
+        audit = migrate_enums(connection, dry_run=True, adapters=(STORAGE_ENUM_ADAPTER,)).audits[0]
+        assert audit.ready is False
+        with pytest.raises(StorageEnumMigrationError, match="forecast snapshot schema contract"):
+            STORAGE_ENUM_ADAPTER.verify(connection, rollback=False)
+
+
 def test_snapshot_schema_audit_reports_incomplete_legacy_pair(postgres_schema) -> None:
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -405,20 +507,12 @@ def test_postgresql_recovers_full_attempt_collision_during_concurrent_snapshot_r
         ForecastSnapshotRecord.__table__.create(connection, checkfirst=True)
         connection.execute(text("DROP INDEX uq_forecast_snapshot_running_range"))
 
-    flush_barrier = Barrier(2)
-
-    class RetryFlushBarrierSession(Session):
-        def flush(self, *args, **kwargs):
-            if any(isinstance(item, ForecastSnapshotRun) and item.attempt == 2 for item in self.new):
-                flush_barrier.wait(timeout=10)
-            return super().flush(*args, **kwargs)
-
     first = StorageDb.__new__(StorageDb)
     first.engine = engine.execution_options(schema_translate_map={None: schema})
-    first.Session = sessionmaker(bind=first.engine, class_=RetryFlushBarrierSession)
+    first.Session = sessionmaker(bind=first.engine)
     second = StorageDb.__new__(StorageDb)
     second.engine = engine.execution_options(schema_translate_map={None: schema})
-    second.Session = sessionmaker(bind=second.engine, class_=RetryFlushBarrierSession)
+    second.Session = sessionmaker(bind=second.engine)
 
     initial = first.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
     first.fail_forecast_snapshot_run(initial.id, "provider unavailable")
@@ -447,5 +541,5 @@ def test_postgresql_recovers_full_attempt_collision_during_concurrent_snapshot_r
 
     assert sum(isinstance(result, int) for result in acquired) == 1
     assert "forecast snapshot is already running for requested range" in acquired
-    assert completed_lookup_count == 1
+    assert completed_lookup_count == 0
     assert runs == [("failed", 1), ("running", 2)]
