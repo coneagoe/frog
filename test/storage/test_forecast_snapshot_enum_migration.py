@@ -4,11 +4,12 @@ import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from threading import Barrier
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from storage.enum_governance import EnumGovernanceError, migrate_enums
 from storage.model import ForecastSnapshotRecord, ForecastSnapshotRun
@@ -205,7 +206,9 @@ def test_postgresql_allows_only_one_running_equivalent_snapshot(postgres_schema)
     assert runs == [("running", 1)]
 
 
-def test_postgresql_allows_only_one_concurrent_snapshot_retry(postgres_schema) -> None:
+def test_postgresql_recovers_full_attempt_collision_during_concurrent_snapshot_retry(
+    postgres_schema, monkeypatch
+) -> None:
     engine, schema = postgres_schema
     with engine.begin() as connection:
         connection.execute(text(f'SET search_path TO "{schema}"'))
@@ -213,22 +216,41 @@ def test_postgresql_allows_only_one_concurrent_snapshot_retry(postgres_schema) -
         connection.execute(text("CREATE TYPE forecast_snapshot_status AS ENUM ('running', 'completed', 'failed')"))
         ForecastSnapshotRun.__table__.create(connection, checkfirst=True)
         ForecastSnapshotRecord.__table__.create(connection, checkfirst=True)
+        connection.execute(text("DROP INDEX uq_forecast_snapshot_running_range"))
+
+    flush_barrier = Barrier(2)
+
+    class RetryFlushBarrierSession(Session):
+        def flush(self, *args, **kwargs):
+            if any(isinstance(item, ForecastSnapshotRun) and item.attempt == 2 for item in self.new):
+                flush_barrier.wait(timeout=10)
+            return super().flush(*args, **kwargs)
 
     first = StorageDb.__new__(StorageDb)
     first.engine = engine.execution_options(schema_translate_map={None: schema})
-    first.Session = sessionmaker(bind=first.engine)
+    first.Session = sessionmaker(bind=first.engine, class_=RetryFlushBarrierSession)
     second = StorageDb.__new__(StorageDb)
     second.engine = engine.execution_options(schema_translate_map={None: schema})
-    second.Session = sessionmaker(bind=second.engine)
+    second.Session = sessionmaker(bind=second.engine, class_=RetryFlushBarrierSession)
 
     initial = first.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
     first.fail_forecast_snapshot_run(initial.id, "provider unavailable")
 
-    def acquire(db: StorageDb) -> int | None:
+    completed_lookup_count = 0
+    original_get_completed = StorageDb.get_completed_forecast_snapshot_run
+
+    def get_completed(*args, **kwargs):
+        nonlocal completed_lookup_count
+        completed_lookup_count += 1
+        return original_get_completed(*args, **kwargs)
+
+    monkeypatch.setattr(StorageDb, "get_completed_forecast_snapshot_run", get_completed)
+
+    def acquire(db: StorageDb) -> int | str:
         try:
             return db.acquire_forecast_snapshot_run(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1)).id
-        except StorageError:
-            return None
+        except StorageError as error:
+            return str(error)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         acquired = list(executor.map(acquire, (first, second)))
@@ -236,5 +258,7 @@ def test_postgresql_allows_only_one_concurrent_snapshot_retry(postgres_schema) -
     with _connection(engine, schema) as connection:
         runs = connection.execute(text("SELECT status, attempt FROM forecast_snapshot_runs ORDER BY attempt")).all()
 
-    assert sum(run_id is not None for run_id in acquired) == 1
+    assert sum(isinstance(result, int) for result in acquired) == 1
+    assert "forecast snapshot is already running for requested range" in acquired
+    assert completed_lookup_count == 3
     assert runs == [("failed", 1), ("running", 2)]
