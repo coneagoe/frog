@@ -159,6 +159,8 @@ def run_monitor(
                 now = datetime.now(timezone.utc)
                 evidence = None
                 if is_forecast_ssf_workflow:
+                    candidate = storage.get_forecast_ssf_candidate_for_target(target.id)
+                    evidence = getattr(candidate, "evidence", None) if candidate is not None else None
                     blackroom = BlackroomService(storage=storage)
                     ban_result = blackroom.is_banned(target.stock_code, target.market)
                     if not ban_result.get("success"):
@@ -169,8 +171,6 @@ def run_monitor(
                             raise RuntimeError("failed to disable forecast SSF target for active blackroom")
                         summary.skipped += 1
                         continue
-                    candidate = storage.get_forecast_ssf_candidate_for_target(target.id)
-                    evidence = getattr(candidate, "evidence", None) if candidate is not None else None
                 _send_alert(target, current_price, change_pct, evidence=evidence)
                 storage.update_monitor_target_state(target.id, True, triggered_at=now)
                 summary.triggered += 1
