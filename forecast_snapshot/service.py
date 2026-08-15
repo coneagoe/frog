@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
+from math import isfinite
 from typing import Any, Callable, Protocol
 
 import pandas as pd
@@ -150,7 +151,10 @@ class ForecastSnapshotService:
     def _optional_numeric(value: object) -> float | None:
         if pd.isna(value):
             return None
-        return float(pd.to_numeric(value, errors="raise"))
+        numeric_value = float(pd.to_numeric(value, errors="raise"))
+        if not isfinite(numeric_value):
+            raise ValueError("forecast numeric value must be finite")
+        return numeric_value
 
     @staticmethod
     def _summary_from_run(run: Any) -> ForecastSnapshotSummary:

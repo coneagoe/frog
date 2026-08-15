@@ -37,3 +37,37 @@ No existing repository documentation required changes. The forecast snapshot des
 ### Residual Scope
 
 This task intentionally does not change mutable forecast refresh, the rolling DAG, or the backfill command. Storage lifecycle persistence remains covered by Task 2's storage tests; this task tests the service with injected provider and storage seams.
+
+### Fix Round 1: Reject Non-Finite Numeric Values
+
+Root cause: `pd.to_numeric(..., errors="raise")` converts infinity representations to non-finite floats without raising. `_optional_numeric` previously persisted that result without checking whether it was finite.
+
+RED reproduction:
+
+```text
+uv run pytest test/forecast_snapshot/test_service.py::test_invalid_numeric_value_marks_run_failed -v
+1 failed, 1 passed
+
+FAILED test_invalid_numeric_value_marks_run_failed[inf]
+AssertionError: assert 'completed' == 'failed'
+```
+
+GREEN evidence:
+
+```text
+uv run pytest test/forecast_snapshot/test_service.py::test_invalid_numeric_value_marks_run_failed -v
+3 passed
+```
+
+Changed files:
+
+- `forecast_snapshot/service.py`: reject converted numeric values that are not finite after preserving actual null values as `None`.
+- `test/forecast_snapshot/test_service.py`: exercise `"NaN"` and `"inf"` through the failed-run lifecycle, and rename the preconfigured attempt-2 test to match its behavior.
+- This report.
+
+Self-review:
+
+- The finite check is immediately after conversion and applies to either optional numeric provider field.
+- Legitimate absent provider values still take the existing `pd.isna(value)` branch and remain nullable.
+- The failure is handled by the existing operational failure lifecycle, so its detail includes the requested ISO date and `ValueError`.
+- No mutable forecast refresh, rolling DAG, backfill command, or provider boundary behavior changed.

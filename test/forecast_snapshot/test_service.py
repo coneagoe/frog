@@ -118,16 +118,21 @@ def test_mismatched_returned_announcement_date_marks_run_failed() -> None:
     assert "ValueError" in summary.failure_detail
 
 
-def test_invalid_numeric_value_marks_run_failed() -> None:
+@pytest.mark.parametrize("invalid_numeric_value", ["not-a-number", "NaN", "inf"])
+def test_invalid_numeric_value_marks_run_failed(invalid_numeric_value: str) -> None:
     from forecast_snapshot.service import ForecastSnapshotRequest, ForecastSnapshotService
 
     storage = FakeStorage()
-    frame = pd.DataFrame([["600001.SH", "20260701", "20260630", "预增", "not-a-number", 20]], columns=FORECAST_FIELDS)
+    frame = pd.DataFrame(
+        [["600001.SH", "20260701", "20260630", "预增", invalid_numeric_value, 20]],
+        columns=FORECAST_FIELDS,
+    )
     summary = ForecastSnapshotService(storage, Mock(return_value=frame)).create_snapshot(
         ForecastSnapshotRequest(date(2026, 6, 30), date(2026, 7, 1), date(2026, 7, 1))
     )
 
     assert summary.status == "failed"
+    assert storage.failed_run_ids == [1]
     assert "2026-07-01" in summary.failure_detail
     assert "ValueError" in summary.failure_detail
 
@@ -172,7 +177,7 @@ def test_completed_acquisition_returns_stored_summary_without_provider_call() ->
     provider.assert_not_called()
 
 
-def test_failed_acquisition_creates_later_attempt() -> None:
+def test_preconfigured_attempt_two_completes_snapshot() -> None:
     from forecast_snapshot.service import ForecastSnapshotRequest, ForecastSnapshotService
 
     storage = FakeStorage()
