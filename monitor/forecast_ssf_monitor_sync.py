@@ -122,6 +122,8 @@ class ForecastSSFMonitorSyncService:
             selected_row = selected_rows_by_code.get(stock_code)
             if selected_row is not None:
                 evidence["forecast"] = self._forecast_evidence(selected_row)
+            else:
+                evidence["forecast"] = {"selected": False, "ann_date": None, "source_order": None}
             evidence = self._with_lifecycle(candidate, evidence, as_of_date, state, reason)
             target_id = getattr(candidate, "monitor_target_id", None)
             if target_id is None:
@@ -511,11 +513,16 @@ class ForecastSSFMonitorSyncService:
         }
 
     def _forecast_evidence(self, row: dict[str, Any]) -> dict[str, Any]:
+        growth_min = row[COL_FORECAST_CHANGE_MIN]
+        try:
+            growth_min = float(growth_min)
+        except (TypeError, ValueError):
+            pass
         return {
             "report_end_date": self._as_date(row[COL_END_DATE]).isoformat(),
             "ann_date": self._as_date(row[COL_ANN_DATE]).isoformat(),
             "type": str(row[COL_FORECAST_TYPE]),
-            "p_change_min": float(row[COL_FORECAST_CHANGE_MIN]),
+            "p_change_min": growth_min,
             "source_order": int(row["source_order"]),
         }
 

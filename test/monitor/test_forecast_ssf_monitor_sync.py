@@ -197,6 +197,54 @@ def test_sync_nonqualifying_snapshot_row_disables_previous_candidate_with_proven
     assert evidence["forecast"]["p_change_min"] == 40.0
 
 
+def test_sync_nonnumeric_snapshot_row_disables_existing_target_and_persists_evidence() -> None:
+    storage = _storage(_records("600001", **{COL_FORECAST_CHANGE_MIN: "not numeric"}))
+    storage.list_forecast_ssf_candidates.return_value = [_candidate()]
+    storage.find_workflow_monitor_target.return_value = _target(17)
+
+    result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+
+    assert result["data"]["disabled"] == 1
+    call = storage.disable_forecast_ssf_target_with_candidate_transition.call_args
+    assert call.args[:3] == (17, "ineligible", "forecast_no_longer_qualified")
+    assert call.args[3]["forecast"] == {
+        "report_end_date": "2025-12-31",
+        "ann_date": "2026-01-15",
+        "type": "预增",
+        "p_change_min": "not numeric",
+        "source_order": 3,
+    }
+
+
+def test_sync_absent_selected_row_marks_current_forecast_provenance_absent() -> None:
+    storage = _storage(_forecasts())
+    storage.list_forecast_ssf_candidates.return_value = [
+        SimpleNamespace(
+            stock_code="600001",
+            report_end_date=date(2025, 12, 31),
+            state="eligible",
+            monitor_target_id=17,
+            evidence={
+                "forecast": {
+                    "ann_date": "2026-01-15",
+                    "source_order": 3,
+                }
+            },
+        )
+    ]
+    storage.find_workflow_monitor_target.return_value = _target(17)
+    storage.load_a_stock_listing_status.return_value = pd.DataFrame(
+        {COL_STOCK_ID: ["600001"], COL_LIST_STATUS: ["L"], COL_DELISTING_DATE: [None]}
+    )
+
+    ForecastSSFMonitorSyncService(storage=storage, blackroom_service=MagicMock()).sync(date(2026, 1, 20))
+
+    evidence = storage.disable_forecast_ssf_target_with_candidate_transition.call_args.args[3]
+    assert evidence["snapshot"] == _snapshot_evidence()
+    assert evidence["forecast"] == {"selected": False, "ann_date": None, "source_order": None}
+    assert evidence["lifecycle"]["reason"] == "forecast_no_longer_qualified"
+
+
 def test_sync_creates_target_and_persists_matching_evidence():
     storage = _storage(_forecasts("600001", "600002"))
     storage.load_latest_top10_floatholders.side_effect = [
@@ -581,7 +629,7 @@ def test_sync_retires_absent_daily_workflow_candidate_with_lifecycle_evidence():
         "ineligible",
         "forecast_no_longer_qualified",
         {
-            "forecast": {"ann_date": "2026-01-15"},
+            "forecast": {"selected": False, "ann_date": None, "source_order": None},
             "snapshot": _snapshot_evidence(),
             "lifecycle": {
                 "as_of_date": "2026-01-20",
@@ -646,6 +694,7 @@ def test_sync_retires_unlinked_absent_candidate_without_creating_target():
         "evidence": {
             "shareholder": {"matched_holder": "全国社保基金一一八组合"},
             "snapshot": _snapshot_evidence(),
+            "forecast": {"selected": False, "ann_date": None, "source_order": None},
             "lifecycle": {
                 "as_of_date": "2026-01-20",
                 "state": "ineligible",
@@ -687,7 +736,7 @@ def test_sync_retires_absent_candidate_with_stale_target_link(daily_target):
         "state": "ineligible",
         "state_reason": "forecast_no_longer_qualified",
         "evidence": {
-            "forecast": {"ann_date": "2026-01-15"},
+            "forecast": {"selected": False, "ann_date": None, "source_order": None},
             "snapshot": _snapshot_evidence(),
             "lifecycle": {
                 "as_of_date": "2026-01-20",
