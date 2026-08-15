@@ -133,6 +133,8 @@ def _create_storage_legacy_schema(connection: Connection) -> None:
     statements = (
         "CREATE TABLE blackroom_records (id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', source varchar(50) NOT NULL DEFAULT 'manual')",
         "CREATE TABLE daily_bar_diagnostics (id integer primary key, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL)",
+        "CREATE TABLE forecast_snapshot_runs (id integer primary key, report_end_date date NOT NULL, announcement_start_date date NOT NULL, announcement_end_date date NOT NULL, attempt integer NOT NULL, status varchar(16) NOT NULL)",
+        "CREATE TABLE forecast_snapshot_records (id integer primary key, run_id integer NOT NULL REFERENCES forecast_snapshot_runs(id), ts_code varchar(32) NOT NULL, announcement_date date NOT NULL, report_end_date date NOT NULL, forecast_type varchar(20) NOT NULL, growth_min double precision, growth_max double precision, source_order integer NOT NULL)",
         "CREATE TABLE ssf_change_signals (id integer primary key, status varchar(20) NOT NULL DEFAULT 'signal', event_types jsonb NOT NULL)",
     )
     for statement in statements:
@@ -157,6 +159,8 @@ def _create_legacy_diagnostics_only_schema(connection: Connection) -> None:
     statements = (
         "CREATE TABLE blackroom_records (id integer primary key, market varchar(5) NOT NULL DEFAULT 'A', source varchar(50) NOT NULL DEFAULT 'manual')",
         "CREATE TABLE daily_bar_diagnostics (id integer primary key, business_date date NOT NULL, stock_id varchar(20) NOT NULL, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL, CONSTRAINT uq_daily_bar_diagnostics_business_key UNIQUE (business_date, stock_id, adjust))",
+        "CREATE TABLE forecast_snapshot_runs (id integer primary key, report_end_date date NOT NULL, announcement_start_date date NOT NULL, announcement_end_date date NOT NULL, attempt integer NOT NULL, status varchar(16) NOT NULL)",
+        "CREATE TABLE forecast_snapshot_records (id integer primary key, run_id integer NOT NULL REFERENCES forecast_snapshot_runs(id), ts_code varchar(32) NOT NULL, announcement_date date NOT NULL, report_end_date date NOT NULL, forecast_type varchar(20) NOT NULL, growth_min double precision, growth_max double precision, source_order integer NOT NULL)",
         "CREATE TABLE ssf_change_signals (id integer primary key, status varchar(20) NOT NULL DEFAULT 'signal', event_types jsonb NOT NULL)",
     )
     for statement in statements:
@@ -634,6 +638,7 @@ def test_dry_run_reports_all_schema_readiness_facts(postgres_schema) -> None:
     assert {check.name for check in audits["storage"].checks} == {
         "ck_daily_bar_diagnostics_provider_outcome_status",
         "ck_ssf_change_signals_event_types",
+        "forecast_snapshot_schema_contract",
     }
     paper_market = next(group for group in audits["paper_trading"].groups if group.type_name == "paper_market")
     round_trips_market = next(

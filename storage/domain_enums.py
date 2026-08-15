@@ -29,6 +29,12 @@ class DailyBarDiagnosticClassification(StrEnum):
     RESOLVED = "resolved"
 
 
+class ForecastSnapshotStatus(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class ProviderOutcomeStatus(StrEnum):
     DOWNLOADED = "downloaded"
     EMPTY = "empty"

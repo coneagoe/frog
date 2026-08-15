@@ -14,12 +14,21 @@ from storage.domain_enums import (
     BlackroomSource,
     DailyBarDiagnosticAdjust,
     DailyBarDiagnosticClassification,
+    ForecastSnapshotStatus,
     SSFChangeSignalStatus,
     validate_provider_outcomes,
     validate_ssf_event_types,
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
-from storage.model import BlackroomRecord, DailyBarDiagnostic, SSFChangeSignal
+from storage.model import (
+    BlackroomRecord,
+    DailyBarDiagnostic,
+    ForecastSnapshotRecord,
+    ForecastSnapshotRun,
+    SSFChangeSignal,
+    tb_name_forecast_snapshot_record,
+    tb_name_forecast_snapshot_run,
+)
 
 
 class StorageEnumMigrationError(RuntimeError):
@@ -92,9 +101,19 @@ STORAGE_ENUM_GROUPS = (
         _labels(SSFChangeSignalStatus),
         (_column("ssf_change_signals", "status", "VARCHAR(20)", "'signal'"),),
     ),
+    StorageEnumGroup(
+        "forecast_snapshot_status",
+        _labels(ForecastSnapshotStatus),
+        (_column("forecast_snapshot_runs", "status", "VARCHAR(16)"),),
+    ),
 )
 
-_GOVERNED_TABLES = (BlackroomRecord.__table__, DailyBarDiagnostic.__table__, SSFChangeSignal.__table__)
+_GOVERNED_TABLES = (
+    BlackroomRecord.__table__,
+    DailyBarDiagnostic.__table__,
+    ForecastSnapshotRun.__table__,
+    SSFChangeSignal.__table__,
+)
 _PRE_RAW_DAILY_BAR_DIAGNOSTIC_ADJUST_LABELS = ("bfq", "qfq", "hfq")
 _PROVIDER_CHECK_NAME = "ck_daily_bar_diagnostics_provider_outcome_status"
 _PROVIDER_CHECK_SQL = (
@@ -113,6 +132,7 @@ _CHECKS = (
     ("daily_bar_diagnostics", _PROVIDER_CHECK_NAME, _PROVIDER_CHECK_SQL),
     ("ssf_change_signals", _SSF_CHECK_NAME, _SSF_CHECK_SQL),
 )
+_SNAPSHOT_SCHEMA_CHECK_NAME = "forecast_snapshot_schema_contract"
 
 
 def _result(
@@ -122,14 +142,18 @@ def _result(
 
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
+    snapshot_tables = (ForecastSnapshotRun.__table__, ForecastSnapshotRecord.__table__)
+    snapshot_table_count = sum(_table_exists(connection, table.name) for table in snapshot_tables)
+    if snapshot_table_count == 1:
+        raise StorageEnumMigrationError("partially missing forecast snapshot tables")
     missing = _preflight(connection, rollback=rollback)
     if missing and len(missing) != len(_GOVERNED_TABLES):
         raise StorageEnumMigrationError(f"partially missing governed tables: {sorted(missing)}")
 
 
 def _adapter_apply(connection: Connection) -> bool:
-    labels_changed = _upgrade_daily_bar_diagnostic_adjust_labels(connection)
     _adapter_preflight(connection, rollback=False)
+    labels_changed = _upgrade_daily_bar_diagnostic_adjust_labels(connection)
     missing = _preflight(connection, rollback=False)
     changed = (
         labels_changed
@@ -139,6 +163,7 @@ def _adapter_apply(connection: Connection) -> bool:
             for group in STORAGE_ENUM_GROUPS
             for column in group.columns
         )
+        or not _snapshot_running_range_index_matches(connection)
     )
     for group in STORAGE_ENUM_GROUPS:
         _create_type(connection, group)
@@ -147,6 +172,10 @@ def _adapter_apply(connection: Connection) -> bool:
     else:
         for group in STORAGE_ENUM_GROUPS:
             _alter_group(connection, group, rollback=False)
+    _upgrade_snapshot_schema(connection)
+    _create_snapshot_indexes(connection)
+    ForecastSnapshotRecord.__table__.create(connection, checkfirst=True)
+    _upgrade_snapshot_schema(connection)
     _add_checks(connection)
     return changed
 
@@ -251,6 +280,17 @@ def _adapter_audit(connection: Connection, *, rollback: bool):
                 None if ready else "incompatible constraint",
             )
         )
+    snapshot_schema_ready = _snapshot_schema_contract_matches(connection, rollback=rollback)
+    checks.append(
+        EnumGovernanceCheckAudit(
+            tb_name_forecast_snapshot_run,
+            _SNAPSHOT_SCHEMA_CHECK_NAME,
+            True,
+            None,
+            snapshot_schema_ready,
+            None if snapshot_schema_ready else "incomplete forecast snapshot schema contract",
+        )
+    )
     return EnumGovernanceDomainAudit(
         "storage",
         tuple(groups),
@@ -349,6 +389,176 @@ def _create_missing_tables(connection: Connection, missing: set[str]) -> None:
 
         ensure_paper_market_type(connection)
         tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
+
+
+def _create_snapshot_indexes(connection: Connection) -> None:
+    for index in ForecastSnapshotRun.__table__.indexes:
+        if _index_exists(connection, index.name) and not _snapshot_running_range_index_matches(connection):
+            connection.execute(text(f"DROP INDEX {index.name}"))
+        index.create(connection, checkfirst=True)
+
+
+def _upgrade_snapshot_schema(connection: Connection) -> None:
+    if not _table_exists(connection, tb_name_forecast_snapshot_run):
+        return
+    run_columns = {
+        "requested_date_count": "integer NOT NULL DEFAULT 0",
+        "covered_date_count": "integer NOT NULL DEFAULT 0",
+        "source_row_count": "integer NOT NULL DEFAULT 0",
+        "record_count": "integer NOT NULL DEFAULT 0",
+        "duplicate_record_count": "integer NOT NULL DEFAULT 0",
+        "same_day_conflict_count": "integer NOT NULL DEFAULT 0",
+        "created_at": "timestamp with time zone NOT NULL DEFAULT now()",
+        "completed_at": "timestamp with time zone",
+        "failed_at": "timestamp with time zone",
+        "failure_detail": "text",
+    }
+    existing_run_columns = _table_column_names(connection, tb_name_forecast_snapshot_run)
+    for name, definition in run_columns.items():
+        if name not in existing_run_columns:
+            connection.execute(text(f"ALTER TABLE {tb_name_forecast_snapshot_run} ADD COLUMN {name} {definition}"))
+    _ensure_generated_id(connection, tb_name_forecast_snapshot_run)
+    if _table_exists(connection, tb_name_forecast_snapshot_record):
+        _ensure_generated_id(connection, tb_name_forecast_snapshot_record)
+
+    if _constraint_exists(
+        connection, tb_name_forecast_snapshot_run, "uq_forecast_snapshot_attempt"
+    ) and not _unique_constraint_matches(
+        connection,
+        tb_name_forecast_snapshot_run,
+        "uq_forecast_snapshot_attempt",
+        ("report_end_date", "announcement_start_date", "announcement_end_date", "attempt"),
+    ):
+        connection.execute(text("ALTER TABLE forecast_snapshot_runs DROP CONSTRAINT uq_forecast_snapshot_attempt"))
+    if not _constraint_exists(connection, tb_name_forecast_snapshot_run, "uq_forecast_snapshot_attempt"):
+        connection.execute(
+            text(
+                "ALTER TABLE forecast_snapshot_runs ADD CONSTRAINT uq_forecast_snapshot_attempt "
+                "UNIQUE (report_end_date, announcement_start_date, announcement_end_date, attempt)"
+            )
+        )
+    if not _table_exists(connection, tb_name_forecast_snapshot_record):
+        return
+    if _constraint_exists(
+        connection, tb_name_forecast_snapshot_record, "uq_forecast_snapshot_record_source_order"
+    ) and not _unique_constraint_matches(
+        connection,
+        tb_name_forecast_snapshot_record,
+        "uq_forecast_snapshot_record_source_order",
+        ("run_id", "announcement_date", "source_order"),
+    ):
+        connection.execute(
+            text("ALTER TABLE forecast_snapshot_records DROP CONSTRAINT uq_forecast_snapshot_record_source_order")
+        )
+    if not _constraint_exists(connection, tb_name_forecast_snapshot_record, "uq_forecast_snapshot_record_source_order"):
+        connection.execute(
+            text(
+                "ALTER TABLE forecast_snapshot_records ADD CONSTRAINT uq_forecast_snapshot_record_source_order "
+                "UNIQUE (run_id, announcement_date, source_order)"
+            )
+        )
+
+
+def _snapshot_schema_contract_matches(connection: Connection, *, rollback: bool) -> bool:
+    if rollback:
+        return True
+    snapshot_table_states = tuple(
+        _table_exists(connection, name) for name in (tb_name_forecast_snapshot_run, tb_name_forecast_snapshot_record)
+    )
+    if not any(snapshot_table_states):
+        return True
+    if not all(snapshot_table_states):
+        return False
+    expected_run_columns = {
+        "id": ("integer", False, None),
+        "report_end_date": ("date", False, None),
+        "announcement_start_date": ("date", False, None),
+        "announcement_end_date": ("date", False, None),
+        "attempt": ("integer", False, None),
+        "status": ("forecast_snapshot_status", False, None),
+        "requested_date_count": ("integer", False, "0"),
+        "covered_date_count": ("integer", False, "0"),
+        "source_row_count": ("integer", False, "0"),
+        "record_count": ("integer", False, "0"),
+        "duplicate_record_count": ("integer", False, "0"),
+        "same_day_conflict_count": ("integer", False, "0"),
+        "created_at": ("timestamp with time zone", False, "now()"),
+        "completed_at": ("timestamp with time zone", True, None),
+        "failed_at": ("timestamp with time zone", True, None),
+        "failure_detail": ("text", True, None),
+    }
+    expected_record_columns = {
+        "id": ("integer", False, None),
+        "run_id": ("integer", False, None),
+        "ts_code": ("character varying(32)", False, None),
+        "announcement_date": ("date", False, None),
+        "report_end_date": ("date", False, None),
+        "forecast_type": ("character varying(20)", False, None),
+        "growth_min": ("double precision", True, None),
+        "growth_max": ("double precision", True, None),
+        "source_order": ("integer", False, None),
+    }
+    run_facts = _table_column_facts(connection, tb_name_forecast_snapshot_run)
+    record_facts = _table_column_facts(connection, tb_name_forecast_snapshot_record)
+    return (
+        all(
+            run_facts.get(name) is not None
+            and run_facts[name][0] == column_type
+            and run_facts[name][1] == nullable
+            and (name == "id" or _defaults_match(run_facts[name][2], default))
+            for name, (column_type, nullable, default) in expected_run_columns.items()
+        )
+        and all(
+            record_facts.get(name) is not None
+            and record_facts[name][:2] == expected[:2]
+            and (name == "id" or _defaults_match(record_facts[name][2], expected[2]))
+            for name, expected in expected_record_columns.items()
+        )
+        and _has_generated_id(connection, tb_name_forecast_snapshot_run)
+        and _has_generated_id(connection, tb_name_forecast_snapshot_record)
+        and _primary_key_matches(connection, tb_name_forecast_snapshot_run, ("id",))
+        and _primary_key_matches(connection, tb_name_forecast_snapshot_record, ("id",))
+        and _unique_constraint_matches(
+            connection,
+            tb_name_forecast_snapshot_run,
+            "uq_forecast_snapshot_attempt",
+            ("report_end_date", "announcement_start_date", "announcement_end_date", "attempt"),
+        )
+        and _unique_constraint_matches(
+            connection,
+            tb_name_forecast_snapshot_record,
+            "uq_forecast_snapshot_record_source_order",
+            ("run_id", "announcement_date", "source_order"),
+        )
+        and _snapshot_record_foreign_key_matches(connection)
+        and _snapshot_running_range_index_matches(connection)
+    )
+
+
+def _ensure_generated_id(connection: Connection, table_name: str) -> None:
+    if not _has_generated_id(connection, table_name):
+        connection.execute(text(f"ALTER TABLE {table_name} ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY"))
+    connection.execute(
+        text(
+            f"SELECT setval(pg_get_serial_sequence('{table_name}', 'id'), "
+            f"COALESCE((SELECT max(id) FROM {table_name}), 1), "
+            f"(SELECT max(id) IS NOT NULL FROM {table_name}))"
+        )
+    )
+
+
+def _has_generated_id(connection: Connection, table_name: str) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                "SELECT EXISTS (SELECT FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid "
+                "LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum "
+                "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :table_name "
+                "AND a.attname = 'id' AND (a.attidentity <> '' OR d.oid IS NOT NULL))"
+            ),
+            {"table_name": table_name},
+        ).scalar_one()
+    )
 
 
 def _validate_json(connection: Connection, table_name: str, column_name: str, validator: object) -> None:
@@ -450,6 +660,9 @@ def _add_checks(connection: Connection) -> None:
 
 def _rollback(connection: Connection) -> bool:
     changed = False
+    if _index_exists(connection, "uq_forecast_snapshot_running_range"):
+        connection.execute(text("DROP INDEX uq_forecast_snapshot_running_range"))
+        changed = True
     for group in STORAGE_ENUM_GROUPS:
         if any(_column_has_type(connection, column, group.type_name) for column in group.columns):
             _alter_group(connection, group, rollback=True)
@@ -477,11 +690,126 @@ def _verify(connection: Connection, *, rollback: bool) -> None:
             _validate_default(connection, group, column, rollback=rollback)
     for table_name, name, definition in _CHECKS:
         _validate_check(connection, table_name, name, definition, required=not rollback)
+    if not _snapshot_schema_contract_matches(connection, rollback=rollback):
+        raise StorageEnumMigrationError("forecast snapshot schema contract verification failed")
 
 
 def _table_exists(connection: Connection, table_name: str) -> bool:
     return (
         connection.execute(text("SELECT to_regclass(:table_name)"), {"table_name": table_name}).scalar_one() is not None
+    )
+
+
+def _table_column_names(connection: Connection, table_name: str) -> set[str]:
+    return set(_table_column_facts(connection, table_name))
+
+
+def _table_column_facts(connection: Connection, table_name: str) -> dict[str, tuple[str, bool, str | None]]:
+    return {
+        str(name): (str(column_type), bool(nullable), None if default is None else str(default))
+        for name, column_type, nullable, default in connection.execute(
+            text(
+                "SELECT a.attname, lower(format_type(a.atttypid, a.atttypmod)), NOT a.attnotnull, "
+                "pg_get_expr(d.adbin, d.adrelid) "
+                "FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum "
+                "WHERE n.nspname = current_schema() AND c.relname = :table_name "
+                "AND a.attnum > 0 AND NOT a.attisdropped"
+            ),
+            {"table_name": table_name},
+        )
+    }
+
+
+def _constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:
+    return (
+        connection.execute(
+            text(
+                "SELECT EXISTS (SELECT FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
+                "WHERE c.connamespace = current_schema()::regnamespace AND t.relname = :table_name "
+                "AND c.conname = :constraint_name)"
+            ),
+            {"table_name": table_name, "constraint_name": constraint_name},
+        ).scalar_one()
+        is True
+    )
+
+
+def _unique_constraint_matches(
+    connection: Connection, table_name: str, constraint_name: str, columns: tuple[str, ...]
+) -> bool:
+    actual = connection.execute(
+        text(
+            "SELECT array_agg(a.attname ORDER BY key.ordinality) "
+            "FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
+            "JOIN unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON TRUE "
+            "JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key.attnum "
+            "WHERE c.connamespace = current_schema()::regnamespace AND t.relname = :table_name "
+            "AND c.conname = :constraint_name AND c.contype = 'u' GROUP BY c.oid"
+        ),
+        {"table_name": table_name, "constraint_name": constraint_name},
+    ).scalar_one_or_none()
+    return actual is not None and tuple(actual) == columns
+
+
+def _primary_key_matches(connection: Connection, table_name: str, columns: tuple[str, ...]) -> bool:
+    actual = connection.execute(
+        text(
+            "SELECT array_agg(a.attname ORDER BY key.ordinality) "
+            "FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
+            "JOIN unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON TRUE "
+            "JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key.attnum "
+            "WHERE c.connamespace = current_schema()::regnamespace AND t.relname = :table_name "
+            "AND c.contype = 'p' GROUP BY c.oid"
+        ),
+        {"table_name": table_name},
+    ).scalar_one_or_none()
+    return actual is not None and tuple(actual) == columns
+
+
+def _snapshot_record_foreign_key_matches(connection: Connection) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                "SELECT EXISTS (SELECT FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
+                "JOIN pg_class target ON target.oid = c.confrelid "
+                "WHERE c.connamespace = current_schema()::regnamespace "
+                "AND t.relname = 'forecast_snapshot_records' AND target.relname = 'forecast_snapshot_runs' "
+                "AND c.contype = 'f' AND c.conkey = ARRAY[(SELECT attnum FROM pg_attribute "
+                "WHERE attrelid = t.oid AND attname = 'run_id')] "
+                "AND c.confkey = ARRAY[(SELECT attnum FROM pg_attribute "
+                "WHERE attrelid = target.oid AND attname = 'id')])"
+            )
+        ).scalar_one()
+    )
+
+
+def _index_exists(connection: Connection, index_name: str) -> bool:
+    return (
+        connection.execute(text("SELECT to_regclass(:index_name)"), {"index_name": index_name}).scalar_one() is not None
+    )
+
+
+def _snapshot_running_range_index_matches(connection: Connection) -> bool:
+    row = connection.execute(
+        text(
+            "SELECT i.indisunique, array_agg(a.attname ORDER BY key.ordinality), "
+            "pg_get_expr(i.indpred, i.indrelid) "
+            "FROM pg_index i "
+            "JOIN pg_class c ON c.oid = i.indexrelid "
+            "JOIN pg_class t ON t.oid = i.indrelid "
+            "JOIN unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality) ON key.ordinality <= i.indnkeyatts "
+            "JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = key.attnum "
+            "WHERE c.relnamespace = current_schema()::regnamespace "
+            "AND c.relname = 'uq_forecast_snapshot_running_range' "
+            "GROUP BY i.indexrelid, i.indisunique, i.indpred"
+        )
+    ).one_or_none()
+    return row == (
+        True,
+        ["report_end_date", "announcement_start_date", "announcement_end_date"],
+        "(status = 'running'::forecast_snapshot_status)",
     )
 
 
@@ -588,7 +916,7 @@ def _type_dependencies(connection: Connection, group: StorageEnumGroup) -> tuple
             text(
                 "WITH managed(table_name, column_name) AS (VALUES "
                 + managed
-                + ") SELECT DISTINCT COALESCE('view ' || v.relname, pg_describe_object(d.classid, d.objid, d.objsubid)) FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid LEFT JOIN pg_class vc ON vc.oid = d.objid AND vc.relkind = 'v' LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid LEFT JOIN pg_class v ON v.oid = COALESCE(vc.oid, r.ev_class) WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') AND NOT EXISTS (SELECT 1 FROM managed m JOIN pg_class c ON c.relname = m.table_name JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = m.column_name LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum WHERE n.nspname = current_schema() AND ((d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.objsubid = a.attnum) OR (d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid))) ORDER BY 1"
+                + ") SELECT DISTINCT COALESCE('view ' || v.relname, pg_describe_object(d.classid, d.objid, d.objsubid)) FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid LEFT JOIN pg_class vc ON vc.oid = d.objid AND vc.relkind = 'v' LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid LEFT JOIN pg_class v ON v.oid = COALESCE(vc.oid, r.ev_class) WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') AND NOT (t.typname = 'forecast_snapshot_status' AND d.classid = 'pg_class'::regclass AND d.objid = to_regclass('uq_forecast_snapshot_running_range')) AND NOT EXISTS (SELECT 1 FROM managed m JOIN pg_class c ON c.relname = m.table_name JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = m.column_name LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum WHERE n.nspname = current_schema() AND ((d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.objsubid = a.attnum) OR (d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid))) ORDER BY 1"
             ),
             parameters,
         ).scalars()

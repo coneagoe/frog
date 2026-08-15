@@ -5,6 +5,12 @@ from .daily_basic_a_stock import DailyBasicAStock, tb_name_daily_basic_a_stock
 from .etf_basic import ETFBasic, tb_name_etf_basic
 from .etf_daily import ETFDaily, tb_name_etf_daily
 from .forecast import Forecast, tb_name_forecast
+from .forecast_snapshot import (
+    ForecastSnapshotRecord,
+    ForecastSnapshotRun,
+    tb_name_forecast_snapshot_record,
+    tb_name_forecast_snapshot_run,
+)
 from .forecast_ssf_candidate import ForecastSSFCandidate, tb_name_forecast_ssf_candidate
 from .general_info_etf import GeneralInfoETF, tb_name_general_info_etf
 from .general_info_ggt import GeneralInfoGGT, tb_name_general_info_ggt
@@ -83,6 +89,8 @@ __all__ = [
     "ETFBasic",
     "ETFDaily",
     "Forecast",
+    "ForecastSnapshotRun",
+    "ForecastSnapshotRecord",
     "ForecastSSFCandidate",
     "HistoryDataDailyAStockBFQ",
     "HistoryDataDailyAStockQFQ",
@@ -118,6 +126,8 @@ __all__ = [
     "tb_name_etf_basic",
     "tb_name_etf_daily",
     "tb_name_forecast",
+    "tb_name_forecast_snapshot_run",
+    "tb_name_forecast_snapshot_record",
     "tb_name_forecast_ssf_candidate",
     "tb_name_history_data_weekly_a_stock_qfq",
     "tb_name_history_data_weekly_a_stock_hfq",

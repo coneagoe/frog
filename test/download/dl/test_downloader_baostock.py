@@ -46,7 +46,7 @@ def downloader_bs_module(monkeypatch):
     ]
 
     for mod in modules_to_remove:
-        sys.modules.pop(mod, None)
+        monkeypatch.delitem(sys.modules, mod, raising=False)
 
     # Mock baostock module with nested structure BEFORE any imports
     bs_stub = types.SimpleNamespace()

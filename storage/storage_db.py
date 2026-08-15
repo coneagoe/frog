@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import Insert as PostgreSQLInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from common.const import (
@@ -94,10 +94,12 @@ from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
 
 from .config import StorageConfig
-from .domain_enums import SSFChangeSignalStatus, validate_ssf_event_types
+from .domain_enums import ForecastSnapshotStatus, SSFChangeSignalStatus, validate_ssf_event_types
 from .model import (
     Base,
     ETFBasic,
+    ForecastSnapshotRecord,
+    ForecastSnapshotRun,
     tb_name_a_stock_basic,
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
@@ -105,6 +107,8 @@ from .model import (
     tb_name_etf_basic,
     tb_name_etf_daily,
     tb_name_forecast,
+    tb_name_forecast_snapshot_record,
+    tb_name_forecast_snapshot_run,
     tb_name_forecast_ssf_candidate,
     tb_name_general_info_etf,
     tb_name_general_info_ggt,
@@ -325,6 +329,8 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_paper_etf_eligibility,
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
+    tb_name_forecast_snapshot_record,
+    tb_name_forecast_snapshot_run,
     tb_name_ssf_change_signal,
     tb_name_stock_monitor_target,
     tb_name_forecast_ssf_candidate,
@@ -1531,6 +1537,237 @@ class StorageDb:
         from .model.forecast_ssf_candidate import ForecastSSFCandidate  # noqa: F401
 
         ForecastSSFCandidate.__table__.create(self.engine, checkfirst=True)
+
+    def ensure_forecast_snapshot_tables(self) -> None:
+        if self.engine is None:
+            raise ConnectionError("SQLAlchemy引擎未初始化")
+        if self.engine.dialect.name == "postgresql":
+            return
+        ForecastSnapshotRun.__table__.create(self.engine, checkfirst=True)
+        ForecastSnapshotRecord.__table__.create(self.engine, checkfirst=True)
+
+    def acquire_forecast_snapshot_run(
+        self,
+        report_end_date: date,
+        announcement_start_date: date,
+        announcement_end_date: date,
+    ) -> ForecastSnapshotRun:
+        self.ensure_forecast_snapshot_tables()
+        assert self.Session is not None
+
+        completed_run_id: int | None = None
+        try:
+            with self.Session.begin() as session:
+                self._lock_forecast_snapshot_range(
+                    session, report_end_date, announcement_start_date, announcement_end_date
+                )
+                completed = self._get_completed_forecast_snapshot_run(
+                    session, report_end_date, announcement_start_date, announcement_end_date
+                )
+                if completed is not None:
+                    completed_run_id = run_id = completed.id
+                else:
+                    active_run = self._get_active_forecast_snapshot_run(
+                        session, report_end_date, announcement_start_date, announcement_end_date
+                    )
+                    if active_run is not None:
+                        raise StorageError("forecast snapshot is already running for requested range")
+                    completed = self._get_completed_forecast_snapshot_run(
+                        session, report_end_date, announcement_start_date, announcement_end_date
+                    )
+                    if completed is not None:
+                        completed_run_id = run_id = completed.id
+                    else:
+                        max_attempt = (
+                            session.query(func.max(ForecastSnapshotRun.attempt))
+                            .filter_by(
+                                report_end_date=report_end_date,
+                                announcement_start_date=announcement_start_date,
+                                announcement_end_date=announcement_end_date,
+                            )
+                            .scalar()
+                        )
+                        run = ForecastSnapshotRun(
+                            report_end_date=report_end_date,
+                            announcement_start_date=announcement_start_date,
+                            announcement_end_date=announcement_end_date,
+                            attempt=(max_attempt or 0) + 1,
+                            status=ForecastSnapshotStatus.RUNNING.value,
+                            requested_date_count=(announcement_end_date - announcement_start_date).days + 1,
+                        )
+                        session.add(run)
+                        session.flush()
+                        run_id = run.id
+        except IntegrityError:
+            completed = self.get_completed_forecast_snapshot_run(
+                report_end_date, announcement_start_date, announcement_end_date
+            )
+            if completed is not None:
+                return completed
+            raise StorageError("forecast snapshot is already running for requested range") from None
+
+        return self._get_forecast_snapshot_run(completed_run_id or run_id)
+
+    def save_forecast_snapshot_records(
+        self, run_id: int, records: list[dict[str, object]], counts: dict[str, int]
+    ) -> None:
+        self.ensure_forecast_snapshot_tables()
+        assert self.Session is not None
+        with self.Session.begin() as session:
+            run = session.get(ForecastSnapshotRun, run_id)
+            if run is None:
+                raise DataNotFoundError(f"forecast snapshot run {run_id} not found")
+            if run.status != ForecastSnapshotStatus.RUNNING.value:
+                raise StorageError("forecast snapshot records can only be saved for a running run")
+            if records:
+                session.execute(
+                    ForecastSnapshotRecord.__table__.insert(), [dict(record, run_id=run_id) for record in records]
+                )
+            self._set_forecast_snapshot_counts(run, counts)
+
+    def complete_forecast_snapshot_run(self, run_id: int, counts: dict[str, int]) -> ForecastSnapshotRun:
+        self.ensure_forecast_snapshot_tables()
+        assert self.Session is not None
+        with self.Session.begin() as session:
+            run = session.get(ForecastSnapshotRun, run_id)
+            if run is None:
+                raise DataNotFoundError(f"forecast snapshot run {run_id} not found")
+            self._lock_forecast_snapshot_range(
+                session, run.report_end_date, run.announcement_start_date, run.announcement_end_date
+            )
+            if run.status != ForecastSnapshotStatus.RUNNING.value:
+                raise StorageError("forecast snapshot run is not running")
+            self._validate_forecast_snapshot_final_counts(counts)
+            if counts["covered_date_count"] != run.requested_date_count:
+                raise StorageError("forecast snapshot coverage does not match requested date count")
+            self._set_forecast_snapshot_counts(run, counts)
+            run.status = ForecastSnapshotStatus.COMPLETED.value
+            run.completed_at = datetime.now(timezone.utc)
+
+        return self._get_forecast_snapshot_run(run_id)
+
+    def fail_forecast_snapshot_run(self, run_id: int, failure_detail: str) -> ForecastSnapshotRun:
+        self.ensure_forecast_snapshot_tables()
+        assert self.Session is not None
+        with self.Session.begin() as session:
+            run = session.get(ForecastSnapshotRun, run_id)
+            if run is None:
+                raise DataNotFoundError(f"forecast snapshot run {run_id} not found")
+            self._lock_forecast_snapshot_range(
+                session, run.report_end_date, run.announcement_start_date, run.announcement_end_date
+            )
+            if run.status != ForecastSnapshotStatus.RUNNING.value:
+                raise StorageError("forecast snapshot run is not running")
+            run.status = ForecastSnapshotStatus.FAILED.value
+            run.failed_at = datetime.now(timezone.utc)
+            run.failure_detail = failure_detail
+
+        return self._get_forecast_snapshot_run(run_id)
+
+    @staticmethod
+    def _lock_forecast_snapshot_range(
+        session: Any, report_end_date: date, announcement_start_date: date, announcement_end_date: date
+    ) -> None:
+        if session.bind is not None and session.bind.dialect.name == "postgresql":
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:range_identity AS text), 0))"),
+                {
+                    "range_identity": (
+                        f"{report_end_date.isoformat()}:{announcement_start_date.isoformat()}:"
+                        f"{announcement_end_date.isoformat()}"
+                    )
+                },
+            )
+
+    def get_completed_forecast_snapshot_run(
+        self,
+        report_end_date: date,
+        announcement_start_date: date,
+        announcement_end_date: date,
+    ) -> ForecastSnapshotRun | None:
+        self.ensure_forecast_snapshot_tables()
+        assert self.Session is not None
+        with self.Session() as session:
+            return self._get_completed_forecast_snapshot_run(
+                session, report_end_date, announcement_start_date, announcement_end_date
+            )
+
+    def list_forecast_snapshot_records(self, run_id: int) -> list[ForecastSnapshotRecord]:
+        self.ensure_forecast_snapshot_tables()
+        assert self.Session is not None
+        with self.Session() as session:
+            return (
+                session.query(ForecastSnapshotRecord)
+                .filter_by(run_id=run_id)
+                .order_by(ForecastSnapshotRecord.announcement_date, ForecastSnapshotRecord.source_order)
+                .all()
+            )
+
+    @staticmethod
+    def _set_forecast_snapshot_counts(run: ForecastSnapshotRun, counts: dict[str, int]) -> None:
+        for field in (
+            "covered_date_count",
+            "source_row_count",
+            "record_count",
+            "duplicate_record_count",
+            "same_day_conflict_count",
+        ):
+            if field in counts:
+                setattr(run, field, counts[field])
+
+    @staticmethod
+    def _validate_forecast_snapshot_final_counts(counts: dict[str, int]) -> None:
+        required_fields = (
+            "covered_date_count",
+            "source_row_count",
+            "record_count",
+            "duplicate_record_count",
+            "same_day_conflict_count",
+        )
+        missing_fields = [field for field in required_fields if field not in counts]
+        if missing_fields:
+            raise StorageError(f"forecast snapshot final counts are missing: {', '.join(missing_fields)}")
+
+    @staticmethod
+    def _get_completed_forecast_snapshot_run(
+        session: Any, report_end_date: date, announcement_start_date: date, announcement_end_date: date
+    ) -> ForecastSnapshotRun | None:
+        return cast(
+            ForecastSnapshotRun | None,
+            session.query(ForecastSnapshotRun)
+            .filter_by(
+                report_end_date=report_end_date,
+                announcement_start_date=announcement_start_date,
+                announcement_end_date=announcement_end_date,
+                status=ForecastSnapshotStatus.COMPLETED.value,
+            )
+            .order_by(ForecastSnapshotRun.completed_at.desc(), ForecastSnapshotRun.id.desc())
+            .first(),
+        )
+
+    @staticmethod
+    def _get_active_forecast_snapshot_run(
+        session: Any, report_end_date: date, announcement_start_date: date, announcement_end_date: date
+    ) -> ForecastSnapshotRun | None:
+        return cast(
+            ForecastSnapshotRun | None,
+            session.query(ForecastSnapshotRun)
+            .filter_by(
+                report_end_date=report_end_date,
+                announcement_start_date=announcement_start_date,
+                announcement_end_date=announcement_end_date,
+                status=ForecastSnapshotStatus.RUNNING.value,
+            )
+            .first(),
+        )
+
+    def _get_forecast_snapshot_run(self, run_id: int) -> ForecastSnapshotRun:
+        assert self.Session is not None
+        with self.Session() as session:
+            run = session.get(ForecastSnapshotRun, run_id)
+            if run is None:
+                raise DataNotFoundError(f"forecast snapshot run {run_id} not found")
+            return run
 
     def upsert_forecast_ssf_candidate(
         self,

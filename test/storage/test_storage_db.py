@@ -3872,6 +3872,22 @@ def test_postgresql_ssf_startup_upgrades_existing_legacy_table_before_storage_mi
                 )
             )
             connection.execute(
+                text(
+                    "CREATE TABLE forecast_snapshot_runs ("
+                    "id integer primary key, report_end_date date NOT NULL, announcement_start_date date NOT NULL, "
+                    "announcement_end_date date NOT NULL, attempt integer NOT NULL, status varchar(16) NOT NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE forecast_snapshot_records ("
+                    "id integer primary key, run_id integer NOT NULL REFERENCES forecast_snapshot_runs(id), "
+                    "ts_code varchar(32) NOT NULL, announcement_date date NOT NULL, report_end_date date NOT NULL, "
+                    "forecast_type varchar(20) NOT NULL, growth_min double precision, growth_max double precision, "
+                    "source_order integer NOT NULL)"
+                )
+            )
+            connection.execute(
                 text("CREATE TABLE ssf_change_signals (id integer primary key, event_types jsonb NOT NULL)")
             )
 
