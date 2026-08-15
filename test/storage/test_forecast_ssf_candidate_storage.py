@@ -208,6 +208,44 @@ def test_lifecycle_transition_rejects_stale_link_without_mutation(tmp_path):
     )
 
 
+@pytest.mark.parametrize("operation", ["transition", "blackroom"], ids=["transition", "blackroom_adapter"])
+def test_lifecycle_transition_rejects_non_a_link_without_mutation(tmp_path, operation):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_monitor_target("00700", "HK", _typed_condition(workflow="forecast_ssf_ma20"), enabled=True)
+    db.upsert_forecast_ssf_candidate(
+        "00700", "HK", date(2025, 12, 31), "eligible", "ssf_holder_match", {"before": True}, target.id
+    )
+
+    with pytest.raises(ValueError, match="linked workflow target"):
+        if operation == "transition":
+            db.transition_forecast_ssf_candidate_with_workflow_target(
+                "00700", "HK", date(2025, 12, 31), "blackroom", "active_blackroom", {"after": True}, False
+            )
+        else:
+            db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
+
+    assert db.get_monitor_target(target.id).enabled is True
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert (saved.state, saved.evidence) == ("eligible", {"before": True})
+
+
+def test_public_disable_transition_rejects_mismatched_candidate_target_without_mutation(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = _create_target(db, workflow="forecast_ssf_ma20", enabled=True)
+    db.upsert_forecast_ssf_candidate(
+        "600002", "A", date(2025, 12, 31), "eligible", "ssf_holder_match", {"before": True}, target.id
+    )
+
+    with pytest.raises(ValueError, match="linked workflow target"):
+        db.disable_forecast_ssf_target_with_candidate_transition(
+            target.id, "blackroom", "active_blackroom", {"after": True}
+        )
+
+    assert db.get_monitor_target(target.id).enabled is True
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert (saved.state, saved.evidence) == ("eligible", {"before": True})
+
+
 @pytest.mark.parametrize("state,enabled", [("blackroom", False), ("delisted_or_unlisted", False), ("eligible", True)])
 def test_lifecycle_transition_preserves_retained_target_identity(tmp_path, state, enabled):
     db = _sqlite_storage(tmp_path)

@@ -2819,10 +2819,16 @@ class StorageDb:
                     return False
                 candidate = candidates[0]
                 evidence = evidence_builder(candidate)
-                candidate.state = state
-                candidate.state_reason = state_reason
-                candidate.evidence = evidence
-                self._disable_workflow_target_in_transaction(session, target)
+                self._transition_forecast_ssf_candidate_with_workflow_target_in_transaction(
+                    session,
+                    candidate.stock_code,
+                    candidate.market,
+                    candidate.report_end_date,
+                    state,
+                    state_reason,
+                    evidence,
+                    False,
+                )
             return True
         except Exception:
             session.rollback()
@@ -2926,13 +2932,14 @@ class StorageDb:
         from .model.stock_monitor_target import StockMonitorTarget
 
         candidate = session.query(ForecastSSFCandidate).filter_by(stock_code=stock_code, market=market).first()
-        if candidate is None or candidate.monitor_target_id is None:
+        if market != "A" or candidate is None or candidate.monitor_target_id is None:
             raise ValueError("candidate must have a linked workflow target")
         target = session.query(StockMonitorTarget).filter_by(id=candidate.monitor_target_id).first()
         if (
             target is None
             or target.stock_code != stock_code
             or target.market != market
+            or target.market != "A"
             or target.workflow != "forecast_ssf_ma20"
             or target.frequency != "daily"
         ):
