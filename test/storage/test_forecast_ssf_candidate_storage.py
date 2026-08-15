@@ -168,6 +168,144 @@ def test_get_forecast_ssf_candidate_for_target_returns_linked_candidate(tmp_path
     assert db.get_forecast_ssf_candidate_for_target(target.id + 1) is None
 
 
+def test_lifecycle_disable_retains_target_link_and_last_state(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    db.update_monitor_target_state(target.id, True)
+
+    updated = db.transition_forecast_ssf_candidate_with_workflow_target(
+        stock_code="600001",
+        market="A",
+        report_end_date=date(2025, 12, 31),
+        state="ineligible",
+        state_reason="ssf_holder_not_found",
+        evidence={"lifecycle": {"state": "ineligible"}},
+        target_enabled=False,
+    )
+
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    persisted = db.get_monitor_target(target.id)
+    assert updated.id == target.id
+    assert (persisted.enabled, persisted.last_state) == (False, True)
+    assert (saved.state, saved.monitor_target_id) == ("ineligible", target.id)
+
+
+def test_lifecycle_transition_rejects_stale_link_without_mutation(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, candidate = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    db.delete_monitor_target(target.id)
+
+    with pytest.raises(ValueError, match="linked workflow target"):
+        db.transition_forecast_ssf_candidate_with_workflow_target(
+            "600001", "A", candidate.report_end_date, "blackroom", "active_blackroom", {"after": True}, False
+        )
+
+    saved = db.list_forecast_ssf_candidates()[0]
+    assert (saved.state, saved.monitor_target_id, saved.evidence) == (
+        "eligible",
+        target.id,
+        {"forecast": {"ann_date": "2026-01-15"}},
+    )
+
+
+@pytest.mark.parametrize("state,enabled", [("blackroom", False), ("delisted_or_unlisted", False), ("eligible", True)])
+def test_lifecycle_transition_preserves_retained_target_identity(tmp_path, state, enabled):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=not enabled, state="eligible")
+    db.update_monitor_target_state(target.id, True)
+
+    updated = db.transition_forecast_ssf_candidate_with_workflow_target(
+        "600001", "A", date(2025, 12, 31), state, "test_transition", {"state": state}, enabled
+    )
+
+    candidate = db.get_forecast_ssf_candidate_for_target(target.id)
+    persisted = db.get_monitor_target(target.id)
+    assert (updated.id, candidate.monitor_target_id) == (target.id, target.id)
+    assert (persisted.enabled, persisted.last_state) == (enabled, True)
+
+
+def test_lifecycle_transition_paused_target_records_candidate_but_stays_disabled(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="blackroom")
+    db.set_workflow_monitor_target_paused(target.id, paused=True)
+
+    db.transition_forecast_ssf_candidate_with_workflow_target(
+        "600001",
+        "A",
+        date(2025, 12, 31),
+        "paused",
+        "manual_pause",
+        {"evaluation": {"state": "eligible", "reason": "ssf_holder_match"}},
+        True,
+    )
+
+    persisted = db.get_monitor_target(target.id)
+    assert (persisted.paused, persisted.enabled) == (True, False)
+
+
+@pytest.mark.parametrize(
+    ("workflow", "frequency"),
+    [("other_workflow", "daily"), ("forecast_ssf_ma20", "intraday")],
+    ids=["wrong_workflow", "non_daily"],
+)
+def test_lifecycle_transition_rejects_invalid_target_relationship_without_mutation(tmp_path, workflow, frequency):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_monitor_target(
+        "600001", "A", _typed_condition(workflow=workflow), frequency=frequency, enabled=True
+    )
+    db.upsert_forecast_ssf_candidate(
+        "600001", "A", date(2025, 12, 31), "eligible", "ssf_holder_match", {"before": True}, target.id
+    )
+
+    with pytest.raises(ValueError, match="linked workflow target"):
+        db.transition_forecast_ssf_candidate_with_workflow_target(
+            "600001", "A", date(2025, 12, 31), "blackroom", "active_blackroom", {"after": True}, False
+        )
+
+    assert db.get_monitor_target(target.id).enabled is True
+    saved = db.get_forecast_ssf_candidate_for_target(target.id)
+    assert (saved.state, saved.evidence) == ("eligible", {"before": True})
+
+
+def test_lifecycle_transition_rejects_duplicate_target_links_without_mutation(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    db.upsert_forecast_ssf_candidate(
+        "600002", "A", date(2025, 12, 31), "eligible", "ssf_holder_match", {"before": 2}, target.id
+    )
+
+    with pytest.raises(ValueError, match=r"multiple candidates.*monitor_target_id"):
+        db.transition_forecast_ssf_candidate_with_workflow_target(
+            "600001", "A", date(2025, 12, 31), "blackroom", "active_blackroom", {"after": True}, False
+        )
+
+    assert db.get_monitor_target(target.id).enabled is True
+    assert {candidate.state for candidate in db.list_forecast_ssf_candidates()} == {"eligible"}
+
+
+def test_existing_candidate_upsert_does_not_reset_target_last_state(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    db.update_monitor_target_state(target.id, True)
+
+    updated = db.upsert_forecast_ssf_candidate_with_workflow_target(
+        stock_code="600001",
+        market="A",
+        report_end_date=date(2025, 12, 31),
+        state="eligible",
+        state_reason="ssf_holder_match",
+        evidence={"after": True},
+        workflow="forecast_ssf_ma20",
+        frequency="daily",
+        condition=_typed_condition(workflow="forecast_ssf_ma20"),
+        note="workflow",
+        target_enabled=True,
+        reset_last_state=True,
+    )
+
+    assert (updated.id, updated.last_state) == (target.id, True)
+
+
 def test_disable_transition_retains_owned_target_and_candidate_link(tmp_path):
     db = _sqlite_storage(tmp_path)
     target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
@@ -276,7 +414,7 @@ def test_blackroom_disable_rolls_back_candidate_when_target_flush_fails(tmp_path
     with pytest.raises(RuntimeError, match="disable failed"):
         db.disable_forecast_ssf_target_for_blackroom(target.id, "active_blackroom")
 
-    assert db.get_monitor_target(target.id) is not None
+    assert db.get_monitor_target(target.id).enabled is True
     saved = db.list_forecast_ssf_candidates()[0]
     assert (saved.state, saved.monitor_target_id) == ("eligible", target.id)
     assert saved.evidence == {"forecast": {"ann_date": "2026-01-15"}}

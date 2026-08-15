@@ -2835,22 +2835,122 @@ class StorageDb:
         session.flush()
 
     def disable_forecast_ssf_target_for_blackroom(self, target_id: int, reason: str) -> bool:
-        def build_evidence(candidate: Any) -> dict[str, Any]:
-            evidence = dict(candidate.evidence or {})
-            evidence["lifecycle"] = {
-                "as_of_date": date.today().isoformat(),
-                "state": "blackroom",
-                "reason": reason,
-                "previous_state": candidate.state,
-            }
-            return evidence
+        from .model.forecast_ssf_candidate import ForecastSSFCandidate
+        from .model.stock_monitor_target import StockMonitorTarget
 
-        return self._disable_forecast_ssf_target_with_candidate_transition(
-            target_id,
-            "blackroom",
-            reason,
-            build_evidence,
-        )
+        self.ensure_monitor_targets_table()
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            with session.begin():
+                target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+                if target is None or target.workflow != "forecast_ssf_ma20" or target.frequency != "daily":
+                    return False
+                candidates = session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target_id).all()
+                if len(candidates) > 1:
+                    raise ValueError(f"multiple candidates found for monitor_target_id={target_id}")
+                if not candidates:
+                    return False
+                candidate = candidates[0]
+                evidence = dict(candidate.evidence or {})
+                evidence["lifecycle"] = {
+                    "as_of_date": date.today().isoformat(),
+                    "state": "blackroom",
+                    "reason": reason,
+                    "previous_state": candidate.state,
+                }
+                self._transition_forecast_ssf_candidate_with_workflow_target_in_transaction(
+                    session,
+                    candidate.stock_code,
+                    candidate.market,
+                    candidate.report_end_date,
+                    "blackroom",
+                    reason,
+                    evidence,
+                    False,
+                )
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def transition_forecast_ssf_candidate_with_workflow_target(
+        self,
+        stock_code: str,
+        market: str,
+        report_end_date: date,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+        target_enabled: bool,
+    ) -> Any:
+        self._validate_monitor_enum_value(market, "market", MonitorMarket)
+        self._validate_monitor_enum_value(state, "state", ForecastSSFCandidateState)
+        self.ensure_monitor_targets_table()
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            with session.begin():
+                target = self._transition_forecast_ssf_candidate_with_workflow_target_in_transaction(
+                    session,
+                    stock_code,
+                    market,
+                    report_end_date,
+                    state,
+                    state_reason,
+                    evidence,
+                    target_enabled,
+                )
+            session.refresh(target)
+            return target
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _transition_forecast_ssf_candidate_with_workflow_target_in_transaction(
+        self,
+        session: Any,
+        stock_code: str,
+        market: str,
+        report_end_date: date,
+        state: str,
+        state_reason: str,
+        evidence: dict[str, Any],
+        target_enabled: bool,
+    ) -> Any:
+        from .model.forecast_ssf_candidate import ForecastSSFCandidate
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        candidate = session.query(ForecastSSFCandidate).filter_by(stock_code=stock_code, market=market).first()
+        if candidate is None or candidate.monitor_target_id is None:
+            raise ValueError("candidate must have a linked workflow target")
+        target = session.query(StockMonitorTarget).filter_by(id=candidate.monitor_target_id).first()
+        if (
+            target is None
+            or target.stock_code != stock_code
+            or target.market != market
+            or target.workflow != "forecast_ssf_ma20"
+            or target.frequency != "daily"
+        ):
+            raise ValueError("candidate must have a linked workflow target")
+        candidates = session.query(ForecastSSFCandidate).filter_by(monitor_target_id=target.id).all()
+        if len(candidates) != 1:
+            raise ValueError(f"multiple candidates found for monitor_target_id={target.id}")
+
+        candidate.report_end_date = report_end_date
+        candidate.state = state
+        candidate.state_reason = state_reason
+        candidate.evidence = evidence
+        if not target_enabled:
+            self._disable_workflow_target_in_transaction(session, target)
+        else:
+            target.enabled = False if target.paused else True
+            session.flush()
+        return target
 
     def find_workflow_monitor_target(self, stock_code: str, market: str, frequency: str, workflow: str) -> Any | None:
         from .model.stock_monitor_target import StockMonitorTarget
@@ -3036,7 +3136,7 @@ class StorageDb:
                     condition,
                     note,
                     target_enabled,
-                    reset_last_state,
+                    False,
                 )
                 self._upsert_forecast_ssf_candidate_in_transaction(
                     session.connection(),
