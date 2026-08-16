@@ -37,7 +37,7 @@ def main() -> int:
         if not key:
             raise RuntimeError("QG_PROXY_KEY must be configured in .env")
 
-        params = {
+        params: dict[str, str | int | bool] = {
             "key": key,
             "num": 1,
             "distinct": True,

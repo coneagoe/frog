@@ -47,7 +47,7 @@ import os
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Never, cast
 
 import requests
 
@@ -67,7 +67,7 @@ class _ParserError(Exception):
 class _SafeParser(argparse.ArgumentParser):
     """ArgumentParser that raises _ParserError on bad/missing args."""
 
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> Never:
         raise _ParserError(message)
 
 
@@ -86,14 +86,14 @@ class PaperTradingApiClient:
         self._session = requests.Session()
         self._session.headers["Authorization"] = f"Bearer {self.token}"
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def _request(self, method: str, path: str, **kwargs: Any) -> object:
         url = f"{self.base_url}{path}"
         kwargs.setdefault("timeout", self.TIMEOUT)
         resp = self._session.request(method, url, **kwargs)
         if resp.status_code == 204:
             return {"success": True, "message": "Deleted successfully"}
         resp.raise_for_status()
-        return resp.json()
+        return cast(object, resp.json())
 
     def create_account(
         self,
@@ -119,16 +119,16 @@ class PaperTradingApiClient:
             body["transfer_fee_rate"] = str(transfer_fee_rate)
         if etf_commission_rate is not None:
             body["etf_commission_rate"] = str(etf_commission_rate)
-        return self._request("POST", "/paper/accounts", json=body)
+        return cast(dict[str, Any], self._request("POST", "/paper/accounts", json=body))
 
     def list_accounts(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/paper/accounts")
+        return cast(list[dict[str, Any]], self._request("GET", "/paper/accounts"))
 
     def get_account(self, account_id: int) -> dict[str, Any] | None:
-        return self._request("GET", f"/paper/accounts/{account_id}")
+        return cast(dict[str, Any] | None, self._request("GET", f"/paper/accounts/{account_id}"))
 
     def delete_account(self, account_id: int) -> dict[str, Any]:
-        return self._request("DELETE", f"/paper/accounts/{account_id}")
+        return cast(dict[str, Any], self._request("DELETE", f"/paper/accounts/{account_id}"))
 
     def update_account_fees(
         self,
@@ -150,13 +150,13 @@ class PaperTradingApiClient:
             body["transfer_fee_rate"] = str(transfer_fee_rate)
         if etf_commission_rate is not None:
             body["etf_commission_rate"] = str(etf_commission_rate)
-        return self._request("PATCH", f"/paper/accounts/{account_id}", json=body)
+        return cast(dict[str, Any], self._request("PATCH", f"/paper/accounts/{account_id}", json=body))
 
     def list_positions(self, account_id: int) -> list[dict[str, Any]]:
-        return self._request("GET", f"/paper/accounts/{account_id}/positions")
+        return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/positions"))
 
     def list_cash_ledger(self, account_id: int) -> list[dict[str, Any]]:
-        return self._request("GET", f"/paper/accounts/{account_id}/cash-ledger")
+        return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/cash-ledger"))
 
     def create_order(
         self,
@@ -183,46 +183,52 @@ class PaperTradingApiClient:
             body["comment"] = comment
         if market is not None:
             body["market"] = market
-        return self._request("POST", f"/paper/accounts/{account_id}/orders", json=body)
+        return cast(dict[str, Any], self._request("POST", f"/paper/accounts/{account_id}/orders", json=body))
 
     def list_orders(self, account_id: int) -> list[dict[str, Any]]:
-        return self._request("GET", f"/paper/accounts/{account_id}/orders")
+        return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/orders"))
 
     def get_order(self, order_id: int) -> dict[str, Any]:
-        return self._request("GET", f"/paper/orders/{order_id}")
+        return cast(dict[str, Any], self._request("GET", f"/paper/orders/{order_id}"))
 
     def cancel_order(self, order_id: int) -> dict[str, Any]:
-        return self._request("POST", f"/paper/orders/{order_id}/cancel")
+        return cast(dict[str, Any], self._request("POST", f"/paper/orders/{order_id}/cancel"))
 
     def delete_order(self, order_id: int) -> None:
         self._request("DELETE", f"/paper/orders/{order_id}")
 
     def update_order_comment(self, order_id: int, comment: str | None) -> dict[str, Any]:
-        return self._request("PATCH", f"/paper/orders/{order_id}/comment", json={"comment": comment})
+        return cast(
+            dict[str, Any],
+            self._request("PATCH", f"/paper/orders/{order_id}/comment", json={"comment": comment}),
+        )
 
     def list_order_validity_checks(self, account_id: int, order_id: int) -> list[dict[str, Any]]:
-        return self._request(
-            "GET",
-            f"/paper/accounts/{account_id}/orders/{order_id}/validity-checks",
+        return cast(
+            list[dict[str, Any]],
+            self._request(
+                "GET",
+                f"/paper/accounts/{account_id}/orders/{order_id}/validity-checks",
+            ),
         )
 
     def list_trades(self, account_id: int) -> list[dict[str, Any]]:
-        return self._request("GET", f"/paper/accounts/{account_id}/trades")
+        return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/trades"))
 
     def run_matching(self, trade_date: str, account_id: int | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {"trade_date": trade_date}
         if account_id is not None:
             body["account_id"] = account_id
-        return self._request("POST", "/paper/matching/runs", json=body)
+        return cast(dict[str, Any], self._request("POST", "/paper/matching/runs", json=body))
 
     def list_matching_runs(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/paper/matching/runs")
+        return cast(list[dict[str, Any]], self._request("GET", "/paper/matching/runs"))
 
     def get_matching_run(self, run_id: int) -> dict[str, Any]:
-        return self._request("GET", f"/paper/matching/runs/{run_id}")
+        return cast(dict[str, Any], self._request("GET", f"/paper/matching/runs/{run_id}"))
 
     def list_snapshots(self, account_id: int) -> list[dict[str, Any]]:
-        return self._request("GET", f"/paper/accounts/{account_id}/snapshots")
+        return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/snapshots"))
 
     def deposit_cash(
         self, account_id: int, amount: Decimal, trade_date: str, note: str | None = None
@@ -230,7 +236,7 @@ class PaperTradingApiClient:
         body: dict[str, Any] = {"amount": str(amount), "trade_date": trade_date}
         if note is not None:
             body["note"] = note
-        return self._request("POST", f"/paper/accounts/{account_id}/cash/deposit", json=body)
+        return cast(dict[str, Any], self._request("POST", f"/paper/accounts/{account_id}/cash/deposit", json=body))
 
     def withdraw_cash(
         self, account_id: int, amount: Decimal, trade_date: str, note: str | None = None
@@ -238,35 +244,41 @@ class PaperTradingApiClient:
         body: dict[str, Any] = {"amount": str(amount), "trade_date": trade_date}
         if note is not None:
             body["note"] = note
-        return self._request("POST", f"/paper/accounts/{account_id}/cash/withdraw", json=body)
+        return cast(dict[str, Any], self._request("POST", f"/paper/accounts/{account_id}/cash/withdraw", json=body))
 
     def import_positions(self, account_id: int, positions: list[dict[str, Any]]) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            f"/paper/accounts/{account_id}/positions/import",
-            json={"positions": positions},
+        return cast(
+            dict[str, Any],
+            self._request(
+                "POST",
+                f"/paper/accounts/{account_id}/positions/import",
+                json={"positions": positions},
+            ),
         )
 
     def rebuild_delayed_daily_bar_orders(self) -> dict[str, Any]:
-        return self._request("POST", "/paper/matching/runs/rebuilds")
+        return cast(dict[str, Any], self._request("POST", "/paper/matching/runs/rebuilds"))
 
     def repair_historical_etf_markets(self, apply: bool = False) -> dict[str, Any]:
-        return self._request("POST", "/paper/repairs/etf-markets", json={"apply": apply})
+        return cast(dict[str, Any], self._request("POST", "/paper/repairs/etf-markets", json={"apply": apply}))
 
     def list_etf_eligibility(self, status: str | None = None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
         if status is not None:
             kwargs["params"] = {"status": status}
-        return self._request("GET", "/paper/etf-eligibility", **kwargs)
+        return cast(dict[str, Any], self._request("GET", "/paper/etf-eligibility", **kwargs))
 
     def get_etf_eligibility(self, symbol: str) -> dict[str, Any]:
-        return self._request("GET", f"/paper/etf-eligibility/{symbol}")
+        return cast(dict[str, Any], self._request("GET", f"/paper/etf-eligibility/{symbol}"))
 
     def classify_etf_eligibility(self, symbol: str, status: str, reviewed_by: str) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            f"/paper/etf-eligibility/{symbol}/classify",
-            json={"status": status, "reviewed_by": reviewed_by},
+        return cast(
+            dict[str, Any],
+            self._request(
+                "POST",
+                f"/paper/etf-eligibility/{symbol}/classify",
+                json={"status": status, "reviewed_by": reviewed_by},
+            ),
         )
 
 
@@ -529,26 +541,26 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
     if cmd == "import-positions":
         return _handle_import_positions(client, args)
     if cmd == "update-fee":
-        kwargs: dict[str, Any] = {}
+        update_kwargs: dict[str, Any] = {}
         if args.commission_rate is not None:
-            kwargs["commission_rate"] = _parse_non_negative_decimal(args.commission_rate, "--commission-rate")
+            update_kwargs["commission_rate"] = _parse_non_negative_decimal(args.commission_rate, "--commission-rate")
         if args.min_commission is not None:
-            kwargs["min_commission"] = _parse_non_negative_decimal(args.min_commission, "--min-commission")
+            update_kwargs["min_commission"] = _parse_non_negative_decimal(args.min_commission, "--min-commission")
         if args.stamp_duty_rate is not None:
-            kwargs["stamp_duty_rate"] = _parse_non_negative_decimal(args.stamp_duty_rate, "--stamp-duty-rate")
+            update_kwargs["stamp_duty_rate"] = _parse_non_negative_decimal(args.stamp_duty_rate, "--stamp-duty-rate")
         if args.transfer_fee_rate is not None:
-            kwargs["transfer_fee_rate"] = _parse_non_negative_decimal(
+            update_kwargs["transfer_fee_rate"] = _parse_non_negative_decimal(
                 args.transfer_fee_rate,
                 "--transfer-fee-rate",
             )
         if args.etf_commission_rate is not None:
-            kwargs["etf_commission_rate"] = _parse_non_negative_decimal(
+            update_kwargs["etf_commission_rate"] = _parse_non_negative_decimal(
                 args.etf_commission_rate,
                 "--etf-commission-rate",
             )
-        if not kwargs:
+        if not update_kwargs:
             raise _ParserError("at least one fee field is required")
-        return client.update_account_fees(account_id=args.account_id, **kwargs)
+        return client.update_account_fees(account_id=args.account_id, **update_kwargs)
     raise _ParserError(f"unknown account command: {cmd}")
 
 
@@ -759,7 +771,7 @@ def _get_subcommand(args: argparse.Namespace) -> str | None:
     ):
         val = getattr(args, attr, None)
         if val is not None:
-            return val
+            return cast(str, val)
     return None
 
 

@@ -38,7 +38,7 @@ def _make_target(
     return t
 
 
-def _candidate_evidence():
+def _candidate_evidence() -> SimpleNamespace:
     return SimpleNamespace(
         evidence={
             "forecast": {
@@ -530,13 +530,12 @@ def test_banned_workflow_target_is_disabled_without_email():
     events = []
     storage.get_forecast_ssf_candidate_for_target.side_effect = lambda _: events.append("evidence")
     blackroom = MagicMock()
-    blackroom.is_banned.side_effect = lambda *_: (
+
+    def is_banned(*_: object) -> dict[str, object]:
         events.append("blackroom")
-        or {
-            "success": True,
-            "data": {"banned": True},
-        }
-    )
+        return {"success": True, "data": {"banned": True}}
+
+    blackroom.is_banned.side_effect = is_banned
 
     with (
         patch("monitor.monitor_runner.get_storage", return_value=storage),
@@ -607,17 +606,19 @@ def test_workflow_alert_checks_blackroom_after_evidence_before_email():
     storage = MagicMock()
     storage.load_monitor_targets.return_value = [target]
     events = []
-    storage.get_forecast_ssf_candidate_for_target.side_effect = lambda _: (
-        events.append("evidence") or _candidate_evidence()
-    )
+
+    def get_candidate_evidence(_: object) -> SimpleNamespace:
+        events.append("evidence")
+        return _candidate_evidence()
+
+    storage.get_forecast_ssf_candidate_for_target.side_effect = get_candidate_evidence
     blackroom = MagicMock()
-    blackroom.is_banned.side_effect = lambda *_: (
+
+    def is_banned(*_: object) -> dict[str, object]:
         events.append("blackroom")
-        or {
-            "success": True,
-            "data": {"banned": False},
-        }
-    )
+        return {"success": True, "data": {"banned": False}}
+
+    blackroom.is_banned.side_effect = is_banned
 
     with (
         patch("monitor.monitor_runner.get_storage", return_value=storage),

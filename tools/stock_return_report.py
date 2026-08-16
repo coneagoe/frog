@@ -85,7 +85,7 @@ def _calculate_return(history_df: pd.DataFrame, lookback: int) -> float | None:
     if pd.isna(latest_close) or pd.isna(base_close) or base_close == 0:
         return None
 
-    return round((latest_close / base_close - 1) * 100, 2)
+    return round(float((latest_close / base_close - 1) * 100), 2)
 
 
 def _format_for_print(report_df: pd.DataFrame) -> pd.DataFrame:

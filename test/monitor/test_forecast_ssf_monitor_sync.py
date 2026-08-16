@@ -1,5 +1,6 @@
 from datetime import date
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -58,7 +59,7 @@ def _snapshot(
 def _records(*stock_codes: str, **overrides: object) -> pd.DataFrame:
     records = _forecasts(*stock_codes).assign(source_order=3)
     for column, value in overrides.items():
-        records[column] = value
+        records[column] = cast(Any, value)
     return records
 
 
@@ -298,14 +299,16 @@ def test_sync_real_listing_output_keeps_st_named_stock_target_disabled(tmp_path)
         session.commit()
     finally:
         session.close()
-    storage.get_latest_completed_forecast_snapshot_run = MagicMock(return_value=_snapshot())
-    storage.load_selected_forecast_snapshot_records = MagicMock(return_value=_records("600001"))
+    setattr(storage, "get_latest_completed_forecast_snapshot_run", MagicMock(return_value=_snapshot()))
+    setattr(storage, "load_selected_forecast_snapshot_records", MagicMock(return_value=_records("600001")))
     blackroom = MagicMock()
 
     result = ForecastSSFMonitorSyncService(storage=storage, blackroom_service=blackroom).sync(date(2026, 1, 20))
 
     assert result["data"]["forecast_candidates"] == 0
-    assert storage.get_monitor_target(target.id).enabled is False
+    current_target = storage.get_monitor_target(target.id)
+    assert current_target is not None
+    assert current_target.enabled is False
     assert storage.list_forecast_ssf_candidates()[0].state == "ineligible"
     blackroom.is_banned.assert_not_called()
 

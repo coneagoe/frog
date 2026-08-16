@@ -203,10 +203,9 @@ def build_parser() -> _StableParser:
 
 def _render_target_line(item: dict[str, Any]) -> str:
     stock_code = item.get("stock_code")
-    stock_name = resolve_stock_name(
-        stock_code=stock_code,
-        stock_name=item.get("stock_name"),
-    )
+    if not isinstance(stock_code, str):
+        stock_code = None
+    stock_name = resolve_stock_name(stock_code=stock_code, stock_name=item.get("stock_name")) if stock_code else None
     return format_monitor_target_label(
         stock_code=stock_code,
         stock_name=stock_name,

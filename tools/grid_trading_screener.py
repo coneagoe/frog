@@ -13,7 +13,7 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Callable
+from typing import Callable, cast
 
 import pandas as pd
 
@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     parsed = parser.parse_args(argv)
 
     # Lazy tushare import inside the CLI entry point.
-    import tushare as ts  # type: ignore[import-untyped]
+    import tushare as ts
 
     token = os.environ.get("TUSHARE_TOKEN") or ts.get_token()
     if token:
@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     pro = ts.pro_api()
 
     def fetch_daily(code: str, start_date: str, end_date: str) -> pd.DataFrame:
-        df = pro.daily(ts_code=code, start_date=start_date, end_date=end_date)
+        df = cast(pd.DataFrame, pro.daily(ts_code=code, start_date=start_date, end_date=end_date))
         if df.empty:
             return df
         return df[["trade_date", "close", "amount"]]

@@ -74,9 +74,23 @@ package = false
 
 [tool.mypy]
 files = [
-    "celery_app.py", "common", "conf", "dags", "download", "factor",
-    "monitor", "ocr", "paper_trading", "storage", "task",
-    "top10_floatholder", "utility",
+    "celery_app.py",
+    "common",
+    "conf",
+    "dags",
+    "download",
+    "factor",
+    "forecast_snapshot",
+    "fund",
+    "monitor",
+    "ocr",
+    "paper_trading",
+    "storage",
+    "task",
+    "tools",
+    "trigger",
+    "top10_floatholder",
+    "utility",
 ]
 python_version = "3.12"
 explicit_package_bases = true
@@ -92,24 +106,17 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 
-# Exclude tools directory
 [[tool.mypy.overrides]]
-module = "tools.*"
+module = ["fund", "fund.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["ocr", "ocr.*"]
 ignore_errors = true
 
 # Exclude stock
 [[tool.mypy.overrides]]
 module = "stock.*"
-ignore_errors = true
-
-# Exclude stock
-[[tool.mypy.overrides]]
-module = "fund.*"
-ignore_errors = true
-
-# Exclude backtest/deprecate directory
-[[tool.mypy.overrides]]
-module = "backtest.deprecate.*"
 ignore_errors = true
 
 # Third-party libraries without type stubs
