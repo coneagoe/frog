@@ -240,6 +240,52 @@ def test_final_close_runner_uses_hfq_storage_and_never_fetches_realtime_price():
     assert summary.triggered == 1
 
 
+def _close_history(end: str, closes: list[float]) -> pd.DataFrame:
+    return pd.DataFrame({COL_DATE: pd.date_range(end=end, periods=len(closes)), COL_CLOSE: closes})
+
+
+def test_reenabled_workflow_target_above_ma_waits_for_later_close_crossover():
+    target = _make_target(
+        condition={"type": "close_cross_ma", "direction": "above", "period": 20},
+        last_state=True,
+        reset_mode="auto",
+    )
+    target.workflow = "forecast_ssf_ma20"
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+    histories = [
+        _close_history("2026-06-03", [10.0] * 18 + [11.0, 11.0, 12.0]),
+        _close_history("2026-06-04", [10.0] * 19 + [10.0, 9.0]),
+        _close_history("2026-06-05", [10.0] * 18 + [10.0, 9.0, 11.0]),
+    ]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_final_close_history_df", side_effect=histories) as fetch_final,
+        patch("monitor.monitor_runner.fetch_current_price") as realtime,
+        patch("monitor.monitor_runner.BlackroomService") as blackroom,
+        patch("monitor.monitor_runner.send_email") as email,
+    ):
+        first = run_monitor(workflow="forecast_ssf_ma20", as_of_date=date(2026, 6, 3))
+        target.last_state = False
+        second = run_monitor(workflow="forecast_ssf_ma20", as_of_date=date(2026, 6, 4))
+        blackroom.return_value.is_banned.return_value = {"success": True, "data": {"banned": False}}
+        third = run_monitor(workflow="forecast_ssf_ma20", as_of_date=date(2026, 6, 5))
+
+    assert fetch_final.call_count == 3
+    realtime.assert_not_called()
+    state_updates = storage.update_monitor_target_state.call_args_list
+    assert state_updates[0].args == (1, False)
+    assert state_updates[0].kwargs == {"triggered_at": None}
+    assert state_updates[1].args == (1, True)
+    assert isinstance(state_updates[1].kwargs["triggered_at"], datetime)
+    email.assert_called_once()
+    blackroom.return_value.is_banned.assert_called_once_with("600519", "A")
+    assert (first.triggered, first.skipped, first.errors) == (0, 0, 0)
+    assert (second.triggered, second.skipped, second.errors) == (0, 0, 0)
+    assert (third.triggered, third.skipped, third.errors) == (1, 0, 0)
+
+
 def test_final_close_stale_bar_preserves_state_and_sends_no_email():
     target = _make_target(
         last_state=True,
