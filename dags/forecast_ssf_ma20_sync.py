@@ -6,9 +6,9 @@ import sys
 from datetime import date, datetime
 from typing import Any, cast
 
-from airflow import DAG
 from airflow.exceptions import AirflowSkipException
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import DAG
 
 project_root = os.environ.get("FROG_PROJECT_ROOT") or "/opt/airflow/frog"
 if os.path.isdir(project_root):

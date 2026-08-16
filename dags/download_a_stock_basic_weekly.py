@@ -3,8 +3,8 @@
 import os
 import sys
 
-from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import DAG
 
 # Ensure project root and dags directory are on sys.path
 project_root = os.environ.get("FROG_PROJECT_ROOT") or "/opt/airflow/frog"
@@ -15,6 +15,7 @@ else:
 
 # Also add dags directory to sys.path for common_dags import
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 
 from download import DownloadManager  # noqa: E402
 

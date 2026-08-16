@@ -3,9 +3,9 @@
 import os
 import sys
 
-from airflow import DAG
 from airflow.exceptions import AirflowSkipException
-from airflow.operators.python import PythonOperator
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import DAG
 
 # Ensure project root is on sys.path
 project_root = os.environ.get("FROG_PROJECT_ROOT") or "/opt/airflow/frog"
@@ -13,6 +13,7 @@ if os.path.isdir(project_root):
     sys.path.insert(0, project_root)
 else:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 from download import DownloadManager  # noqa: E402
 from stock.market import is_a_market_open_today  # noqa: E402

@@ -8,7 +8,7 @@
 - ✅ 自动权限修复：通过 `airflow-init-permissions` 容器自动设置目录权限
 - ✅ 支持自定义 UID：通过环境变量 `AIRFLOW_UID` 配置
   （Airflow 官方镜像要求 `GID=0`，此处已写死为 0）
-- ✅ 完整的 Airflow 栈：包含 webserver、scheduler、worker 和数据库
+- ✅ 完整的 Airflow 3 栈：包含 API server、scheduler、dag processor、worker 和数据库
 
 ## 使用方法
 
@@ -49,14 +49,14 @@ docker compose up -d
 
 ### 3. 重置/修改 Airflow 密码
 
-Airflow 2.x 支持在容器内用 CLI 重置密码：
+Airflow 3.x 使用 API server 容器内的 CLI 重置密码：
 
 ```bash
 # 交互式（推荐，不会把密码留在 shell history）
-docker compose exec -it airflow-webserver airflow users reset-password --username admin
+docker compose exec -it airflow-apiserver airflow users reset-password --username admin
 
 # 非交互式（会出现在 shell history，请谨慎）
-docker compose exec airflow-webserver airflow users reset-password --username admin --password 'REPLACE_WITH_STRONG_PASSWORD'
+docker compose exec airflow-apiserver airflow users reset-password --username admin --password 'REPLACE_WITH_STRONG_PASSWORD'
 ```
 
 如果你用的不是 `admin` 用户名，把 `--username` 改成实际用户名即可。
@@ -67,8 +67,8 @@ docker compose exec airflow-webserver airflow users reset-password --username ad
 # 查看所有服务状态
 docker compose ps
 
-# 查看 webserver 日志
-docker compose logs airflow-webserver
+# 查看 API server 日志
+docker compose logs airflow-apiserver
 
 # 查看权限初始化日志
 docker compose logs airflow-init-permissions

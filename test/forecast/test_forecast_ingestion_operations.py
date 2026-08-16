@@ -36,13 +36,23 @@ def daily_module(monkeypatch):
     monkeypatch.syspath_prepend(str(DAGS_DIR))
     monkeypatch.setenv("FROG_PROJECT_ROOT", str(ROOT))
     airflow = types.ModuleType("airflow")
-    setattr(airflow, "DAG", FakeDAG)
-    airflow_operators = types.ModuleType("airflow.operators")
-    airflow_python = types.ModuleType("airflow.operators.python")
+    airflow.__path__ = []
+    airflow_sdk = types.ModuleType("airflow.sdk")
+    setattr(airflow_sdk, "DAG", FakeDAG)
+    airflow_providers = types.ModuleType("airflow.providers")
+    airflow_providers.__path__ = []
+    airflow_standard = types.ModuleType("airflow.providers.standard")
+    airflow_standard.__path__ = []
+    airflow_operators = types.ModuleType("airflow.providers.standard.operators")
+    airflow_operators.__path__ = []
+    airflow_python = types.ModuleType("airflow.providers.standard.operators.python")
     setattr(airflow_python, "PythonOperator", FakePythonOperator)
     monkeypatch.setitem(sys.modules, "airflow", airflow)
-    monkeypatch.setitem(sys.modules, "airflow.operators", airflow_operators)
-    monkeypatch.setitem(sys.modules, "airflow.operators.python", airflow_python)
+    monkeypatch.setitem(sys.modules, "airflow.sdk", airflow_sdk)
+    monkeypatch.setitem(sys.modules, "airflow.providers", airflow_providers)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard", airflow_standard)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard.operators", airflow_operators)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard.operators.python", airflow_python)
     sys.modules.pop("download_forecast_daily", None)
     module = importlib.import_module("download_forecast_daily")
     yield module

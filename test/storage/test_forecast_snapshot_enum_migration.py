@@ -458,6 +458,30 @@ def test_migration_creates_both_snapshot_tables_in_a_fresh_schema() -> None:
         engine.dispose()
 
 
+def test_migration_creates_snapshot_tables_for_existing_governed_schema() -> None:
+    engine = _engine()
+    schema = f"forecast_snapshot_existing_schema_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        _create_legacy_schema(connection)
+        assert migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,)).converted is True
+        connection.execute(text("DROP TABLE forecast_snapshot_records"))
+        connection.execute(text("DROP TABLE forecast_snapshot_runs"))
+    try:
+        with _connection(engine, schema) as connection:
+            assert migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,)).converted is True
+
+            assert _table_exists(connection, "forecast_snapshot_runs")
+            assert _table_exists(connection, "forecast_snapshot_records")
+            assert _foreign_key_target(connection, "forecast_snapshot_records") == "forecast_snapshot_runs"
+            assert _column_type(connection, "forecast_snapshot_runs", "status") == "forecast_snapshot_status"
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
+
+
 def test_migration_rejects_run_without_snapshot_records() -> None:
     engine = _engine()
     schema = f"forecast_snapshot_run_only_{uuid.uuid4().hex}"

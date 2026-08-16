@@ -1,7 +1,7 @@
 import importlib
 import sys
 import types
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
@@ -38,13 +38,23 @@ def snapshot_module(monkeypatch):
     monkeypatch.setenv("FROG_PROJECT_ROOT", str(ROOT))
 
     airflow_module = types.ModuleType("airflow")
-    airflow_module.__dict__["DAG"] = FakeDAG
-    airflow_operators = types.ModuleType("airflow.operators")
-    airflow_python = types.ModuleType("airflow.operators.python")
+    airflow_module.__path__ = []
+    airflow_sdk = types.ModuleType("airflow.sdk")
+    airflow_sdk.__dict__["DAG"] = FakeDAG
+    airflow_providers = types.ModuleType("airflow.providers")
+    airflow_providers.__path__ = []
+    airflow_standard = types.ModuleType("airflow.providers.standard")
+    airflow_standard.__path__ = []
+    airflow_operators = types.ModuleType("airflow.providers.standard.operators")
+    airflow_operators.__path__ = []
+    airflow_python = types.ModuleType("airflow.providers.standard.operators.python")
     airflow_python.__dict__["PythonOperator"] = FakePythonOperator
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
-    monkeypatch.setitem(sys.modules, "airflow.operators", airflow_operators)
-    monkeypatch.setitem(sys.modules, "airflow.operators.python", airflow_python)
+    monkeypatch.setitem(sys.modules, "airflow.sdk", airflow_sdk)
+    monkeypatch.setitem(sys.modules, "airflow.providers", airflow_providers)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard", airflow_standard)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard.operators", airflow_operators)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard.operators.python", airflow_python)
 
     sys.modules.pop("create_forecast_snapshot", None)
     module = importlib.import_module("create_forecast_snapshot")
@@ -54,13 +64,14 @@ def snapshot_module(monkeypatch):
 
 def valid_context() -> dict[str, Any]:
     return {
+        "logical_date": datetime(2026, 7, 3, 6, 0),
         "dag_run": SimpleNamespace(
             conf={
                 "report_end_date": "2026-06-30",
                 "announcement_start_date": "2026-07-01",
                 "announcement_end_date": "2026-07-02",
             }
-        )
+        ),
     }
 
 
@@ -84,6 +95,36 @@ def test_snapshot_callable_builds_parsed_request_and_returns_completed_summary(m
     )
 
 
+@pytest.mark.parametrize("conf", ({}, None))
+def test_snapshot_callable_defaults_empty_configuration_to_recent_annual_window(monkeypatch, snapshot_module, conf):
+    summary = ForecastSnapshotSummary(7, 1, "completed", 120, 120, 3, 3, 0, 0, None)
+    service = MagicMock()
+    service.create_snapshot.return_value = summary
+    monkeypatch.setattr(snapshot_module, "ForecastSnapshotService", lambda: service)
+
+    result = snapshot_module.create_forecast_snapshot(
+        logical_date=datetime(2026, 8, 16, 12, 30), dag_run=SimpleNamespace(conf=conf)
+    )
+
+    assert result == summary.to_dict()
+    assert service.create_snapshot.call_args.args[0] == snapshot_module.ForecastSnapshotRequest(
+        date(2025, 12, 31), date(2026, 1, 1), date(2026, 4, 30)
+    )
+
+
+def test_snapshot_callable_defaults_missing_configuration_to_recent_annual_window(monkeypatch, snapshot_module):
+    summary = ForecastSnapshotSummary(7, 1, "completed", 120, 120, 3, 3, 0, 0, None)
+    service = MagicMock()
+    service.create_snapshot.return_value = summary
+    monkeypatch.setattr(snapshot_module, "ForecastSnapshotService", lambda: service)
+
+    snapshot_module.create_forecast_snapshot(logical_date=date(2026, 8, 16), dag_run=SimpleNamespace())
+
+    assert service.create_snapshot.call_args.args[0] == snapshot_module.ForecastSnapshotRequest(
+        date(2025, 12, 31), date(2026, 1, 1), date(2026, 4, 30)
+    )
+
+
 @pytest.mark.parametrize(
     ("context", "parameter"),
     [
@@ -91,9 +132,10 @@ def test_snapshot_callable_builds_parsed_request_and_returns_completed_summary(m
         *(
             (
                 {
+                    "logical_date": valid_context()["logical_date"],
                     "dag_run": SimpleNamespace(
                         conf={key: value for key, value in valid_context()["dag_run"].conf.items() if key != parameter}
-                    )
+                    ),
                 },
                 parameter,
             )
@@ -102,12 +144,13 @@ def test_snapshot_callable_builds_parsed_request_and_returns_completed_summary(m
         *(
             (
                 {
+                    "logical_date": valid_context()["logical_date"],
                     "dag_run": SimpleNamespace(
                         conf={
                             **valid_context()["dag_run"].conf,
                             parameter: value,
                         }
-                    )
+                    ),
                 },
                 parameter,
             )
@@ -116,25 +159,27 @@ def test_snapshot_callable_builds_parsed_request_and_returns_completed_summary(m
         ),
         (
             {
+                "logical_date": valid_context()["logical_date"],
                 "dag_run": SimpleNamespace(
                     conf={
                         "report_end_date": "20260630",
                         "announcement_start_date": "2026-07-01",
                         "announcement_end_date": "2026-07-02",
                     }
-                )
+                ),
             },
             "report_end_date",
         ),
         (
             {
+                "logical_date": valid_context()["logical_date"],
                 "dag_run": SimpleNamespace(
                     conf={
                         "report_end_date": "2026-06-30",
                         "announcement_start_date": "2026-07-02",
                         "announcement_end_date": "2026-07-01",
                     }
-                )
+                ),
             },
             "announcement_end_date",
         ),
@@ -148,6 +193,16 @@ def test_snapshot_callable_rejects_invalid_configuration_before_constructing_ser
 
     with pytest.raises(ValueError, match=parameter):
         snapshot_module.create_forecast_snapshot(**context)
+
+    service_factory.assert_not_called()
+
+
+def test_snapshot_callable_rejects_empty_configuration_without_logical_date(monkeypatch, snapshot_module):
+    service_factory = MagicMock()
+    monkeypatch.setattr(snapshot_module, "ForecastSnapshotService", service_factory)
+
+    with pytest.raises(ValueError, match="logical_date"):
+        snapshot_module.create_forecast_snapshot(dag_run=SimpleNamespace(conf={}))
 
     service_factory.assert_not_called()
 

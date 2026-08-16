@@ -52,17 +52,27 @@ def sync_module(monkeypatch):
     monkeypatch.setenv("FROG_PROJECT_ROOT", str(ROOT))
 
     airflow_module = types.ModuleType("airflow")
-    setattr(airflow_module, "DAG", FakeDAG)
+    airflow_module.__path__ = []
+    airflow_sdk = types.ModuleType("airflow.sdk")
+    setattr(airflow_sdk, "DAG", FakeDAG)
     airflow_exceptions = types.ModuleType("airflow.exceptions")
     setattr(airflow_exceptions, "AirflowSkipException", FakeAirflowSkipException)
-    airflow_operators = types.ModuleType("airflow.operators")
-    airflow_python = types.ModuleType("airflow.operators.python")
+    airflow_providers = types.ModuleType("airflow.providers")
+    airflow_providers.__path__ = []
+    airflow_standard = types.ModuleType("airflow.providers.standard")
+    airflow_standard.__path__ = []
+    airflow_operators = types.ModuleType("airflow.providers.standard.operators")
+    airflow_operators.__path__ = []
+    airflow_python = types.ModuleType("airflow.providers.standard.operators.python")
     setattr(airflow_python, "PythonOperator", FakePythonOperator)
 
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
+    monkeypatch.setitem(sys.modules, "airflow.sdk", airflow_sdk)
     monkeypatch.setitem(sys.modules, "airflow.exceptions", airflow_exceptions)
-    monkeypatch.setitem(sys.modules, "airflow.operators", airflow_operators)
-    monkeypatch.setitem(sys.modules, "airflow.operators.python", airflow_python)
+    monkeypatch.setitem(sys.modules, "airflow.providers", airflow_providers)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard", airflow_standard)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard.operators", airflow_operators)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard.operators.python", airflow_python)
 
     sys.modules.pop("forecast_ssf_ma20_sync", None)
     module = importlib.import_module("forecast_ssf_ma20_sync")

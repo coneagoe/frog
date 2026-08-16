@@ -57,13 +57,14 @@ x-proxy-pool-env: &proxy-pool-env
   PROXY_PROVIDER: ${PROXY_PROVIDER:-auto}
 
 x-airflow-common: &airflow-common
-  image: frog-airflow:2.9.2-python3.12
+  image: frog-airflow:3.3.0-python3.12
   build:
     context: .
     dockerfile: airflow.Dockerfile
   user: "${AIRFLOW_UID:-1000}:0"
   environment:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     # Airflow metadata DB (separate from business data DB)
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://quant:quant@db:5432/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
@@ -71,12 +72,17 @@ x-airflow-common: &airflow-common
     # Business data still writes to Postgres via storage layer; Airflow metadata remains in Postgres.
     AIRFLOW__CELERY__RESULT_BACKEND: redis://redis:6379/1
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
-    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Asia/Shanghai
-    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
-    # Keep this identical across webserver/scheduler/worker, otherwise log fetching can fail with
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-frog_airflow_jwt_secret_change_me}
+    AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-frog}
+    # Preserve Airflow 2 cron data interval semantics for DAGs using data_interval_end.
+    AIRFLOW__SCHEDULER__CREATE_CRON_DATA_INTERVALS: "true"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Shanghai
+    AIRFLOW__API__EXPOSE_CONFIG: "true"
+    # Keep this identical across API server/scheduler/worker, otherwise log fetching can fail with
     # "serve_logs signature was wrong" due to presigned URL verification errors.
     # Override via .env/CI secrets in real deployments.
-    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-frog_airflow_secret_key_change_me}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW__API__SECRET_KEY:-frog_airflow_secret_key_change_me}
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: "false"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     # Cap Airflow SQLAlchemy connection usage (metadata DB) to avoid exhausting Postgres connections.
@@ -86,7 +92,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_RECYCLE: "1800"
     AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_PRE_PING: "true"
     # Stopgap: avoid frequent DAG parsing process kills when imports are slow.
-    AIRFLOW__SCHEDULER__STALE_DAG_THRESHOLD: "300"
+    AIRFLOW__DAG_PROCESSOR__STALE_DAG_THRESHOLD: "300"
     AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "120"
     # When worker concurrency < active partitions, tasks can sit in "queued" for hours.
     # Default queued timeout is often too low and causes scheduler to mark them failed.
@@ -281,25 +287,38 @@ services:
     command:
       ["sh", "-c", "mkdir -p /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags && chown -R ${AIRFLOW_UID:-1000}:0 /opt/airflow/logs /opt/airflow/plugins /opt/airflow/dags && echo 'Permissions fixed successfully!'"]
 
-  airflow-webserver:
+  airflow-apiserver:
     <<: *airflow-common
     ports: ["8080:8080"]
-    # Includes init + admin user creation (idempotent) before starting the webserver.
+    # Airflow 3 replaces the webserver command with the API server.
     command:
-      ["bash", "-c", "airflow db init && airflow webserver"]
+      ["api-server"]
     depends_on:
       <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
       proxy_pool:
         condition: service_started
 
   airflow-scheduler:
     <<: *airflow-common
     command:
-      ["bash", "-c", "airflow db upgrade || echo 'DB already upgraded'; airflow scheduler"]
+      ["scheduler"]
     depends_on:
       <<: *airflow-common-depends-on
-      airflow-webserver:
+      airflow-init:
+        condition: service_completed_successfully
+      proxy_pool:
         condition: service_started
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command:
+      ["dag-processor"]
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
       proxy_pool:
         condition: service_started
 
@@ -307,11 +326,13 @@ services:
     <<: *airflow-common
     entrypoint: ["bash", "/opt/airflow/frog/entrypoint-common.sh"]
     command:
-      ["bash", "-c", "airflow db upgrade || echo 'DB already upgraded'; airflow celery worker"]
+      ["airflow", "celery", "worker"]
     depends_on:
       <<: *airflow-common-depends-on
-      airflow-webserver:
+      airflow-apiserver:
         condition: service_started
+      airflow-init:
+        condition: service_completed_successfully
       paper-trading:
         condition: service_started
       proxy_pool:
@@ -320,7 +341,7 @@ services:
   airflow-init:
     <<: *airflow-common
     command:
-      ["bash", "-c", "set -euo pipefail; if [ -z \"$$AIRFLOW_ADMIN_PASSWORD\" ]; then echo 'AIRFLOW_ADMIN_PASSWORD is required (set it in .env)'; exit 1; fi; airflow db init; airflow users create --username \"$$AIRFLOW_ADMIN_USERNAME\" --password \"$$AIRFLOW_ADMIN_PASSWORD\" --firstname \"$$AIRFLOW_ADMIN_FIRSTNAME\" --lastname \"$$AIRFLOW_ADMIN_LASTNAME\" --role Admin --email \"$$AIRFLOW_ADMIN_EMAIL\" || echo 'User already exists' "]
+      ["bash", "-c", "set -euo pipefail; if [ -z \"$$AIRFLOW_ADMIN_PASSWORD\" ]; then echo 'AIRFLOW_ADMIN_PASSWORD is required (set it in .env)'; exit 1; fi; airflow db migrate; airflow users create --username \"$$AIRFLOW_ADMIN_USERNAME\" --password \"$$AIRFLOW_ADMIN_PASSWORD\" --firstname \"$$AIRFLOW_ADMIN_FIRSTNAME\" --lastname \"$$AIRFLOW_ADMIN_LASTNAME\" --role Admin --email \"$$AIRFLOW_ADMIN_EMAIL\" || echo 'User already exists' "]
     restart: "no"
 
 volumes:

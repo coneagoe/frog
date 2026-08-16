@@ -1,5 +1,5 @@
 # Dockerfile
-- `airflow.Dockerfile`：用于构建Airflow docker image（固定基于 Airflow 2.9.2）
+- `airflow.Dockerfile`：用于构建Airflow docker image（固定基于 Airflow 3.3.0）
 
 # 环境变量设置
 参见`config.md`。
@@ -10,7 +10,7 @@
 - 启动：`docker compose up -d`
 - 查看状态：`docker compose ps`
 
-注：不要使用 `apache/airflow:slim-latest-*` 这类浮动 tag；仓库默认固定在 Airflow 2.9.2。
+注：不要使用 `apache/airflow:slim-latest-*` 这类浮动 tag；仓库默认固定在 Airflow 3.3.0。
 
 ## 访问Airflow UI
 参见`airflow.md`
