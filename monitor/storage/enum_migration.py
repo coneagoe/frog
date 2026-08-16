@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -11,6 +12,8 @@ from monitor.condition_validation import validate_condition
 from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
 from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import ForecastSSFCandidate, StockMonitorTarget
+
+logger = logging.getLogger(__name__)
 
 
 class MonitorEnumMigrationError(RuntimeError):
@@ -41,6 +44,17 @@ class MonitorEnumMigrationResult:
     converted: bool
     rolled_back: bool
     groups: tuple[MonitorEnumGroup, ...]
+    price_vs_ma_diagnostics: tuple[PriceVsMaMigrationDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class PriceVsMaMigrationDiagnostic:
+    target_id: int
+    market: str | None
+    frequency: str | None
+    direction: str | None
+    disabled: bool
+    reason: str
 
 
 def _labels(enum_type: type[StrEnum]) -> tuple[str, ...]:
@@ -131,15 +145,19 @@ _CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
 _CONDITION_CHECK_SQL = (
     "CHECK (jsonb_typeof(condition::jsonb) = 'object' AND condition::jsonb ? 'type' "
     "AND condition::jsonb->>'type' IS NOT NULL AND condition::jsonb->>'type' IN "
-    "('price_threshold', 'price_cross_ma', 'price_vs_ma', 'close_cross_ma', 'ma_cross', 'change_pct', 'rsi'))"
+    "('price_threshold', 'price_cross_ma', 'close_cross_ma', 'ma_cross', 'change_pct', 'rsi'))"
 )
 _NORMALIZED_CONDITION_CHECK = (
     "checkjsonb_typeofcondition='object'andcondition?'type'andcondition->>'type'isnotnullandcondition->>'type'=anyarray["
-    "'price_threshold','price_cross_ma','price_vs_ma','close_cross_ma','ma_cross','change_pct','rsi']"
+    "'price_threshold','price_cross_ma','close_cross_ma','ma_cross','change_pct','rsi']"
 )
 _NORMALIZED_LEGACY_CONDITION_CHECK = (
     "checkjsonb_typeofcondition='object'andcondition?'type'andcondition->>'type'isnotnullandcondition->>'type'=anyarray["
     "'price_threshold','price_cross_ma','price_vs_ma','ma_cross','change_pct','rsi']"
+)
+_NORMALIZED_TRANSITION_CONDITION_CHECK = (
+    "checkjsonb_typeofcondition='object'andcondition?'type'andcondition->>'type'isnotnullandcondition->>'type'=anyarray["
+    "'price_threshold','price_cross_ma','price_vs_ma','close_cross_ma','ma_cross','change_pct','rsi']"
 )
 
 
@@ -149,6 +167,7 @@ def _result(
     rollback: bool = False,
     converted: bool = False,
     rolled_back: bool = False,
+    price_vs_ma_diagnostics: tuple[PriceVsMaMigrationDiagnostic, ...] = (),
 ) -> MonitorEnumMigrationResult:
     return MonitorEnumMigrationResult(
         dry_run=dry_run,
@@ -156,6 +175,7 @@ def _result(
         converted=converted,
         rolled_back=rolled_back,
         groups=MONITOR_ENUM_GROUPS,
+        price_vs_ma_diagnostics=price_vs_ma_diagnostics,
     )
 
 
@@ -165,15 +185,20 @@ def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
         raise MonitorEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
 
 
-def _adapter_apply(connection: Connection) -> bool:
+def _adapter_apply(connection: Connection) -> tuple[bool, tuple[PriceVsMaMigrationDiagnostic, ...]]:
+    return _apply_monitor_enums(connection)
+
+
+def _apply_monitor_enums(connection: Connection) -> tuple[bool, tuple[PriceVsMaMigrationDiagnostic, ...]]:
     _adapter_preflight(connection, rollback=False)
     missing_tables = _preflight(connection, rollback=False)
+    migrated_price_vs_ma = () if missing_tables else _migrate_price_vs_ma_conditions(connection)
     changed = any(
         not _column_has_type(connection, column, group.type_name)
         for group in MONITOR_ENUM_GROUPS
         for column in group.columns
     )
-    changed = changed or bool(missing_tables) or _condition_check_is_legacy(connection)
+    changed = changed or bool(missing_tables) or bool(migrated_price_vs_ma) or _condition_check_is_legacy(connection)
     if missing_tables:
         for group in MONITOR_ENUM_GROUPS:
             _create_type(connection, group)
@@ -186,7 +211,7 @@ def _adapter_apply(connection: Connection) -> bool:
             _alter_group(connection, group, rollback=False)
     _add_condition_check(connection)
     _ensure_indexes(connection)
-    return changed
+    return changed, migrated_price_vs_ma
 
 
 def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
@@ -327,9 +352,9 @@ def migrate_monitor_enums(
         MONITOR_ENUM_ADAPTER.verify(connection, rollback=True)
         return _result(rollback=True, rolled_back=rolled_back)
 
-    converted = MONITOR_ENUM_ADAPTER.apply(connection)
+    converted, price_vs_ma_diagnostics = _apply_monitor_enums(connection)
     MONITOR_ENUM_ADAPTER.verify(connection, rollback=False)
-    return _result(converted=converted)
+    return _result(converted=converted, price_vs_ma_diagnostics=price_vs_ma_diagnostics)
 
 
 def _preflight(connection: Connection, *, rollback: bool) -> set[str]:
@@ -385,9 +410,79 @@ def _validate_legacy_conditions(connection: Connection) -> None:
     rows = connection.execute(text("SELECT id, condition FROM stock_monitor_targets")).all()
     for row_id, condition in rows:
         try:
-            validate_condition(condition)
+            validate_condition(_condition_for_validation(condition))
         except ValueError as error:
             raise MonitorEnumMigrationError(f"condition for stock_monitor_targets.id={row_id}: {error}") from error
+
+
+def _condition_for_validation(condition):
+    if isinstance(condition, dict) and condition.get("type") == "price_vs_ma":
+        candidate = dict(condition)
+        candidate["type"] = "close_cross_ma"
+        candidate["direction"] = "above"
+        return candidate
+    return condition
+
+
+def _migrate_price_vs_ma_conditions(connection: Connection) -> tuple[PriceVsMaMigrationDiagnostic, ...]:
+    if not _table_exists(connection, "stock_monitor_targets"):
+        return ()
+    rows = connection.execute(
+        text(
+            "SELECT id, market::text, frequency::text, condition::jsonb->>'direction' AS direction, "
+            "CASE WHEN EXISTS ("
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'stock_monitor_targets' AND column_name = 'enabled'"
+            ") THEN true ELSE false END AS has_enabled "
+            "FROM stock_monitor_targets WHERE condition::jsonb->>'type' = 'price_vs_ma' ORDER BY id"
+        )
+    ).all()
+    diagnostics: list[PriceVsMaMigrationDiagnostic] = []
+    for row in rows:
+        row_id, market, frequency, direction, has_enabled = row
+        supported = market == "A" and frequency == "daily" and direction == "above"
+        disable_sql = ", enabled = false" if has_enabled and not supported else ""
+        connection.execute(
+            text(
+                "UPDATE stock_monitor_targets "
+                "SET condition = "
+                "jsonb_set(jsonb_set(condition::jsonb, '{type}', '\"close_cross_ma\"'::jsonb, false), "
+                "'{direction}', '\"above\"'::jsonb, true)"
+                f"{disable_sql} WHERE id = :target_id"
+            ),
+            {"target_id": row_id},
+        )
+        if not supported:
+            logger.warning(
+                "Migrated unsupported price_vs_ma monitor target id=%s market=%s frequency=%s "
+                "direction=%s to disabled close_cross_ma",
+                row_id,
+                market,
+                frequency,
+                direction,
+            )
+            diagnostics.append(
+                PriceVsMaMigrationDiagnostic(
+                    target_id=int(row_id),
+                    market=None if market is None else str(market),
+                    frequency=None if frequency is None else str(frequency),
+                    direction=None if direction is None else str(direction),
+                    disabled=bool(has_enabled),
+                    reason="close_cross_ma unsupported outside A daily above scope",
+                )
+            )
+        else:
+            diagnostics.append(
+                PriceVsMaMigrationDiagnostic(
+                    target_id=int(row_id),
+                    market=None if market is None else str(market),
+                    frequency=None if frequency is None else str(frequency),
+                    direction=None if direction is None else str(direction),
+                    disabled=False,
+                    reason="migrated to close_cross_ma",
+                )
+            )
+    return tuple(diagnostics)
 
 
 def _validate_values(connection: Connection, group: MonitorEnumGroup, column: MonitorEnumColumn) -> None:
@@ -478,7 +573,10 @@ def _add_condition_check(connection: Connection) -> None:
             text(f"ALTER TABLE stock_monitor_targets ADD CONSTRAINT {_CONDITION_CHECK_NAME} {_CONDITION_CHECK_SQL}")
         )
         return
-    if _normalize_condition_check(definition) == _NORMALIZED_LEGACY_CONDITION_CHECK:
+    if _normalize_condition_check(definition) in {
+        _NORMALIZED_LEGACY_CONDITION_CHECK,
+        _NORMALIZED_TRANSITION_CONDITION_CHECK,
+    }:
         connection.execute(text(f"ALTER TABLE stock_monitor_targets DROP CONSTRAINT {_CONDITION_CHECK_NAME}"))
         connection.execute(
             text(f"ALTER TABLE stock_monitor_targets ADD CONSTRAINT {_CONDITION_CHECK_NAME} {_CONDITION_CHECK_SQL}")
@@ -633,7 +731,10 @@ def _validate_condition_check(connection: Connection, *, required: bool) -> None
 
 def _condition_check_is_legacy(connection: Connection) -> bool:
     definition = _condition_check_definition(connection)
-    return definition is not None and _normalize_condition_check(definition) == _NORMALIZED_LEGACY_CONDITION_CHECK
+    return definition is not None and _normalize_condition_check(definition) in {
+        _NORMALIZED_LEGACY_CONDITION_CHECK,
+        _NORMALIZED_TRANSITION_CONDITION_CHECK,
+    }
 
 
 def _normalize_condition_check(definition: str) -> str:

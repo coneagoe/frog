@@ -298,21 +298,8 @@ def test_add_target_rejects_untyped_workflow_condition():
     assert "condition.type" in result["message"]
 
 
-def test_add_target_accepts_price_vs_ma_condition():
+def test_add_target_rejects_price_vs_ma_condition():
     storage = MagicMock()
-    storage.create_monitor_target.return_value = MagicMock(
-        id=1,
-        stock_code="600519",
-        market="A",
-        condition={"type": "price_vs_ma", "direction": "above", "period": 20},
-        note=None,
-        frequency="daily",
-        reset_mode="auto",
-        enabled=True,
-        last_state=False,
-        triggered_at=None,
-        created_at=None,
-    )
 
     result = MonitorTargetService(storage=storage).add_target(
         stock_code="600519",
@@ -320,7 +307,10 @@ def test_add_target_accepts_price_vs_ma_condition():
         condition={"type": "price_vs_ma", "direction": "above", "period": 20},
     )
 
-    assert result["success"] is True
+    assert result["success"] is False
+    assert result["code"] == "VALIDATION_ERROR"
+    assert "condition.type" in result["message"]
+    storage.create_monitor_target.assert_not_called()
 
 
 def test_add_target_rejects_close_cross_ma_outside_a_share_daily_scope():

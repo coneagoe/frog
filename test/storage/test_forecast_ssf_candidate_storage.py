@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from typing import Any
 from unittest.mock import MagicMock
@@ -54,6 +55,73 @@ def _legacy_monitor_target_storage(tmp_path):
             )
         )
     return db
+
+
+def test_sqlite_price_vs_ma_migration_is_repeatable(tmp_path):
+    db = _legacy_monitor_target_storage(tmp_path)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO stock_monitor_targets "
+                "(id, stock_code, market, condition, frequency, reset_mode, enabled, last_state) "
+                "VALUES "
+                "(1, '600001', 'A', :a_condition, 'daily', 'manual', true, true), "
+                "(2, '00700', 'HK', :hk_condition, 'daily', 'auto', true, false)"
+            ),
+            {
+                "a_condition": json.dumps(
+                    {
+                        "type": "price_vs_ma",
+                        "direction": "above",
+                        "period": 20,
+                        "workflow": "forecast_ssf_ma20",
+                    }
+                ),
+                "hk_condition": json.dumps({"type": "price_vs_ma", "direction": "above", "period": 20}),
+            },
+        )
+
+    db.ensure_monitor_targets_table()
+    db.ensure_monitor_targets_table()
+
+    with db.engine.begin() as conn:
+        rows = conn.execute(
+            text("SELECT id, market, condition, enabled, last_state FROM stock_monitor_targets ORDER BY id")
+        ).all()
+
+    first = rows[0]._mapping
+    second = rows[1]._mapping
+    first_condition = json.loads(first["condition"])
+    second_condition = json.loads(second["condition"])
+    assert first_condition["type"] == "close_cross_ma"
+    assert first_condition["workflow"] == "forecast_ssf_ma20"
+    assert bool(first["enabled"]) is True
+    assert bool(first["last_state"]) is True
+    assert second_condition["type"] == "close_cross_ma"
+    assert bool(second["enabled"]) is False
+    assert bool(second["last_state"]) is False
+
+
+def test_sqlite_price_vs_ma_below_direction_migrates_disabled_and_normalized(tmp_path):
+    db = _legacy_monitor_target_storage(tmp_path)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO stock_monitor_targets "
+                "(id, stock_code, market, condition, frequency, reset_mode, enabled, last_state) "
+                "VALUES (1, '600001', 'A', :condition, 'daily', 'auto', true, true)"
+            ),
+            {"condition": json.dumps({"type": "price_vs_ma", "direction": "below", "period": 20})},
+        )
+
+    db.ensure_monitor_targets_table()
+
+    with db.engine.begin() as conn:
+        row = conn.execute(text("SELECT condition, enabled, last_state FROM stock_monitor_targets WHERE id = 1")).one()
+
+    assert json.loads(row[0]) == {"type": "close_cross_ma", "direction": "above", "period": 20}
+    assert bool(row[1]) is False
+    assert bool(row[2]) is True
 
 
 def _typed_condition(**extra: Any) -> dict[str, Any]:

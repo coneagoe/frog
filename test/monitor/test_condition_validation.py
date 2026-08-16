@@ -16,7 +16,7 @@ def test_enum_values_match_persisted_contract():
     assert "delisted_or_unlisted" in {value.value for value in ForecastSSFCandidateState}
 
 
-def test_validate_condition_accepts_typed_workflow_price_vs_ma_condition():
+def test_validate_condition_rejects_price_vs_ma_condition():
     condition = {
         "type": "price_vs_ma",
         "direction": "above",
@@ -24,7 +24,8 @@ def test_validate_condition_accepts_typed_workflow_price_vs_ma_condition():
         "workflow": "forecast_ssf_ma20",
     }
 
-    assert validate_condition(condition) == condition
+    with pytest.raises(ValueError, match="condition.type"):
+        validate_condition(condition)
 
 
 def test_validate_condition_accepts_close_cross_ma():
@@ -39,7 +40,7 @@ def test_validate_condition_accepts_close_cross_ma():
         ({"type": "unknown"}, "condition.type"),
         ({"type": "ma_cross", "direction": "above", "fast": 5, "slow": 20}, "condition.direction"),
         ({"type": "price_threshold", "direction": "above"}, "condition.value"),
-        ({"type": "price_vs_ma", "direction": "above", "period": 0}, "condition.period"),
+        ({"type": "price_vs_ma", "direction": "above", "period": 0}, "condition.type"),
         ({"type": "close_cross_ma", "direction": "below", "period": 20}, "condition.direction"),
         ({"workflow": "forecast_ssf_ma20"}, "condition.type"),
     ],

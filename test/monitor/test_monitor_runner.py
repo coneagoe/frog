@@ -220,27 +220,6 @@ def test_run_daily_monitor_preserves_realtime_price_for_price_cross_ma():
     assert "当前价格: 26.0" in mock_email.call_args.args[1]
 
 
-def test_run_daily_monitor_uses_final_close_for_price_vs_ma():
-    target = _make_target(
-        condition={"type": "price_vs_ma", "direction": "above", "period": 20},
-        last_state=False,
-    )
-    history_df = pd.DataFrame({COL_CLOSE: [25.0] * 19 + [28.0]})
-    mock_storage = MagicMock()
-    mock_storage.load_monitor_targets.return_value = [target]
-
-    with (
-        patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
-        patch("monitor.monitor_runner.fetch_current_price", return_value=26.0),
-        patch("monitor.monitor_runner.fetch_history_df", return_value=history_df),
-        patch("monitor.monitor_runner.send_email") as mock_email,
-    ):
-        summary = run_monitor(frequency="daily")
-
-    assert summary.triggered == 1
-    assert "当前价格: 28.0" in mock_email.call_args.args[1]
-
-
 def test_final_close_runner_uses_hfq_storage_and_never_fetches_realtime_price():
     target = _make_target(condition={"type": "close_cross_ma", "direction": "above", "period": 20})
     history = pd.DataFrame({COL_DATE: pd.date_range(end="2026-06-03", periods=21), COL_CLOSE: [10.0] * 20 + [11.0]})

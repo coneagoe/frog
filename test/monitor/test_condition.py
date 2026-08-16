@@ -130,24 +130,6 @@ def test_price_cross_ma_below_triggers():
     assert result == ConditionResult.TRIGGERED
 
 
-def test_price_vs_ma_uses_latest_close_and_requires_strictly_above():
-    cond = {"type": "price_vs_ma", "direction": "above", "period": 20}
-
-    above = evaluate_condition(cond, current_price=None, history_df=_make_prices([10.0] * 19 + [11.0]))
-    equal = evaluate_condition(cond, current_price=None, history_df=_make_prices([10.0] * 20))
-
-    assert above == ConditionResult.TRIGGERED
-    assert equal == ConditionResult.NOT_TRIGGERED
-
-
-def test_price_vs_ma_requires_complete_daily_history():
-    cond = {"type": "price_vs_ma", "direction": "above", "period": 20}
-
-    result = evaluate_condition(cond, current_price=None, history_df=_make_prices([10.0] * 19))
-
-    assert result == ConditionResult.INSUFFICIENT_DATA
-
-
 def test_close_cross_ma_requires_a_real_upward_crossover():
     condition = {"type": "close_cross_ma", "direction": "above", "period": 20}
     history = _make_prices([10.0] * 20 + [11.0])

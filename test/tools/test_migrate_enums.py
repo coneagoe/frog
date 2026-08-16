@@ -53,6 +53,7 @@ class FakeGroup:
 @dataclass(frozen=True)
 class FakeDomainResult:
     groups: tuple[FakeGroup, ...]
+    price_vs_ma_diagnostics: tuple[dict[str, object], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,19 @@ def _result_with_paper_and_monitor_groups() -> FakeResult:
             ),
             FakeDomain(
                 "monitor",
-                FakeDomainResult((FakeGroup("monitor_market", (FakeColumn("stock_monitor_targets", "market"),)),)),
+                FakeDomainResult(
+                    (FakeGroup("monitor_market", (FakeColumn("stock_monitor_targets", "market"),)),),
+                    (
+                        {
+                            "target_id": 7,
+                            "market": "HK",
+                            "frequency": "daily",
+                            "direction": "above",
+                            "disabled": True,
+                            "reason": "close_cross_ma unsupported outside A daily above scope",
+                        },
+                    ),
+                ),
             ),
         ),
         audits=(
@@ -148,6 +161,16 @@ def test_main_emits_stable_json_for_all_domains(monkeypatch, capsys) -> None:
     assert output["converted"] is False
     assert output["rolled_back"] is False
     assert [domain["name"] for domain in output["domains"]] == ["paper_trading", "monitor"]
+    assert output["domains"][1]["result"]["price_vs_ma_diagnostics"] == [
+        {
+            "target_id": 7,
+            "market": "HK",
+            "frequency": "daily",
+            "direction": "above",
+            "disabled": True,
+            "reason": "close_cross_ma unsupported outside A daily above scope",
+        }
+    ]
 
 
 def test_main_emits_json_schema_readiness_audits(monkeypatch, capsys) -> None:

@@ -509,6 +509,32 @@ def test_global_migration_bootstraps_empty_schema_without_partial_storage_domain
         ).replace("::jsonb", "")
 
 
+def test_unified_monitor_migration_preserves_price_vs_ma_diagnostics(postgres_schema) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET search_path TO "{schema}"'))
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN enabled boolean NOT NULL DEFAULT true"))
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode, enabled) "
+                "VALUES (100, '00700', 'HK', :condition, 'daily', 'auto', true)"
+            ),
+            {"condition": '{"type":"price_vs_ma","direction":"above","period":20}'},
+        )
+
+        result = migrate_enums(connection)
+
+        monitor = next(domain.result for domain in result.domains if domain.name == "monitor")
+        assert result.converted is True
+        assert len(monitor.price_vs_ma_diagnostics) == 1
+        diagnostic = monitor.price_vs_ma_diagnostics[0]
+        assert diagnostic.target_id == 100
+        assert diagnostic.market == "HK"
+        assert diagnostic.frequency == "daily"
+        assert diagnostic.direction == "above"
+        assert diagnostic.disabled is True
+
+
 def test_global_migration_upgrades_legacy_diagnostics_when_paper_tables_are_missing(empty_postgres_schema) -> None:
     engine, schema = empty_postgres_schema
     with engine.begin() as connection:

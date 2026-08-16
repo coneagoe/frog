@@ -37,8 +37,6 @@ def _build_history_for_condition(condition: dict, stock_code: str, market: str):
         return None  # uses change_pct kwarg, not history
     if ctype == "price_cross_ma":
         return fetch_history_df(stock_code, market, min_periods=int(condition["period"]) + 5)
-    if ctype == "price_vs_ma":
-        return fetch_history_df(stock_code, market, min_periods=int(condition["period"]))
     if ctype == "ma_cross":
         return fetch_history_df(stock_code, market, min_periods=int(condition["slow"]) + 5)
     if ctype == "rsi":
@@ -60,9 +58,9 @@ def _resolve_current_price(
     frequency: str, condition: dict, current_price: Optional[float], history_df
 ) -> Optional[float]:
     ctype = condition.get("type")
-    if frequency != "daily" or ctype not in {"price_cross_ma", "price_vs_ma"}:
+    if frequency != "daily" or ctype != "price_cross_ma":
         return current_price
-    if ctype == "price_cross_ma" and not is_missing_number(current_price):
+    if not is_missing_number(current_price):
         return current_price
     if history_df is None or len(history_df) == 0:
         return current_price

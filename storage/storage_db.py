@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import textwrap
@@ -3290,7 +3291,56 @@ class StorageDb:
         from .model.stock_monitor_target import StockMonitorTarget  # noqa: F401
 
         StockMonitorTarget.__table__.create(self.engine, checkfirst=True)
+        self._migrate_sqlite_price_vs_ma_conditions()
         self._ensure_workflow_monitor_target_identity()
+
+    def _migrate_sqlite_price_vs_ma_conditions(self) -> None:
+        if self.engine is None or self.engine.dialect.name != "sqlite":
+            return
+        inspector = inspect(self.engine)
+        if not inspector.has_table("stock_monitor_targets"):
+            return
+        columns = {column["name"] for column in inspector.get_columns("stock_monitor_targets")}
+        if "condition" not in columns:
+            return
+        has_enabled = "enabled" in columns
+        select_columns = ["id", "market", "frequency", "condition"]
+        if has_enabled:
+            select_columns.append("enabled")
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                text(f"SELECT {', '.join(select_columns)} FROM stock_monitor_targets ORDER BY id")
+            ).mappings()
+            for row in rows:
+                condition = row["condition"]
+                if isinstance(condition, str):
+                    try:
+                        parsed_condition = json.loads(condition)
+                    except json.JSONDecodeError:
+                        continue
+                elif isinstance(condition, dict):
+                    parsed_condition = dict(condition)
+                else:
+                    continue
+                if parsed_condition.get("type") != "price_vs_ma":
+                    continue
+                original_direction = parsed_condition.get("direction")
+                parsed_condition["type"] = "close_cross_ma"
+                parsed_condition["direction"] = "above"
+                supported = row["market"] == "A" and row["frequency"] == "daily" and original_direction == "above"
+                assignments = "condition = :condition"
+                parameters: dict[str, Any] = {"target_id": row["id"], "condition": json.dumps(parsed_condition)}
+                if has_enabled and not supported:
+                    assignments += ", enabled = false"
+                    logging.warning(
+                        "Migrated unsupported price_vs_ma monitor target id=%s market=%s to disabled close_cross_ma",
+                        row["id"],
+                        row["market"],
+                    )
+                conn.execute(
+                    text(f"UPDATE stock_monitor_targets SET {assignments} WHERE id = :target_id"),
+                    parameters,
+                )
 
     # ------------------------------------------------------------------
     # Blackroom record CRUD

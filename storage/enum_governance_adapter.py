@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from storage.enum_governance import EnumGovernanceDomainAudit
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class EnumGovernanceAdapter:
     name: str
     preflight: Callable[..., None]
-    apply: Callable[..., bool]
+    apply: Callable[..., Any]
     verify: Callable[..., None]
     rollback: Callable[..., bool]
     result: Callable[..., object]

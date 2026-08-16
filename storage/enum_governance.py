@@ -106,7 +106,12 @@ def migrate_enums(
     changed = [_run_phase(adapter, "apply", adapter.apply, connection) for adapter in adapters]
     for adapter in adapters:
         _run_phase(adapter, "verify", adapter.verify, connection, rollback=False)
-    return _result(adapters, converted=any(changed), audits=audits)
+    return _result(
+        adapters,
+        converted=any(_apply_changed(result) for result in changed),
+        audits=audits,
+        apply_results=tuple(changed),
+    )
 
 
 def _run_phase(
@@ -126,6 +131,7 @@ def _result(
     converted: bool = False,
     rolled_back: bool = False,
     audits: tuple[EnumGovernanceDomainAudit, ...] = (),
+    apply_results: tuple[Any, ...] = (),
 ) -> EnumGovernanceResult:
     return EnumGovernanceResult(
         dry_run=dry_run,
@@ -133,16 +139,42 @@ def _result(
         converted=converted,
         rolled_back=rolled_back,
         domains=tuple(
-            EnumGovernanceDomainResult(
-                adapter.name,
-                adapter.result(
-                    dry_run=dry_run,
-                    rollback=rollback,
-                    converted=converted,
-                    rolled_back=rolled_back,
-                ),
+            _domain_result(
+                adapter,
+                dry_run=dry_run,
+                rollback=rollback,
+                converted=converted,
+                rolled_back=rolled_back,
+                apply_result=apply_results[index] if index < len(apply_results) else None,
             )
-            for adapter in adapters
+            for index, adapter in enumerate(adapters)
         ),
         audits=audits,
     )
+
+
+def _domain_result(
+    adapter: EnumGovernanceAdapter,
+    *,
+    dry_run: bool,
+    rollback: bool,
+    converted: bool,
+    rolled_back: bool,
+    apply_result: Any,
+) -> EnumGovernanceDomainResult:
+    result_kwargs: dict[str, Any] = {
+        "dry_run": dry_run,
+        "rollback": rollback,
+        "converted": converted,
+        "rolled_back": rolled_back,
+    }
+    if isinstance(apply_result, tuple) and len(apply_result) == 2 and isinstance(apply_result[0], bool):
+        result_kwargs["converted"] = apply_result[0]
+        result_kwargs["price_vs_ma_diagnostics"] = apply_result[1]
+    return EnumGovernanceDomainResult(adapter.name, adapter.result(**result_kwargs))
+
+
+def _apply_changed(result: Any) -> bool:
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[0], bool):
+        return result[0]
+    return bool(result)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from json import dumps
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -166,9 +167,10 @@ def test_adapter_apply_legacy_json_condition_creates_types_and_condition_check(p
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
         MONITOR_ENUM_ADAPTER.preflight(connection, rollback=False)
-        changed = MONITOR_ENUM_ADAPTER.apply(connection)
+        changed, diagnostics = MONITOR_ENUM_ADAPTER.apply(connection)
 
         assert changed is True
+        assert diagnostics == ()
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         assert _check_exists(connection)
 
@@ -408,6 +410,117 @@ def test_apply_replaces_legacy_condition_check_and_remains_idempotent(postgres_s
 
         assert migrate_monitor_enums(connection).converted is False
         assert connection.execute(text("SELECT count(*) FROM stock_monitor_targets")).scalar_one() == 1
+
+
+def test_apply_migrates_price_vs_ma_targets_before_tightening_condition_check(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN note text"))
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN workflow varchar(64)"))
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN enabled boolean NOT NULL DEFAULT true"))
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN last_state boolean NOT NULL DEFAULT false"))
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN triggered_at timestamptz"))
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets "
+                "(id, stock_code, market, condition, frequency, reset_mode, note, workflow, enabled, last_state, triggered_at) "
+                "VALUES "
+                "(1, '600001', 'A', :a_condition, "
+                "'daily', 'manual', 'keep note', 'forecast_ssf_ma20', true, true, '2026-06-03 15:30:00+08'), "
+                "(2, '00700', 'HK', :hk_condition, "
+                "'daily', 'auto', 'hk note', NULL, true, false, NULL)"
+            ),
+            {
+                "a_condition": dumps(
+                    {
+                        "type": "price_vs_ma",
+                        "direction": "above",
+                        "period": 20,
+                        "workflow": "forecast_ssf_ma20",
+                    }
+                ),
+                "hk_condition": dumps({"type": "price_vs_ma", "direction": "above", "period": 20}),
+            },
+        )
+
+        result = migrate_monitor_enums(connection)
+
+        rows = connection.execute(
+            text(
+                "SELECT id, market, condition::jsonb AS condition, frequency, reset_mode, note, workflow, "
+                "enabled, last_state, triggered_at FROM stock_monitor_targets ORDER BY id"
+            )
+        ).all()
+        first = rows[0]._mapping
+        second = rows[1]._mapping
+        assert result.converted is True
+        assert [diagnostic.target_id for diagnostic in result.price_vs_ma_diagnostics] == [1, 2]
+        assert result.price_vs_ma_diagnostics[0].disabled is False
+        assert result.price_vs_ma_diagnostics[1].market == "HK"
+        assert result.price_vs_ma_diagnostics[1].disabled is True
+        assert first["condition"]["type"] == "close_cross_ma"
+        assert first["condition"]["workflow"] == "forecast_ssf_ma20"
+        assert first["enabled"] is True
+        assert first["last_state"] is True
+        assert first["note"] == "keep note"
+        assert first["workflow"] == "forecast_ssf_ma20"
+        assert second["condition"]["type"] == "close_cross_ma"
+        assert second["enabled"] is False
+        assert second["last_state"] is False
+        _assert_insert_rejected(
+            connection,
+            "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
+            "VALUES (3, '600002', 'A', "
+            '\'{"type": "price_vs_ma", "direction": "above", "period": 20}\'::jsonb, '
+            "'daily', 'auto')",
+        )
+
+
+def test_price_vs_ma_migration_is_rerun_safe(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN enabled boolean NOT NULL DEFAULT true"))
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN last_state boolean NOT NULL DEFAULT false"))
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode, enabled, last_state) "
+                "VALUES (1, '600001', 'A', :condition, 'daily', 'auto', true, false)"
+            ),
+            {"condition": dumps({"type": "price_vs_ma", "direction": "above", "period": 20})},
+        )
+
+        assert migrate_monitor_enums(connection).converted is True
+        before = connection.execute(text("SELECT condition::jsonb, enabled, last_state FROM stock_monitor_targets")).one()
+
+        result = migrate_monitor_enums(connection)
+        assert result.converted is False
+        assert result.price_vs_ma_diagnostics == ()
+        after = connection.execute(text("SELECT condition::jsonb, enabled, last_state FROM stock_monitor_targets")).one()
+
+        assert before == after
+
+
+def test_price_vs_ma_below_direction_migrates_disabled_and_normalized(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN enabled boolean NOT NULL DEFAULT true"))
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode, enabled) "
+                "VALUES (1, '600001', 'A', :condition, 'daily', 'auto', true)"
+            ),
+            {"condition": dumps({"type": "price_vs_ma", "direction": "below", "period": 20})},
+        )
+
+        result = migrate_monitor_enums(connection)
+
+        row = connection.execute(text("SELECT condition::jsonb, enabled FROM stock_monitor_targets WHERE id = 1")).one()
+        assert len(result.price_vs_ma_diagnostics) == 1
+        assert result.price_vs_ma_diagnostics[0].target_id == 1
+        assert result.price_vs_ma_diagnostics[0].direction == "below"
+        assert result.price_vs_ma_diagnostics[0].disabled is True
+        assert row[0] == {"type": "close_cross_ma", "direction": "above", "period": 20}
+        assert row[1] is False
 
 
 def test_second_apply_is_idempotent(postgres_schema):

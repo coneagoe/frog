@@ -904,7 +904,7 @@ docker compose exec -T "$DB_SERVICE" psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$
 WITH expected(table_name, constraint_name, definition) AS (
   VALUES
     ('stock_monitor_targets','ck_stock_monitor_targets_condition_type',
-     $condition$CHECK (((jsonb_typeof(condition) = 'object'::text) AND (condition ? 'type'::text) AND ((condition ->> 'type'::text) IS NOT NULL) AND ((condition ->> 'type'::text) = ANY (ARRAY['price_threshold'::text, 'price_cross_ma'::text, 'price_vs_ma'::text, 'ma_cross'::text, 'change_pct'::text, 'rsi'::text]))))$condition$),
+     $condition$CHECK (((jsonb_typeof(condition) = 'object'::text) AND (condition ? 'type'::text) AND ((condition ->> 'type'::text) IS NOT NULL) AND ((condition ->> 'type'::text) = ANY (ARRAY['price_threshold'::text, 'price_cross_ma'::text, 'close_cross_ma'::text, 'ma_cross'::text, 'change_pct'::text, 'rsi'::text]))))$condition$),
     ('daily_bar_diagnostics','ck_daily_bar_diagnostics_provider_outcome_status',
      $provider$CHECK (((jsonb_typeof((provider_outcomes)::jsonb) = 'array'::text) AND (NOT jsonb_path_exists((provider_outcomes)::jsonb, '$[*]?(((@.type() != "object" || !(exists (@."status"))) || @."status".type() != "string") || !((@."status" == "downloaded" || @."status" == "empty") || @."status" == "error"))'::jsonpath))))$provider$),
     ('ssf_change_signals','ck_ssf_change_signals_event_types',

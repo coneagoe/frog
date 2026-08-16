@@ -20,7 +20,7 @@ def validate_condition(condition: Mapping[str, Any]) -> dict[str, Any]:
     elif condition_type == "change_pct":
         _validate_direction(normalized, {"above", "below"})
         _required_number(normalized, "value")
-    elif condition_type in {"price_cross_ma", "price_vs_ma"}:
+    elif condition_type == "price_cross_ma":
         _validate_direction(normalized, {"above", "below"})
         _required_positive_int(normalized, "period")
     elif condition_type == "close_cross_ma":
