@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
-from monitor.storage.enum_migration import MONITOR_ENUM_GROUPS
+from monitor.storage.enum_migration import MONITOR_ENUM_GROUPS, MonitorEnumMigrationResult
 from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_GROUPS
 from storage.enum_governance import (
     ENUM_GOVERNANCE_ADAPTERS,
@@ -524,7 +524,10 @@ def test_unified_monitor_migration_preserves_price_vs_ma_diagnostics(postgres_sc
 
         result = migrate_enums(connection)
 
-        monitor = next(domain.result for domain in result.domains if domain.name == "monitor")
+        monitor = cast(
+            MonitorEnumMigrationResult,
+            next(domain.result for domain in result.domains if domain.name == "monitor"),
+        )
         assert result.converted is True
         assert len(monitor.price_vs_ma_diagnostics) == 1
         diagnostic = monitor.price_vs_ma_diagnostics[0]
