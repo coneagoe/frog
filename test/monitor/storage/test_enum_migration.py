@@ -418,7 +418,9 @@ def test_apply_migrates_price_vs_ma_targets_before_tightening_condition_check(po
         connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN note text"))
         connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN workflow varchar(64)"))
         connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN enabled boolean NOT NULL DEFAULT true"))
-        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN last_state boolean NOT NULL DEFAULT false"))
+        connection.execute(
+            text("ALTER TABLE stock_monitor_targets ADD COLUMN last_state boolean NOT NULL DEFAULT false")
+        )
         connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN triggered_at timestamptz"))
         connection.execute(
             text(
@@ -480,7 +482,9 @@ def test_price_vs_ma_migration_is_rerun_safe(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
         connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN enabled boolean NOT NULL DEFAULT true"))
-        connection.execute(text("ALTER TABLE stock_monitor_targets ADD COLUMN last_state boolean NOT NULL DEFAULT false"))
+        connection.execute(
+            text("ALTER TABLE stock_monitor_targets ADD COLUMN last_state boolean NOT NULL DEFAULT false")
+        )
         connection.execute(
             text(
                 "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode, enabled, last_state) "
@@ -490,12 +494,16 @@ def test_price_vs_ma_migration_is_rerun_safe(postgres_schema):
         )
 
         assert migrate_monitor_enums(connection).converted is True
-        before = connection.execute(text("SELECT condition::jsonb, enabled, last_state FROM stock_monitor_targets")).one()
+        before = connection.execute(
+            text("SELECT condition::jsonb, enabled, last_state FROM stock_monitor_targets")
+        ).one()
 
         result = migrate_monitor_enums(connection)
         assert result.converted is False
         assert result.price_vs_ma_diagnostics == ()
-        after = connection.execute(text("SELECT condition::jsonb, enabled, last_state FROM stock_monitor_targets")).one()
+        after = connection.execute(
+            text("SELECT condition::jsonb, enabled, last_state FROM stock_monitor_targets")
+        ).one()
 
         assert before == after
 

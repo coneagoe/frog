@@ -95,6 +95,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 ## Agent skills
 
+### Issue implementation review
+
+- At the end of implementing any issue, during the final review/verification phase, invoke the `simplify` skill before declaring the work complete.
+- Use `simplify` to check whether the touched code can be made clearer or less complex without changing behavior; apply only targeted simplifications that preserve the issue scope and verified behavior.
+- If no safe simplification is available, state that the simplify review found no change worth making.
+
 ### Issue tracker
 
 Issues and PRDs live in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
