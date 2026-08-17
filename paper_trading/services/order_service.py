@@ -441,16 +441,6 @@ class OrderService:
                 "Trade date is not open",
                 {"trade_date": str(trade_date)},
             )
-        if (
-            market == Market.A_SHARE
-            and trade_date < date.today()
-            and not self.repo.has_unresolved_daily_bar_diagnostic(trade_date, market, symbol)
-        ):
-            raise PaperTradingError(
-                "HISTORICAL_TRADE_DATE_NOT_ELIGIBLE",
-                "Past trade date is not eligible for retry",
-                {"trade_date": str(trade_date), "symbol": symbol},
-            )
         if side == OrderSide.BUY:
             return self._accept_buy_order(
                 account_id,

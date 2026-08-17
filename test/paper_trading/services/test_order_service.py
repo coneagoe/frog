@@ -497,7 +497,7 @@ def test_historical_order_33_sell_without_matured_inventory_reports_position_fai
     engine.dispose()
 
 
-def test_past_a_share_order_requires_unresolved_canonical_bfq_diagnostic(tmp_path):
+def test_past_a_share_buy_is_accepted_even_with_unresolved_diagnostic(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("historical-canonical", Decimal("100000.00"))
     trade_date = date(2026, 6, 17)
@@ -517,27 +517,6 @@ def test_past_a_share_order_requires_unresolved_canonical_bfq_diagnostic(tmp_pat
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.market == Market.A_SHARE.value
     engine.dispose()
-
-
-def test_historical_diagnostic_gate_is_only_for_a_share_market(sqlite_session):
-    Base.metadata.create_all(sqlite_session.get_bind())
-    repo = PaperTradingRepository(sqlite_session)
-    account = repo.create_account("historical-market-guard", Decimal("100000.00"))
-    service = OrderService(repo, FakeMarketDataProvider())
-
-    order = service._place_a_share_order(
-        account.id,
-        "000001.SZ",
-        OrderSide.BUY,
-        100,
-        Decimal("10.00"),
-        date(2026, 7, 21),
-        Market.HK_CONNECT,
-        None,
-        None,
-    )
-
-    assert order.status == OrderStatus.ACCEPTED.value
 
 
 def test_past_hk_connect_order_uses_hk_validation_without_bfq_diagnostic(sqlite_session):
