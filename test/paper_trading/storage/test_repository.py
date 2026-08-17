@@ -1122,7 +1122,9 @@ def test_clear_account_rebuild_state_from_restores_pre_start_lots_and_realized_p
 
     lot = repo.get_lots(account.id, "a_share", "000001")[0]
     assert lot.remaining_quantity == 60
-    assert repo.get_account(account.id).realized_pnl == Decimal("75.0000")
+    rebuilt_account = repo.get_account(account.id)
+    assert rebuilt_account is not None
+    assert rebuilt_account.realized_pnl == Decimal("75.0000")
     assert [trade.id for trade in repo.list_trades(account.id)] == [buy_trade.id, pre_sell_trade.id]
     position = repo.get_position(account.id, "a_share", "000001")
     assert position is not None
