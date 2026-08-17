@@ -301,6 +301,7 @@ def test_selected_paper_enum_defaults_round_trip_as_readable_strings(tmp_path):
             start_date=date(2026, 8, 7),
             triggering_order_ids=[],
             status="completed",
+            trigger_evidence={"source": "test"},
             deleted_counts={},
             regenerated_counts={},
         )
@@ -327,5 +328,7 @@ def test_selected_paper_enum_defaults_round_trip_as_readable_strings(tmp_path):
         assert loaded_cycle.market == "a_share"
         assert loaded_check.data_granularity == "daily"
         assert loaded_rebuild.status == "completed"
+        assert loaded_rebuild.trigger_evidence == {"source": "test"}
+        assert loaded_rebuild.finished_at is None
 
     engine.dispose()

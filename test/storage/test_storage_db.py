@@ -419,6 +419,8 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
 
     snapshot_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_account_snapshots)}
     assert "pending_settlement" in snapshot_columns
+    rebuild_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_ledger_rebuilds)}
+    assert {"trigger_evidence", "finished_at"} <= rebuild_columns
 
     with Session(storage.engine) as session:
         assert session.query(PaperAccount).order_by(PaperAccount.id).one().hk_commission_rate is None

@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import (
+    get_hk_metadata_provider,
+    get_market_data_provider,
     get_position_valuation_service,
     get_security_name_provider,
     get_session,
@@ -16,12 +18,17 @@ from paper_trading.schemas.accounts import (
     CreateAccountRequest,
     ImportPositionsRequest,
     ImportPositionsResponse,
+    LedgerRebuildAuditResponse,
+    LedgerRebuildRequest,
     PositionResponse,
     UpdateAccountFeeRequest,
 )
 from paper_trading.services.account_service import AccountService
 from paper_trading.services.cash_service import CashService
+from paper_trading.services.ledger_rebuild_service import LedgerRebuildService
 from paper_trading.services.position_valuation_service import PositionValuationService
+from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
+from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from paper_trading.storage.security_metadata import SecurityNameProvider
 
@@ -112,6 +119,34 @@ def list_positions(
 @router.get("/{account_id}/cash-ledger", response_model=list[CashLedgerResponse])
 def list_cash_ledger(account_id: int, session: Session = Depends(get_session)):
     return PaperTradingRepository(session).list_cash_ledger(account_id)
+
+
+@router.post("/{account_id}/ledger-rebuilds", response_model=LedgerRebuildAuditResponse)
+def rebuild_account_ledger(
+    account_id: int,
+    request: LedgerRebuildRequest,
+    session: Session = Depends(get_session),
+    market_data: MarketDataProvider = Depends(get_market_data_provider),
+    hk_metadata: HkConnectMetadataProvider = Depends(get_hk_metadata_provider),
+):
+    repo = PaperTradingRepository(session)
+    if repo.get_account(account_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
+    service = LedgerRebuildService(repo, market_data, hk_metadata)
+    try:
+        rebuild = service.rebuild_account_from(
+            account_id,
+            request.start_date,
+            trigger_evidence=request.trigger_evidence or {"source": "api"},
+        )
+        session.commit()
+        return rebuild
+    except Exception as exc:
+        session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Historical ledger rebuild failed",
+        ) from exc
 
 
 @router.post("/{account_id}/positions/import", response_model=ImportPositionsResponse)

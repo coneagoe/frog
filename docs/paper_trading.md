@@ -408,6 +408,23 @@ curl -X DELETE "$PAPER_TRADING_API_BASE_URL/paper/orders/123" \
   -H "Authorization: Bearer $PAPER_TRADING_API_TOKEN"
 ```
 
+### Rebuild an account ledger from a date
+
+Use an explicit historical ledger rebuild when derived account state needs to be replayed from a known `start_date` without deleting source facts. The rebuild preserves orders, cancellations, deposits, withdrawals, manual cash adjustments, existing validity checks, and historical matching runs, then recreates derived trades, trade cash events, positions, lots, round trips, snapshots, valuation gaps, and new replay matching runs from that date forward. A lightweight audit row records the account, start date, trigger evidence, deleted/regenerated counts, terminal status, and any error detail.
+
+```bash
+uv run tools/paper_trading_cli.py account rebuild_ledger --account-id 1 --start-date 2026-07-17 --trigger-evidence "manual repair"
+```
+
+Raw API:
+
+```bash
+curl -X POST "$PAPER_TRADING_API_BASE_URL/paper/accounts/1/ledger-rebuilds" \
+  -H "Authorization: Bearer $PAPER_TRADING_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"start_date":"2026-07-17","trigger_evidence":{"source":"operator","note":"manual repair"}}'
+```
+
 ## Trade Validity Analysis
 
 Paper trading records the original trading intent and analyzes whether the operation was valid for the specified `trade_date`. The order lifecycle status (`accepted`, `rejected`, `filled`, `cancelled`) remains separate from validity status.

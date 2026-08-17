@@ -66,6 +66,15 @@ def _mock_client(**kwargs) -> MagicMock:
                 "note": "initial deposit",
             }
         ]
+        client.rebuild_account_ledger.return_value = {
+            "id": 1,
+            "account_id": 1,
+            "start_date": "2026-07-17",
+            "status": "completed",
+            "trigger_evidence": {"source": "cli-test"},
+            "deleted_counts": {},
+            "regenerated_counts": {"trades": 1},
+        }
         client.create_order.return_value = {
             "id": 10,
             "account_id": 1,
@@ -486,6 +495,43 @@ class TestAccountCashLedger:
         exit_code = main(["account", "cash-ledger", "--account-id", "1"], client=client)
         assert exit_code == EXIT_CODES["OK"]
         assert "deposit" in capsys.readouterr().out
+
+
+class TestAccountLedgerRebuild:
+    def test_rebuild_ledger_calls_client(self):
+        client = _mock_client()
+
+        exit_code = main(
+            [
+                "account",
+                "rebuild_ledger",
+                "--account-id",
+                "1",
+                "--start-date",
+                "2026-07-17",
+                "--trigger-evidence",
+                "manual repair",
+            ],
+            client=client,
+        )
+
+        assert exit_code == EXIT_CODES["OK"]
+        client.rebuild_account_ledger.assert_called_once_with(
+            account_id=1,
+            start_date="2026-07-17",
+            trigger_evidence={"source": "cli", "note": "manual repair"},
+        )
+
+    def test_rebuild_ledger_rejects_bad_start_date(self):
+        client = _mock_client()
+
+        exit_code = main(
+            ["account", "rebuild_ledger", "--account-id", "1", "--start-date", "2026-99-17"],
+            client=client,
+        )
+
+        assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+        client.rebuild_account_ledger.assert_not_called()
 
 
 class TestAccountImportPositions:

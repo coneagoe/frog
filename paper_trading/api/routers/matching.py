@@ -77,7 +77,7 @@ def rebuild_delayed_daily_bar_orders(
             service.rebuild_account_from(account_id, orders[0].trade_date, [order.id for order in orders])
         session.commit()
     except Exception:
-        session.rollback()
+        session.commit()
         logger.exception("Historical ledger rebuild failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

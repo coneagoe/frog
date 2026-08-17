@@ -3813,6 +3813,21 @@ class StorageDb:
                             text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}")
                         )
 
+        if inspect(self.engine).has_table(tb_name_paper_ledger_rebuilds):
+            rebuild_columns = {
+                column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_ledger_rebuilds)
+            }
+            rebuild_audit_columns = {
+                "trigger_evidence": "JSON NOT NULL DEFAULT '{}'",
+                "finished_at": "TIMESTAMP WITH TIME ZONE",
+            }
+            for column_name, ddl in rebuild_audit_columns.items():
+                if column_name not in rebuild_columns:
+                    with self.engine.begin() as conn:
+                        conn.execute(
+                            text(f"ALTER TABLE {tb_name_paper_ledger_rebuilds} ADD COLUMN {column_name} {ddl}")
+                        )
+
         if "comment" not in columns:
             with self.engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN comment TEXT"))

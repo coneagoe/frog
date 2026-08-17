@@ -72,7 +72,9 @@ class TradeValidityGranularity(StrEnum):
 
 
 class LedgerRebuildStatus(StrEnum):
+    RUNNING = "running"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class ETFEligibilityStatus(StrEnum):

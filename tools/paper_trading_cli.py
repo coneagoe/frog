@@ -158,6 +158,17 @@ class PaperTradingApiClient:
     def list_cash_ledger(self, account_id: int) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/cash-ledger"))
 
+    def rebuild_account_ledger(
+        self,
+        account_id: int,
+        start_date: str,
+        trigger_evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"start_date": start_date}
+        if trigger_evidence is not None:
+            body["trigger_evidence"] = trigger_evidence
+        return cast(dict[str, Any], self._request("POST", f"/paper/accounts/{account_id}/ledger-rebuilds", json=body))
+
     def create_order(
         self,
         account_id: int,
@@ -319,6 +330,10 @@ def _add_account_subparsers(subparsers: Any) -> None:
     p_pos.add_argument("--account-id", type=int, required=True, help="Account ID")
     p_cl = acct_sub.add_parser("cash-ledger", help="List cash ledger entries")
     p_cl.add_argument("--account-id", type=int, required=True, help="Account ID")
+    p_rebuild = acct_sub.add_parser("rebuild_ledger", help="Rebuild derived ledger from a historical date")
+    p_rebuild.add_argument("--account-id", type=int, required=True, help="Account ID")
+    p_rebuild.add_argument("--start-date", required=True, help="Replay start date YYYY-MM-DD")
+    p_rebuild.add_argument("--trigger-evidence", default=None, help="Optional human-readable rebuild trigger note")
     p_import = acct_sub.add_parser("import-positions", help="Import existing holdings from CSV")
     p_import.add_argument("--account-id", type=int, required=True, help="Account ID")
     p_import.add_argument(
@@ -532,6 +547,16 @@ def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> 
         return client.list_positions(account_id=args.account_id)
     if cmd == "cash-ledger":
         return client.list_cash_ledger(account_id=args.account_id)
+    if cmd == "rebuild_ledger":
+        start_date = _validate_trade_date(args.start_date)
+        trigger_evidence = {"source": "cli"}
+        if args.trigger_evidence is not None:
+            trigger_evidence["note"] = args.trigger_evidence
+        return client.rebuild_account_ledger(
+            account_id=args.account_id,
+            start_date=start_date,
+            trigger_evidence=trigger_evidence,
+        )
     if cmd == "deposit":
         _validate_trade_date(args.trade_date)
         return client.deposit_cash(args.account_id, _parse_decimal(args.amount, "amount"), args.trade_date, args.note)

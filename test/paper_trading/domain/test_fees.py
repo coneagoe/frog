@@ -27,7 +27,7 @@ def test_paper_trading_new_enum_values_are_canonical():
     assert [item.value for item in PendingSettlementSource] == ["hk_sell"]
     assert [item.value for item in RoundTripStatus] == ["open", "closed"]
     assert [item.value for item in TradeValidityGranularity] == ["daily"]
-    assert [item.value for item in LedgerRebuildStatus] == ["completed"]
+    assert [item.value for item in LedgerRebuildStatus] == ["running", "completed", "failed"]
 
 
 def test_buy_fee_uses_minimum_commission_and_transfer_fee():

@@ -1079,13 +1079,222 @@ class PaperTradingRepository:
             account_id=account_id,
             start_date=start_date,
             triggering_order_ids=triggering_order_ids,
+            trigger_evidence={"triggering_order_ids": triggering_order_ids},
             status=LedgerRebuildStatus.COMPLETED.value,
             deleted_counts=deleted_counts,
             regenerated_counts=regenerated_counts,
+            finished_at=datetime.now(timezone.utc),
         )
         self.session.add(rebuild)
         self.session.flush()
         return rebuild
+
+    def create_ledger_rebuild_started(
+        self,
+        account_id: int,
+        start_date: date,
+        trigger_evidence: dict[str, Any] | None = None,
+        triggering_order_ids: list[int] | None = None,
+    ) -> PaperLedgerRebuild:
+        rebuild = PaperLedgerRebuild(
+            account_id=account_id,
+            start_date=start_date,
+            triggering_order_ids=triggering_order_ids or [],
+            trigger_evidence=trigger_evidence or {},
+            status=LedgerRebuildStatus.RUNNING.value,
+            deleted_counts={},
+            regenerated_counts={},
+        )
+        self.session.add(rebuild)
+        self.session.flush()
+        return rebuild
+
+    def complete_ledger_rebuild(
+        self,
+        rebuild: PaperLedgerRebuild,
+        deleted_counts: dict[str, int],
+        regenerated_counts: dict[str, int],
+    ) -> PaperLedgerRebuild:
+        rebuild.status = LedgerRebuildStatus.COMPLETED.value
+        rebuild.deleted_counts = deleted_counts
+        rebuild.regenerated_counts = regenerated_counts
+        rebuild.error_details = None
+        rebuild.finished_at = datetime.now(timezone.utc)
+        self.session.flush()
+        return rebuild
+
+    def create_ledger_rebuild_failed(
+        self,
+        account_id: int,
+        start_date: date,
+        trigger_evidence: dict[str, Any] | None,
+        error_details: str,
+        deleted_counts: dict[str, int] | None = None,
+        regenerated_counts: dict[str, int] | None = None,
+        triggering_order_ids: list[int] | None = None,
+    ) -> PaperLedgerRebuild:
+        rebuild = PaperLedgerRebuild(
+            account_id=account_id,
+            start_date=start_date,
+            triggering_order_ids=triggering_order_ids or [],
+            trigger_evidence=trigger_evidence or {},
+            status=LedgerRebuildStatus.FAILED.value,
+            deleted_counts=deleted_counts or {},
+            regenerated_counts=regenerated_counts or {},
+            error_details=error_details,
+            finished_at=datetime.now(timezone.utc),
+        )
+        self.session.add(rebuild)
+        self.session.flush()
+        return rebuild
+
+    def _rebuild_positions_from_surviving_lots(self, account_id: int) -> None:
+        self.session.query(PaperPosition).filter(PaperPosition.account_id == account_id).delete(
+            synchronize_session="fetch"
+        )
+        lots = (
+            self.session.query(PaperPositionLot)
+            .filter(PaperPositionLot.account_id == account_id, PaperPositionLot.remaining_quantity > 0)
+            .order_by(PaperPositionLot.market.asc(), PaperPositionLot.symbol.asc(), PaperPositionLot.id.asc())
+            .all()
+        )
+        total_qty: dict[tuple[str, str], int] = defaultdict(int)
+        total_cost: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
+        sources: dict[tuple[str, str], set[str]] = defaultdict(set)
+        for lot in lots:
+            key = (lot.market, lot.symbol)
+            remaining_quantity = int(lot.remaining_quantity or 0)
+            total_qty[key] += remaining_quantity
+            total_cost[key] += Decimal(lot.cost_price) * remaining_quantity
+            sources[key].add(lot.source)
+        for market, symbol in total_qty:
+            source = (
+                PositionSource.IMPORTED.value
+                if sources[(market, symbol)] == {PositionSource.IMPORTED.value}
+                else PositionSource.TRADE.value
+            )
+            self.session.add(
+                PaperPosition(
+                    account_id=account_id,
+                    symbol=symbol,
+                    total_quantity=total_qty[(market, symbol)],
+                    frozen_quantity=0,
+                    cost_amount=total_cost[(market, symbol)].quantize(Decimal("0.0001")),
+                    realized_pnl=Decimal("0"),
+                    source=source,
+                    market=market,
+                )
+            )
+
+    def _restore_lot_quantities_as_of(self, account_id: int, start_date: date) -> Decimal:
+        self.session.query(PaperPositionLot).filter(PaperPositionLot.account_id == account_id).update(
+            {PaperPositionLot.remaining_quantity: PaperPositionLot.original_quantity},
+            synchronize_session="fetch",
+        )
+        realized_pnl = Decimal("0.0000")
+        pre_start_sells = (
+            self.session.query(PaperTrade)
+            .filter(
+                PaperTrade.account_id == account_id,
+                PaperTrade.trade_date < start_date,
+                PaperTrade.side == OrderSide.SELL.value,
+            )
+            .order_by(PaperTrade.trade_date.asc(), PaperTrade.id.asc())
+            .all()
+        )
+        for trade in pre_start_sells:
+            remaining = int(trade.quantity)
+            cost_reduction = Decimal("0.0000")
+            for lot in self.get_lots(account_id, trade.market, trade.symbol):
+                if remaining <= 0:
+                    break
+                available = int(lot.remaining_quantity or 0)
+                used = min(available, remaining)
+                lot.remaining_quantity = available - used
+                cost_reduction += (Decimal(used) * Decimal(lot.cost_price)).quantize(Decimal("0.0001"))
+                remaining -= used
+            realized_pnl += (Decimal(trade.amount) - Decimal(trade.fees) - cost_reduction).quantize(Decimal("0.0001"))
+        return realized_pnl.quantize(Decimal("0.0001"))
+
+    def clear_account_rebuild_state_from(self, account_id: int, start_date: date) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        account = self.get_account(account_id)
+        if account is None:
+            raise KeyError(f"paper account not found: {account_id}")
+        deleted_trade_ids = [
+            row[0]
+            for row in self.session.query(PaperTrade.id)
+            .filter(PaperTrade.account_id == account_id, PaperTrade.trade_date >= start_date)
+            .all()
+        ]
+        cash_event_delete_predicates = [PaperCashLedger.trade_date >= start_date]
+        pending_settlement_delete_predicates = [PaperPendingSettlement.expected_settle_date >= start_date]
+        if deleted_trade_ids:
+            cash_event_delete_predicates.append(PaperCashLedger.trade_id.in_(deleted_trade_ids))
+            pending_settlement_delete_predicates.append(PaperPendingSettlement.trade_id.in_(deleted_trade_ids))
+        counts["cash_events"] = (
+            self.session.query(PaperCashLedger)
+            .filter(
+                PaperCashLedger.account_id == account_id,
+                PaperCashLedger.event_type.in_(
+                    [
+                        CashEventType.FREEZE.value,
+                        CashEventType.RELEASE.value,
+                        CashEventType.TRADE.value,
+                        CashEventType.FEE.value,
+                    ]
+                ),
+                or_(*cash_event_delete_predicates),
+            )
+            .delete(synchronize_session=False)
+        )
+        counts["round_trips"] = (
+            self.session.query(PaperPositionRoundTrip)
+            .filter(
+                PaperPositionRoundTrip.account_id == account_id,
+                or_(
+                    PaperPositionRoundTrip.open_trade_date >= start_date,
+                    PaperPositionRoundTrip.close_trade_date >= start_date,
+                ),
+            )
+            .delete(synchronize_session=False)
+        )
+        counts["snapshots"] = (
+            self.session.query(PaperAccountSnapshot)
+            .filter(PaperAccountSnapshot.account_id == account_id, PaperAccountSnapshot.trade_date >= start_date)
+            .delete(synchronize_session=False)
+        )
+        counts["valuation_gaps"] = (
+            self.session.query(PaperValuationGap)
+            .filter(PaperValuationGap.account_id == account_id, PaperValuationGap.trade_date >= start_date)
+            .delete(synchronize_session=False)
+        )
+        counts["pending_settlements"] = (
+            self.session.query(PaperPendingSettlement)
+            .filter(
+                PaperPendingSettlement.account_id == account_id,
+                or_(*pending_settlement_delete_predicates),
+            )
+            .delete(synchronize_session=False)
+        )
+        counts["trades"] = (
+            self.session.query(PaperTrade)
+            .filter(PaperTrade.account_id == account_id, PaperTrade.trade_date >= start_date)
+            .delete(synchronize_session=False)
+        )
+        counts["trade_lots"] = (
+            self.session.query(PaperPositionLot)
+            .filter(
+                PaperPositionLot.account_id == account_id,
+                PaperPositionLot.source == PositionSource.TRADE.value,
+                PaperPositionLot.buy_trade_date >= start_date,
+            )
+            .delete(synchronize_session=False)
+        )
+        account.realized_pnl = self._restore_lot_quantities_as_of(account_id, start_date)
+        self._rebuild_positions_from_surviving_lots(account_id)
+        self.session.flush()
+        return {key: int(value) for key, value in counts.items()}
 
     def clear_account_rebuild_state(
         self, account_id: int, *, preserve_execution_history: bool = False
@@ -1227,6 +1436,43 @@ class PaperTradingRepository:
         # resolvable after a later delete and should be reconsidered.
         self.session.query(PaperOrder).filter(
             PaperOrder.account_id == account_id,
+            PaperOrder.status == OrderStatus.REJECTED.value,
+            PaperOrder.rejection_reason.like(f"{REPLAY_REJECTION_MARKER}%"),
+        ).update(
+            {
+                PaperOrder.status: OrderStatus.ACCEPTED.value,
+                PaperOrder.filled_quantity: 0,
+                PaperOrder.rejection_code: None,
+                PaperOrder.rejection_reason: None,
+            },
+            synchronize_session=False,
+        )
+        self.session.flush()
+
+    def reset_orders_for_replay_from(self, account_id: int, start_date: date) -> None:
+        self.session.query(PaperOrder).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.trade_date >= start_date,
+            PaperOrder.status.in_(
+                [
+                    OrderStatus.ACCEPTED.value,
+                    OrderStatus.FILLED.value,
+                    OrderStatus.PARTIALLY_FILLED.value,
+                    OrderStatus.NEW.value,
+                ]
+            ),
+        ).update(
+            {
+                PaperOrder.status: OrderStatus.ACCEPTED.value,
+                PaperOrder.filled_quantity: 0,
+                PaperOrder.rejection_code: None,
+                PaperOrder.rejection_reason: None,
+            },
+            synchronize_session=False,
+        )
+        self.session.query(PaperOrder).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.trade_date >= start_date,
             PaperOrder.status == OrderStatus.REJECTED.value,
             PaperOrder.rejection_reason.like(f"{REPLAY_REJECTION_MARKER}%"),
         ).update(

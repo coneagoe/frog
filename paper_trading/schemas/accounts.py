@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal, Self
 
@@ -160,3 +160,24 @@ class CashFlowResponse(BaseModel):
     net_asset_value: Decimal
     share_count: Decimal
     ledger: CashLedgerResponse
+
+
+class LedgerRebuildRequest(BaseModel):
+    start_date: date
+    trigger_evidence: dict | None = None
+
+
+class LedgerRebuildAuditResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    account_id: int
+    start_date: date
+    triggering_order_ids: list[int]
+    trigger_evidence: dict
+    status: str
+    deleted_counts: dict[str, int]
+    regenerated_counts: dict[str, int]
+    error_details: str | None = None
+    created_at: datetime
+    finished_at: datetime | None = None

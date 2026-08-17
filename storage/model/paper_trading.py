@@ -404,6 +404,7 @@ class PaperLedgerRebuild(Base):
     )
     start_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     triggering_order_ids: Mapped[list[int]] = mapped_column(JSON, nullable=False)
+    trigger_evidence: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, server_default=text("'{}'"))
     status: Mapped[str] = mapped_column(
         _value_enum(LedgerRebuildStatus, "paper_ledger_rebuild_status"), nullable=False, index=True
     )
@@ -411,6 +412,7 @@ class PaperLedgerRebuild(Base):
     regenerated_counts: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False)
     error_details: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ETFEligibility(Base):

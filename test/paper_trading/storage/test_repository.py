@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from paper_trading.domain.enums import (
     CashEventType,
     ETFEligibilityStatus,
+    LedgerRebuildStatus,
     Market,
     MatchingRunStatus,
     OrderSide,
     OrderStatus,
 )
-from paper_trading.storage.models import PaperTradeValidityCheck
+from paper_trading.storage.models import PaperPendingSettlement, PaperTradeValidityCheck, PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.domain_enums import (
     DailyBarDiagnosticAdjust,
@@ -864,6 +865,269 @@ def test_delete_order_returns_deleted_order_and_removes_row(sqlite_session):
     sqlite_session.flush()
     with pytest.raises(KeyError):
         repo.get_order(order.id)
+
+
+def test_ledger_rebuild_audit_lifecycle_records_trigger_counts_and_failure(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("audit-rebuild", Decimal("100000"))
+
+    running = repo.create_ledger_rebuild_started(
+        account.id,
+        date(2026, 7, 19),
+        trigger_evidence={"source": "api", "requested_by": "test"},
+    )
+
+    assert running.status == LedgerRebuildStatus.RUNNING.value
+    assert running.trigger_evidence == {"source": "api", "requested_by": "test"}
+    assert running.triggering_order_ids == []
+    assert running.deleted_counts == {}
+    assert running.regenerated_counts == {}
+    assert running.finished_at is None
+
+    completed = repo.complete_ledger_rebuild(
+        running,
+        deleted_counts={"trades": 1},
+        regenerated_counts={"trades": 2, "matching_runs": 1},
+    )
+
+    assert completed.status == LedgerRebuildStatus.COMPLETED.value
+    assert completed.deleted_counts == {"trades": 1}
+    assert completed.regenerated_counts == {"trades": 2, "matching_runs": 1}
+    assert completed.finished_at is not None
+
+    failed = repo.create_ledger_rebuild_failed(
+        account.id,
+        date(2026, 7, 20),
+        trigger_evidence={"source": "api"},
+        error_details="boom",
+        deleted_counts={"trades": 0},
+        regenerated_counts={"trades": 0},
+    )
+
+    assert failed.status == LedgerRebuildStatus.FAILED.value
+    assert failed.error_details == "boom"
+    assert failed.finished_at is not None
+
+
+def test_clear_account_rebuild_state_from_date_preserves_source_facts_and_history(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("scoped-rebuild", Decimal("100000"))
+    before_date = date(2026, 7, 18)
+    start_date = date(2026, 7, 19)
+
+    before_order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), before_date, OrderStatus.FILLED
+    )
+    after_order = repo.create_order(
+        account.id, "000002", OrderSide.BUY, 100, Decimal("20.00"), start_date, OrderStatus.FILLED
+    )
+    cancelled_order = repo.create_order(
+        account.id, "000003", OrderSide.BUY, 100, Decimal("30.00"), start_date, OrderStatus.CANCELLED
+    )
+    before_trade = repo.create_trade(
+        before_order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        Decimal("1000"),
+        Decimal("5"),
+        before_date,
+    )
+    after_trade = repo.create_trade(
+        after_order.id,
+        account.id,
+        "000002",
+        OrderSide.BUY,
+        100,
+        Decimal("20.00"),
+        Decimal("2000"),
+        Decimal("5"),
+        start_date,
+    )
+    repo.add_cash_event(
+        account.id,
+        CashEventType.TRADE,
+        Decimal("-1005"),
+        order_id=before_order.id,
+        trade_id=before_trade.id,
+        trade_date=before_date,
+    )
+    repo.add_cash_event(
+        account.id,
+        CashEventType.TRADE,
+        Decimal("-2005"),
+        order_id=after_order.id,
+        trade_id=after_trade.id,
+        trade_date=start_date,
+    )
+    manual_deposit = repo.add_cash_event(
+        account.id, CashEventType.DEPOSIT, Decimal("500"), trade_date=start_date, note="manual deposit"
+    )
+    repo.create_position_lot(account.id, "a_share", "000001", before_date, 100, 100, Decimal("10.00"), source="trade")
+    repo.create_position_lot(account.id, "a_share", "000002", start_date, 100, 100, Decimal("20.00"), source="trade")
+    repo.upsert_position(account.id, "a_share", "000001", 100, 0, Decimal("1000"), source="trade")
+    repo.upsert_position(account.id, "a_share", "000002", 100, 0, Decimal("2000"), source="trade")
+    repo.create_round_trip(account.id, "a_share", "000001", before_trade.id, before_date, Decimal("1000"), Decimal("5"))
+    repo.create_round_trip(account.id, "a_share", "000002", after_trade.id, start_date, Decimal("2000"), Decimal("5"))
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=before_date,
+        cash_available=Decimal("99000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("1000"),
+        total_assets=Decimal("100000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=1,
+        order_count=1,
+        trade_count=1,
+    )
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=start_date,
+        cash_available=Decimal("97000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("3000"),
+        total_assets=Decimal("100000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=2,
+        order_count=2,
+        trade_count=2,
+    )
+    repo.upsert_valuation_gap(account.id, before_date, ["000001"], [])
+    repo.upsert_valuation_gap(account.id, start_date, ["000002"], [])
+    repo.create_pending_settlement(account.id, Decimal("100"), start_date, trade_id=after_trade.id)
+    historical_run = repo.create_matching_run(start_date, account.id, MatchingRunStatus.COMPLETED.value)
+    repo.create_trade_validity_check(
+        order_id=after_order.id,
+        account_id=account.id,
+        symbol="000002",
+        trade_date=start_date,
+        side=OrderSide.BUY.value,
+        input_price=Decimal("20.00"),
+        status="valid",
+        reason_code="VALID",
+    )
+    sqlite_session.commit()
+
+    counts = repo.clear_account_rebuild_state_from(account.id, start_date)
+    repo.reset_orders_for_replay_from(account.id, start_date)
+
+    assert counts["trades"] == 1
+    assert counts["cash_events"] == 1
+    assert [trade.id for trade in repo.list_trades(account.id)] == [before_trade.id]
+    assert [event.id for event in repo.list_cash_ledger(account.id) if event.note == "manual deposit"] == [
+        manual_deposit.id
+    ]
+    assert [order.id for order in repo.list_orders(account.id)] == [before_order.id, after_order.id, cancelled_order.id]
+    assert repo.get_order(before_order.id).status == OrderStatus.FILLED.value
+    assert repo.get_order(after_order.id).status == OrderStatus.ACCEPTED.value
+    assert repo.get_order(cancelled_order.id).status == OrderStatus.CANCELLED.value
+    assert repo.list_matching_runs()[0].id == historical_run.id
+    assert repo.list_trade_validity_checks(after_order.id) != []
+    assert [snapshot.trade_date for snapshot in repo.list_snapshots(account.id)] == [before_date]
+    assert sqlite_session.query(PaperValuationGap).filter_by(account_id=account.id).one().trade_date == before_date
+    assert sqlite_session.query(PaperPendingSettlement).filter_by(account_id=account.id).count() == 0
+    assert [(position.symbol, position.total_quantity) for position in repo.get_positions(account.id)] == [
+        ("000001", 100)
+    ]
+
+
+def test_clear_account_rebuild_state_from_restores_pre_start_lots_and_realized_pnl(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("baseline-rebuild", Decimal("100000"))
+    buy_date = date(2026, 7, 16)
+    pre_start_sell_date = date(2026, 7, 18)
+    start_date = date(2026, 7, 19)
+    post_start_sell_date = date(2026, 7, 20)
+
+    buy_order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10"), buy_date, OrderStatus.FILLED
+    )
+    buy_trade = repo.create_trade(
+        buy_order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        Decimal("1000"),
+        Decimal("5"),
+        buy_date,
+    )
+    repo.create_position_lot(account.id, "a_share", "000001", buy_date, 100, 20, Decimal("10"), source="trade")
+
+    pre_sell_order = repo.create_order(
+        account.id, "000001", OrderSide.SELL, 40, Decimal("12"), pre_start_sell_date, OrderStatus.FILLED
+    )
+    pre_sell_trade = repo.create_trade(
+        pre_sell_order.id,
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        40,
+        Decimal("12"),
+        Decimal("480"),
+        Decimal("5"),
+        pre_start_sell_date,
+    )
+    post_sell_order = repo.create_order(
+        account.id, "000001", OrderSide.SELL, 40, Decimal("13"), post_start_sell_date, OrderStatus.FILLED
+    )
+    post_sell_trade = repo.create_trade(
+        post_sell_order.id,
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        40,
+        Decimal("13"),
+        Decimal("520"),
+        Decimal("5"),
+        post_start_sell_date,
+    )
+    repo.add_cash_event(
+        account.id,
+        CashEventType.TRADE,
+        Decimal("-1005"),
+        order_id=buy_order.id,
+        trade_id=buy_trade.id,
+        trade_date=buy_date,
+    )
+    repo.add_cash_event(
+        account.id,
+        CashEventType.TRADE,
+        Decimal("475"),
+        order_id=pre_sell_order.id,
+        trade_id=pre_sell_trade.id,
+        trade_date=pre_start_sell_date,
+    )
+    repo.add_cash_event(
+        account.id,
+        CashEventType.TRADE,
+        Decimal("515"),
+        order_id=post_sell_order.id,
+        trade_id=post_sell_trade.id,
+        trade_date=post_start_sell_date,
+    )
+    account.realized_pnl = Decimal("190.0000")
+    sqlite_session.commit()
+
+    repo.clear_account_rebuild_state_from(account.id, start_date)
+
+    lot = repo.get_lots(account.id, "a_share", "000001")[0]
+    assert lot.remaining_quantity == 60
+    assert repo.get_account(account.id).realized_pnl == Decimal("75.0000")
+    assert [trade.id for trade in repo.list_trades(account.id)] == [buy_trade.id, pre_sell_trade.id]
+    position = repo.get_position(account.id, "a_share", "000001")
+    assert position is not None
+    assert position.total_quantity == 60
+    assert position.cost_amount == Decimal("600.0000")
 
 
 def test_clear_account_rebuild_state_preserves_initial_cash(sqlite_session):
