@@ -10,7 +10,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from tools.paper_trading_cli import EXIT_CODES, PaperTradingApiClient, main, run_paper_trading_matching
+from tools.paper_trading_cli import (
+    EXIT_CODES,
+    PaperTradingApiClient,
+    main,
+    run_paper_trading_ledger_rebuild,
+    run_paper_trading_matching,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -2017,6 +2023,36 @@ class TestClientConstruction:
             c = PaperTradingApiClient()
             assert c.token == "env-token"
             assert c.base_url == "http://env:8000"
+
+    def test_rebuild_helper_includes_api_response_detail_on_failure(self, monkeypatch):
+        class Response:
+            status_code = 500
+
+            def json(self):
+                return {
+                    "detail": {
+                        "code": "HISTORICAL_LEDGER_REBUILD_FAILED",
+                        "message": "Historical ledger rebuild failed",
+                        "details": {"error": "delayed rebuild replay failed"},
+                    }
+                }
+
+            def raise_for_status(self):
+                raise requests.exceptions.HTTPError("500 Server Error")
+
+        class Session:
+            def __init__(self):
+                self.headers = {}
+
+            def request(self, method, url, **kwargs):
+                assert method == "POST"
+                assert url == "http://paper-trading:8000/paper/matching/runs/rebuilds"
+                return Response()
+
+        monkeypatch.setattr(requests, "Session", Session)
+
+        with pytest.raises(requests.exceptions.HTTPError, match="delayed rebuild replay failed"):
+            run_paper_trading_ledger_rebuild(base_url="http://paper-trading:8000", token="token")
 
     def test_client_init_default_base_url(self):
         """Without env var, base_url should be default."""

@@ -52,7 +52,7 @@ class MatchingService:
             try:
                 try:
                     bar = self.market_data.get_daily_bar(order.symbol, trade_date, market=order.market)
-                except KeyError as exc:
+                except (KeyError, ValueError) as exc:
                     warning_count += 1
                     self._record_missing_exact_date_diagnostic(order, exc)
                     continue
@@ -121,7 +121,7 @@ class MatchingService:
         """
         try:
             bar = self.market_data.get_daily_bar(order.symbol, order.trade_date, market=order.market)
-        except KeyError as exc:
+        except (KeyError, ValueError) as exc:
             self._record_missing_exact_date_diagnostic(order, exc)
             return "warning"
         except SQLAlchemyError:
@@ -163,7 +163,7 @@ class MatchingService:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
 
-    def _record_missing_exact_date_diagnostic(self, order: PaperOrder, error: KeyError) -> None:
+    def _record_missing_exact_date_diagnostic(self, order: PaperOrder, error: Exception) -> None:
         adjust = self._diagnostic_adjust(order.market)
         self.repo.upsert_daily_bar_diagnostic(
             order.trade_date,

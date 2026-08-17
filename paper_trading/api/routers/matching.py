@@ -14,10 +14,24 @@ from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import MarketDataProvider
+from paper_trading.storage.models import PaperOrder
 from paper_trading.storage.repository import PaperTradingRepository
 
 router = APIRouter(prefix="/paper/matching/runs", dependencies=[Depends(require_api_token)])
 logger = logging.getLogger(__name__)
+
+
+def _resolve_rebuild_diagnostics(repo: PaperTradingRepository, orders: list[PaperOrder]) -> None:
+    for order in orders:
+        repo.upsert_daily_bar_diagnostic(
+            order.trade_date,
+            order.market,
+            order.symbol,
+            "bfq",
+            "resolved",
+            [{"provider": "market_data", "status": "downloaded"}],
+            resolved=True,
+        )
 
 
 @router.post("", response_model=MatchingRunResponse)
@@ -65,7 +79,7 @@ def rebuild_delayed_daily_bar_orders(
     for order in repo.list_eligible_daily_bar_rebuild_orders():
         try:
             market_data.get_daily_bar(order.symbol, order.trade_date, market=order.market)
-        except KeyError:
+        except (KeyError, ValueError):
             continue
         eligible.append(order)
     by_account: dict[int, list] = {}
@@ -74,14 +88,20 @@ def rebuild_delayed_daily_bar_orders(
     try:
         service = OrderDeleteService(repo, market_data)
         for account_id, orders in by_account.items():
-            service.rebuild_account_from(account_id, orders[0].trade_date, [order.id for order in orders])
+            ordered = sorted(orders, key=lambda item: (item.trade_date, item.id))
+            service.rebuild_account_from(account_id, ordered[0].trade_date, [order.id for order in ordered])
+            _resolve_rebuild_diagnostics(repo, ordered)
         session.commit()
-    except Exception:
+    except Exception as exc:
         session.commit()
         logger.exception("Historical ledger rebuild failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Historical ledger rebuild failed",
+            detail={
+                "code": "HISTORICAL_LEDGER_REBUILD_FAILED",
+                "message": "Historical ledger rebuild failed",
+                "details": {"error": str(exc)},
+            },
         ) from None
     return LedgerRebuildResponse(rebuilt_account_ids=sorted(by_account))
 

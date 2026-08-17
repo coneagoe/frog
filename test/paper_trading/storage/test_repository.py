@@ -1047,9 +1047,7 @@ def test_clear_account_rebuild_state_from_restores_pre_start_lots_and_realized_p
     start_date = date(2026, 7, 19)
     post_start_sell_date = date(2026, 7, 20)
 
-    buy_order = repo.create_order(
-        account.id, "000001", OrderSide.BUY, 100, Decimal("10"), buy_date, OrderStatus.FILLED
-    )
+    buy_order = repo.create_order(account.id, "000001", OrderSide.BUY, 100, Decimal("10"), buy_date, OrderStatus.FILLED)
     buy_trade = repo.create_trade(
         buy_order.id,
         account.id,
@@ -1430,21 +1428,33 @@ def test_hk_diagnostic_does_not_select_same_symbol_a_share_order_for_rebuild(sql
     assert order.market == "a_share"
 
 
-def test_eligible_daily_bar_rebuild_orders_include_etf_missing_exact_date(sqlite_session):
+def test_eligible_daily_bar_rebuild_orders_include_only_a_share_bfq_missing_exact_date(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
-    etf_account = repo.create_account("etf-retry", Decimal("100000"))
+    first_account = repo.create_account("a-share-retry-first", Decimal("100000"))
+    second_account = repo.create_account("a-share-retry-second", Decimal("100000"))
+    etf_account = repo.create_account("etf-raw-diagnostic", Decimal("100000"))
     hk_account = repo.create_account("hk-retry", Decimal("100000"))
-    legacy_etf_account = repo.create_account("etf-qfq-diagnostic", Decimal("100000"))
-    etf_order = repo.create_order(
-        etf_account.id,
-        "510300",
+    non_accepted_account = repo.create_account("a-share-filled", Decimal("100000"))
+    later_a_share_order = repo.create_order(
+        second_account.id,
+        "000002",
         OrderSide.BUY,
         100,
-        Decimal("3.100"),
+        Decimal("10.000"),
         date(2026, 8, 10),
         OrderStatus.ACCEPTED,
-        market=Market.ETF,
+        market=Market.A_SHARE,
+    )
+    earliest_a_share_order = repo.create_order(
+        first_account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.000"),
+        date(2026, 8, 8),
+        OrderStatus.ACCEPTED,
+        market=Market.A_SHARE,
     )
     hk_order = repo.create_order(
         hk_account.id,
@@ -1456,9 +1466,9 @@ def test_eligible_daily_bar_rebuild_orders_include_etf_missing_exact_date(sqlite
         OrderStatus.ACCEPTED,
         market=Market.HK_CONNECT,
     )
-    legacy_etf_order = repo.create_order(
-        legacy_etf_account.id,
-        "510500",
+    etf_order = repo.create_order(
+        etf_account.id,
+        "510300",
         OrderSide.BUY,
         100,
         Decimal("3.100"),
@@ -1466,14 +1476,30 @@ def test_eligible_daily_bar_rebuild_orders_include_etf_missing_exact_date(sqlite
         OrderStatus.ACCEPTED,
         market=Market.ETF,
     )
-    repo.upsert_daily_bar_diagnostic(
-        etf_order.trade_date, Market.ETF, etf_order.symbol, "raw", "missing_exact_date", [], resolved=False
+    filled_a_share_order = repo.create_order(
+        non_accepted_account.id,
+        "000003",
+        OrderSide.BUY,
+        100,
+        Decimal("10.000"),
+        date(2026, 8, 10),
+        OrderStatus.FILLED,
+        market=Market.A_SHARE,
     )
     repo.upsert_daily_bar_diagnostic(
-        legacy_etf_order.trade_date,
-        Market.ETF,
-        legacy_etf_order.symbol,
-        "qfq",
+        later_a_share_order.trade_date,
+        Market.A_SHARE,
+        later_a_share_order.symbol,
+        "bfq",
+        "missing_exact_date",
+        [],
+        resolved=False,
+    )
+    repo.upsert_daily_bar_diagnostic(
+        earliest_a_share_order.trade_date,
+        Market.A_SHARE,
+        earliest_a_share_order.symbol,
+        "bfq",
         "missing_exact_date",
         [],
         resolved=False,
@@ -1481,8 +1507,41 @@ def test_eligible_daily_bar_rebuild_orders_include_etf_missing_exact_date(sqlite
     repo.upsert_daily_bar_diagnostic(
         hk_order.trade_date, Market.HK_CONNECT, hk_order.symbol, "bfq", "missing_exact_date", [], resolved=False
     )
+    repo.upsert_daily_bar_diagnostic(
+        etf_order.trade_date, Market.ETF, etf_order.symbol, "raw", "missing_exact_date", [], resolved=False
+    )
+    repo.upsert_daily_bar_diagnostic(
+        filled_a_share_order.trade_date,
+        Market.A_SHARE,
+        filled_a_share_order.symbol,
+        "bfq",
+        "missing_exact_date",
+        [],
+        resolved=False,
+    )
+    repo.upsert_daily_bar_diagnostic(
+        later_a_share_order.trade_date,
+        Market.A_SHARE,
+        "000004",
+        "qfq",
+        "missing_exact_date",
+        [],
+        resolved=False,
+    )
+    repo.upsert_daily_bar_diagnostic(
+        later_a_share_order.trade_date,
+        Market.A_SHARE,
+        "000005",
+        "bfq",
+        "downloaded",
+        [{"provider": "market_data", "status": "downloaded"}],
+        resolved=False,
+    )
 
-    assert [item.id for item in repo.list_eligible_daily_bar_rebuild_orders()] == [etf_order.id]
+    assert [item.id for item in repo.list_eligible_daily_bar_rebuild_orders()] == [
+        earliest_a_share_order.id,
+        later_a_share_order.id,
+    ]
 
 
 def test_same_symbol_round_trips_are_isolated_by_market(sqlite_session):

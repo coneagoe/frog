@@ -155,18 +155,18 @@ def test_rebuild_locks_account_before_clearing_derived_state(session, monkeypatc
     account = repo.create_account("rebuild-lock", Decimal("100000"))
     calls: list[str] = []
     original_lock = repo.lock_account
-    original_clear = repo.clear_account_rebuild_state
+    original_clear_from = repo.clear_account_rebuild_state_from
 
     def lock_account(account_id: int):
         calls.append("lock")
         return original_lock(account_id)
 
-    def clear_account_rebuild_state(account_id: int, *, preserve_execution_history: bool = False):
+    def clear_account_rebuild_state_from(account_id: int, start_date: date):
         calls.append("clear")
-        return original_clear(account_id, preserve_execution_history=preserve_execution_history)
+        return original_clear_from(account_id, start_date)
 
     monkeypatch.setattr(repo, "lock_account", lock_account)
-    monkeypatch.setattr(repo, "clear_account_rebuild_state", clear_account_rebuild_state)
+    monkeypatch.setattr(repo, "clear_account_rebuild_state_from", clear_account_rebuild_state_from)
 
     OrderDeleteService(repo, FakeMarketDataProvider()).rebuild_account_from(account.id, date(2026, 7, 17), [])
 

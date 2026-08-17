@@ -256,6 +256,7 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         ("510300", buy_date, Market.ETF),
         ("510300", buy_date, Market.ETF.value),
         ("510300", buy_date, Market.ETF),
+        ("510300", buy_date, Market.ETF),
     ]
 
     market_data.requested_bars.clear()
@@ -266,7 +267,7 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
 
     assert automatic_rebuilds == [
         (account.id, buy_date, [buy.id], {"trades": 1, "snapshots": 1, "matching_runs": 1}),
-        (account.id, sell_date, [sell.id], {"trades": 2, "snapshots": 2, "matching_runs": 2}),
+        (account.id, sell_date, [sell.id], {"trades": 1, "snapshots": 1, "matching_runs": 1}),
     ]
     assert repo.get_order(buy.id).status == OrderStatus.FILLED.value
     assert repo.get_order(sell.id).status == OrderStatus.FILLED.value
@@ -281,10 +282,8 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         (trades[1].id, Decimal("3.2500"), Decimal("325.0000"), Decimal("0.0325"), sell_date),
     ]
     assert market_data.requested_bars == [
-        ("510300", sell_date, Market.ETF),
-        ("510300", buy_date, Market.ETF.value),
-        ("510300", buy_date, Market.ETF),
         ("510300", sell_date, Market.ETF.value),
+        ("510300", sell_date, Market.ETF),
     ]
     assert repo.get_cash_available(account.id) == Decimal("100009.9360")
     assert repo.list_pending_settlements(account.id) == []
@@ -472,7 +471,7 @@ def test_etf_limit_outside_daily_range_stays_accepted_and_skipped(tmp_path):
     engine.dispose()
 
 
-def test_etf_missing_bar_becomes_eligible_for_one_rebuild_fill(tmp_path):
+def test_etf_missing_bar_records_raw_diagnostic_without_a_share_rebuild_eligibility(tmp_path):
     engine, session, repo, _, _, trade_date = _services(tmp_path)
     _add_supported_etf(repo)
     bars: dict[tuple[str, date], DailyBar] = {}
@@ -497,32 +496,15 @@ def test_etf_missing_bar_becomes_eligible_for_one_rebuild_fill(tmp_path):
     diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "510300")
     assert first_run.warning_count == 1
     assert (diagnostic.market, diagnostic.adjust.value, diagnostic.resolved) == ("etf", "raw", False)
-    assert repo.list_eligible_daily_bar_rebuild_orders() == [order]
+    assert repo.list_eligible_daily_bar_rebuild_orders() == []
 
     bars[("510300", trade_date)] = DailyBar(
         "510300", trade_date, Decimal("3.100"), Decimal("3.200"), Decimal("3.000"), Decimal("3.150")
     )
     eligible = repo.list_eligible_daily_bar_rebuild_orders()
-    assert [candidate.id for candidate in eligible] == [order.id]
-    OrderDeleteService(repo, market_data).rebuild_account_from(account.id, trade_date, [order.id])
-    session.commit()
-
-    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
-    assert len(repo.list_trades(account.id)) == 1
-    assert repo.list_eligible_daily_bar_rebuild_orders() == []
-    assert repo.get_position(account.id, Market.ETF, "510300").total_quantity == 100
-
-    trade_count = len(repo.list_trades(account.id))
-    cash_event_count = len(repo.list_cash_ledger(account.id))
-    cash_available = repo.get_cash_available(account.id)
-    filled_quantity = repo.get_order(order.id).filled_quantity
-    OrderDeleteService(repo, market_data).rebuild_account_from(account.id, trade_date, [order.id])
-    session.commit()
-
-    assert repo.get_order(order.id).filled_quantity == filled_quantity == 100
-    assert len(repo.list_trades(account.id)) == trade_count == 1
-    assert len(repo.list_cash_ledger(account.id)) == cash_event_count
-    assert repo.get_cash_available(account.id) == cash_available
+    assert eligible == []
+    assert repo.get_order(order.id).status == OrderStatus.ACCEPTED.value
+    assert repo.list_trades(account.id) == []
     engine.dispose()
 
 

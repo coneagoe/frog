@@ -92,7 +92,12 @@ class PaperTradingApiClient:
         resp = self._session.request(method, url, **kwargs)
         if resp.status_code == 204:
             return {"success": True, "message": "Deleted successfully"}
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            detail = _response_error_detail(resp)
+            message = f"{exc}: {detail}" if detail else str(exc)
+            raise requests.exceptions.HTTPError(message, response=resp) from exc
         return cast(object, resp.json())
 
     def create_account(
@@ -307,6 +312,20 @@ def run_paper_trading_matching(
 
 def run_paper_trading_ledger_rebuild(base_url: str | None = None, token: str | None = None) -> dict[str, Any]:
     return PaperTradingApiClient(base_url, token).rebuild_delayed_daily_bar_orders()
+
+
+def _response_error_detail(resp: requests.Response) -> str:
+    try:
+        payload = resp.json()
+    except ValueError:
+        return ""
+    if isinstance(payload, dict):
+        detail = payload.get("detail")
+        if isinstance(detail, str):
+            return detail
+        if detail is not None:
+            return json.dumps(detail, ensure_ascii=False, default=str)
+    return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 def _add_account_subparsers(subparsers: Any) -> None:

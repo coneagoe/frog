@@ -167,6 +167,17 @@ def test_warning_summary_runs_matching_with_same_business_date(monkeypatch):
     run_rebuild.assert_called_once()
 
 
+def test_daily_dag_rebuild_failures_are_not_swallowed():
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+    matching_source = source[source.index("def run_paper_trading_matching_for_active_accounts") :]
+
+    assert "run_paper_trading_ledger_rebuild(" in matching_source
+    before_rebuild, _, after_rebuild = matching_source.partition("run_paper_trading_ledger_rebuild(")
+    surrounding_source = before_rebuild[-160:] + after_rebuild[:220]
+    assert "try:" not in surrounding_source
+    assert "except" not in surrounding_source
+
+
 def test_closed_date_does_not_run_matching(monkeypatch):
     pendulum = pytest.importorskip("pendulum")
     pytest.importorskip("airflow")
