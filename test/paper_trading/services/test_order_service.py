@@ -21,7 +21,7 @@ from common.const import (
     COL_STOCK_ID,
     COL_UP_LIMIT,
 )
-from paper_trading.domain.enums import ETFEligibilityStatus, Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import CashEventType, ETFEligibilityStatus, Market, OrderSide, OrderStatus
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.order_service import OrderService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
@@ -345,6 +345,44 @@ def test_place_order_replays_past_a_share_buy_without_current_cash_freeze(tmp_pa
     position = repo.get_position(account.id, Market.A_SHARE, "000002.SZ")
     assert position is not None
     assert position.total_quantity == 100
+    engine.dispose()
+
+
+def test_place_order_rejects_past_a_share_buy_when_only_later_cash_is_sufficient(tmp_path, monkeypatch):
+    class HistoricalToday(date):
+        @classmethod
+        def today(cls) -> Self:
+            return cls(2026, 8, 2)
+
+    monkeypatch.setattr(order_service_module, "date", HistoricalToday)
+    engine = create_engine(f"sqlite:///{tmp_path / 'historical_buy_later_cash.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    service = OrderService(repo, FakeMarketDataProvider())
+    account = repo.create_account("historical-buy-later-cash", Decimal("1000.00"))
+    repo.add_cash_event(
+        account.id,
+        CashEventType.DEPOSIT,
+        Decimal("100000.00"),
+        trade_date=date(2026, 6, 17),
+        note="later_funding",
+    )
+
+    order = service.place_order(
+        account.id,
+        "000002.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+    )
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INSUFFICIENT_CASH"
+    assert repo.list_trades(account.id) == []
+    assert repo.get_position(account.id, Market.A_SHARE, "000002.SZ") is None
+    assert repo.get_cash_available(account.id) == Decimal("101000.0000")
     engine.dispose()
 
 

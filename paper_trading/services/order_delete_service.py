@@ -240,7 +240,7 @@ class OrderDeleteService:
         if side == OrderSide.BUY:
             frozen_cash = Decimal(order.frozen_cash or 0)
             if frozen_cash > 0:
-                if self.repo.get_cash_available(account_id) >= frozen_cash:
+                if self.repo.get_cash_available_as_of(account_id, order.trade_date) >= frozen_cash:
                     self.repo.add_cash_event(
                         account_id,
                         CashEventType.FREEZE,

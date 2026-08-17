@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -498,6 +498,17 @@ class PaperTradingRepository:
         total = (
             self.session.query(func.coalesce(func.sum(PaperCashLedger.amount), 0))
             .filter(PaperCashLedger.account_id == account_id)
+            .scalar()
+        )
+        return Decimal(total).quantize(Decimal("0.0001"))
+
+    def get_cash_available_as_of(self, account_id: int, as_of: date) -> Decimal:
+        total = (
+            self.session.query(func.coalesce(func.sum(PaperCashLedger.amount), 0))
+            .filter(
+                PaperCashLedger.account_id == account_id,
+                or_(PaperCashLedger.trade_date.is_(None), PaperCashLedger.trade_date <= as_of),
+            )
             .scalar()
         )
         return Decimal(total).quantize(Decimal("0.0001"))
