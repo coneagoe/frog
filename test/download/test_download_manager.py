@@ -133,6 +133,38 @@ class TestDownloadManager:
         )
         storage.save_etf_share_size.assert_called_once_with(df)
 
+    def test_download_etf_share_size_saves_unmapped_etf_without_resolver_dependency(self, monkeypatch):
+        from download.etf_index_mapping import ETFIndexMappingStatus, resolve_etf_index
+
+        manager, storage, downloader = _make_manager(monkeypatch)
+        df = pd.DataFrame(
+            [
+                {
+                    "基金代码": "560000",
+                    "日期": "2024-01-05",
+                    "收盘": 1.5,
+                    "单位净值": 1.48,
+                    "总份额": 10.0,
+                    "总规模": 14.8,
+                }
+            ]
+        )
+        downloader.dl_etf_share_size.return_value = df
+        storage.save_etf_share_size.return_value = True
+
+        diagnostic = resolve_etf_index("560000.SH")
+        result = manager.download_etf_share_size(ts_code="560000.SH", start_date="20240101", end_date="20240105")
+
+        assert diagnostic.status == ETFIndexMappingStatus.MISSING_MAPPING
+        assert result is True
+        downloader.dl_etf_share_size.assert_called_once_with(
+            ts_code="560000.SH",
+            trade_date="",
+            start_date="20240101",
+            end_date="20240105",
+        )
+        storage.save_etf_share_size.assert_called_once_with(df)
+
     def test_download_etf_share_size_empty_response_is_successful_noop(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         downloader.dl_etf_share_size.return_value = pd.DataFrame(

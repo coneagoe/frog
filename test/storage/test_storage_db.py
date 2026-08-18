@@ -3569,6 +3569,35 @@ class TestETFShareSizeStorage:
         assert saved.iloc[0][COL_ETF_TOTAL_SHARE] == 125.0
         assert saved.iloc[0][COL_ETF_TOTAL_SIZE] == 450.0
 
+    def test_save_etf_share_size_accepts_unmapped_valid_etf_code(self, sqlite_storage):
+        from download.etf_index_mapping import ETFIndexMappingStatus, resolve_etf_index
+
+        db, engine = sqlite_storage
+        df = pd.DataFrame(
+            {
+                "ts_code": ["560000.SH"],
+                "trade_date": ["20240105"],
+                "close": [1.5],
+                "nav": [1.48],
+                "total_share": [10.0],
+                "total_size": [14.8],
+            }
+        )
+
+        diagnostic = resolve_etf_index("560000.SH")
+        assert diagnostic.status == ETFIndexMappingStatus.MISSING_MAPPING
+        assert db.save_etf_share_size(df) is True
+
+        saved = pd.read_sql(
+            f'SELECT * FROM {tb_name_etf_share_size} WHERE "{COL_ETF_ID}" = "560000"',
+            engine,
+        )
+        assert len(saved) == 1
+        assert saved.iloc[0][COL_CLOSE] == 1.5
+        assert saved.iloc[0][COL_NAV] == 1.48
+        assert saved.iloc[0][COL_ETF_TOTAL_SHARE] == 10.0
+        assert saved.iloc[0][COL_ETF_TOTAL_SIZE] == 14.8
+
     def test_save_index_daily_turnover_is_idempotent_for_same_primary_key(self, sqlite_storage):
         db, engine = sqlite_storage
         initial_df = pd.DataFrame(
