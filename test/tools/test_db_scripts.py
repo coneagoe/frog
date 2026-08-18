@@ -24,6 +24,7 @@ MONITOR_ENUM_TYPES = (
     "monitor_reset_mode",
     "forecast_ssf_candidate_state",
 )
+ETF_QUANT_PIPELINE_TABLES = {"etf_share_size", "index_daily_turnover", "etf_net_flow"}
 
 
 def _run_script_result(
@@ -271,7 +272,20 @@ def test_clean_full_matching_export_retains_business_table_selection(tmp_path: P
     assert "--table=public.a_stock_basic" in command
     assert "--table=public.paper_matching_runs" in command
     assert "--table=public.paper_valuation_gaps" in command
+    for table_name in ETF_QUANT_PIPELINE_TABLES:
+        assert f"--table=public.{table_name}" in command
     assert "--clean" not in command
+
+
+def test_clean_full_import_drops_etf_quant_pipeline_tables(tmp_path: Path):
+    input_file = tmp_path / "etf-quant.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    _run_script("db_import.sh", ["--clean", "--in", str(input_file)], tmp_path)
+
+    drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
+    for table_name in ETF_QUANT_PIPELINE_TABLES:
+        assert f'DROP TABLE IF EXISTS "public"."{table_name}"' in drop_sql
 
 
 def test_unrelated_export_does_not_query_enum(tmp_path: Path):

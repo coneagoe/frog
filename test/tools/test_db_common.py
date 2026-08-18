@@ -4,6 +4,7 @@ from pathlib import Path
 import storage.model as storage_model
 
 DB_COMMON_PATH = Path(__file__).resolve().parents[2] / "tools" / "db_common.sh"
+ETF_QUANT_PIPELINE_TABLES = {"etf_share_size", "index_daily_turnover", "etf_net_flow"}
 
 
 def _parse_business_tables() -> set[str]:
@@ -41,3 +42,7 @@ def test_business_tables_include_index_daily_turnover():
 
 def test_business_tables_include_etf_net_flow():
     assert "etf_net_flow" in _parse_business_tables()
+
+
+def test_business_tables_include_etf_quant_pipeline_tables():
+    assert ETF_QUANT_PIPELINE_TABLES <= _parse_business_tables()

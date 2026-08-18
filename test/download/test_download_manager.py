@@ -1,6 +1,7 @@
 import importlib
 import os
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -263,7 +264,7 @@ class TestDownloadManager:
 
     def test_download_etf_quant_data_runs_raw_downloads_before_rebuild(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
-        calls = []
+        calls: list[tuple[Any, ...]] = []
         rebuild_result = ETFNetFlowRebuildResult(etf_code="510300", saved_rows=2, diagnostics=())
 
         def download_share_size(**kwargs):
