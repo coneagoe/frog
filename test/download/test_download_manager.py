@@ -8,6 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 import download.download_manager as dm  # noqa: E402
+import download.etf_index_mapping as etf_index_mapping  # noqa: E402
 from common.const import (
     COL_AMOUNT,
     COL_CLOSE,
@@ -39,6 +40,28 @@ def _make_manager(monkeypatch):
 
 
 class TestDownloadManager:
+    def test_prepare_etf_flow_index_context_exposes_manager_seam_for_mapped_etf(self):
+        from download.download_manager import prepare_etf_flow_index_context
+        from download.etf_index_mapping import ETFIndexMappingStatus
+
+        context = prepare_etf_flow_index_context("159915.SZ")
+
+        assert context.should_calculate is True
+        assert context.normalized_etf_code == "159915"
+        assert context.index_ts_code == "399006.SZ"
+        assert context.diagnostic.status == ETFIndexMappingStatus.MAPPED
+
+    def test_prepare_etf_flow_index_context_exposes_manager_seam_for_missing_mapping(self):
+        from download.download_manager import prepare_etf_flow_index_context
+        from download.etf_index_mapping import ETFIndexMappingStatus
+
+        context = prepare_etf_flow_index_context("560000.SH")
+
+        assert context.should_calculate is False
+        assert context.normalized_etf_code == "560000"
+        assert context.index_ts_code is None
+        assert context.diagnostic.status == ETFIndexMappingStatus.MISSING_MAPPING
+
     def test_download_etf_basic_refreshes_and_reconciles_saved_snapshot_atomically(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         etf_basic = pd.DataFrame({"ts_code": ["510300.SH"]})
@@ -105,6 +128,40 @@ class TestDownloadManager:
         assert result is True
         downloader.dl_etf_share_size.assert_called_once_with(
             ts_code="510300",
+            trade_date="",
+            start_date="20240101",
+            end_date="20240105",
+        )
+        storage.save_etf_share_size.assert_called_once_with(df)
+
+    def test_download_etf_share_size_saves_unmapped_etf_without_resolver_dependency(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        df = pd.DataFrame(
+            [
+                {
+                    "基金代码": "560000",
+                    "日期": "2024-01-05",
+                    "收盘": 1.5,
+                    "单位净值": 1.48,
+                    "总份额": 10.0,
+                    "总规模": 14.8,
+                }
+            ]
+        )
+        downloader.dl_etf_share_size.return_value = df
+        storage.save_etf_share_size.return_value = True
+
+        def fail_if_resolver_dependency_is_used(etf_code):
+            raise AssertionError(f"raw share/size download should not resolve {etf_code}")
+
+        monkeypatch.setattr(dm, "prepare_etf_flow_index_context", fail_if_resolver_dependency_is_used)
+        monkeypatch.setattr(dm, "_prepare_etf_flow_index_context", fail_if_resolver_dependency_is_used)
+        monkeypatch.setattr(etf_index_mapping, "resolve_etf_index", fail_if_resolver_dependency_is_used)
+        result = manager.download_etf_share_size(ts_code="560000.SH", start_date="20240101", end_date="20240105")
+
+        assert result is True
+        downloader.dl_etf_share_size.assert_called_once_with(
+            ts_code="560000.SH",
             trade_date="",
             start_date="20240101",
             end_date="20240105",
