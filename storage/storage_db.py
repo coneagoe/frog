@@ -2630,7 +2630,7 @@ class StorageDb:
                 start_date=start_date,
                 end_date=end_date,
             )
-            df = pd.read_sql(sql, self.engine, params=sql_params)
+            df = self._read_sql_with_dialect_params(sql, sql_params)
             logger.info(f"ETF日线数据加载成功，数据条数: {len(df)}")
             return df
 

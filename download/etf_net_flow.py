@@ -29,6 +29,7 @@ INDEX_TURNOVER_UNIT_TO_YUAN = 1000.0
 
 class ETFNetFlowDiagnosticReason(StrEnum):
     MISSING_MAPPING = "missing_mapping"
+    MISSING_SHARE_ROWS = "missing_share_rows"
     MISSING_PRIOR_SHARE = "missing_prior_share"
     MISSING_ETF_DAILY_PRICE = "missing_etf_daily_price"
     MISSING_INDEX_TURNOVER = "missing_index_turnover"
@@ -107,6 +108,8 @@ def _diagnostic(
 def rebuild_etf_net_flow(*, storage: Any, etf_code: str, start_date: str, end_date: str) -> ETFNetFlowRebuildResult:
     context = prepare_etf_flow_index_context(etf_code)
     normalized_etf_code = context.normalized_etf_code or etf_code
+    normalized_start_date = _normalize_date(start_date)
+    normalized_end_date = _normalize_date(end_date)
 
     if not context.should_calculate or context.index_ts_code is None:
         return ETFNetFlowRebuildResult(
@@ -124,13 +127,17 @@ def rebuild_etf_net_flow(*, storage: Any, etf_code: str, start_date: str, end_da
 
     share_df = storage.load_etf_share_size(
         normalized_etf_code,
-        start_date=start_date,
-        end_date=end_date,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
         include_prior_effective=True,
     )
-    daily_by_date = _rows_by_date(storage.load_etf_daily(normalized_etf_code, start_date=start_date, end_date=end_date))
+    daily_by_date = _rows_by_date(
+        storage.load_etf_daily(normalized_etf_code, start_date=normalized_start_date, end_date=normalized_end_date)
+    )
     turnover_by_date = _rows_by_date(
-        storage.load_index_daily_turnover(context.index_ts_code, start_date=start_date, end_date=end_date)
+        storage.load_index_daily_turnover(
+            context.index_ts_code, start_date=normalized_start_date, end_date=normalized_end_date
+        )
     )
 
     diagnostics: list[ETFNetFlowDiagnostic] = []
@@ -142,12 +149,15 @@ def rebuild_etf_net_flow(*, storage: Any, etf_code: str, start_date: str, end_da
         share_df[COL_DATE] = pd.to_datetime(share_df[COL_DATE])
         share_df = share_df.sort_values(COL_DATE)
 
+    has_in_range_share_row = False
+
     for share_row in share_df.to_dict(orient="records"):
         trade_date = _normalize_date(share_row[COL_DATE])
         current_total_share = _as_optional_float(share_row.get(COL_ETF_TOTAL_SHARE))
-        if trade_date < start_date or trade_date > end_date:
+        if trade_date < normalized_start_date or trade_date > normalized_end_date:
             previous_total_share = current_total_share
             continue
+        has_in_range_share_row = True
 
         net_share_change = calculate_net_share_change(current_total_share, previous_total_share)
         if net_share_change is None:
@@ -227,6 +237,16 @@ def rebuild_etf_net_flow(*, storage: Any, etf_code: str, start_date: str, end_da
     saved_rows = 0
     if derived_rows and storage.save_etf_net_flow(pd.DataFrame(derived_rows)):
         saved_rows = len(derived_rows)
+
+    if not has_in_range_share_row:
+        diagnostics.append(
+            _diagnostic(
+                etf_code=normalized_etf_code,
+                trade_date=None,
+                reason=ETFNetFlowDiagnosticReason.MISSING_SHARE_ROWS,
+                message="missing ETF share rows in requested date range",
+            )
+        )
 
     return ETFNetFlowRebuildResult(
         etf_code=normalized_etf_code,

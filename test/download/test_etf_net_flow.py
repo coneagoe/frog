@@ -132,6 +132,33 @@ def test_rebuild_etf_net_flow_saves_derived_rows_for_mapped_etf() -> None:
     }
 
 
+def test_rebuild_etf_net_flow_normalizes_compact_input_dates_before_loading_and_comparing() -> None:
+    storage = FakeETFNetFlowStorage(
+        share_rows=[_share_row("2024-01-02", 100.0), _share_row("2024-01-03", 103.0)],
+        daily_rows=[_daily_row("2024-01-03", 240.0, 200.0, 11.0)],
+        turnover_rows=[_turnover_row("2024-01-03", 720.0)],
+    )
+
+    result = rebuild_etf_net_flow(
+        storage=storage,
+        etf_code="510300.SH",
+        start_date="20240103",
+        end_date="20240103",
+    )
+
+    assert result.saved_rows == 1
+    assert result.diagnostics == ()
+    assert storage.load_share_calls[0]["start_date"] == "2024-01-03"
+    assert storage.load_share_calls[0]["end_date"] == "2024-01-03"
+    assert storage.load_daily_calls[0] == {"etf_id": "510300", "start_date": "2024-01-03", "end_date": "2024-01-03"}
+    assert storage.load_turnover_calls[0] == {
+        "ts_code": "000300.SH",
+        "start_date": "2024-01-03",
+        "end_date": "2024-01-03",
+    }
+    assert _saved_row(storage)[COL_DATE] == "2024-01-03"
+
+
 def test_rebuild_etf_net_flow_uses_prior_effective_share_before_start_date() -> None:
     storage = FakeETFNetFlowStorage(
         share_rows=[_share_row("2024-01-01", 98.0), _share_row("2024-01-04", 101.0)],
@@ -170,6 +197,46 @@ def test_rebuild_etf_net_flow_skips_row_when_prior_share_is_missing() -> None:
     assert storage.saved_frames == []
     assert [diagnostic.reason for diagnostic in result.diagnostics] == [ETFNetFlowDiagnosticReason.MISSING_PRIOR_SHARE]
     assert result.diagnostics[0].trade_date == "2024-01-03"
+
+
+def test_rebuild_etf_net_flow_reports_empty_share_rows() -> None:
+    storage = FakeETFNetFlowStorage(
+        share_rows=[],
+        daily_rows=[_daily_row("2024-01-03", 240.0, 200.0, 11.0)],
+        turnover_rows=[_turnover_row("2024-01-03", 720.0)],
+    )
+
+    result = rebuild_etf_net_flow(
+        storage=storage,
+        etf_code="510300",
+        start_date="2024-01-03",
+        end_date="2024-01-03",
+    )
+
+    assert result.saved_rows == 0
+    assert storage.saved_frames == []
+    assert [diagnostic.reason for diagnostic in result.diagnostics] == [ETFNetFlowDiagnosticReason.MISSING_SHARE_ROWS]
+    assert result.diagnostics[0].trade_date is None
+
+
+def test_rebuild_etf_net_flow_reports_prior_only_share_rows_without_in_range_data() -> None:
+    storage = FakeETFNetFlowStorage(
+        share_rows=[_share_row("2024-01-02", 100.0)],
+        daily_rows=[_daily_row("2024-01-03", 240.0, 200.0, 11.0)],
+        turnover_rows=[_turnover_row("2024-01-03", 720.0)],
+    )
+
+    result = rebuild_etf_net_flow(
+        storage=storage,
+        etf_code="510300",
+        start_date="2024-01-03",
+        end_date="2024-01-03",
+    )
+
+    assert result.saved_rows == 0
+    assert storage.saved_frames == []
+    assert [diagnostic.reason for diagnostic in result.diagnostics] == [ETFNetFlowDiagnosticReason.MISSING_SHARE_ROWS]
+    assert result.diagnostics[0].trade_date is None
 
 
 def test_rebuild_etf_net_flow_missing_mapping_skips_loader_calls() -> None:

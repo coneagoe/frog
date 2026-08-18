@@ -3733,6 +3733,50 @@ class TestETFShareSizeStorage:
             {COL_INDEX_CODE: "000300.SH", COL_DATE: "2024-01-05", COL_AMOUNT: 10000.0}
         ]
 
+    def test_load_etf_daily_filters_sqlite_by_code_and_date_range(self, sqlite_storage):
+        db, _engine = sqlite_storage
+        assert (
+            db.save_etf_daily(
+                pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "510300.SH",
+                            "trade_date": "20240105",
+                            "open": 3.1,
+                            "high": 3.4,
+                            "low": 3.0,
+                            "close": 3.3,
+                            "pre_close": 3.2,
+                            "change": 0.1,
+                            "pct_chg": 3.125,
+                            "vol": 1200.0,
+                            "amount": 3960.0,
+                        },
+                        {
+                            "ts_code": "510500.SH",
+                            "trade_date": "20240105",
+                            "open": 5.1,
+                            "high": 5.4,
+                            "low": 5.0,
+                            "close": 5.3,
+                            "pre_close": 5.2,
+                            "change": 0.1,
+                            "pct_chg": 1.923,
+                            "vol": 2200.0,
+                            "amount": 11660.0,
+                        },
+                    ]
+                )
+            )
+            is True
+        )
+
+        result = db.load_etf_daily("510300", "2024-01-05", "2024-01-05")
+
+        assert result[[COL_ETF_ID, COL_DATE, COL_CLOSE, COL_AMOUNT]].astype({COL_DATE: str}).to_dict("records") == [
+            {COL_ETF_ID: "510300", COL_DATE: "2024-01-05", COL_CLOSE: 3.3, COL_AMOUNT: 3960.0}
+        ]
+
     def test_save_etf_net_flow_is_idempotent_for_same_primary_key(self, sqlite_storage):
         db, engine = sqlite_storage
         initial_df = pd.DataFrame(
