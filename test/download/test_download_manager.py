@@ -8,6 +8,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 import download.download_manager as dm  # noqa: E402
+import download.etf_index_mapping as etf_index_mapping  # noqa: E402
 from common.const import (
     COL_AMOUNT,
     COL_CLOSE,
@@ -134,8 +135,6 @@ class TestDownloadManager:
         storage.save_etf_share_size.assert_called_once_with(df)
 
     def test_download_etf_share_size_saves_unmapped_etf_without_resolver_dependency(self, monkeypatch):
-        from download.etf_index_mapping import ETFIndexMappingStatus, resolve_etf_index
-
         manager, storage, downloader = _make_manager(monkeypatch)
         df = pd.DataFrame(
             [
@@ -152,10 +151,14 @@ class TestDownloadManager:
         downloader.dl_etf_share_size.return_value = df
         storage.save_etf_share_size.return_value = True
 
-        diagnostic = resolve_etf_index("560000.SH")
+        def fail_if_resolver_dependency_is_used(etf_code):
+            raise AssertionError(f"raw share/size download should not resolve {etf_code}")
+
+        monkeypatch.setattr(dm, "prepare_etf_flow_index_context", fail_if_resolver_dependency_is_used)
+        monkeypatch.setattr(dm, "_prepare_etf_flow_index_context", fail_if_resolver_dependency_is_used)
+        monkeypatch.setattr(etf_index_mapping, "resolve_etf_index", fail_if_resolver_dependency_is_used)
         result = manager.download_etf_share_size(ts_code="560000.SH", start_date="20240101", end_date="20240105")
 
-        assert diagnostic.status == ETFIndexMappingStatus.MISSING_MAPPING
         assert result is True
         downloader.dl_etf_share_size.assert_called_once_with(
             ts_code="560000.SH",
