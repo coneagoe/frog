@@ -4,6 +4,7 @@ from .blackroom_record import BlackroomRecord, tb_name_blackroom_record
 from .daily_basic_a_stock import DailyBasicAStock, tb_name_daily_basic_a_stock
 from .etf_basic import ETFBasic, tb_name_etf_basic
 from .etf_daily import ETFDaily, tb_name_etf_daily
+from .etf_net_flow import ETFNetFlow, tb_name_etf_net_flow
 from .etf_share_size import ETFShareSize, tb_name_etf_share_size
 from .forecast import Forecast, tb_name_forecast
 from .forecast_snapshot import (
@@ -90,6 +91,7 @@ __all__ = [
     "AStockBasic",
     "ETFBasic",
     "ETFDaily",
+    "ETFNetFlow",
     "ETFShareSize",
     "Forecast",
     "ForecastSnapshotRun",
@@ -130,6 +132,7 @@ __all__ = [
     "tb_name_a_stock_basic",
     "tb_name_etf_basic",
     "tb_name_etf_daily",
+    "tb_name_etf_net_flow",
     "tb_name_etf_share_size",
     "tb_name_forecast",
     "tb_name_forecast_snapshot_run",
