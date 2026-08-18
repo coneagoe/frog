@@ -105,6 +105,7 @@ from .model import (
     ETFShareSize,
     ForecastSnapshotRecord,
     ForecastSnapshotRun,
+    IndexDailyTurnover,
     tb_name_a_stock_basic,
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
@@ -133,6 +134,7 @@ from .model import (
     tb_name_history_data_weekly_etf_hfq,
     tb_name_history_data_weekly_etf_qfq,
     tb_name_history_data_weekly_hk_stock_hfq,
+    tb_name_index_daily_turnover,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
     tb_name_paper_account_snapshots,
@@ -321,6 +323,14 @@ COL_MAP_ETF_SHARE_SIZE = {
     "nav": COL_NAV,
     "total_share": COL_ETF_TOTAL_SHARE,
     "total_size": COL_ETF_TOTAL_SIZE,
+}
+
+
+COL_MAP_INDEX_DAILY_TURNOVER = {
+    "ts_code": COL_INDEX_CODE,
+    "trade_date": COL_DATE,
+    "close": COL_CLOSE,
+    "amount": COL_AMOUNT,
 }
 
 
@@ -2402,6 +2412,49 @@ class StorageDb:
             return True
         except Exception as e:
             logger.error(f"保存ETF份额规模数据失败: {str(e)}")
+            return False
+
+    def save_index_daily_turnover(self, df: pd.DataFrame) -> bool:
+        try:
+            prepared = df.rename(columns=COL_MAP_INDEX_DAILY_TURNOVER).copy()
+            required = [COL_INDEX_CODE, COL_DATE, COL_CLOSE, COL_AMOUNT]
+            missing = set(required) - set(prepared.columns)
+            if missing:
+                raise ValueError(f"指数收盘成交额缺少字段: {sorted(missing)}")
+
+            prepared = prepared[required]
+            prepared[COL_INDEX_CODE] = prepared[COL_INDEX_CODE].astype(str)
+            prepared[COL_DATE] = pd.to_datetime(prepared[COL_DATE], errors="raise").dt.date
+            for column in [COL_CLOSE, COL_AMOUNT]:
+                prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
+
+            records = prepared.to_dict(orient="records")
+            if not records:
+                return True
+
+            table = IndexDailyTurnover.__table__
+            stmt: PostgreSQLInsert | SQLiteInsert
+            if self.engine.dialect.name == "postgresql":
+                postgres_insert_stmt = pg_insert(table).values(records)
+                stmt = postgres_insert_stmt.on_conflict_do_update(
+                    index_elements=list(table.primary_key.columns.keys()),
+                    set_={column.name: getattr(postgres_insert_stmt.excluded, column.name) for column in table.columns},
+                )
+            elif self.engine.dialect.name == "sqlite":
+                sqlite_insert_stmt = sqlite_insert(table).values(records)
+                stmt = sqlite_insert_stmt.on_conflict_do_update(
+                    index_elements=list(table.primary_key.columns.keys()),
+                    set_={column.name: getattr(sqlite_insert_stmt.excluded, column.name) for column in table.columns},
+                )
+            else:
+                raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+
+            logger.info(f"指数收盘成交额数据保存成功: {tb_name_index_daily_turnover}, 数据条数: {len(prepared)}")
+            return True
+        except Exception as e:
+            logger.error(f"保存指数收盘成交额数据失败: {str(e)}")
             return False
 
     def load_etf_daily(

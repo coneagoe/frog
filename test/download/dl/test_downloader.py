@@ -249,6 +249,7 @@ class TestDownloader:
         assert Downloader.dl_history_data_stock.__name__ == "download_history_data_stock_bs"
         assert Downloader.dl_history_data_stock_hk.__name__ == "download_history_data_stock_hk_ts"
         assert Downloader.dl_history_data_us_index.__name__ == "download_history_data_us_index_ak"
+        assert Downloader.dl_index_daily_turnover.__name__ == "download_index_daily_turnover"
 
     def test_dl_history_data_stock_by_provider_dispatches_to_named_provider(self, monkeypatch):
         calls = []

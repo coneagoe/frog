@@ -33,3 +33,7 @@ def test_public_storage_model_exposes_pending_settlement_table_name():
 
 def test_business_tables_include_etf_share_size():
     assert "etf_share_size" in _parse_business_tables()
+
+
+def test_business_tables_include_index_daily_turnover():
+    assert "index_daily_turnover" in _parse_business_tables()

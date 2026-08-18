@@ -36,6 +36,7 @@ BUSINESS_TABLES=(
   etf_basic
   etf_daily
   etf_share_size
+  index_daily_turnover
   stock_monitor_targets
   blackroom_records
   paper_accounts

@@ -21,6 +21,7 @@ from common.const import (
     COL_ETF_TOTAL_SHARE,
     COL_ETF_TOTAL_SIZE,
     COL_HIGH,
+    COL_INDEX_CODE,
     COL_LOW,
     COL_NAV,
     COL_OPEN,
@@ -181,6 +182,20 @@ etf_share_size_columns = [
     COL_NAV,
     COL_ETF_TOTAL_SHARE,
     COL_ETF_TOTAL_SIZE,
+]
+
+index_daily_turnover_fields = [
+    "ts_code",
+    "trade_date",
+    "close",
+    "amount",
+]
+
+index_daily_turnover_columns = [
+    COL_INDEX_CODE,
+    COL_DATE,
+    COL_CLOSE,
+    COL_AMOUNT,
 ]
 
 
@@ -657,6 +672,10 @@ def _empty_etf_share_size_dataframe() -> pd.DataFrame:
     return pd.DataFrame(columns=etf_share_size_columns)
 
 
+def _empty_index_daily_turnover_dataframe() -> pd.DataFrame:
+    return pd.DataFrame(columns=index_daily_turnover_columns)
+
+
 @retrying.retry(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
@@ -815,6 +834,49 @@ def download_etf_share_size(
         "%Y-%m-%d"
     )
     return normalized.reindex(columns=etf_share_size_columns).dropna(subset=[COL_DATE])
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
+def download_index_daily_turnover(
+    ts_code: str = "",
+    trade_date: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    pro: Any | None = None,
+) -> pd.DataFrame | Any:
+    normalized_trade_date = convert_date(trade_date) if trade_date else ""
+    normalized_start_date = convert_date(start_date) if start_date else ""
+    normalized_end_date = convert_date(end_date) if end_date else ""
+
+    client = require_pro_client(pro)
+    df = client.index_daily(
+        ts_code=ts_code,
+        trade_date=normalized_trade_date,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        fields=index_daily_turnover_fields,
+    )
+    if df.empty:
+        return _empty_index_daily_turnover_dataframe()
+
+    normalized = df.rename(
+        columns={
+            "ts_code": COL_INDEX_CODE,
+            "trade_date": COL_DATE,
+            "close": COL_CLOSE,
+            "amount": COL_AMOUNT,
+        }
+    ).copy()
+    normalized[COL_INDEX_CODE] = normalized[COL_INDEX_CODE].astype(str)
+    normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], format="%Y%m%d", errors="coerce").dt.strftime(
+        "%Y-%m-%d"
+    )
+    return normalized.reindex(columns=index_daily_turnover_columns).dropna(subset=[COL_DATE])
 
 
 @retrying.retry(

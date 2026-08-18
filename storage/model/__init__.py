@@ -40,6 +40,7 @@ from .history_data_hk_stock import (
     tb_name_history_data_monthly_hk_stock_hfq,
     tb_name_history_data_weekly_hk_stock_hfq,
 )
+from .index_daily_turnover import IndexDailyTurnover, tb_name_index_daily_turnover
 from .ingredient import (
     Ingredient300,
     Ingredient500,
@@ -110,11 +111,13 @@ __all__ = [
     "Top10Floatholders",
     "Ingredient300",
     "Ingredient500",
+    "IndexDailyTurnover",
     "tb_name_general_info_etf",
     "tb_name_general_info_stock",
     "tb_name_general_info_ggt",
     "tb_name_ingredient_300",
     "tb_name_ingredient_500",
+    "tb_name_index_daily_turnover",
     "tb_name_history_data_daily_a_stock_bfq",
     "tb_name_history_data_daily_a_stock_qfq",
     "tb_name_history_data_daily_a_stock_hfq",

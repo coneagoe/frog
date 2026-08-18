@@ -30,6 +30,7 @@ from common.const import (  # noqa: E402
     COL_FLOAT_HOLDER_NAME,
     COL_FLOAT_HOLDER_TYPE,
     COL_HIGH,
+    COL_INDEX_CODE,
     COL_LOW,
     COL_NAV,
     COL_OPEN,
@@ -56,6 +57,7 @@ from storage.model import (  # noqa: E402
     tb_name_history_data_daily_fund,
     tb_name_history_data_daily_hk_stock_hfq,
     tb_name_history_data_weekly_a_stock_qfq,
+    tb_name_index_daily_turnover,
     tb_name_ingredient_300,
     tb_name_ingredient_500,
     tb_name_paper_account_snapshots,
@@ -3566,6 +3568,41 @@ class TestETFShareSizeStorage:
         assert saved.iloc[0][COL_NAV] == 3.58
         assert saved.iloc[0][COL_ETF_TOTAL_SHARE] == 125.0
         assert saved.iloc[0][COL_ETF_TOTAL_SIZE] == 450.0
+
+    def test_save_index_daily_turnover_is_idempotent_for_same_primary_key(self, sqlite_storage):
+        db, engine = sqlite_storage
+        initial_df = pd.DataFrame(
+            {
+                "ts_code": ["000300.SH"],
+                "trade_date": ["20240105"],
+                "close": [3350.5],
+                "amount": [100.0],
+            }
+        )
+        updated_df = pd.DataFrame(
+            {
+                COL_INDEX_CODE: ["000300.SH"],
+                COL_DATE: ["2024-01-05"],
+                COL_CLOSE: [3360.0],
+                COL_AMOUNT: [200.0],
+            }
+        )
+
+        assert db.save_index_daily_turnover(initial_df) is True
+        assert db.save_index_daily_turnover(updated_df) is True
+
+        saved = pd.read_sql(
+            f'SELECT * FROM {tb_name_index_daily_turnover} WHERE "{COL_INDEX_CODE}" = "000300.SH"',
+            engine,
+        )
+        assert len(saved) == 1
+        assert saved.iloc[0][COL_CLOSE] == 3360.0
+        assert saved.iloc[0][COL_AMOUNT] == 200.0
+
+    def test_save_index_daily_turnover_rejects_missing_required_columns(self, sqlite_storage):
+        db, _engine = sqlite_storage
+
+        assert db.save_index_daily_turnover(pd.DataFrame([{COL_INDEX_CODE: "000300.SH"}])) is False
 
 
 class TestSSFChangeSignalStorage:
