@@ -2380,17 +2380,21 @@ class StorageDb:
                 return True
 
             table = ETFShareSize.__table__
+            stmt: PostgreSQLInsert | SQLiteInsert
             if self.engine.dialect.name == "postgresql":
-                insert_stmt = pg_insert(table).values(records)
+                postgres_insert_stmt = pg_insert(table).values(records)
+                stmt = postgres_insert_stmt.on_conflict_do_update(
+                    index_elements=list(table.primary_key.columns.keys()),
+                    set_={column.name: getattr(postgres_insert_stmt.excluded, column.name) for column in table.columns},
+                )
             elif self.engine.dialect.name == "sqlite":
-                insert_stmt = sqlite_insert(table).values(records)
+                sqlite_insert_stmt = sqlite_insert(table).values(records)
+                stmt = sqlite_insert_stmt.on_conflict_do_update(
+                    index_elements=list(table.primary_key.columns.keys()),
+                    set_={column.name: getattr(sqlite_insert_stmt.excluded, column.name) for column in table.columns},
+                )
             else:
                 raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
-
-            stmt = insert_stmt.on_conflict_do_update(
-                index_elements=list(table.primary_key.columns.keys()),
-                set_={column.name: getattr(insert_stmt.excluded, column.name) for column in table.columns},
-            )
             with self.engine.begin() as conn:
                 conn.execute(stmt)
 
