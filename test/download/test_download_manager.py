@@ -14,6 +14,7 @@ from common.const import (
     COL_DATE,
     COL_ETF_ID,
     COL_HIGH,
+    COL_INDEX_CODE,
     COL_LOW,
     COL_OPEN,
     COL_STOCK_ID,
@@ -21,6 +22,7 @@ from common.const import (
     AdjustType,
     PeriodType,
 )  # noqa: E402
+from download.core_indexes import CORE_INDEX_TS_CODES  # noqa: E402
 
 
 def _make_manager(monkeypatch):
@@ -119,6 +121,70 @@ class TestDownloadManager:
 
         assert result is True
         storage.save_etf_share_size.assert_not_called()
+
+    def test_download_index_daily_turnover_saves_rows(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        df = pd.DataFrame(
+            [
+                {
+                    COL_INDEX_CODE: "000300.SH",
+                    COL_DATE: "2024-01-05",
+                    COL_CLOSE: 3350.5,
+                    COL_AMOUNT: 123456789.0,
+                }
+            ]
+        )
+        downloader.dl_index_daily_turnover.return_value = df
+        storage.save_index_daily_turnover.return_value = True
+
+        result = manager.download_index_daily_turnover(
+            ts_code="000300.SH",
+            start_date="20240101",
+            end_date="20240105",
+        )
+
+        assert result is True
+        downloader.dl_index_daily_turnover.assert_called_once_with(
+            ts_code="000300.SH",
+            trade_date="",
+            start_date="20240101",
+            end_date="20240105",
+        )
+        storage.save_index_daily_turnover.assert_called_once_with(df)
+
+    def test_download_index_daily_turnover_empty_response_is_successful_noop(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        downloader.dl_index_daily_turnover.return_value = pd.DataFrame(
+            columns=[COL_INDEX_CODE, COL_DATE, COL_CLOSE, COL_AMOUNT]
+        )
+
+        result = manager.download_index_daily_turnover(trade_date="20240105")
+
+        assert result is True
+        storage.save_index_daily_turnover.assert_not_called()
+
+    def test_download_core_index_daily_turnover_requests_pinned_indexes(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        df = pd.DataFrame(
+            [
+                {
+                    COL_INDEX_CODE: "000300.SH",
+                    COL_DATE: "2024-01-05",
+                    COL_CLOSE: 3350.5,
+                    COL_AMOUNT: 123456789.0,
+                }
+            ]
+        )
+        downloader.dl_index_daily_turnover.return_value = df
+        storage.save_index_daily_turnover.return_value = True
+
+        result = manager.download_core_index_daily_turnover(start_date="20240101", end_date="20240105")
+
+        assert result is True
+        assert downloader.dl_index_daily_turnover.call_count == len(CORE_INDEX_TS_CODES)
+        assert storage.save_index_daily_turnover.call_count == len(CORE_INDEX_TS_CODES)
+        requested_codes = [call.kwargs["ts_code"] for call in downloader.dl_index_daily_turnover.call_args_list]
+        assert requested_codes == list(CORE_INDEX_TS_CODES.values())
 
     def test_download_forecast_reports_saved_rows(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)

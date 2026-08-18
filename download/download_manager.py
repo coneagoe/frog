@@ -19,6 +19,7 @@ from common.const import (
     PeriodType,
     SecurityType,
 )
+from download.core_indexes import CORE_INDEX_TS_CODES
 from download.provider_order import (
     parse_hk_stock_history_provider_order,
     parse_stock_history_provider_order,
@@ -216,6 +217,50 @@ class DownloadManager:
         except Exception as exc:
             logging.error("下载ETF份额规模数据失败: %s", exc)
             return False
+
+    def download_index_daily_turnover(
+        self,
+        ts_code: str = "",
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+    ) -> bool:
+        try:
+            df = self.downloader.dl_index_daily_turnover(
+                ts_code=ts_code,
+                trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if df is None:
+                logging.warning("Failed to download index daily turnover data")
+                return False
+            if df.empty:
+                logging.info("No index daily turnover data returned")
+                return True
+            return get_storage().save_index_daily_turnover(df)
+        except Exception as exc:
+            logging.error("下载指数收盘成交额数据失败: %s", exc)
+            return False
+
+    def download_core_index_daily_turnover(
+        self,
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+    ) -> bool:
+        ok = True
+        for ts_code in CORE_INDEX_TS_CODES.values():
+            ok = (
+                self.download_index_daily_turnover(
+                    ts_code=ts_code,
+                    trade_date=trade_date,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                and ok
+            )
+        return ok
 
     def _download_history_data(
         self,

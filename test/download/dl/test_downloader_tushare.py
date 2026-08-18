@@ -13,6 +13,7 @@ from common.const import (
     COL_CLOSE,
     COL_DATE,
     COL_HIGH,
+    COL_INDEX_CODE,
     COL_LOW,
     COL_OPEN,
     COL_STOCK_ID,
@@ -325,6 +326,55 @@ def test_download_etf_share_size_empty_result_has_stable_shape(downloader_ts_mod
     result = module.download_etf_share_size(trade_date="2024-01-05")
 
     assert list(result.columns) == module.etf_share_size_columns
+    assert result.empty
+
+
+def test_download_index_daily_turnover_uses_explicit_fields_and_normalizes(downloader_ts_module, monkeypatch):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    pro_stub.index_daily = Mock(
+        return_value=pd.DataFrame(
+            {
+                "ts_code": ["000300.SH"],
+                "trade_date": ["20240105"],
+                "close": [3350.5],
+                "amount": [123456789.0],
+            }
+        )
+    )
+
+    result = module.download_index_daily_turnover(
+        ts_code="000300.SH",
+        start_date="2024-01-01",
+        end_date="2024-01-05",
+    )
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.index_daily.assert_called_once_with(
+        ts_code="000300.SH",
+        trade_date="",
+        start_date="20240101",
+        end_date="20240105",
+        fields=module.index_daily_turnover_fields,
+    )
+    assert result.to_dict("records") == [
+        {
+            COL_INDEX_CODE: "000300.SH",
+            COL_DATE: "2024-01-05",
+            COL_CLOSE: 3350.5,
+            COL_AMOUNT: 123456789.0,
+        }
+    ]
+
+
+def test_download_index_daily_turnover_empty_result_has_stable_shape(downloader_ts_module, monkeypatch):
+    module, _ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    pro_stub.index_daily = Mock(return_value=pd.DataFrame())
+
+    result = module.download_index_daily_turnover(trade_date="2024-01-05")
+
+    assert list(result.columns) == module.index_daily_turnover_columns
     assert result.empty
 
 
