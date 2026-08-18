@@ -17,8 +17,12 @@ from common.const import (
     COL_CHANGE_RATE,
     COL_CLOSE,
     COL_DATE,
+    COL_ETF_ID,
+    COL_ETF_TOTAL_SHARE,
+    COL_ETF_TOTAL_SIZE,
     COL_HIGH,
     COL_LOW,
+    COL_NAV,
     COL_OPEN,
     COL_STOCK_ID,
     COL_TURNOVER_RATE,
@@ -159,6 +163,24 @@ fund_daily_fields = [
     "pct_chg",
     "vol",
     "amount",
+]
+
+etf_share_size_fields = [
+    "ts_code",
+    "trade_date",
+    "close",
+    "nav",
+    "total_share",
+    "total_size",
+]
+
+etf_share_size_columns = [
+    COL_ETF_ID,
+    COL_DATE,
+    COL_CLOSE,
+    COL_NAV,
+    COL_ETF_TOTAL_SHARE,
+    COL_ETF_TOTAL_SIZE,
 ]
 
 
@@ -621,6 +643,20 @@ def _get_etf_suffix(etf_id: str) -> str:
     return ".SH"
 
 
+def _to_etf_ts_code(etf_id_or_ts_code: str) -> str:
+    if not etf_id_or_ts_code:
+        return ""
+    if re.fullmatch(r"\d{6}\.(SH|SZ)", etf_id_or_ts_code):
+        return etf_id_or_ts_code
+    if not re.fullmatch(r"\d{6}", etf_id_or_ts_code):
+        raise ValueError("ETF code must be 6 digits or provider-style ts_code.")
+    return etf_id_or_ts_code + _get_etf_suffix(etf_id_or_ts_code)
+
+
+def _empty_etf_share_size_dataframe() -> pd.DataFrame:
+    return pd.DataFrame(columns=etf_share_size_columns)
+
+
 @retrying.retry(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
@@ -734,6 +770,51 @@ def download_etf_daily(
     )
 
     return df
+
+
+@retrying.retry(
+    wait_exponential_multiplier=2000,
+    wait_exponential_max=60000,
+    stop_max_attempt_number=3,
+)
+@get_pro
+def download_etf_share_size(
+    ts_code: str = "",
+    trade_date: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    pro: Any | None = None,
+) -> pd.DataFrame | Any:
+    normalized_trade_date = convert_date(trade_date) if trade_date else ""
+    normalized_start_date = convert_date(start_date) if start_date else ""
+    normalized_end_date = convert_date(end_date) if end_date else ""
+
+    client = require_pro_client(pro)
+    df = client.etf_share_size(
+        ts_code=_to_etf_ts_code(ts_code),
+        trade_date=normalized_trade_date,
+        start_date=normalized_start_date,
+        end_date=normalized_end_date,
+        fields=etf_share_size_fields,
+    )
+    if df.empty:
+        return _empty_etf_share_size_dataframe()
+
+    normalized = df.rename(
+        columns={
+            "ts_code": COL_ETF_ID,
+            "trade_date": COL_DATE,
+            "close": COL_CLOSE,
+            "nav": COL_NAV,
+            "total_share": COL_ETF_TOTAL_SHARE,
+            "total_size": COL_ETF_TOTAL_SIZE,
+        }
+    ).copy()
+    normalized[COL_ETF_ID] = normalized[COL_ETF_ID].astype(str).str.split(".").str[0]
+    normalized[COL_DATE] = pd.to_datetime(normalized[COL_DATE], format="%Y%m%d", errors="coerce").dt.strftime(
+        "%Y-%m-%d"
+    )
+    return normalized.reindex(columns=etf_share_size_columns).dropna(subset=[COL_DATE])
 
 
 @retrying.retry(

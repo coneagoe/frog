@@ -192,6 +192,31 @@ class DownloadManager:
 
         return get_storage().save_general_info_hk_ggt(df)
 
+    def download_etf_share_size(
+        self,
+        ts_code: str = "",
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = "",
+    ) -> bool:
+        try:
+            df = self.downloader.dl_etf_share_size(
+                ts_code=ts_code,
+                trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if df is None:
+                logging.warning("Failed to download ETF share/size data")
+                return False
+            if df.empty:
+                logging.info("No ETF share/size data returned")
+                return True
+            return get_storage().save_etf_share_size(df)
+        except Exception as exc:
+            logging.error("下载ETF份额规模数据失败: %s", exc)
+            return False
+
     def _download_history_data(
         self,
         table_name: str,

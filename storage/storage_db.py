@@ -42,6 +42,8 @@ from common.const import (
     COL_ETF_EXT_NAME,
     COL_ETF_ID,
     COL_ETF_NAME,
+    COL_ETF_TOTAL_SHARE,
+    COL_ETF_TOTAL_SIZE,
     COL_ETF_TYPE,
     COL_EXCHANGE,
     COL_FLOAT_HOLDER_HOLD_AMOUNT,
@@ -68,6 +70,7 @@ from common.const import (
     COL_MARKET,
     COL_MGR_NAME,
     COL_MGT_FEE,
+    COL_NAV,
     COL_OPEN,
     COL_PB,
     COL_PE,
@@ -99,6 +102,7 @@ from .domain_enums import ForecastSnapshotStatus, SSFChangeSignalStatus, validat
 from .model import (
     Base,
     ETFBasic,
+    ETFShareSize,
     ForecastSnapshotRecord,
     ForecastSnapshotRun,
     tb_name_a_stock_basic,
@@ -107,6 +111,7 @@ from .model import (
     tb_name_daily_basic_a_stock,
     tb_name_etf_basic,
     tb_name_etf_daily,
+    tb_name_etf_share_size,
     tb_name_forecast,
     tb_name_forecast_snapshot_record,
     tb_name_forecast_snapshot_run,
@@ -306,6 +311,16 @@ COL_MAP_ETF_DAILY = {
     "pct_chg": COL_CHANGE_RATE,
     "vol": COL_VOLUME,
     "amount": COL_AMOUNT,
+}
+
+
+COL_MAP_ETF_SHARE_SIZE = {
+    "ts_code": COL_ETF_ID,
+    "trade_date": COL_DATE,
+    "close": COL_CLOSE,
+    "nav": COL_NAV,
+    "total_share": COL_ETF_TOTAL_SHARE,
+    "total_size": COL_ETF_TOTAL_SIZE,
 }
 
 
@@ -2344,6 +2359,45 @@ class StorageDb:
 
         except Exception as e:
             logger.error(f"保存ETF日线数据失败: {str(e)}")
+            return False
+
+    def save_etf_share_size(self, df: pd.DataFrame) -> bool:
+        try:
+            prepared = df.rename(columns=COL_MAP_ETF_SHARE_SIZE).copy()
+            required = [COL_ETF_ID, COL_DATE, COL_CLOSE, COL_NAV, COL_ETF_TOTAL_SHARE, COL_ETF_TOTAL_SIZE]
+            missing = set(required) - set(prepared.columns)
+            if missing:
+                raise ValueError(f"ETF share/size 缺少字段: {sorted(missing)}")
+
+            prepared = prepared[required]
+            prepared[COL_ETF_ID] = prepared[COL_ETF_ID].astype(str).str.split(".").str[0]
+            prepared[COL_DATE] = pd.to_datetime(prepared[COL_DATE], errors="raise").dt.date
+            for column in [COL_CLOSE, COL_NAV, COL_ETF_TOTAL_SHARE, COL_ETF_TOTAL_SIZE]:
+                prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
+
+            records = prepared.to_dict(orient="records")
+            if not records:
+                return True
+
+            table = ETFShareSize.__table__
+            if self.engine.dialect.name == "postgresql":
+                insert_stmt = pg_insert(table).values(records)
+            elif self.engine.dialect.name == "sqlite":
+                insert_stmt = sqlite_insert(table).values(records)
+            else:
+                raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
+
+            stmt = insert_stmt.on_conflict_do_update(
+                index_elements=list(table.primary_key.columns.keys()),
+                set_={column.name: getattr(insert_stmt.excluded, column.name) for column in table.columns},
+            )
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+
+            logger.info(f"ETF份额规模数据保存成功: {tb_name_etf_share_size}, 数据条数: {len(prepared)}")
+            return True
+        except Exception as e:
+            logger.error(f"保存ETF份额规模数据失败: {str(e)}")
             return False
 
     def load_etf_daily(

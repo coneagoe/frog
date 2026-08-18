@@ -29,3 +29,7 @@ def test_business_tables_cover_all_storage_models():
 
 def test_public_storage_model_exposes_pending_settlement_table_name():
     assert storage_model.tb_name_paper_pending_settlement == "paper_pending_settlement"
+
+
+def test_business_tables_include_etf_share_size():
+    assert "etf_share_size" in _parse_business_tables()

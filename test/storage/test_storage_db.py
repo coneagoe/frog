@@ -21,6 +21,8 @@ from common.const import (  # noqa: E402
     COL_END_DATE,
     COL_ETF_ID,
     COL_ETF_NAME,
+    COL_ETF_TOTAL_SHARE,
+    COL_ETF_TOTAL_SIZE,
     COL_FLOAT_HOLDER_HOLD_AMOUNT,
     COL_FLOAT_HOLDER_HOLD_CHANGE,
     COL_FLOAT_HOLDER_HOLD_FLOAT_RATIO,
@@ -29,6 +31,7 @@ from common.const import (  # noqa: E402
     COL_FLOAT_HOLDER_TYPE,
     COL_HIGH,
     COL_LOW,
+    COL_NAV,
     COL_OPEN,
     COL_STOCK_ID,
     COL_STOCK_NAME,
@@ -47,6 +50,7 @@ from storage.model import (  # noqa: E402
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
     tb_name_etf_daily,
+    tb_name_etf_share_size,
     tb_name_history_data_daily_a_stock_bfq,
     tb_name_history_data_daily_a_stock_qfq,
     tb_name_history_data_daily_fund,
@@ -3501,6 +3505,67 @@ class TestSaveAndGetTop10Floatholders:
 
         result = storage_db.get_last_top10_floatholders_ann_date("000001")
         assert result is None
+
+
+class TestETFShareSizeStorage:
+    @pytest.fixture
+    def sqlite_storage(self, tmp_path, monkeypatch):
+        from sqlalchemy import create_engine as real_create_engine
+
+        sqlite_url = f"sqlite:///{tmp_path}/test.db"
+        engine = real_create_engine(sqlite_url)
+        Base.metadata.create_all(engine)
+
+        reset_storage()
+        mock_config = Mock(spec=StorageConfig)
+        monkeypatch.setattr("storage.storage_db.create_engine", lambda *a, **kw: engine)
+        monkeypatch.setattr("storage.storage_db.sessionmaker", Mock())
+        monkeypatch.setattr("storage.storage_db.Base.metadata.create_all", Mock())
+        mock_config.get_db_host.return_value = "localhost"
+        mock_config.get_db_port.return_value = 5432
+        mock_config.get_db_name.return_value = "test_db"
+        mock_config.get_db_username.return_value = "test_user"
+        mock_config.get_db_password.return_value = "test_pass"
+        db = get_storage(mock_config)
+        db.engine = engine
+        db.Session = sessionmaker(bind=engine)
+        return db, engine
+
+    def test_save_etf_share_size_is_idempotent_for_same_primary_key(self, sqlite_storage):
+        db, engine = sqlite_storage
+        initial_df = pd.DataFrame(
+            {
+                "ts_code": ["510300.SH"],
+                "trade_date": ["20240105"],
+                "close": [3.5],
+                "nav": [3.48],
+                "total_share": [123.4],
+                "total_size": [432.1],
+            }
+        )
+        updated_df = pd.DataFrame(
+            {
+                "ts_code": ["510300.SH"],
+                "trade_date": ["20240105"],
+                "close": [3.6],
+                "nav": [3.58],
+                "total_share": [125.0],
+                "total_size": [450.0],
+            }
+        )
+
+        assert db.save_etf_share_size(initial_df) is True
+        assert db.save_etf_share_size(updated_df) is True
+
+        saved = pd.read_sql(
+            f'SELECT * FROM {tb_name_etf_share_size} WHERE "{COL_ETF_ID}" = "510300"',
+            engine,
+        )
+        assert len(saved) == 1
+        assert saved.iloc[0][COL_CLOSE] == 3.6
+        assert saved.iloc[0][COL_NAV] == 3.58
+        assert saved.iloc[0][COL_ETF_TOTAL_SHARE] == 125.0
+        assert saved.iloc[0][COL_ETF_TOTAL_SIZE] == 450.0
 
 
 class TestSSFChangeSignalStorage:

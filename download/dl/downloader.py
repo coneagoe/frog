@@ -22,6 +22,7 @@ from .downloader_tushare import (
     download_daily_basic_a_stock_ts,
     download_etf_basic,
     download_etf_daily,
+    download_etf_share_size,
     download_forecast,
     download_history_data_etf_ts,
     download_history_data_stock_hk_ts,
@@ -68,6 +69,7 @@ class Downloader:
     dl_a_stock_basic = staticmethod(download_a_stock_basic)
     dl_etf_basic = staticmethod(download_etf_basic)
     dl_etf_daily = staticmethod(download_etf_daily)
+    dl_etf_share_size = staticmethod(download_etf_share_size)
     dl_stk_holdernumber = staticmethod(download_stk_holdernumber)
     dl_top10_floatholders = staticmethod(download_top10_floatholders)
     dl_forecast = staticmethod(download_forecast)

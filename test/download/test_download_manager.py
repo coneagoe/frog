@@ -81,6 +81,45 @@ class TestDownloadManager:
         assert result is False
         storage.refresh_etf_basic_and_reconcile.assert_not_called()
 
+    def test_download_etf_share_size_saves_rows(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        df = pd.DataFrame(
+            [
+                {
+                    "基金代码": "510300",
+                    "日期": "2024-01-05",
+                    "收盘": 3.5,
+                    "单位净值": 3.48,
+                    "总份额": 123.4,
+                    "总规模": 432.1,
+                }
+            ]
+        )
+        downloader.dl_etf_share_size.return_value = df
+        storage.save_etf_share_size.return_value = True
+
+        result = manager.download_etf_share_size(ts_code="510300", start_date="20240101", end_date="20240105")
+
+        assert result is True
+        downloader.dl_etf_share_size.assert_called_once_with(
+            ts_code="510300",
+            trade_date="",
+            start_date="20240101",
+            end_date="20240105",
+        )
+        storage.save_etf_share_size.assert_called_once_with(df)
+
+    def test_download_etf_share_size_empty_response_is_successful_noop(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        downloader.dl_etf_share_size.return_value = pd.DataFrame(
+            columns=["基金代码", "日期", "收盘", "单位净值", "总份额", "总规模"]
+        )
+
+        result = manager.download_etf_share_size(trade_date="20240105")
+
+        assert result is True
+        storage.save_etf_share_size.assert_not_called()
+
     def test_download_forecast_reports_saved_rows(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         forecast = pd.DataFrame({"股票代码": ["600001", "000001"]})

@@ -35,6 +35,7 @@ BUSINESS_TABLES=(
   ssf_change_signals
   etf_basic
   etf_daily
+  etf_share_size
   stock_monitor_targets
   blackroom_records
   paper_accounts

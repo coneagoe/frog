@@ -263,6 +263,71 @@ def test_download_history_data_etf_ts_success_ignores_period_adjust(downloader_t
     assert result[module.COL_DATE].tolist() == ["2024-01-01", "2024-01-02"]
 
 
+def test_download_etf_share_size_uses_explicit_fields_and_normalizes(downloader_ts_module, monkeypatch):
+    module, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    pro_stub.etf_share_size = Mock(
+        return_value=pd.DataFrame(
+            {
+                "ts_code": ["510300.SH"],
+                "trade_date": ["20240105"],
+                "close": [3.5],
+                "nav": [3.48],
+                "total_share": [123.4],
+                "total_size": [432.1],
+            }
+        )
+    )
+
+    result = module.download_etf_share_size(ts_code="510300", start_date="2024-01-01", end_date="2024-01-05")
+
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+    pro_stub.etf_share_size.assert_called_once_with(
+        ts_code="510300.SH",
+        trade_date="",
+        start_date="20240101",
+        end_date="20240105",
+        fields=module.etf_share_size_fields,
+    )
+    assert result.to_dict("records") == [
+        {
+            "基金代码": "510300",
+            "日期": "2024-01-05",
+            "收盘": 3.5,
+            "单位净值": 3.48,
+            "总份额": 123.4,
+            "总规模": 432.1,
+        }
+    ]
+
+
+def test_download_etf_share_size_provider_code_passthrough(downloader_ts_module, monkeypatch):
+    module, _ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    pro_stub.etf_share_size = Mock(return_value=pd.DataFrame(columns=module.etf_share_size_fields))
+
+    module.download_etf_share_size(ts_code="159915.SZ", trade_date="20240105")
+
+    pro_stub.etf_share_size.assert_called_once_with(
+        ts_code="159915.SZ",
+        trade_date="20240105",
+        start_date="",
+        end_date="",
+        fields=module.etf_share_size_fields,
+    )
+
+
+def test_download_etf_share_size_empty_result_has_stable_shape(downloader_ts_module, monkeypatch):
+    module, _ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    pro_stub.etf_share_size = Mock(return_value=pd.DataFrame())
+
+    result = module.download_etf_share_size(trade_date="2024-01-05")
+
+    assert list(result.columns) == module.etf_share_size_columns
+    assert result.empty
+
+
 def test_download_stk_holdernumber_missing_token_raises(downloader_ts_module, monkeypatch):
     """无 token 时应抛出 ConnectionError。"""
     module, ts_stub, _ = downloader_ts_module
