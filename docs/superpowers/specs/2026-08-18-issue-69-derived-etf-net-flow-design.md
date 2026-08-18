@@ -125,7 +125,7 @@ Recommended focused verification:
 
 ```bash
 uv run pytest test/download/test_etf_net_flow.py test/download/test_download_manager.py -k 'etf_net_flow or rebuild_etf_net_flow' -v
-uv run pytest test/storage/model/test_etf_net_flow.py test/storage/test_storage_db.py test/tools/test_db_common.py -k 'etf_net_flow or business_tables_include_etf_net_flow' -v
+uv run pytest test/storage/model/test_etf_net_flow_model.py test/storage/test_storage_db.py test/tools/test_db_common.py -k 'etf_net_flow or business_tables_include_etf_net_flow' -v
 ```
 
 Use `tools/run_tests.sh` only if PostgreSQL integration behavior is changed beyond existing SQLite-compatible conflict-update coverage.

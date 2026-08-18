@@ -37,7 +37,7 @@ The main claim is that issue #69 can rebuild derived ETF net-flow rows from pers
 - Create `download/etf_net_flow.py`: diagnostics enum/dataclasses, unit constants, pure math helpers, and rebuild service.
 - Modify `download/download_manager.py`: add `DownloadManager.rebuild_etf_net_flow(...)` as an orchestration wrapper.
 - Modify `tools/db_common.sh`: add `etf_net_flow` to `BUSINESS_TABLES`.
-- Create `test/storage/model/test_etf_net_flow.py`.
+- Create `test/storage/model/test_etf_net_flow_model.py`.
 - Modify `test/storage/test_storage_db.py`.
 - Create `test/download/test_etf_net_flow.py`.
 - Modify `test/download/test_download_manager.py`.
@@ -53,7 +53,7 @@ The main claim is that issue #69 can rebuild derived ETF net-flow rows from pers
 - Modify: `storage/model/__init__.py`
 - Modify: `storage/__init__.py`
 - Modify: `tools/db_common.sh`
-- Test: `test/storage/model/test_etf_net_flow.py`
+- Test: `test/storage/model/test_etf_net_flow_model.py`
 - Test: `test/tools/test_db_common.py`
 
 **Interfaces:**
@@ -62,7 +62,7 @@ The main claim is that issue #69 can rebuild derived ETF net-flow rows from pers
 
 - [ ] **Step 1: Write failing model and DB script tests**
 
-Create `test/storage/model/test_etf_net_flow.py`:
+Create `test/storage/model/test_etf_net_flow_model.py`:
 
 ```python
 from common.const import (
@@ -122,7 +122,7 @@ def test_business_tables_include_etf_net_flow():
 Run:
 
 ```bash
-uv run pytest test/storage/model/test_etf_net_flow.py test/tools/test_db_common.py -k 'etf_net_flow or business_tables_cover_all_storage_models' -v
+uv run pytest test/storage/model/test_etf_net_flow_model.py test/tools/test_db_common.py -k 'etf_net_flow or business_tables_cover_all_storage_models' -v
 ```
 
 Expected: FAIL because `ETFNetFlow`, constants, and `etf_net_flow` script coverage do not exist.
@@ -174,7 +174,7 @@ Export `ETFNetFlow` and `tb_name_etf_net_flow` from `storage/model/__init__.py`;
 Run:
 
 ```bash
-uv run pytest test/storage/model/test_etf_net_flow.py test/tools/test_db_common.py -k 'etf_net_flow or business_tables_cover_all_storage_models' -v
+uv run pytest test/storage/model/test_etf_net_flow_model.py test/tools/test_db_common.py -k 'etf_net_flow or business_tables_cover_all_storage_models' -v
 ```
 
 Expected: PASS.
@@ -182,7 +182,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 1**
 
 ```bash
-git add common/const.py storage/model/etf_net_flow.py storage/model/__init__.py storage/__init__.py tools/db_common.sh test/storage/model/test_etf_net_flow.py test/tools/test_db_common.py
+git add common/const.py storage/model/etf_net_flow.py storage/model/__init__.py storage/__init__.py tools/db_common.sh test/storage/model/test_etf_net_flow_model.py test/tools/test_db_common.py
 git commit -m "feat: add ETF net flow storage model"
 ```
 
@@ -435,14 +435,14 @@ git commit -m "feat: expose ETF net flow rebuild manager"
 
 ```bash
 uv run pytest test/download/test_etf_net_flow.py test/download/test_download_manager.py -k 'etf_net_flow or rebuild_etf_net_flow' -v
-uv run pytest test/storage/model/test_etf_net_flow.py test/storage/test_storage_db.py test/tools/test_db_common.py -k 'etf_net_flow or load_etf_share_size or load_index_daily_turnover or business_tables_include_etf_net_flow' -v
+uv run pytest test/storage/model/test_etf_net_flow_model.py test/storage/test_storage_db.py test/tools/test_db_common.py -k 'etf_net_flow or load_etf_share_size or load_index_daily_turnover or business_tables_include_etf_net_flow' -v
 ```
 
 - [ ] **Step 2: Run formatting, linting, and type checks**
 
 ```bash
-uv run ruff format common/const.py download/etf_net_flow.py download/download_manager.py storage/__init__.py storage/model/__init__.py storage/model/etf_net_flow.py storage/storage_db.py test/download/test_etf_net_flow.py test/download/test_download_manager.py test/storage/model/test_etf_net_flow.py test/storage/test_storage_db.py test/tools/test_db_common.py
-uv run ruff check common/const.py download/etf_net_flow.py download/download_manager.py storage/__init__.py storage/model/__init__.py storage/model/etf_net_flow.py storage/storage_db.py test/download/test_etf_net_flow.py test/download/test_download_manager.py test/storage/model/test_etf_net_flow.py test/storage/test_storage_db.py test/tools/test_db_common.py
+uv run ruff format common/const.py download/etf_net_flow.py download/download_manager.py storage/__init__.py storage/model/__init__.py storage/model/etf_net_flow.py storage/storage_db.py test/download/test_etf_net_flow.py test/download/test_download_manager.py test/storage/model/test_etf_net_flow_model.py test/storage/test_storage_db.py test/tools/test_db_common.py
+uv run ruff check common/const.py download/etf_net_flow.py download/download_manager.py storage/__init__.py storage/model/__init__.py storage/model/etf_net_flow.py storage/storage_db.py test/download/test_etf_net_flow.py test/download/test_download_manager.py test/storage/model/test_etf_net_flow_model.py test/storage/test_storage_db.py test/tools/test_db_common.py
 uv run mypy
 ```
 
