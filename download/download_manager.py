@@ -154,6 +154,18 @@ class ForecastDownloadResult:
     saved: bool
 
 
+@dataclass(frozen=True)
+class ETFQuantDataDownloadResult:
+    etf_code: str
+    start_date: str
+    end_date: str
+    share_size_downloaded: bool
+    index_turnover_downloaded: bool
+    net_flow_rebuild: ETFNetFlowRebuildResult | None
+    failed_stages: tuple[str, ...]
+    succeeded: bool
+
+
 def prepare_etf_flow_index_context(etf_code: str) -> ETFFlowIndexContext:
     return _prepare_etf_flow_index_context(etf_code)
 
@@ -165,6 +177,58 @@ class DownloadManager:
             etf_code=etf_code,
             start_date=start_date,
             end_date=end_date,
+        )
+
+    def download_etf_quant_data(
+        self,
+        etf_code: str,
+        start_date: str,
+        end_date: str,
+    ) -> ETFQuantDataDownloadResult:
+        failed_stages: list[str] = []
+
+        try:
+            share_size_downloaded = self.download_etf_share_size(
+                ts_code=etf_code,
+                trade_date="",
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except Exception as exc:
+            logging.error("ETF share/size download stage failed for %s: %s", etf_code, exc)
+            share_size_downloaded = False
+        if not share_size_downloaded:
+            failed_stages.append("etf_share_size")
+
+        try:
+            index_turnover_downloaded = self.download_core_index_daily_turnover(
+                trade_date="",
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except Exception as exc:
+            logging.error("Index turnover download stage failed for ETF %s: %s", etf_code, exc)
+            index_turnover_downloaded = False
+        if not index_turnover_downloaded:
+            failed_stages.append("index_daily_turnover")
+
+        net_flow_rebuild = None
+        if share_size_downloaded and index_turnover_downloaded:
+            try:
+                net_flow_rebuild = self.rebuild_etf_net_flow(etf_code, start_date, end_date)
+            except Exception as exc:
+                logging.error("ETF net-flow rebuild stage failed for %s: %s", etf_code, exc)
+                failed_stages.append("etf_net_flow")
+
+        return ETFQuantDataDownloadResult(
+            etf_code=etf_code,
+            start_date=start_date,
+            end_date=end_date,
+            share_size_downloaded=share_size_downloaded,
+            index_turnover_downloaded=index_turnover_downloaded,
+            net_flow_rebuild=net_flow_rebuild,
+            failed_stages=tuple(failed_stages),
+            succeeded=not failed_stages,
         )
 
     def download_forecast(self, ann_date: str) -> ForecastDownloadResult:
