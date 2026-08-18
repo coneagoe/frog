@@ -19,8 +19,13 @@ from common.const import (  # noqa: E402
     COL_CLOSE,
     COL_DATE,
     COL_END_DATE,
+    COL_ETF_ESTIMATED_TRADED_PRICE,
     COL_ETF_ID,
     COL_ETF_NAME,
+    COL_ETF_NET_FLOW_AMOUNT,
+    COL_ETF_NET_FLOW_TO_INDEX_TURNOVER_RATIO,
+    COL_ETF_NET_SHARE_CHANGE,
+    COL_ETF_PREV_EFFECTIVE_TOTAL_SHARE,
     COL_ETF_TOTAL_SHARE,
     COL_ETF_TOTAL_SIZE,
     COL_FLOAT_HOLDER_HOLD_AMOUNT,
@@ -31,6 +36,7 @@ from common.const import (  # noqa: E402
     COL_FLOAT_HOLDER_TYPE,
     COL_HIGH,
     COL_INDEX_CODE,
+    COL_INDEX_TURNOVER_AMOUNT,
     COL_LOW,
     COL_NAV,
     COL_OPEN,
@@ -51,6 +57,7 @@ from storage.model import (  # noqa: E402
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
     tb_name_etf_daily,
+    tb_name_etf_net_flow,
     tb_name_etf_share_size,
     tb_name_history_data_daily_a_stock_bfq,
     tb_name_history_data_daily_a_stock_qfq,
@@ -3632,6 +3639,139 @@ class TestETFShareSizeStorage:
         db, _engine = sqlite_storage
 
         assert db.save_index_daily_turnover(pd.DataFrame([{COL_INDEX_CODE: "000300.SH"}])) is False
+
+    def test_load_etf_share_size_includes_prior_effective_row_before_start_date(self, sqlite_storage):
+        db, _engine = sqlite_storage
+        assert (
+            db.save_etf_share_size(
+                pd.DataFrame(
+                    [
+                        {
+                            COL_ETF_ID: "510300",
+                            COL_DATE: "2024-01-02",
+                            COL_CLOSE: 3.1,
+                            COL_NAV: 3.0,
+                            COL_ETF_TOTAL_SHARE: 1000.0,
+                            COL_ETF_TOTAL_SIZE: 3000.0,
+                        },
+                        {
+                            COL_ETF_ID: "510300",
+                            COL_DATE: "2024-01-05",
+                            COL_CLOSE: 3.2,
+                            COL_NAV: 3.1,
+                            COL_ETF_TOTAL_SHARE: 1005.0,
+                            COL_ETF_TOTAL_SIZE: 3216.0,
+                        },
+                        {
+                            COL_ETF_ID: "510300",
+                            COL_DATE: "2024-01-08",
+                            COL_CLOSE: 3.3,
+                            COL_NAV: 3.2,
+                            COL_ETF_TOTAL_SHARE: 1007.0,
+                            COL_ETF_TOTAL_SIZE: 3323.1,
+                        },
+                    ]
+                )
+            )
+            is True
+        )
+
+        result = db.load_etf_share_size("510300", "2024-01-05", "2024-01-08", include_prior_effective=True)
+
+        assert result[COL_DATE].astype(str).tolist() == ["2024-01-02", "2024-01-05", "2024-01-08"]
+
+    def test_load_etf_share_size_without_prior_only_returns_requested_range(self, sqlite_storage):
+        db, _engine = sqlite_storage
+        assert (
+            db.save_etf_share_size(
+                pd.DataFrame(
+                    [
+                        {
+                            COL_ETF_ID: "510300",
+                            COL_DATE: "2024-01-02",
+                            COL_CLOSE: 3.1,
+                            COL_NAV: 3.0,
+                            COL_ETF_TOTAL_SHARE: 1000.0,
+                            COL_ETF_TOTAL_SIZE: 3000.0,
+                        },
+                        {
+                            COL_ETF_ID: "510300",
+                            COL_DATE: "2024-01-05",
+                            COL_CLOSE: 3.2,
+                            COL_NAV: 3.1,
+                            COL_ETF_TOTAL_SHARE: 1005.0,
+                            COL_ETF_TOTAL_SIZE: 3216.0,
+                        },
+                    ]
+                )
+            )
+            is True
+        )
+
+        result = db.load_etf_share_size("510300", "2024-01-05", "2024-01-08")
+
+        assert result[COL_DATE].astype(str).tolist() == ["2024-01-05"]
+
+    def test_load_index_daily_turnover_filters_by_code_and_date_range(self, sqlite_storage):
+        db, _engine = sqlite_storage
+        assert (
+            db.save_index_daily_turnover(
+                pd.DataFrame(
+                    [
+                        {COL_INDEX_CODE: "000300.SH", COL_DATE: "2024-01-05", COL_CLOSE: 3500.0, COL_AMOUNT: 10000.0},
+                        {COL_INDEX_CODE: "000905.SH", COL_DATE: "2024-01-05", COL_CLOSE: 5500.0, COL_AMOUNT: 20000.0},
+                        {COL_INDEX_CODE: "000300.SH", COL_DATE: "2024-01-08", COL_CLOSE: 3510.0, COL_AMOUNT: 12000.0},
+                    ]
+                )
+            )
+            is True
+        )
+
+        result = db.load_index_daily_turnover("000300.SH", "2024-01-05", "2024-01-05")
+
+        assert result[[COL_INDEX_CODE, COL_DATE, COL_AMOUNT]].astype({COL_DATE: str}).to_dict("records") == [
+            {COL_INDEX_CODE: "000300.SH", COL_DATE: "2024-01-05", COL_AMOUNT: 10000.0}
+        ]
+
+    def test_save_etf_net_flow_is_idempotent_for_same_primary_key(self, sqlite_storage):
+        db, engine = sqlite_storage
+        initial_df = pd.DataFrame(
+            [
+                {
+                    COL_ETF_ID: "510300",
+                    COL_DATE: "2024-01-05",
+                    COL_ETF_TOTAL_SHARE: 1005.0,
+                    COL_ETF_PREV_EFFECTIVE_TOTAL_SHARE: 1000.0,
+                    COL_ETF_NET_SHARE_CHANGE: 5.0,
+                    COL_ETF_ESTIMATED_TRADED_PRICE: 5.0,
+                    COL_ETF_NET_FLOW_AMOUNT: 250000.0,
+                    COL_INDEX_CODE: "000300.SH",
+                    COL_INDEX_TURNOVER_AMOUNT: 10000.0,
+                    COL_ETF_NET_FLOW_TO_INDEX_TURNOVER_RATIO: 0.025,
+                }
+            ]
+        )
+        updated_df = initial_df.copy()
+        updated_df.loc[0, COL_ETF_NET_FLOW_AMOUNT] = 300000.0
+        updated_df.loc[0, COL_ETF_NET_FLOW_TO_INDEX_TURNOVER_RATIO] = 0.03
+
+        assert db.save_etf_net_flow(initial_df) is True
+        assert db.save_etf_net_flow(updated_df) is True
+
+        with engine.connect() as conn:
+            rows = (
+                conn.execute(text(f'SELECT * FROM {tb_name_etf_net_flow} WHERE "{COL_ETF_ID}" = "510300"'))
+                .mappings()
+                .all()
+            )
+        assert len(rows) == 1
+        assert rows[0][COL_ETF_NET_FLOW_AMOUNT] == 300000.0
+        assert rows[0][COL_ETF_NET_FLOW_TO_INDEX_TURNOVER_RATIO] == 0.03
+
+    def test_save_etf_net_flow_rejects_missing_required_columns(self, sqlite_storage):
+        db, _engine = sqlite_storage
+
+        assert db.save_etf_net_flow(pd.DataFrame([{COL_ETF_ID: "510300"}])) is False
 
 
 class TestSSFChangeSignalStorage:

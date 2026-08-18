@@ -39,9 +39,14 @@ from common.const import (
     COL_DV_TTM,
     COL_END_DATE,
     COL_ENNAME,
+    COL_ETF_ESTIMATED_TRADED_PRICE,
     COL_ETF_EXT_NAME,
     COL_ETF_ID,
     COL_ETF_NAME,
+    COL_ETF_NET_FLOW_AMOUNT,
+    COL_ETF_NET_FLOW_TO_INDEX_TURNOVER_RATIO,
+    COL_ETF_NET_SHARE_CHANGE,
+    COL_ETF_PREV_EFFECTIVE_TOTAL_SHARE,
     COL_ETF_TOTAL_SHARE,
     COL_ETF_TOTAL_SIZE,
     COL_ETF_TYPE,
@@ -62,6 +67,7 @@ from common.const import (
     COL_HOLDER_NUM,
     COL_INDEX_CODE,
     COL_INDEX_NAME,
+    COL_INDEX_TURNOVER_AMOUNT,
     COL_INDUSTRY,
     COL_IPO_DATE,
     COL_IS_HS,
@@ -102,6 +108,7 @@ from .domain_enums import ForecastSnapshotStatus, SSFChangeSignalStatus, validat
 from .model import (
     Base,
     ETFBasic,
+    ETFNetFlow,
     ETFShareSize,
     ForecastSnapshotRecord,
     ForecastSnapshotRun,
@@ -112,6 +119,7 @@ from .model import (
     tb_name_daily_basic_a_stock,
     tb_name_etf_basic,
     tb_name_etf_daily,
+    tb_name_etf_net_flow,
     tb_name_etf_share_size,
     tb_name_forecast,
     tb_name_forecast_snapshot_record,
@@ -331,6 +339,20 @@ COL_MAP_INDEX_DAILY_TURNOVER = {
     "trade_date": COL_DATE,
     "close": COL_CLOSE,
     "amount": COL_AMOUNT,
+}
+
+
+COL_MAP_ETF_NET_FLOW = {
+    "ts_code": COL_ETF_ID,
+    "trade_date": COL_DATE,
+    "total_share": COL_ETF_TOTAL_SHARE,
+    "prev_effective_total_share": COL_ETF_PREV_EFFECTIVE_TOTAL_SHARE,
+    "net_share_change": COL_ETF_NET_SHARE_CHANGE,
+    "estimated_traded_price": COL_ETF_ESTIMATED_TRADED_PRICE,
+    "net_flow_amount": COL_ETF_NET_FLOW_AMOUNT,
+    "index_code": COL_INDEX_CODE,
+    "index_turnover_amount": COL_INDEX_TURNOVER_AMOUNT,
+    "net_flow_to_index_turnover_ratio": COL_ETF_NET_FLOW_TO_INDEX_TURNOVER_RATIO,
 }
 
 
@@ -2455,6 +2477,132 @@ class StorageDb:
             return True
         except Exception as e:
             logger.error(f"保存指数收盘成交额数据失败: {str(e)}")
+            return False
+
+    def _read_sql_with_dialect_params(self, sql: str, params: tuple[Any, ...]) -> pd.DataFrame:
+        if self.engine.dialect.name == "sqlite":
+            sql = sql.replace("%s", "?")
+        return pd.read_sql(sql, self.engine, params=params)
+
+    def load_etf_share_size(
+        self,
+        etf_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        include_prior_effective: bool = False,
+    ) -> pd.DataFrame:
+        try:
+            sql, sql_params = self._build_code_date_range_query(
+                table_name=tb_name_etf_share_size,
+                code_column=COL_ETF_ID,
+                code_value=etf_id,
+                date_column=COL_DATE,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            df = self._read_sql_with_dialect_params(sql, sql_params)
+
+            if include_prior_effective and start_date:
+                prior_sql = f'''
+                SELECT * FROM {tb_name_etf_share_size}
+                WHERE "{COL_ETF_ID}" = %s
+                  AND "{COL_DATE}" < %s
+                ORDER BY "{COL_DATE}" DESC
+                LIMIT 1
+                '''
+                prior = self._read_sql_with_dialect_params(prior_sql, (etf_id, start_date))
+                if not prior.empty:
+                    df = pd.concat([prior, df], ignore_index=True)
+
+            logger.info(f"ETF份额规模数据加载成功: {etf_id}, 数据条数: {len(df)}")
+            return df
+        except Exception as e:
+            logger.error(f"加载ETF份额规模数据失败: {etf_id}, 错误: {str(e)}")
+            return pd.DataFrame()
+
+    def load_index_daily_turnover(
+        self,
+        ts_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> pd.DataFrame:
+        try:
+            sql, sql_params = self._build_code_date_range_query(
+                table_name=tb_name_index_daily_turnover,
+                code_column=COL_INDEX_CODE,
+                code_value=ts_code,
+                date_column=COL_DATE,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            df = self._read_sql_with_dialect_params(sql, sql_params)
+            logger.info(f"指数收盘成交额数据加载成功: {ts_code}, 数据条数: {len(df)}")
+            return df
+        except Exception as e:
+            logger.error(f"加载指数收盘成交额数据失败: {ts_code}, 错误: {str(e)}")
+            return pd.DataFrame()
+
+    def save_etf_net_flow(self, df: pd.DataFrame) -> bool:
+        try:
+            prepared = df.rename(columns=COL_MAP_ETF_NET_FLOW).copy()
+            required = [
+                COL_ETF_ID,
+                COL_DATE,
+                COL_ETF_TOTAL_SHARE,
+                COL_ETF_PREV_EFFECTIVE_TOTAL_SHARE,
+                COL_ETF_NET_SHARE_CHANGE,
+                COL_ETF_ESTIMATED_TRADED_PRICE,
+                COL_ETF_NET_FLOW_AMOUNT,
+                COL_INDEX_CODE,
+                COL_INDEX_TURNOVER_AMOUNT,
+                COL_ETF_NET_FLOW_TO_INDEX_TURNOVER_RATIO,
+            ]
+            missing = set(required) - set(prepared.columns)
+            if missing:
+                raise ValueError(f"ETF净申赎缺少字段: {sorted(missing)}")
+
+            prepared = prepared[required]
+            prepared[COL_ETF_ID] = prepared[COL_ETF_ID].astype(str).str.split(".").str[0]
+            prepared[COL_INDEX_CODE] = prepared[COL_INDEX_CODE].astype(str)
+            prepared[COL_DATE] = pd.to_datetime(prepared[COL_DATE], errors="raise").dt.date
+            for column in [
+                COL_ETF_TOTAL_SHARE,
+                COL_ETF_PREV_EFFECTIVE_TOTAL_SHARE,
+                COL_ETF_NET_SHARE_CHANGE,
+                COL_ETF_ESTIMATED_TRADED_PRICE,
+                COL_ETF_NET_FLOW_AMOUNT,
+                COL_INDEX_TURNOVER_AMOUNT,
+                COL_ETF_NET_FLOW_TO_INDEX_TURNOVER_RATIO,
+            ]:
+                prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
+
+            records = prepared.to_dict(orient="records")
+            if not records:
+                return True
+
+            table = ETFNetFlow.__table__
+            stmt: PostgreSQLInsert | SQLiteInsert
+            if self.engine.dialect.name == "postgresql":
+                postgres_insert_stmt = pg_insert(table).values(records)
+                stmt = postgres_insert_stmt.on_conflict_do_update(
+                    index_elements=list(table.primary_key.columns.keys()),
+                    set_={column.name: getattr(postgres_insert_stmt.excluded, column.name) for column in table.columns},
+                )
+            elif self.engine.dialect.name == "sqlite":
+                sqlite_insert_stmt = sqlite_insert(table).values(records)
+                stmt = sqlite_insert_stmt.on_conflict_do_update(
+                    index_elements=list(table.primary_key.columns.keys()),
+                    set_={column.name: getattr(sqlite_insert_stmt.excluded, column.name) for column in table.columns},
+                )
+            else:
+                raise ConnectionError(f"Unsupported database dialect: {self.engine.dialect.name}")
+            with self.engine.begin() as conn:
+                conn.execute(stmt)
+
+            logger.info(f"ETF净申赎数据保存成功: {tb_name_etf_net_flow}, 数据条数: {len(prepared)}")
+            return True
+        except Exception as e:
+            logger.error(f"保存ETF净申赎数据失败: {str(e)}")
             return False
 
     def load_etf_daily(
