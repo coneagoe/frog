@@ -324,7 +324,6 @@ services:
 
   airflow-worker:
     <<: *airflow-common
-    entrypoint: ["bash", "/opt/airflow/frog/entrypoint-common.sh"]
     command:
       ["airflow", "celery", "worker"]
     depends_on:
