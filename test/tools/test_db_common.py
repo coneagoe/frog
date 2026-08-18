@@ -37,3 +37,7 @@ def test_business_tables_include_etf_share_size():
 
 def test_business_tables_include_index_daily_turnover():
     assert "index_daily_turnover" in _parse_business_tables()
+
+
+def test_business_tables_include_etf_net_flow():
+    assert "etf_net_flow" in _parse_business_tables()
