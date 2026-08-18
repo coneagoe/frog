@@ -23,6 +23,15 @@ class ETFIndexResolution:
     diagnostic_reason: str
 
 
+@dataclass(frozen=True)
+class ETFFlowIndexContext:
+    etf_code: str
+    normalized_etf_code: str | None
+    should_calculate: bool
+    index_ts_code: str | None
+    diagnostic: ETFIndexResolution
+
+
 ETF_CORE_INDEX_GROUPS = MappingProxyType(
     {
         "510300": CoreIndexGroup.CSI_300,
@@ -106,4 +115,15 @@ def resolve_etf_index(etf_code: str) -> ETFIndexResolution:
         index_ts_code=CORE_INDEX_TS_CODES[group],
         index_display_name=CORE_INDEX_DISPLAY_NAMES[group],
         diagnostic_reason="mapped_to_supported_core_index",
+    )
+
+
+def prepare_etf_flow_index_context(etf_code: str) -> ETFFlowIndexContext:
+    diagnostic = resolve_etf_index(etf_code)
+    return ETFFlowIndexContext(
+        etf_code=etf_code,
+        normalized_etf_code=diagnostic.normalized_etf_code,
+        should_calculate=diagnostic.status == ETFIndexMappingStatus.MAPPED,
+        index_ts_code=diagnostic.index_ts_code,
+        diagnostic=diagnostic,
     )

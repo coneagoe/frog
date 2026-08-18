@@ -6,6 +6,7 @@ from download.etf_index_mapping import (
     UNSUPPORTED_ETF_CODES,
     ETFIndexMappingStatus,
     normalize_etf_code,
+    prepare_etf_flow_index_context,
     resolve_etf_index,
 )
 
@@ -98,3 +99,45 @@ def test_unsupported_etf_codes_do_not_overlap_mapped_codes():
 
 def test_all_mapped_etfs_point_to_supported_core_indexes():
     assert set(ETF_CORE_INDEX_GROUPS.values()).issubset(set(CORE_INDEX_TS_CODES))
+
+
+def test_prepare_etf_flow_index_context_returns_mapped_index_identifier():
+    context = prepare_etf_flow_index_context("510300.SH")
+
+    assert context.should_calculate is True
+    assert context.etf_code == "510300.SH"
+    assert context.normalized_etf_code == "510300"
+    assert context.index_ts_code == "000300.SH"
+    assert context.diagnostic.status == ETFIndexMappingStatus.MAPPED
+    assert context.diagnostic.diagnostic_reason == "mapped_to_supported_core_index"
+
+
+def test_prepare_etf_flow_index_context_returns_diagnostic_for_missing_mapping():
+    context = prepare_etf_flow_index_context("560000.SH")
+
+    assert context.should_calculate is False
+    assert context.etf_code == "560000.SH"
+    assert context.normalized_etf_code == "560000"
+    assert context.index_ts_code is None
+    assert context.diagnostic.status == ETFIndexMappingStatus.MISSING_MAPPING
+    assert context.diagnostic.diagnostic_reason == "missing_etf_index_mapping"
+
+
+def test_prepare_etf_flow_index_context_returns_diagnostic_for_unsupported_mapping():
+    context = prepare_etf_flow_index_context("510880.SH")
+
+    assert context.should_calculate is False
+    assert context.normalized_etf_code == "510880"
+    assert context.index_ts_code is None
+    assert context.diagnostic.status == ETFIndexMappingStatus.UNSUPPORTED_ETF
+    assert context.diagnostic.diagnostic_reason == "unsupported_etf_without_trusted_core_index_mapping"
+
+
+def test_prepare_etf_flow_index_context_returns_diagnostic_for_invalid_code():
+    context = prepare_etf_flow_index_context("bad-code")
+
+    assert context.should_calculate is False
+    assert context.normalized_etf_code is None
+    assert context.index_ts_code is None
+    assert context.diagnostic.status == ETFIndexMappingStatus.INVALID_CODE
+    assert context.diagnostic.diagnostic_reason == "invalid_etf_code"

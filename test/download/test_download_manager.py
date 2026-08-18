@@ -39,6 +39,28 @@ def _make_manager(monkeypatch):
 
 
 class TestDownloadManager:
+    def test_prepare_etf_flow_index_context_exposes_manager_seam_for_mapped_etf(self):
+        from download.download_manager import prepare_etf_flow_index_context
+        from download.etf_index_mapping import ETFIndexMappingStatus
+
+        context = prepare_etf_flow_index_context("159915.SZ")
+
+        assert context.should_calculate is True
+        assert context.normalized_etf_code == "159915"
+        assert context.index_ts_code == "399006.SZ"
+        assert context.diagnostic.status == ETFIndexMappingStatus.MAPPED
+
+    def test_prepare_etf_flow_index_context_exposes_manager_seam_for_missing_mapping(self):
+        from download.download_manager import prepare_etf_flow_index_context
+        from download.etf_index_mapping import ETFIndexMappingStatus
+
+        context = prepare_etf_flow_index_context("560000.SH")
+
+        assert context.should_calculate is False
+        assert context.normalized_etf_code == "560000"
+        assert context.index_ts_code is None
+        assert context.diagnostic.status == ETFIndexMappingStatus.MISSING_MAPPING
+
     def test_download_etf_basic_refreshes_and_reconciles_saved_snapshot_atomically(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         etf_basic = pd.DataFrame({"ts_code": ["510300.SH"]})
