@@ -261,6 +261,98 @@ class TestDownloadManager:
         requested_codes = [call.kwargs["ts_code"] for call in downloader.dl_index_daily_turnover.call_args_list]
         assert requested_codes == list(CORE_INDEX_TS_CODES.values())
 
+    def test_download_etf_quant_data_runs_raw_downloads_before_rebuild(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        calls = []
+        rebuild_result = ETFNetFlowRebuildResult(etf_code="510300", saved_rows=2, diagnostics=())
+
+        def download_share_size(**kwargs):
+            calls.append(("share_size", kwargs))
+            return True
+
+        def download_index_turnover(**kwargs):
+            calls.append(("index_turnover", kwargs))
+            return True
+
+        def rebuild_net_flow(etf_code, start_date, end_date):
+            calls.append(("net_flow", etf_code, start_date, end_date))
+            return rebuild_result
+
+        monkeypatch.setattr(manager, "download_etf_share_size", download_share_size)
+        monkeypatch.setattr(manager, "download_core_index_daily_turnover", download_index_turnover)
+        monkeypatch.setattr(manager, "rebuild_etf_net_flow", rebuild_net_flow)
+
+        result = manager.download_etf_quant_data("510300.SH", "20240101", "20240105")
+
+        assert result == dm.ETFQuantDataDownloadResult(
+            etf_code="510300.SH",
+            start_date="20240101",
+            end_date="20240105",
+            share_size_downloaded=True,
+            index_turnover_downloaded=True,
+            net_flow_rebuild=rebuild_result,
+            failed_stages=(),
+            succeeded=True,
+        )
+        assert calls == [
+            (
+                "share_size",
+                {"ts_code": "510300.SH", "trade_date": "", "start_date": "20240101", "end_date": "20240105"},
+            ),
+            ("index_turnover", {"trade_date": "", "start_date": "20240101", "end_date": "20240105"}),
+            ("net_flow", "510300.SH", "20240101", "20240105"),
+        ]
+        assert storage.method_calls == []
+        assert downloader.method_calls == []
+
+    def test_download_etf_quant_data_reports_raw_failure_without_rebuild(self, monkeypatch):
+        manager, _, _ = _make_manager(monkeypatch)
+        rebuild = MagicMock()
+        monkeypatch.setattr(manager, "download_etf_share_size", MagicMock(return_value=True))
+        monkeypatch.setattr(manager, "download_core_index_daily_turnover", MagicMock(return_value=False))
+        monkeypatch.setattr(manager, "rebuild_etf_net_flow", rebuild)
+
+        result = manager.download_etf_quant_data("510300.SH", "20240101", "20240105")
+
+        assert result.share_size_downloaded is True
+        assert result.index_turnover_downloaded is False
+        assert result.net_flow_rebuild is None
+        assert result.failed_stages == ("index_daily_turnover",)
+        assert result.succeeded is False
+        rebuild.assert_not_called()
+
+    def test_download_etf_quant_data_reports_share_exception_and_continues_raw_index(self, monkeypatch):
+        manager, _, _ = _make_manager(monkeypatch)
+        share = MagicMock(side_effect=RuntimeError("share provider unavailable"))
+        index = MagicMock(return_value=True)
+        rebuild = MagicMock()
+        monkeypatch.setattr(manager, "download_etf_share_size", share)
+        monkeypatch.setattr(manager, "download_core_index_daily_turnover", index)
+        monkeypatch.setattr(manager, "rebuild_etf_net_flow", rebuild)
+
+        result = manager.download_etf_quant_data("510300.SH", "20240101", "20240105")
+
+        assert result.share_size_downloaded is False
+        assert result.index_turnover_downloaded is True
+        assert result.failed_stages == ("etf_share_size",)
+        assert result.succeeded is False
+        index.assert_called_once_with(trade_date="", start_date="20240101", end_date="20240105")
+        rebuild.assert_not_called()
+
+    def test_download_etf_quant_data_reports_rebuild_exception(self, monkeypatch):
+        manager, _, _ = _make_manager(monkeypatch)
+        monkeypatch.setattr(manager, "download_etf_share_size", MagicMock(return_value=True))
+        monkeypatch.setattr(manager, "download_core_index_daily_turnover", MagicMock(return_value=True))
+        monkeypatch.setattr(manager, "rebuild_etf_net_flow", MagicMock(side_effect=RuntimeError("storage unavailable")))
+
+        result = manager.download_etf_quant_data("510300.SH", "20240101", "20240105")
+
+        assert result.share_size_downloaded is True
+        assert result.index_turnover_downloaded is True
+        assert result.net_flow_rebuild is None
+        assert result.failed_stages == ("etf_net_flow",)
+        assert result.succeeded is False
+
     def test_download_forecast_reports_saved_rows(self, monkeypatch):
         manager, storage, downloader = _make_manager(monkeypatch)
         forecast = pd.DataFrame({"股票代码": ["600001", "000001"]})
