@@ -20,10 +20,9 @@ from common.const import (
     SecurityType,
 )
 from download.core_indexes import CORE_INDEX_TS_CODES
-from download.etf_net_flow import ETFNetFlowRebuildResult
-from download.etf_net_flow import rebuild_etf_net_flow
 from download.etf_index_mapping import ETFFlowIndexContext
 from download.etf_index_mapping import prepare_etf_flow_index_context as _prepare_etf_flow_index_context
+from download.etf_net_flow import ETFNetFlowRebuildResult, rebuild_etf_net_flow
 from download.provider_order import (
     parse_hk_stock_history_provider_order,
     parse_stock_history_provider_order,

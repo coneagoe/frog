@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 
@@ -83,7 +83,8 @@ def _rows_by_date(df: pd.DataFrame) -> dict[str, dict[str, Any]]:
         return {}
     rows: dict[str, dict[str, Any]] = {}
     for row in df.to_dict(orient="records"):
-        rows[_normalize_date(row[COL_DATE])] = row
+        typed_row = cast(dict[str, Any], row)
+        rows[_normalize_date(typed_row[COL_DATE])] = typed_row
     return rows
 
 
