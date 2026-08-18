@@ -100,6 +100,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 - At the end of implementing any issue, during the final review/verification phase, invoke the `simplify` skill before declaring the work complete.
 - Use `simplify` to check whether the touched code can be made clearer or less complex without changing behavior; apply only targeted simplifications that preserve the issue scope and verified behavior.
 - If no safe simplification is available, state that the simplify review found no change worth making.
+- If issue work was done in a worktree, automatically merge the verified branch back into its intended base branch after review and verification pass, then verify the merged result and clean up the worktree/branch. Do not wait for an extra merge prompt unless the user explicitly requested a PR or to keep the branch as-is.
 
 ### Issue tracker
 
