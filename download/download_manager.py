@@ -20,6 +20,8 @@ from common.const import (
     SecurityType,
 )
 from download.core_indexes import CORE_INDEX_TS_CODES
+from download.etf_net_flow import ETFNetFlowRebuildResult
+from download.etf_net_flow import rebuild_etf_net_flow
 from download.etf_index_mapping import ETFFlowIndexContext
 from download.etf_index_mapping import prepare_etf_flow_index_context as _prepare_etf_flow_index_context
 from download.provider_order import (
@@ -158,6 +160,14 @@ def prepare_etf_flow_index_context(etf_code: str) -> ETFFlowIndexContext:
 
 
 class DownloadManager:
+    def rebuild_etf_net_flow(self, etf_code: str, start_date: str, end_date: str) -> ETFNetFlowRebuildResult:
+        return rebuild_etf_net_flow(
+            storage=get_storage(),
+            etf_code=etf_code,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
     def download_forecast(self, ann_date: str) -> ForecastDownloadResult:
         try:
             df = self.downloader.dl_forecast(ann_date=ann_date)

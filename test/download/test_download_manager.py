@@ -24,6 +24,7 @@ from common.const import (
     PeriodType,
 )  # noqa: E402
 from download.core_indexes import CORE_INDEX_TS_CODES  # noqa: E402
+from download.etf_net_flow import ETFNetFlowRebuildResult  # noqa: E402
 
 
 def _make_manager(monkeypatch):
@@ -40,6 +41,23 @@ def _make_manager(monkeypatch):
 
 
 class TestDownloadManager:
+    def test_rebuild_etf_net_flow_delegates_to_service_with_storage_and_no_raw_downloads(self, monkeypatch):
+        manager, storage, downloader = _make_manager(monkeypatch)
+        service_result = ETFNetFlowRebuildResult(etf_code="510300", saved_rows=2, diagnostics=())
+        rebuild_service = MagicMock(return_value=service_result)
+        monkeypatch.setattr(dm, "rebuild_etf_net_flow", rebuild_service, raising=False)
+
+        result = manager.rebuild_etf_net_flow("510300.SH", "2024-01-01", "2024-01-05")
+
+        assert result is service_result
+        rebuild_service.assert_called_once_with(
+            storage=storage,
+            etf_code="510300.SH",
+            start_date="2024-01-01",
+            end_date="2024-01-05",
+        )
+        assert downloader.method_calls == []
+
     def test_prepare_etf_flow_index_context_exposes_manager_seam_for_mapped_etf(self):
         from download.download_manager import prepare_etf_flow_index_context
         from download.etf_index_mapping import ETFIndexMappingStatus
