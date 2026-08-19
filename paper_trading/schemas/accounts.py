@@ -64,6 +64,7 @@ class AccountResponse(BaseModel):
     id: int
     name: str
     initial_cash: Decimal
+    cash_available: Decimal = Decimal("0")
     fee_preset: str
     commission_rate: Decimal
     min_commission: Decimal

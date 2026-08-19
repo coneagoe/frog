@@ -110,6 +110,41 @@ def test_create_account_accepts_and_returns_fee_config(monkeypatch, sqlite_sessi
     assert body["etf_commission_rate"] == "0.00008000"
 
 
+def test_account_responses_include_ledger_derived_cash_available(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+
+    created = client.post(
+        "/paper/accounts",
+        json={"name": "cash-available", "initial_cash": "100000.00"},
+        headers=headers,
+    )
+
+    assert created.status_code == 200
+    account_id = created.json()["id"]
+    assert created.json()["cash_available"] == "100000.0000"
+
+    deposited = client.post(
+        f"/paper/accounts/{account_id}/cash/deposit",
+        json={"amount": "25000.00", "trade_date": "2026-07-20"},
+        headers=headers,
+    )
+    assert deposited.status_code == 200
+
+    listed = client.get("/paper/accounts", headers=headers)
+    detailed = client.get(f"/paper/accounts/{account_id}", headers=headers)
+    fee_updated = client.patch(
+        f"/paper/accounts/{account_id}",
+        json={"commission_rate": "0.0002"},
+        headers=headers,
+    )
+
+    for response in (listed, detailed, fee_updated):
+        assert response.status_code == 200
+    assert listed.json()[0]["cash_available"] == "125000.0000"
+    assert detailed.json()["cash_available"] == "125000.0000"
+    assert fee_updated.json()["cash_available"] == "125000.0000"
+
+
 def test_create_account_rejects_negative_fee_config(monkeypatch, sqlite_session):
     client, headers, _ = _client(monkeypatch, sqlite_session)
 

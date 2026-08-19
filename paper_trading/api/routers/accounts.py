@@ -35,6 +35,13 @@ from paper_trading.storage.security_metadata import SecurityNameProvider
 router = APIRouter(prefix="/paper/accounts", dependencies=[Depends(require_api_token)])
 
 
+def _account_response(repo: PaperTradingRepository, account) -> AccountResponse | None:
+    if account is None:
+        return None
+    response = AccountResponse.model_validate(account)
+    return response.model_copy(update={"cash_available": repo.get_cash_available(account.id)})
+
+
 @router.post("", response_model=AccountResponse)
 def create_account(request: CreateAccountRequest, session: Session = Depends(get_session)):
     repo = PaperTradingRepository(session)
@@ -53,17 +60,21 @@ def create_account(request: CreateAccountRequest, session: Session = Depends(get
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     session.commit()
-    return account
+    return _account_response(repo, account)
 
 
 @router.get("", response_model=list[AccountResponse])
 def list_accounts(session: Session = Depends(get_session)):
-    return AccountService(PaperTradingRepository(session)).list_accounts()
+    repo = PaperTradingRepository(session)
+    accounts = AccountService(repo).list_accounts()
+    return [_account_response(repo, account) for account in accounts]
 
 
 @router.get("/{account_id}", response_model=AccountResponse | None)
 def get_account(account_id: int, session: Session = Depends(get_session)):
-    return AccountService(PaperTradingRepository(session)).get_account(account_id)
+    repo = PaperTradingRepository(session)
+    account = AccountService(repo).get_account(account_id)
+    return _account_response(repo, account)
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -100,7 +111,7 @@ def update_account_fees(
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
     session.commit()
-    return account
+    return _account_response(repo, account)
 
 
 @router.get("/{account_id}/positions", response_model=list[PositionResponse])
