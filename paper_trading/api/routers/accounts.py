@@ -44,7 +44,7 @@ def _account_response(repo: PaperTradingRepository, account) -> AccountResponse 
         if field_name != "cash_available"
     }
     payload["cash_available"] = repo.get_cash_available(account.id)
-    return AccountResponse.model_validate(payload)
+    return AccountResponse(**payload)
 
 
 @router.post("", response_model=AccountResponse)
