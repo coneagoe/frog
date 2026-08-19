@@ -454,7 +454,7 @@ Snapshots require a daily bar for every held position. When one is unavailable, 
 ### 日期语义
 
 - API/CLI 下单必须显式提供 `trade_date`，不使用默认日期；匹配同样必须显式提供 `trade_date`，并以它进行订单选择、行情柱、成交、结算和快照处理。
-- A 股日线历史 DAG 将 Airflow `context['data_interval_end']` 转换为 `Asia/Shanghai` 后得到业务日期，并将该日期传给 BFQ/HFQ 下载及 EOD 模拟交易匹配；周末及非交易日会跳过。订单先入队，匹配单独执行。
+- A 股日线历史 DAG 将 Airflow `context['logical_date']` 转换为 `Asia/Shanghai` 后得到业务日期，并将该日期传给 BFQ/HFQ 下载及 EOD 模拟交易匹配；周末及非交易日会跳过。`data_interval_end` 仅表示数据区间右边界，不作为该工作流的交易业务日期。
 - 只有 `OrderService` 的历史重试资格校验会将订单提交日期与 `date.today()` 比较；这只影响订单是否被接受，不会推导订单日期。
 
 日线历史 DAG 对缺失或失败的 BFQ/HFQ 下载记录 provider 结果；汇总警告仍允许模拟交易匹配继续执行，只有致命的汇总失败会阻止匹配。

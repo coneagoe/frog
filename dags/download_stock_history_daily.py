@@ -77,7 +77,7 @@ PARTITION_COUNT = get_partition_count()
 
 def get_business_date(context: dict[str, Any]) -> date:
     """Get the scheduled business date in the configured local timezone."""
-    return cast(date, context["data_interval_end"].in_timezone(LOCAL_TZ).date())
+    return cast(date, context["logical_date"].in_timezone(LOCAL_TZ).date())
 
 
 def ensure_a_share_trade_date(context: dict[str, Any]) -> date:

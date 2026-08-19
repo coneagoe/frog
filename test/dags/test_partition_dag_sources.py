@@ -48,7 +48,7 @@ def read_source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_business_date_uses_data_interval_end_in_local_timezone():
+def test_business_date_uses_logical_date_in_local_timezone():
     pendulum = pytest.importorskip("pendulum")
     pytest.importorskip("airflow")
     import dags.download_stock_history_daily as dag_module
@@ -57,12 +57,14 @@ def test_business_date_uses_data_interval_end_in_local_timezone():
         "data_interval_end": pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
         "logical_date": pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
     }
-    assert dag_module.get_business_date(context) == date(2026, 7, 28)
+    assert dag_module.get_business_date(context) == date(2026, 7, 27)
 
 
 def test_partition_uses_business_date_not_wall_clock():
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
 
+    assert 'context["logical_date"]' in source
+    assert 'context["data_interval_end"]' not in source
     assert "end_date=business_date.isoformat()" in source
     assert "datetime.now" not in source
 
@@ -73,7 +75,10 @@ def test_closed_business_date_is_skipped(monkeypatch):
     import dags.download_stock_history_daily as dag_module
 
     monkeypatch.setattr(dag_module, "is_a_share_trade_date", lambda business_date: False)
-    context = {"data_interval_end": pendulum.datetime(2026, 7, 28, 8, tz="UTC")}
+    context = {
+        "data_interval_end": pendulum.datetime(2026, 7, 29, 8, tz="UTC"),
+        "logical_date": pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
+    }
     with pytest.raises(dag_module.AirflowSkipException):
         dag_module.ensure_a_share_trade_date(context)
 
@@ -188,7 +193,8 @@ def test_closed_date_does_not_run_matching(monkeypatch):
     monkeypatch.setattr(dag_module, "run_paper_trading_matching", run_matching)
     with pytest.raises(dag_module.AirflowSkipException):
         dag_module.run_paper_trading_matching_for_active_accounts(
-            data_interval_end=pendulum.datetime(2026, 7, 28, 8, tz="UTC")
+            data_interval_end=pendulum.datetime(2026, 7, 29, 8, tz="UTC"),
+            logical_date=pendulum.datetime(2026, 7, 28, 8, tz="UTC"),
         )
     run_matching.assert_not_called()
 

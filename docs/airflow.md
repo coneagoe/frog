@@ -144,7 +144,7 @@ DOWNLOAD_PROCESS_COUNT=4
 
 ### A 股日线日期语义
 
-- A 股 BFQ/HFQ 日线 DAG 从 Airflow `context['data_interval_end']` 转换为 `Asia/Shanghai` 后，只派生一个业务日期，并将同一日期作为两类下载的 `end_date`；周末及非交易日会跳过。
+- A 股 BFQ/HFQ 日线 DAG 从 Airflow `context['logical_date']` 转换为 `Asia/Shanghai` 后，只派生一个业务日期，并将同一日期作为两类下载的 `end_date`；周末及非交易日会跳过。`data_interval_end` 仅表示数据区间右边界，不作为该工作流的交易业务日期。
 - 汇总完成后，EOD 模拟交易匹配也使用这个相同的显式日期。
 - 其余仍按墙上时钟运行的路径包括：周末 QFQ 历史 DAG、`daily_basic`/`stk_limit`/`suspend_d` DAG，以及调用方未传 `end_date` 时 `DownloadManager` 的通用回退逻辑。
 
