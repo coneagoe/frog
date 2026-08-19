@@ -194,10 +194,19 @@ export function OrdersPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch whenever the account, range, or page changes. An invalid custom range
+  // Fetch whenever the account, range, or page changes. Every change also
+  // invalidates any in-flight list request: loadOrders bumps the request id for
+  // a valid view, and the invalid-range branch below bumps it directly, so a
+  // late response can never overwrite the newer view. An invalid custom range
   // sends no request and keeps the last valid results on screen.
   useEffect(() => {
-    if (selectedAccountId === null || !rangeValid) return;
+    if (selectedAccountId === null) return;
+    if (!rangeValid) {
+      requestIdRef.current += 1;
+      setLoading(false);
+      setOrdersLoading(false);
+      return;
+    }
     void loadOrders(selectedAccountId, startDate, endDate, page);
   }, [selectedAccountId, startDate, endDate, page, rangeValid, loadOrders]);
 

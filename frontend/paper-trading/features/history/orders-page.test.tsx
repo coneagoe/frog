@@ -744,6 +744,38 @@ describe("OrdersPage", () => {
     expect(screen.getByText("GOOGL")).toBeInTheDocument();
     expect(screen.queryByText("AAPL")).not.toBeInTheDocument();
   });
+
+  it("discards an in-flight response when the custom range becomes invalid", async () => {
+    let resolveFirst!: (value: OrderPage) => void;
+    const firstPromise = new Promise<OrderPage>((resolve) => { resolveFirst = resolve; });
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockReturnValueOnce(firstPromise);
+
+    render(<OrdersPage />);
+    await waitFor(() => expect(listOrdersMock).toHaveBeenCalledTimes(1));
+    // The valid default-range request is still in flight.
+    expect(screen.getByText("Loading orders...")).toBeInTheDocument();
+
+    // Both the intermediate and final states are invalid, so no request may fire.
+    fireEvent.change(screen.getByLabelText("Start date"), { target: { value: "2099-01-10" } });
+    fireEvent.change(screen.getByLabelText("End date"), { target: { value: "2099-01-01" } });
+
+    expect(await screen.findByText("Start date must be on or before end date.")).toBeInTheDocument();
+    expect(listOrdersMock).toHaveBeenCalledTimes(1);
+    // Invalidating the in-flight request must not leave the loading panel stuck.
+    expect(screen.queryByText("Loading orders...")).not.toBeInTheDocument();
+
+    // The in-flight response arrives late; it must not modify the invalid-range view.
+    await act(async () => {
+      resolveFirst(makeOrderPage([mockOrder]));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByText("Start date must be on or before end date.")).toBeInTheDocument();
+    expect(screen.queryByText("AAPL")).not.toBeInTheDocument();
+    expect(screen.getByText("No orders")).toBeInTheDocument();
+    expect(screen.queryByText("Loading orders...")).not.toBeInTheDocument();
+  });
 });
 
 describe("Asia/Shanghai date helpers", () => {
