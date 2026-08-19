@@ -32,7 +32,7 @@ def _run_test_runner(
     )
     (bin_dir / "uv").write_text(
         "#!/usr/bin/env bash\n"
-        'printf \'uv %s TEST_DB_HOST_PORT=%s TEST_POSTGRESQL_URL=%s\\n\' '
+        "printf 'uv %s TEST_DB_HOST_PORT=%s TEST_POSTGRESQL_URL=%s\\n' "
         '"$*" "$TEST_DB_HOST_PORT" "$TEST_POSTGRESQL_URL" >> "$COMMAND_LOG"\n'
         'exit "$PYTEST_STATUS"\n',
         encoding="utf-8",
@@ -40,7 +40,7 @@ def _run_test_runner(
     for executable in bin_dir.iterdir():
         executable.chmod(0o755)
     occupied_case = (
-        f"case \"${{@: -1}}\" in {'|'.join(map(str, occupied_ports))}) exit 0;; esac\n"
+        f'case "${{@: -1}}" in {"|".join(map(str, occupied_ports))}) exit 0;; esac\n'
         if len(occupied_ports) < 100
         else ""
     )
@@ -52,14 +52,10 @@ def _run_test_runner(
 
     environment = os.environ.copy()
     environment["COMMAND_LOG"] = str(command_log)
-    environment["PATH"] = (
-        f"{bin_dir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    )
+    environment["PATH"] = f"{bin_dir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     environment["PYTEST_STATUS"] = str(pytest_status)
     environment.pop("TEST_DB_HOST_PORT", None)
-    environment["TEST_POSTGRESQL_URL"] = (
-        "postgresql://sentinel:sentinel@127.0.0.1:5433/sentinel"
-    )
+    environment["TEST_POSTGRESQL_URL"] = "postgresql://sentinel:sentinel@127.0.0.1:5433/sentinel"
     for name in (
         "SMTP_HOST",
         "SMTP_PORT",
@@ -78,19 +74,13 @@ def _run_test_runner(
         capture_output=True,
         text=True,
     )
-    commands = (
-        command_log.read_text(encoding="utf-8").splitlines()
-        if command_log.exists()
-        else []
-    )
+    commands = command_log.read_text(encoding="utf-8").splitlines() if command_log.exists() else []
     return completed, commands
 
 
 def test_compose_defines_isolated_test_database():
     compose_file = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    test_db_block = compose_file.split("  test_db:\n", maxsplit=1)[1].split(
-        "  db:\n", maxsplit=1
-    )[0]
+    test_db_block = compose_file.split("  test_db:\n", maxsplit=1)[1].split("  db:\n", maxsplit=1)[0]
 
     assert "timescale/timescaledb:latest-pg16" in test_db_block
     assert 'ports: ["127.0.0.1:${TEST_DB_HOST_PORT:-5433}:5432"]' in test_db_block
@@ -123,9 +113,7 @@ def test_runner_preserves_pytest_failure_after_cleanup(tmp_path: Path):
 
 
 def test_runner_skips_consecutive_occupied_ports(tmp_path: Path):
-    completed, commands = _run_test_runner(
-        [], tmp_path, pytest_status=0, occupied_ports=(5433, 5434)
-    )
+    completed, commands = _run_test_runner([], tmp_path, pytest_status=0, occupied_ports=(5433, 5434))
 
     assert completed.returncode == 0
     assert "TEST_DB_HOST_PORT=5435" in commands[0]
@@ -184,8 +172,7 @@ def test_sourcing_runner_does_not_clean_up_with_docker(tmp_path: Path):
     docker_log = tmp_path / "docker.log"
     fake_docker = tmp_path / "docker"
     fake_docker.write_text(
-        "#!/usr/bin/env bash\n"
-        'printf \'%s\\n\' "$*" >> "$DOCKER_LOG"\n',
+        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" >> "$DOCKER_LOG"\n',
         encoding="utf-8",
     )
     fake_docker.chmod(0o755)
