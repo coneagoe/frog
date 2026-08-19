@@ -587,6 +587,29 @@ class PaperTradingRepository:
             .all()
         )
 
+    def list_orders_page(
+        self,
+        account_id: int,
+        start_date: date,
+        end_date: date,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[PaperOrder], int]:
+        query = self.session.query(PaperOrder).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.trade_date >= start_date,
+            PaperOrder.trade_date <= end_date,
+        )
+        total = query.count()
+        offset = (page - 1) * page_size
+        orders = (
+            query.order_by(PaperOrder.trade_date.desc(), PaperOrder.id.desc())
+            .offset(offset)
+            .limit(page_size)
+            .all()
+        )
+        return list(orders), total
+
     def list_catalogue_etf_a_share_orders(self, account_id: int | None = None) -> list[PaperOrder]:
         query = (
             self.session.query(PaperOrder)
