@@ -776,6 +776,255 @@ describe("OrdersPage", () => {
     expect(screen.getByText("No orders")).toBeInTheDocument();
     expect(screen.queryByText("Loading orders...")).not.toBeInTheDocument();
   });
+
+  it("refreshes with the active account, range, and page after cancellation", async () => {
+    mockSearchParams.set("start_date", "2026-06-01");
+    mockSearchParams.set("end_date", "2026-06-30");
+    mockSearchParams.set("page", "2");
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    mockOrdersEchoingPage(3, 61);
+    cancelOrderMock.mockResolvedValue({ ...mockOrder, status: "cancelled" });
+
+    render(<OrdersPage />);
+    expect(await screen.findByText(/Page 2 of 3/)).toBeInTheDocument();
+    listOrdersMock.mockClear();
+
+    await userEvent.click(screen.getByText("Cancel"));
+
+    await waitFor(() => {
+      expect(listOrdersMock).toHaveBeenCalledWith(1, {
+        start_date: "2026-06-01",
+        end_date: "2026-06-30",
+        page: 2,
+        page_size: 25
+      });
+    });
+    expect(await screen.findByText(/Page 2 of 3/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Start date")).toHaveValue("2026-06-01");
+    expect(screen.getByLabelText("End date")).toHaveValue("2026-06-30");
+  });
+
+  it("refreshes with the active account, range, and page after deletion", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockSearchParams.set("start_date", "2026-06-01");
+    mockSearchParams.set("end_date", "2026-06-30");
+    mockSearchParams.set("page", "2");
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    mockOrdersEchoingPage(3, 61);
+    deleteOrderMock.mockResolvedValue(undefined);
+
+    render(<OrdersPage />);
+    expect(await screen.findByText(/Page 2 of 3/)).toBeInTheDocument();
+    listOrdersMock.mockClear();
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(deleteOrderMock).toHaveBeenCalledWith(42);
+    await waitFor(() => {
+      expect(listOrdersMock).toHaveBeenCalledWith(1, {
+        start_date: "2026-06-01",
+        end_date: "2026-06-30",
+        page: 2,
+        page_size: 25
+      });
+    });
+    expect(await screen.findByText(/Page 2 of 3/)).toBeInTheDocument();
+  });
+
+  it("keeps the active range and page when saving a comment", async () => {
+    const user = userEvent.setup();
+    mockSearchParams.set("start_date", "2026-06-01");
+    mockSearchParams.set("end_date", "2026-06-30");
+    mockSearchParams.set("page", "2");
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    mockOrdersEchoingPage(3, 61, [{ ...mockOrder, comment: "old comment" }]);
+    updateOrderCommentMock.mockResolvedValue({ ...mockOrder, comment: "new comment" });
+
+    render(<OrdersPage />);
+    expect(await screen.findByText("old comment")).toBeInTheDocument();
+    const callsBefore = listOrdersMock.mock.calls.length;
+
+    await user.click(screen.getByText("Edit"));
+    const input = screen.getByDisplayValue("old comment");
+    await user.clear(input);
+    await user.type(input, "new comment");
+    await user.click(screen.getByText("Save"));
+
+    expect(await screen.findByText("new comment")).toBeInTheDocument();
+    expect(updateOrderCommentMock).toHaveBeenCalledWith(42, "new comment");
+    // The in-place patch must not trigger a reload or move the view.
+    expect(listOrdersMock.mock.calls.length).toBe(callsBefore);
+    expect(screen.getByText(/Page 2 of 3/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Start date")).toHaveValue("2026-06-01");
+    expect(screen.getByLabelText("End date")).toHaveValue("2026-06-30");
+  });
+
+  it("does not refresh with the previous range when a cancellation resolves after a range change", async () => {
+    const user = userEvent.setup();
+    let resolveCancel!: (value: Order) => void;
+    const cancelPromise = new Promise<Order>((resolve) => { resolveCancel = resolve; });
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockResolvedValue(makeOrderPage([mockOrder]));
+    cancelOrderMock.mockReturnValue(cancelPromise);
+
+    render(<OrdersPage />);
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Cancel"));
+    expect(cancelOrderMock).toHaveBeenCalledWith(42);
+
+    // Change the range while the cancellation is in flight.
+    await user.click(screen.getByRole("button", { name: "Today" }));
+    const today = expectedShanghaiToday();
+    await waitFor(() => {
+      expect(listOrdersMock).toHaveBeenCalledWith(1, {
+        start_date: today,
+        end_date: today,
+        page: 1,
+        page_size: 25
+      });
+    });
+    const callsBefore = listOrdersMock.mock.calls.length;
+
+    await act(async () => {
+      resolveCancel({ ...mockOrder, status: "cancelled" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The stale cancellation must not trigger another refresh of the old range.
+    expect(listOrdersMock.mock.calls.length).toBe(callsBefore);
+    expect(screen.getByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Today" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("does not refresh the previous account when a deletion resolves after an account switch", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    let resolveDelete!: () => void;
+    const deletePromise = new Promise<void>((resolve) => { resolveDelete = resolve; });
+    listAccountsMock.mockResolvedValue([mockAccount, secondAccount]);
+    listOrdersMock.mockImplementation((accountId: number) => {
+      if (accountId === 2) return Promise.resolve(makeOrderPage([{ ...mockOrder, id: 99, symbol: "GOOGL" }]));
+      return Promise.resolve(makeOrderPage([mockOrder])); // AAPL for Account 1
+    });
+    deleteOrderMock.mockReturnValue(deletePromise);
+
+    render(<OrdersPage />);
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(deleteOrderMock).toHaveBeenCalledWith(42);
+
+    // Switch to Account 2 while the deletion is in flight.
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "2");
+    expect(await screen.findByText("GOOGL")).toBeInTheDocument();
+    const callsBefore = listOrdersMock.mock.calls.length;
+
+    await act(async () => {
+      resolveDelete();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The stale deletion must not refresh Account 1 or disturb Account 2's view.
+    expect(listOrdersMock.mock.calls.length).toBe(callsBefore);
+    expect(screen.getByText("GOOGL")).toBeInTheDocument();
+    expect(screen.queryByText("AAPL")).not.toBeInTheDocument();
+  });
+
+  it("does not refresh the previous page when a cancellation resolves after navigating away", async () => {
+    const user = userEvent.setup();
+    let resolveCancel!: (value: Order) => void;
+    const cancelPromise = new Promise<Order>((resolve) => { resolveCancel = resolve; });
+    mockSearchParams.set("page", "2");
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    mockOrdersEchoingPage(2, 26);
+    cancelOrderMock.mockReturnValue(cancelPromise);
+
+    render(<OrdersPage />);
+    expect(await screen.findByText(/Page 2 of 2/)).toBeInTheDocument();
+
+    await user.click(screen.getByText("Cancel"));
+    expect(cancelOrderMock).toHaveBeenCalledWith(42);
+
+    // Navigate to page 1 while the cancellation is in flight.
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(await screen.findByText(/Page 1 of 2/)).toBeInTheDocument();
+    const callsBefore = listOrdersMock.mock.calls.length;
+
+    await act(async () => {
+      resolveCancel({ ...mockOrder, status: "cancelled" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The stale cancellation must not refresh or restore page 2.
+    expect(listOrdersMock.mock.calls.length).toBe(callsBefore);
+    expect(screen.getByText(/Page 1 of 2/)).toBeInTheDocument();
+  });
+
+  it("moves to the preceding page when a deletion empties the current page without API clamping", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockSearchParams.set("page", "2");
+    let deleted = false;
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockImplementation((accountId, params) => {
+      const requestedPage = params?.page ?? 1;
+      // The backend reports the shrunken totals but echoes the requested page
+      // instead of clamping it, so the client must recover on its own.
+      if (deleted) {
+        return Promise.resolve(
+          requestedPage === 2
+            ? makeOrderPage([], { page: 2, total_pages: 1, total_count: 25 })
+            : makeOrderPage([{ ...mockOrder, id: 7, symbol: "MSFT" }], { page: 1, total_pages: 1, total_count: 25 })
+        );
+      }
+      return Promise.resolve(
+        requestedPage === 2
+          ? makeOrderPage([mockOrder], { page: 2, total_pages: 2, total_count: 26 })
+          : makeOrderPage([{ ...mockOrder, id: 7, symbol: "MSFT" }], { page: 1, total_pages: 2, total_count: 26 })
+      );
+    });
+    deleteOrderMock.mockImplementation(async () => { deleted = true; });
+
+    render(<OrdersPage />);
+    expect(await screen.findByText(/Page 2 of 2/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText(/Page 1 of 1/)).toBeInTheDocument();
+    expect(screen.getByText("MSFT")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(listOrdersMock).toHaveBeenCalledWith(1, expect.objectContaining({ page: 1, page_size: 25 }));
+    });
+    expect(mockRouterReplace).toHaveBeenCalledWith(expect.stringMatching(/[?&]page=1(&|$)/));
+  });
+
+  it("moves to page 1 when a cancellation empties every page", async () => {
+    mockSearchParams.set("page", "2");
+    let cancelled = false;
+    listAccountsMock.mockResolvedValue([mockAccount]);
+    listOrdersMock.mockImplementation((accountId, params) => {
+      const requestedPage = params?.page ?? 1;
+      // The cancelled order was the last one in range; every page is now empty.
+      if (cancelled) {
+        return Promise.resolve(makeOrderPage([], { page: requestedPage, total_pages: 0, total_count: 0 }));
+      }
+      return Promise.resolve(makeOrderPage([mockOrder], { page: requestedPage, total_pages: 2, total_count: 26 }));
+    });
+    cancelOrderMock.mockImplementation(async () => {
+      cancelled = true;
+      return { ...mockOrder, status: "cancelled" };
+    });
+
+    render(<OrdersPage />);
+    expect(await screen.findByText(/Page 2 of 2/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("Cancel"));
+
+    expect(await screen.findByText("No orders")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(listOrdersMock).toHaveBeenCalledWith(1, expect.objectContaining({ page: 1, page_size: 25 }));
+    });
+    expect(mockRouterReplace).toHaveBeenCalledWith(expect.stringMatching(/[?&]page=1(&|$)/));
+  });
 });
 
 describe("Asia/Shanghai date helpers", () => {

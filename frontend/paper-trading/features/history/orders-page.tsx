@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { cancelOrder, deleteOrder, listAccounts, listOrders, updateOrderComment } from "@/lib/api-client";
-import type { Account, Order } from "@/lib/types";
+import type { Account, Order, OrderPage } from "@/lib/types";
 import { OrderTable } from "@/features/trading/trading-tables";
 
 const PAGE_SIZE = 25;
@@ -134,7 +134,9 @@ export function OrdersPage() {
   const rangeValid = isValidRange(startDate, endDate);
   const activePreset = activePresetFor(startDate, endDate);
 
-  const loadOrders = useCallback(async (accountId: number, rangeStart: string, rangeEnd: string, targetPage: number) => {
+  // Returns the applied page envelope, or null when the response was stale or
+  // the request failed, so mutation refreshes can react to an emptied page.
+  const loadOrders = useCallback(async (accountId: number, rangeStart: string, rangeEnd: string, targetPage: number): Promise<OrderPage | null> => {
     const requestId = ++requestIdRef.current;
     setOrders([]);
     setOrdersLoading(true);
@@ -155,6 +157,7 @@ export function OrdersPage() {
         if (result.page !== targetPage) {
           setPage(result.page);
         }
+        return result;
       }
     } catch (err) {
       if (requestId === requestIdRef.current) {
@@ -166,6 +169,7 @@ export function OrdersPage() {
         setLoading(false);
       }
     }
+    return null;
   }, []);
 
   useEffect(() => {
@@ -223,6 +227,18 @@ export function OrdersPage() {
     router.replace(`/orders?${params.toString()}`);
   }, [selectedAccountId, startDate, endDate, page, rangeValid, router]);
 
+  // Mutation refreshes request the active query. A mutation can empty the
+  // current page (e.g. deleting its last order); when the refresh comes back
+  // empty beyond page 1, move to the last valid page and let the fetch effect
+  // reload it. Zero total pages means nothing is left, which is page 1.
+  const reloadOrdersAfterMutation = useCallback(async () => {
+    if (selectedAccountId === null || !rangeValid) return;
+    const result = await loadOrders(selectedAccountId, startDate, endDate, page);
+    if (result !== null && result.items.length === 0 && page > 1) {
+      setPage(Math.max(1, result.total_pages));
+    }
+  }, [selectedAccountId, rangeValid, startDate, endDate, page, loadOrders]);
+
   function handleAccountChange(accountId: number) {
     setSelectedAccountId(accountId);
     setPage(1);
@@ -278,8 +294,8 @@ export function OrdersPage() {
     setError(null);
     try {
       await cancelOrder(orderId);
-      if (requestId === requestIdRef.current && selectedAccountId !== null && rangeValid) {
-        await loadOrders(selectedAccountId, startDate, endDate, page);
+      if (requestId === requestIdRef.current) {
+        await reloadOrdersAfterMutation();
       }
     } catch (err) {
       if (requestId === requestIdRef.current) {
@@ -299,8 +315,8 @@ export function OrdersPage() {
     setError(null);
     try {
       await deleteOrder(orderId);
-      if (requestId === requestIdRef.current && selectedAccountId !== null && rangeValid) {
-        await loadOrders(selectedAccountId, startDate, endDate, page);
+      if (requestId === requestIdRef.current) {
+        await reloadOrdersAfterMutation();
       }
     } catch (err) {
       if (requestId === requestIdRef.current) {

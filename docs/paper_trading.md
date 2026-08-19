@@ -63,7 +63,7 @@ Open `http://localhost:3000/accounts`. The frontend has separate workspaces for 
 
 - `Accounts`: create/delete accounts, select an account, and review its positions and cash ledger.
 - `Trade`: submit paper limit orders.
-- `Orders`: review historical orders in pages of 25, filter by Asia/Shanghai trade date (today, trailing 7 or 30 days, or a custom inclusive range), cancel cancellable orders, and delete orders. The URL preserves the account, dates, and page.
+- `Orders`: review historical orders in pages of 25, filter by Asia/Shanghai trade date (today, trailing 7 or 30 days, or a custom inclusive range), cancel cancellable orders, and delete orders. The URL preserves the account, dates, and page; a cancel or delete that empties the current page returns the view to the last valid page.
 - `Trades`: review historical executions.
 - `Analytics`: review snapshots, total assets, trades, and cash movements.
 
