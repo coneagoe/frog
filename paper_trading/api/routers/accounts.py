@@ -38,8 +38,13 @@ router = APIRouter(prefix="/paper/accounts", dependencies=[Depends(require_api_t
 def _account_response(repo: PaperTradingRepository, account) -> AccountResponse | None:
     if account is None:
         return None
-    response = AccountResponse.model_validate(account)
-    return response.model_copy(update={"cash_available": repo.get_cash_available(account.id)})
+    payload = {
+        field_name: getattr(account, field_name)
+        for field_name in AccountResponse.model_fields
+        if field_name != "cash_available"
+    }
+    payload["cash_available"] = repo.get_cash_available(account.id)
+    return AccountResponse.model_validate(payload)
 
 
 @router.post("", response_model=AccountResponse)
