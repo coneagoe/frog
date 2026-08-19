@@ -208,8 +208,79 @@ def test_list_orders_and_trades_include_stock_name(monkeypatch, sqlite_session):
     trades = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
     assert orders.status_code == 200
     assert trades.status_code == 200
-    assert orders.json()[0]["stock_name"] == "Tencent Holdings"
+    assert orders.json()["items"][0]["stock_name"] == "Tencent Holdings"
     assert trades.json()[0]["stock_name"] == "Tencent Holdings"
+
+
+def test_list_orders_returns_filtered_pagination_envelope(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    account_id = client.post(
+        "/paper/accounts", json={"name": "paged", "initial_cash": "100000.00"}, headers=headers
+    ).json()["id"]
+    repo = PaperTradingRepository(session)
+    repo.create_order(account_id, "000001", OrderSide.BUY, 100, Decimal("10"), date(2026, 8, 1), OrderStatus.ACCEPTED)
+    second = repo.create_order(
+        account_id, "000002", OrderSide.BUY, 100, Decimal("20"), date(2026, 8, 2), OrderStatus.ACCEPTED
+    )
+    latest = repo.create_order(
+        account_id, "000003", OrderSide.BUY, 100, Decimal("30"), date(2026, 8, 2), OrderStatus.ACCEPTED
+    )
+    repo.create_order(account_id, "000004", OrderSide.BUY, 100, Decimal("40"), date(2026, 8, 3), OrderStatus.ACCEPTED)
+    session.commit()
+
+    response = client.get(
+        f"/paper/accounts/{account_id}/orders?start_date=2026-08-01&end_date=2026-08-02&page=1&page_size=2",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["id"] for item in payload["items"]] == [latest.id, second.id]
+    assert payload["page"] == 1
+    assert payload["page_size"] == 2
+    assert payload["total_count"] == 3
+    assert payload["total_pages"] == 2
+
+
+def test_list_orders_validates_and_normalizes_pagination(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    account_id = client.post(
+        "/paper/accounts", json={"name": "paged", "initial_cash": "100000.00"}, headers=headers
+    ).json()["id"]
+    repo = PaperTradingRepository(session)
+    only_order = repo.create_order(
+        account_id, "000001", OrderSide.BUY, 100, Decimal("10"), date(2026, 8, 1), OrderStatus.ACCEPTED
+    )
+    session.commit()
+
+    invalid_page = client.get(f"/paper/accounts/{account_id}/orders?page=0", headers=headers)
+    invalid_size = client.get(f"/paper/accounts/{account_id}/orders?page_size=101", headers=headers)
+    invalid_range = client.get(
+        f"/paper/accounts/{account_id}/orders?start_date=2026-08-02&end_date=2026-08-01", headers=headers
+    )
+    normalized = client.get(f"/paper/accounts/{account_id}/orders?page=99", headers=headers)
+    empty = client.get(
+        f"/paper/accounts/{account_id}/orders?start_date=2026-08-02&end_date=2026-08-02", headers=headers
+    )
+
+    assert invalid_page.status_code == 422
+    assert invalid_size.status_code == 422
+    assert invalid_range.status_code == 422
+    assert normalized.json()["page"] == 1
+    assert [item["id"] for item in normalized.json()["items"]] == [only_order.id]
+    assert empty.json() == {"items": [], "page": 1, "page_size": 50, "total_count": 0, "total_pages": 0}
 
 
 def test_create_etf_order_resolves_etf_names_and_rejects_unreviewed_etf(monkeypatch, sqlite_session):
@@ -277,7 +348,7 @@ def test_create_etf_order_resolves_etf_names_and_rejects_unreviewed_etf(monkeypa
 
     orders = client.get(f"/paper/accounts/{account_id}/orders", headers=headers)
     trades = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
-    assert orders.json()[0]["stock_name"] == "CSI 300 ETF"
+    assert orders.json()["items"][0]["stock_name"] == "CSI 300 ETF"
     assert trades.json()[0]["stock_name"] == "CSI 300 ETF"
 
     rejected = client.post(

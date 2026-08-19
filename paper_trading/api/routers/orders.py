@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from math import ceil
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import (
@@ -13,6 +16,8 @@ from paper_trading.api.response_enrichment import enrich_security_names
 from paper_trading.domain.errors import PaperTradingError
 from paper_trading.schemas.orders import (
     CreateOrderRequest,
+    OrderListQuery,
+    OrderListResponse,
     OrderResponse,
     TradeResponse,
     TradeValidityCheckResponse,
@@ -60,14 +65,29 @@ def create_order(
     return order
 
 
-@router.get("/accounts/{account_id}/orders", response_model=list[OrderResponse])
+@router.get("/accounts/{account_id}/orders", response_model=OrderListResponse)
 def list_orders(
     account_id: int,
+    query: Annotated[OrderListQuery, Query()],
     session: Session = Depends(get_session),
     provider: SecurityNameProvider = Depends(get_security_name_provider),
 ):
-    rows = PaperTradingRepository(session).list_orders(account_id)
-    return enrich_security_names(rows, OrderResponse, provider)
+    rows, total_count = PaperTradingRepository(session).list_orders_page(
+        account_id, query.start_date, query.end_date, query.page, query.page_size
+    )
+    total_pages = ceil(total_count / query.page_size)
+    page = min(query.page, total_pages) if total_pages else 1
+    if page != query.page:
+        rows, total_count = PaperTradingRepository(session).list_orders_page(
+            account_id, query.start_date, query.end_date, page, query.page_size
+        )
+    return OrderListResponse(
+        items=enrich_security_names(rows, OrderResponse, provider),
+        page=page,
+        page_size=query.page_size,
+        total_count=total_count,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/orders/{order_id}", response_model=OrderResponse)
