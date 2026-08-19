@@ -3,9 +3,9 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { deleteAccount, listAccounts, listCashLedger, listPositions } from "@/lib/api-client";
-import type { Account, CashLedgerEntry, ImportPositionsResult, Position } from "@/lib/types";
-import { CashLedgerTable, PositionTable } from "../trading/trading-tables";
+import { deleteAccount, listAccounts, listPositions } from "@/lib/api-client";
+import type { Account, ImportPositionsResult, Position } from "@/lib/types";
+import { PositionTable } from "../trading/trading-tables";
 import { AccountList } from "./account-list";
 import { CashFlowModal } from "./cash-flow-modal";
 import { CreateAccountForm } from "./create-account-form";
@@ -19,7 +19,6 @@ export function AccountsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
-  const [cashLedger, setCashLedger] = useState<CashLedgerEntry[]>([]);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [feeEditorAccount, setFeeEditorAccount] = useState<Account | null>(null);
   const [feeEditorOpen, setFeeEditorOpen] = useState(false);
@@ -32,7 +31,6 @@ export function AccountsPage() {
   selectedAccountIdRef.current = selectedAccountId;
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId) ?? null;
-  const cashAvailable = cashLedger.reduce((sum, entry) => sum + Number(entry.amount), 0).toFixed(4);
 
   async function loadAccountDetails(accountId: number, clearExisting = false) {
     if (!accountId) {
@@ -42,12 +40,8 @@ export function AccountsPage() {
     setDetailError(null);
     if (clearExisting) {
       setPositions([]);
-      setCashLedger([]);
     }
-    const [nextPositions, nextCashLedger] = await Promise.allSettled([
-      listPositions(accountId),
-      listCashLedger(accountId)
-    ]);
+    const [nextPositions] = await Promise.allSettled([listPositions(accountId)]);
 
     if (requestId !== requestIdRef.current) {
       return;
@@ -60,12 +54,6 @@ export function AccountsPage() {
     } else {
       errors.push(nextPositions.reason instanceof Error ? nextPositions.reason.message : "Failed to load positions");
     }
-    if (nextCashLedger.status === "fulfilled") {
-      setCashLedger(nextCashLedger.value);
-    } else {
-      errors.push(nextCashLedger.reason instanceof Error ? nextCashLedger.reason.message : "Failed to load cash ledger");
-    }
-
     if (errors.length > 0) {
       setDetailError(errors.join("; "));
     }
@@ -119,7 +107,6 @@ export function AccountsPage() {
       setSelectedAccountId(null);
       setImportSuccess(null);
       setPositions([]);
-      setCashLedger([]);
       setDetailError(null);
       return;
     }
@@ -264,16 +251,10 @@ export function AccountsPage() {
               Imported {importSuccess.imported_count} position{importSuccess.imported_count !== 1 ? "s" : ""} across {importSuccess.lots_count} lot{importSuccess.lots_count !== 1 ? "s" : ""}.
             </div>
           ) : null}
-          <div className="grid grid--two">
-            <section className="panel">
-              <h2>Positions</h2>
-              <PositionTable density="compact" positions={positions} />
-            </section>
-            <section className="panel">
-              <h2>Cash Ledger</h2>
-              <CashLedgerTable density="compact" entries={cashLedger} />
-            </section>
-          </div>
+          <section className="panel">
+            <h2>Positions</h2>
+            <PositionTable density="compact" positions={positions} />
+          </section>
         </div>
       ) : null}
       <EditAccountFeesModal
@@ -293,7 +274,7 @@ export function AccountsPage() {
       />
       <CashFlowModal
         account={selectedAccount}
-        cashAvailable={cashAvailable}
+        cashAvailable={selectedAccount?.cash_available ?? "0.0000"}
         mode={cashFlowMode ?? "deposit"}
         open={cashFlowMode !== null}
         onClose={() => setCashFlowMode(null)}

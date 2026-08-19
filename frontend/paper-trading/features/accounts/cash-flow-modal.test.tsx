@@ -16,6 +16,7 @@ const demoAccount = {
   id: 1,
   name: "demo",
   initial_cash: "100000.00",
+  cash_available: "100000.0000",
   status: "active",
   base_currency: "CNY",
   fee_preset: "a_share",

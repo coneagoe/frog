@@ -2,6 +2,7 @@ export type Account = {
   id: number;
   name: string;
   initial_cash: string;
+  cash_available: string;
   status: string;
   base_currency: string;
   fee_preset: string;

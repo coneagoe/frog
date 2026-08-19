@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAccount, deleteAccount, depositCash, importPositions, listAccounts, listCashLedger, listPositions, updateAccountFees, withdrawCash } from "@/lib/api-client";
+import { createAccount, deleteAccount, depositCash, importPositions, listAccounts, listPositions, updateAccountFees, withdrawCash } from "@/lib/api-client";
 import { AccountsPage } from "./accounts-page";
 
 // Return the same URLSearchParams instance across renders for stable references.
@@ -18,7 +18,6 @@ vi.mock("@/lib/api-client", () => ({
   importPositions: vi.fn(),
   listAccounts: vi.fn(),
   listPositions: vi.fn(),
-  listCashLedger: vi.fn(),
   updateAccountFees: vi.fn(),
   withdrawCash: vi.fn()
 }));
@@ -29,7 +28,6 @@ const depositCashMock = vi.mocked(depositCash);
 const importPositionsMock = vi.mocked(importPositions);
 const listAccountsMock = vi.mocked(listAccounts);
 const listPositionsMock = vi.mocked(listPositions);
-const listCashLedgerMock = vi.mocked(listCashLedger);
 const updateAccountFeesMock = vi.mocked(updateAccountFees);
 const withdrawCashMock = vi.mocked(withdrawCash);
 
@@ -37,6 +35,7 @@ const demoAccount = {
   id: 1,
   name: "demo",
   initial_cash: "100000.00",
+  cash_available: "100000.0000",
   status: "active",
   base_currency: "CNY",
   fee_preset: "a_share",
@@ -59,7 +58,6 @@ describe("AccountsPage", () => {
   it("renders existing accounts", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -88,7 +86,6 @@ describe("AccountsPage", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     createAccountMock.mockResolvedValue(demoAccount);
 
     render(<AccountsPage />);
@@ -107,7 +104,6 @@ describe("AccountsPage", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     createAccountMock.mockResolvedValue(demoAccount);
 
     render(<AccountsPage />);
@@ -202,7 +198,6 @@ describe("AccountsPage", () => {
   it("keeps account fee details out of the account list", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -229,7 +224,6 @@ describe("AccountsPage", () => {
       .mockResolvedValueOnce([demoAccount])
       .mockResolvedValueOnce([]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     deleteAccountMock.mockResolvedValue(undefined);
     const confirmMock = vi.spyOn(window, "confirm").mockReturnValue(true);
 
@@ -250,7 +244,6 @@ describe("AccountsPage", () => {
   it("does not delete an account when confirmation is cancelled", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     vi.spyOn(window, "confirm").mockReturnValue(false);
 
     render(<AccountsPage />);
@@ -265,7 +258,6 @@ describe("AccountsPage", () => {
       .mockResolvedValueOnce([demoAccount])
       .mockResolvedValueOnce([]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     deleteAccountMock.mockResolvedValue(undefined);
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
@@ -285,12 +277,11 @@ describe("AccountsPage", () => {
   });
 
   it("re-selects the first valid account after deleting the selected account", async () => {
-    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
     listAccountsMock
       .mockResolvedValueOnce([demoAccount, account2])
       .mockResolvedValueOnce([account2]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     deleteAccountMock.mockResolvedValue(undefined);
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
@@ -307,19 +298,15 @@ describe("AccountsPage", () => {
     // The remaining account (prod) should be auto-selected and its details loaded
     await waitFor(() => {
       expect(listPositionsMock).toHaveBeenCalledWith(2);
-      expect(listCashLedgerMock).toHaveBeenCalledWith(2);
     });
     expect(screen.getByText("Positions")).toBeInTheDocument();
     expect(screen.queryByText("No paper accounts yet")).not.toBeInTheDocument();
   });
 
-  it("loads positions and cash ledger for the first account on initial load", async () => {
+  it("loads positions without requesting the cash ledger for the first account on initial load", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([
       { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00", mark_price: "12.50", price_source: "real_time", unrealized_pnl: "250.00" }
-    ]);
-    listCashLedgerMock.mockResolvedValue([
-      { id: 1, account_id: 1, event_type: "deposit", amount: "100000.00", note: "Initial deposit" }
     ]);
 
     render(<AccountsPage />);
@@ -327,46 +314,27 @@ describe("AccountsPage", () => {
     // Wait for the first account to be auto-selected and Positions panel to render
     expect(await screen.findByText("Positions")).toBeInTheDocument();
     expect(listPositionsMock).toHaveBeenCalledWith(1);
-    expect(listCashLedgerMock).toHaveBeenCalledWith(1);
-    expect(screen.getByText("Cash Ledger")).toBeInTheDocument();
+    expect(screen.queryByText("Cash Ledger")).not.toBeInTheDocument();
   });
 
-  it("uses compact tables for account positions and cash ledger", async () => {
+  it("uses a compact table for account positions", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([
       { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00", mark_price: "12.50", price_source: "real_time", unrealized_pnl: "250.00" }
-    ]);
-    listCashLedgerMock.mockResolvedValue([
-      { id: 1, account_id: 1, event_type: "deposit", amount: "100000.00", note: "Initial deposit" }
     ]);
 
     const { container } = render(<AccountsPage />);
 
     expect(await screen.findByText("Positions")).toBeInTheDocument();
     const compactTables = container.querySelectorAll(".table.table--compact");
-    expect(compactTables).toHaveLength(2);
-    expect(container.querySelectorAll(".table-wrap.table-wrap--compact")).toHaveLength(2);
+    expect(compactTables).toHaveLength(1);
+    expect(container.querySelectorAll(".table-wrap.table-wrap--compact")).toHaveLength(1);
   });
 
-  it("renders cash ledger NAV and share delta columns", async () => {
-    listAccountsMock.mockResolvedValue([demoAccount]);
-    listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([
-      { id: 1, account_id: 1, event_type: "withdrawal", amount: "-5000.0000", trade_date: "2026-07-20", net_asset_value: "1.250000", share_delta: "-4000.000000", note: "cash out" }
-    ]);
-
-    render(<AccountsPage />);
-
-    expect(await screen.findByText("Withdrawal")).toBeInTheDocument();
-    expect(screen.getByText("1.250000")).toBeInTheDocument();
-    expect(screen.getByText("-4000.000000")).toBeInTheDocument();
-  });
-
-  it("switches positions and cash ledger when selecting a different account", async () => {
-    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+  it("switches positions without requesting the cash ledger when selecting a different account", async () => {
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -378,42 +346,33 @@ describe("AccountsPage", () => {
     // Wait for the Positions panel to appear for account 2
     expect(await screen.findByText("Positions")).toBeInTheDocument();
     expect(listPositionsMock).toHaveBeenCalledWith(2);
-    expect(listCashLedgerMock).toHaveBeenCalledWith(2);
   });
 
-  it("renders fulfilled tables and shows error banner when detail loading partially fails", async () => {
+  it("renders positions without a detail error when the request succeeds", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([
       { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00", mark_price: "12.50", price_source: "real_time", unrealized_pnl: "250.00" }
     ]);
-    listCashLedgerMock.mockRejectedValue(new Error("Ledger unavailable"));
 
     render(<AccountsPage />);
 
-    // Both tables should render even with partial failure
     expect(await screen.findByText("Positions")).toBeInTheDocument();
-    // Positions data should be visible
     expect(screen.getByText("000001")).toBeInTheDocument();
-    // Cash Ledger table should still render (even if empty/errored)
-    expect(screen.getByText("Cash Ledger")).toBeInTheDocument();
-    // Error banner should be visible for the failed portion
-    expect(screen.getByRole("alert")).toHaveTextContent("Ledger unavailable");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("selects account from valid ?accountId search param", async () => {
     // Set accountId=2 which is valid
     mockSearchParams.set("accountId", "2");
-    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
     // Should select account 2, not account 1
     await waitFor(() => {
       expect(listPositionsMock).toHaveBeenCalledWith(2);
-      expect(listCashLedgerMock).toHaveBeenCalledWith(2);
     });
     expect(screen.getByText("Positions")).toBeInTheDocument();
   });
@@ -421,17 +380,15 @@ describe("AccountsPage", () => {
   it("falls back to first account when ?accountId is invalid", async () => {
     // Set accountId=999 which doesn't exist
     mockSearchParams.set("accountId", "999");
-    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
     // Should fall back to first account (id=1)
     await waitFor(() => {
       expect(listPositionsMock).toHaveBeenCalledWith(1);
-      expect(listCashLedgerMock).toHaveBeenCalledWith(1);
     });
     expect(screen.getByText("Positions")).toBeInTheDocument();
   });
@@ -440,10 +397,9 @@ describe("AccountsPage", () => {
     // User visits /accounts?accountId=1, then clicks View for account 2
     // Account 2 should remain selected, not reverted to account 1
     mockSearchParams.set("accountId", "1");
-    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -455,7 +411,6 @@ describe("AccountsPage", () => {
 
     // Clear call counts so we can detect new calls
     listPositionsMock.mockClear();
-    listCashLedgerMock.mockClear();
 
     // Click View for account 2
     await userEvent.click(screen.getByRole("button", { name: "View prod" }));
@@ -463,19 +418,16 @@ describe("AccountsPage", () => {
     // Account 2 should be selected and its details loaded
     await waitFor(() => {
       expect(listPositionsMock).toHaveBeenCalledWith(2);
-      expect(listCashLedgerMock).toHaveBeenCalledWith(2);
     });
     // Account 2 should remain selected, not reverted to account 1
     // listPositions should NOT have been called with 1 again
     expect(listPositionsMock).not.toHaveBeenCalledWith(1);
-    expect(listCashLedgerMock).not.toHaveBeenCalledWith(1);
   });
 
   it("updates selected account when ?accountId changes to a different valid account", async () => {
-    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     // Render with accountId=1
     mockSearchParams.set("accountId", "1");
@@ -501,7 +453,6 @@ describe("AccountsPage", () => {
   it("opens the fee editor from the selected account header", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -516,7 +467,6 @@ describe("AccountsPage", () => {
     const updatedAccount = { ...demoAccount, commission_rate: "0.0002" };
     listAccountsMock.mockResolvedValueOnce([demoAccount]).mockResolvedValueOnce([updatedAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     updateAccountFeesMock.mockResolvedValue(updatedAccount);
 
     render(<AccountsPage />);
@@ -535,7 +485,6 @@ describe("AccountsPage", () => {
     const account0057 = { ...demoAccount, commission_rate: "0.005700" };
     listAccountsMock.mockResolvedValue([account0057]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Edit fees" }));
@@ -548,7 +497,6 @@ describe("AccountsPage", () => {
     const updatedAccount = { ...demoAccount, commission_rate: "0.0057" };
     listAccountsMock.mockResolvedValueOnce([demoAccount]).mockResolvedValueOnce([updatedAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     updateAccountFeesMock.mockResolvedValue(updatedAccount);
 
     render(<AccountsPage />);
@@ -562,7 +510,7 @@ describe("AccountsPage", () => {
   });
 
   it("does not reload saved account details when that account is no longer selected", async () => {
-    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
     const updatedAccount = { ...demoAccount, commission_rate: "0.0002" };
 
     // Control when the fee update resolves so we can switch accounts mid-save
@@ -571,7 +519,6 @@ describe("AccountsPage", () => {
 
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
     expect(await screen.findByText("Positions")).toBeInTheDocument();
@@ -592,7 +539,6 @@ describe("AccountsPage", () => {
 
     // Clear call counts so we can detect any stale calls for account 1
     listPositionsMock.mockClear();
-    listCashLedgerMock.mockClear();
 
     // Let the save complete
     resolveUpdate(updatedAccount);
@@ -600,14 +546,12 @@ describe("AccountsPage", () => {
     // After save completes, details for account 1 should NOT be reloaded
     await waitFor(() => {
       expect(listPositionsMock).not.toHaveBeenCalledWith(1);
-      expect(listCashLedgerMock).not.toHaveBeenCalledWith(1);
     });
   });
 
   it("shows validation errors without sending an empty patch", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Edit fees" }));
@@ -620,7 +564,6 @@ describe("AccountsPage", () => {
   it("shows an Import positions button on the selected account panel", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -631,7 +574,6 @@ describe("AccountsPage", () => {
   it("opens the import modal with a one-time import note", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -644,7 +586,6 @@ describe("AccountsPage", () => {
   it("imports positions, shows success message, closes modal, and refreshes account details", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     importPositionsMock.mockResolvedValue({ imported_count: 2, lots_count: 5 });
 
     render(<AccountsPage />);
@@ -661,7 +602,6 @@ describe("AccountsPage", () => {
       positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15", market: "a_share" }]
     });
     await waitFor(() => expect(listPositionsMock).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(listCashLedgerMock).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("dialog", { name: "Import initial positions for demo" })).not.toBeInTheDocument();
 
     const success = screen.getByRole("status");
@@ -671,7 +611,6 @@ describe("AccountsPage", () => {
   it("clears the success message when opening the import modal again", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     importPositionsMock.mockResolvedValue({ imported_count: 1, lots_count: 1 });
 
     render(<AccountsPage />);
@@ -692,10 +631,9 @@ describe("AccountsPage", () => {
   });
 
   it("clears the success message when selecting a different account", async () => {
-    const account2 = { id: 2, name: "prod", initial_cash: "50000.00", status: "active", base_currency: "CNY" };
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     importPositionsMock.mockResolvedValue({ imported_count: 1, lots_count: 1 });
 
     render(<AccountsPage />);
@@ -718,7 +656,6 @@ describe("AccountsPage", () => {
   it("shows backend validation errors without closing the modal", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
     importPositionsMock.mockRejectedValue(new Error("Account already has positions"));
 
     render(<AccountsPage />);
@@ -743,7 +680,6 @@ describe("AccountsPage", () => {
   it("shows Deposit and Withdraw buttons on the selected account panel", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -755,7 +691,6 @@ describe("AccountsPage", () => {
   it("opens deposit modal from the Deposit button", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -769,7 +704,6 @@ describe("AccountsPage", () => {
   it("opens withdraw modal from the Withdraw button", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([]);
 
     render(<AccountsPage />);
 
@@ -785,7 +719,6 @@ describe("AccountsPage", () => {
 
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);
-    listCashLedgerMock.mockResolvedValue([ledgerEntry]);
     depositCashMock.mockResolvedValue({
       account_id: 1,
       cash_available: "110000.0000",
