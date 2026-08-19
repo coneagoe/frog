@@ -144,6 +144,21 @@ export type Order = {
   comment: string | null;
 };
 
+export type OrderPage = {
+  items: Order[];
+  page: number;
+  page_size: number;
+  total_count: number;
+  total_pages: number;
+};
+
+export type ListOrdersParams = {
+  start_date?: string;
+  end_date?: string;
+  page?: number;
+  page_size?: number;
+};
+
 export type Trade = {
   id: number;
   order_id: number;

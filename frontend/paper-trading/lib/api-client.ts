@@ -10,8 +10,10 @@ import type {
   CreateOrderInput,
   ImportPositionsInput,
   ImportPositionsResult,
+  ListOrdersParams,
   MatchingRun,
   Order,
+  OrderPage,
   Position,
   Snapshot,
   Trade,
@@ -62,8 +64,17 @@ export function listPositions(accountId: number): Promise<Position[]> {
   return apiGet<Position[]>(`/accounts/${accountId}/positions`);
 }
 
-export function listOrders(accountId: number): Promise<Order[]> {
-  return apiGet<Order[]>(`/accounts/${accountId}/orders`);
+export function listOrders(accountId: number, params?: ListOrdersParams): Promise<OrderPage> {
+  const query = new URLSearchParams();
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        query.set(key, String(value));
+      }
+    }
+  }
+  const queryString = query.toString();
+  return apiGet<OrderPage>(`/accounts/${accountId}/orders${queryString ? `?${queryString}` : ""}`);
 }
 
 export function createOrder(accountId: number, input: CreateOrderInput): Promise<Order> {
