@@ -143,7 +143,7 @@ def test_create_order_queues_without_matching(monkeypatch, sqlite_session):
     assert payload["filled_quantity"] == 0
     trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
     trades = trades_response.json()
-    assert trades == []
+    assert trades == {"items": [], "page": 1, "page_size": 50, "total_count": 0, "total_pages": 0}
 
 
 def test_create_order_idempotency_replays_original_order(monkeypatch, sqlite_session):
