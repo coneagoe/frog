@@ -17,7 +17,6 @@ import type {
   OrderPage,
   Position,
   Snapshot,
-  Trade,
   TradePage,
   UpdateAccountFeesInput
 } from "./types";

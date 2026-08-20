@@ -159,9 +159,7 @@ def list_trades(
     provider: SecurityNameProvider = Depends(get_security_name_provider),
 ):
     repo = PaperTradingRepository(session)
-    rows, total_count = repo.list_trades_page(
-        account_id, query.start_date, query.end_date, query.page, query.page_size
-    )
+    rows, total_count = repo.list_trades_page(account_id, query.start_date, query.end_date, query.page, query.page_size)
     total_pages = ceil(total_count / query.page_size)
     page = min(query.page, total_pages) if total_pages else 1
     if page != query.page:
