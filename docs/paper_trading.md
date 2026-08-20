@@ -519,7 +519,16 @@ Snapshots are generated after matching and use close prices for valuation.
 
 The response includes:
 
-- Activity: daily, weekly, and monthly order/trade frequency.
+- Activity: nullable paper-order activity summaries. For accounts with orders,
+  coverage runs from the earliest order's `trade_date` through the current
+  `Asia/Shanghai` date. It reports daily, ISO-weekly, and calendar-month
+  averages for total, successful, and failed orders across every period in that
+  inclusive range, including zero-order periods, weekends, holidays, and
+  partial boundary periods. Total counts all paper orders; successful counts
+  only `filled` orders; failed counts only `rejected` orders. Activity is
+  `null` when an account has no orders. The UI presents these summaries rather
+  than period-detail tables; all non-Activity panels retain their current
+  behavior.
 - Execution: fill rate, rejection rate, and reject reason distribution.
 - Trade quality: full-position round-trip win rate, payoff ratio, profit factor, average win/loss, consecutive wins/losses, and holding days.
 - Risk: total return, max drawdown, current drawdown, and optional Sharpe, Sortino, and Calmar metrics.
