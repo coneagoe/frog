@@ -1,9 +1,11 @@
+from datetime import date
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
+from paper_trading.domain.enums import OrderSide, OrderStatus
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -40,6 +42,15 @@ def test_get_account_analytics_returns_activity_contract_for_populated_account(m
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("api-analytics-populated", Decimal("100000.00"))
+    repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 8, 20),
+        OrderStatus.ACCEPTED,
+    )
     sqlite_session.commit()
     app = create_app()
     app.dependency_overrides[get_session] = lambda: sqlite_session

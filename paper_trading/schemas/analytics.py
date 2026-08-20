@@ -15,16 +15,6 @@ class ActivitySummary(BaseModel):
     failed_orders: Decimal
 
 
-class ActivityBucket(BaseModel):
-    """Compatibility model for the pre-activity analytics service."""
-
-    period: str
-    order_count: int
-    trade_count: int
-    filled_count: int
-    rejected_count: int
-
-
 class ActivityAnalytics(BaseModel):
     coverage_start: date
     coverage_end: date
