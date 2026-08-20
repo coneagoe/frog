@@ -11,6 +11,7 @@ from common.const import COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_security_name_provider, get_session
 from paper_trading.domain.enums import ETFEligibilityStatus, Market, OrderSide, OrderStatus
+from paper_trading.schemas.orders import TradeListResponse
 from paper_trading.storage.market_data import StorageMarketDataProvider
 from paper_trading.storage.models import PaperCashLedger, PaperMatchingRun, PaperTrade
 from paper_trading.storage.repository import PaperTradingRepository
@@ -71,6 +72,22 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
     assert payload["symbol"] == "000001"
     assert payload["quantity"] == 100
     assert payload["limit_price"] == "10.0000"
+
+
+def test_trade_list_response_exposes_pagination_envelope():
+    response = TradeListResponse(
+        items=[],
+        page=1,
+        page_size=50,
+        total_count=0,
+        total_pages=0,
+    )
+
+    assert response.items == []
+    assert response.page == 1
+    assert response.page_size == 50
+    assert response.total_count == 0
+    assert response.total_pages == 0
 
 
 def test_create_order_queues_without_matching(monkeypatch, sqlite_session):

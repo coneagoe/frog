@@ -107,3 +107,11 @@ class TradeResponse(BaseModel):
     comment: str | None = None
     market: str = "a_share"
     stock_name: str | None = None
+
+
+class TradeListResponse(BaseModel):
+    items: list[TradeResponse]
+    page: int
+    page_size: int
+    total_count: int
+    total_pages: int
