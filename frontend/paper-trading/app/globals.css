@@ -1,14 +1,32 @@
 :root {
-  color-scheme: dark;
-  --bg: #0f172a;
-  --panel: #111827;
-  --panel-soft: #1f2937;
-  --border: #334155;
-  --text: #e5e7eb;
-  --muted: #94a3b8;
-  --accent: #38bdf8;
-  --danger: #f87171;
-  --success: #34d399;
+  color-scheme: light;
+
+  /* Ledger Desk tokens: light neutral surfaces, dark ink, grey-green borders */
+  --bg: #f4f5f1;
+  --panel: #ffffff;
+  --panel-soft: #edf0e9;
+  --border: #ccd4c6;
+  --border-strong: #a9b5a1;
+  --text: #1f2933;
+  --muted: #5b6a60;
+  --accent: #1d4ed8;
+  --accent-strong: #1e40af;
+  --accent-ink: #ffffff;
+  --accent-soft: #e9eefe;
+  --focus: #1d4ed8;
+  --success: #146c3e;
+  --success-soft: #e6f3ec;
+  --danger: #b42318;
+  --danger-soft: #fbeae7;
+  --row-hover: #f6f7f2;
+  --radius-panel: 8px;
+  --radius-control: 6px;
+  --radius-dialog: 8px;
+  --radius-badge: 999px;
+  --control-height: 36px;
+  --shadow-panel: 0 1px 2px rgba(31, 41, 51, 0.06);
+  --shadow-dialog: 0 16px 40px rgba(31, 41, 51, 0.18);
+  --font-body: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
 * {
@@ -19,7 +37,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body);
 }
 
 a {
@@ -33,27 +51,39 @@ button {
   font: inherit;
 }
 
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--accent);
+}
+
 .app-shell__header {
   align-items: center;
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(255, 255, 255, 0.92);
   border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
-  padding: 14px 24px;
+  padding: 12px 24px;
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
 .app-shell__brand {
-  color: #f8fafc;
+  color: var(--text);
   font-size: 18px;
   font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .app-shell__nav {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
 .app-shell__nav a {
@@ -67,12 +97,12 @@ button {
 .app-shell__main {
   margin: 0 auto;
   max-width: 1440px;
-  padding: 24px;
+  padding: 20px 24px;
 }
 
 .page {
   display: grid;
-  gap: 20px;
+  gap: 18px;
 }
 
 .page__header {
@@ -94,11 +124,19 @@ button {
 .account-selector {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .page__header select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  font-size: 14px;
+  min-height: var(--control-height);
   min-width: 180px;
+  padding: 0 10px;
 }
 
 .page__header h1,
@@ -109,8 +147,9 @@ button {
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  padding: 16px;
 }
 
 .filter-bar {
@@ -134,11 +173,13 @@ button {
 }
 
 .filter-bar__field input {
-  background: var(--panel-soft);
+  background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   color: var(--text);
-  padding: 10px 12px;
+  font-size: 14px;
+  min-height: var(--control-height);
+  padding: 0 12px;
 }
 
 .filter-error {
@@ -150,7 +191,8 @@ button {
 .pagination {
   align-items: center;
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   justify-content: flex-end;
 }
 
@@ -163,13 +205,15 @@ button {
 .panel__header {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .grid {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .grid--two {
@@ -186,7 +230,7 @@ button {
 
 .summary-grid {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -201,7 +245,8 @@ button {
 
 .actions {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .actions a {
@@ -226,14 +271,14 @@ button {
 .table th,
 .table td {
   border-bottom: 1px solid var(--border);
-  padding: 10px 8px;
+  padding: 8px 10px;
   text-align: left;
   white-space: nowrap;
 }
 
 .table--compact th,
 .table--compact td {
-  padding: 8px 6px;
+  padding: 6px 8px;
 }
 
 .table--compact th {
@@ -245,9 +290,15 @@ button {
 }
 
 .table th {
+  background: var(--panel-soft);
   color: var(--muted);
   font-size: 12px;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+.table tbody tr:hover > td {
+  background: var(--row-hover);
 }
 
 .numeric {
@@ -280,7 +331,7 @@ button {
 
 .form__fieldset {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   display: grid;
   gap: 12px;
   margin: 0;
@@ -301,19 +352,32 @@ button {
 .form select {
   background: var(--panel-soft);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   color: var(--text);
-  padding: 10px 12px;
+  font-size: 14px;
+  min-height: var(--control-height);
+  padding: 0 12px;
 }
 
 .button {
+  align-items: center;
   background: var(--accent);
-  border: 0;
-  border-radius: 10px;
-  color: #082f49;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  color: var(--accent-ink);
   cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
   font-weight: 700;
-  padding: 10px 14px;
+  gap: 6px;
+  justify-content: center;
+  min-height: var(--control-height);
+  padding: 0 14px;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 .button:disabled {
@@ -322,29 +386,37 @@ button {
 }
 
 .button--secondary {
-  background: var(--panel-soft);
+  background: var(--panel);
   border: 1px solid var(--border);
   color: var(--text);
+}
+
+.button--secondary:hover:not(:disabled) {
+  background: var(--panel-soft);
+  border-color: var(--border-strong);
 }
 
 .status-badge {
   background: var(--panel-soft);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-badge);
+  color: var(--muted);
   display: inline-block;
   font-size: 12px;
-  padding: 3px 8px;
+  padding: 2px 8px;
 }
 
 .status-badge--active,
 .status-badge--filled,
 .status-badge--completed {
+  background: var(--success-soft);
   border-color: var(--success);
   color: var(--success);
 }
 
 .status-badge--rejected,
 .status-badge--failed {
+  background: var(--danger-soft);
   border-color: var(--danger);
   color: var(--danger);
 }
@@ -359,16 +431,26 @@ button {
 }
 
 .error-banner {
-  background: rgba(248, 113, 113, 0.12);
+  background: var(--danger-soft);
   border: 1px solid var(--danger);
-  border-radius: 10px;
-  color: #fecaca;
+  border-radius: var(--radius-control);
+  color: var(--danger);
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+.success-banner {
+  background: var(--success-soft);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-control);
+  color: var(--success);
+  font-size: 14px;
   padding: 10px 12px;
 }
 
 .empty-state {
-  border: 1px dashed var(--border);
-  border-radius: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-panel);
   color: var(--muted);
   padding: 20px;
   text-align: center;
@@ -384,7 +466,7 @@ button {
 
 .modal-backdrop {
   align-items: center;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(31, 41, 51, 0.45);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -395,7 +477,8 @@ button {
 .modal {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-dialog);
+  box-shadow: var(--shadow-dialog);
   max-height: 90vh;
   max-width: 480px;
   overflow-y: auto;
@@ -413,7 +496,7 @@ button {
   border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 14px 20px;
 }
 
 .modal__header h2 {
@@ -462,10 +545,10 @@ button {
 }
 
 .import-modal__rules {
-  background: rgba(56, 189, 248, 0.08);
-  border: 1px solid rgba(56, 189, 248, 0.28);
-  border-radius: 12px;
-  color: #bae6fd;
+  background: var(--accent-soft);
+  border: 1px solid rgba(29, 78, 216, 0.24);
+  border-radius: var(--radius-panel);
+  color: var(--accent-strong);
   display: grid;
   gap: 8px;
   padding: 12px;
@@ -500,9 +583,9 @@ button {
 
 .import-grid__row {
   align-items: start;
-  background: rgba(31, 41, 55, 0.72);
+  background: var(--panel-soft);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   padding: 10px;
 }
 
@@ -520,28 +603,22 @@ button {
   font-size: 11px;
 }
 
-.import-grid__field input {
+.import-grid__field input,
+.import-grid__field select {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   color: var(--text);
+  font-size: 14px;
+  min-height: var(--control-height);
   min-width: 0;
-  padding: 10px 12px;
+  padding: 0 12px;
   width: 100%;
 }
 
 .import-grid__field input::placeholder {
-  color: #64748b;
-}
-
-.import-grid__field select {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  min-width: 0;
-  padding: 10px 12px;
-  width: 100%;
+  color: var(--muted);
+  opacity: 0.75;
 }
 
 .import-grid__action {
@@ -550,18 +627,19 @@ button {
 }
 
 .import-grid__action button {
-  background: transparent;
+  background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   color: var(--muted);
   cursor: pointer;
-  padding: 10px 12px;
+  min-height: var(--control-height);
+  padding: 0 12px;
 }
 
 .import-grid__action button:hover,
 .import-grid__action button:focus-visible {
   border-color: var(--danger);
-  color: #fecaca;
+  color: var(--danger);
 }
 
 .import-modal__grid-actions {
@@ -582,12 +660,14 @@ button {
 
 .import-modal__footer-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .modal__footer {
   border-top: 1px solid var(--border);
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
   padding: 14px 20px;
