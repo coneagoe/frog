@@ -46,3 +46,17 @@ Implementation commit: `bd575a2` (`feat: calculate paper order activity averages
 - Validation: `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py -v`
   passed with 14 tests and 1 existing Starlette/httpx deprecation warning.
 - Correction commit: `a2df96b` (`test: stabilize paper activity coverage date`).
+
+## Future-Dated Order Correction
+
+- Activity now takes the `Asia/Shanghai` `coverage_end` from `today_provider`
+  before filtering and excludes orders whose `trade_date` is later than that
+  date. It returns `null` when the account has only future-dated orders.
+- Added service tests for only-future and mixed historical/future orders. The
+  mixed case verifies that total, filled, and rejected averages count only the
+  historical order while preserving the existing daily denominator.
+- Updated `docs/paper_trading.md` and this brief to document the filtering
+  semantics. No frontend files were changed.
+- Validation: `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py -v`
+  passed with 16 tests and 1 existing Starlette/httpx deprecation warning.
+- Future-order correction commit: pending.

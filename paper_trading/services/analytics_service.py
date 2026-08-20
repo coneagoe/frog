@@ -102,10 +102,11 @@ class AnalyticsService:
     # Activity
     # ------------------------------------------------------------------
     def _activity(self, orders: list[PaperOrder]) -> ActivityAnalytics | None:
+        coverage_end = self.today_provider()
+        orders = [order for order in orders if order.trade_date <= coverage_end]
         if not orders:
             return None
         coverage_start = min(order.trade_date for order in orders)
-        coverage_end = self.today_provider()
         return ActivityAnalytics(
             coverage_start=coverage_start,
             coverage_end=coverage_end,

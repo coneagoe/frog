@@ -106,6 +106,58 @@ def test_analytics_activity_is_none_for_empty_account(tmp_path):
     engine.dispose()
 
 
+def test_analytics_activity_is_none_for_only_future_orders(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("future-activity-demo", Decimal("100000.00"))
+    repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 8, 21),
+        OrderStatus.FILLED,
+    )
+
+    analytics = AnalyticsService(repo, today_provider=lambda: date(2026, 8, 20)).get_account_analytics(account.id)
+
+    assert analytics.activity is None
+    engine.dispose()
+
+
+def test_analytics_activity_excludes_future_orders(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("mixed-date-activity-demo", Decimal("100000.00"))
+    repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 8, 20),
+        OrderStatus.FILLED,
+    )
+    repo.create_order(
+        account.id,
+        "000002.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 8, 21),
+        OrderStatus.REJECTED,
+    )
+
+    analytics = AnalyticsService(repo, today_provider=lambda: date(2026, 8, 20)).get_account_analytics(account.id)
+
+    assert analytics.activity is not None
+    assert analytics.activity.coverage_start == date(2026, 8, 20)
+    assert analytics.activity.coverage_end == date(2026, 8, 20)
+    assert analytics.activity.daily.total_orders == Decimal("1.000000")
+    assert analytics.activity.daily.successful_orders == Decimal("1.000000")
+    assert analytics.activity.daily.failed_orders == Decimal("0.000000")
+    engine.dispose()
+
+
 def test_analytics_activity_uses_inclusive_calendar_denominators(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("activity-boundary-demo", Decimal("100000.00"))

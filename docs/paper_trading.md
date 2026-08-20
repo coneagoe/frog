@@ -524,11 +524,12 @@ The response includes:
   `Asia/Shanghai` date. It reports daily, ISO-weekly, and calendar-month
   averages for total, successful, and failed orders across every period in that
   inclusive range, including zero-order periods, weekends, holidays, and
-  partial boundary periods. Total counts all paper orders; successful counts
-  only `filled` orders; failed counts only `rejected` orders. Activity is
-  `null` when an account has no orders. The UI presents these summaries rather
-  than period-detail tables; all non-Activity panels retain their current
-  behavior.
+  partial boundary periods. Orders dated after the current `Asia/Shanghai`
+  date are excluded from Activity; if no orders remain after that filter,
+  Activity is `null`. Total counts all remaining paper orders; successful
+  counts only `filled` orders; failed counts only `rejected` orders. The UI
+  presents these summaries rather than period-detail tables; all non-Activity
+  panels retain their current behavior.
 - Execution: fill rate, rejection rate, and reject reason distribution.
 - Trade quality: full-position round-trip win rate, payoff ratio, profit factor, average win/loss, consecutive wins/losses, and holding days.
 - Risk: total return, max drawdown, current drawdown, and optional Sharpe, Sortino, and Calmar metrics.
