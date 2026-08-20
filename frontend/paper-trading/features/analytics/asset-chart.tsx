@@ -33,5 +33,9 @@ export function AssetChart({ snapshots }: { snapshots: Snapshot[] }) {
     return <EmptyState title="No snapshots yet" description="Run matching to generate account valuation snapshots." />;
   }
 
-  return <div ref={containerRef} />;
+  return (
+    <div className="panel chart-surface">
+      <div ref={containerRef} />
+    </div>
+  );
 }
