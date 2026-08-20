@@ -5,7 +5,9 @@ from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
+from paper_trading.api.routers import analytics as analytics_router
 from paper_trading.domain.enums import OrderSide, OrderStatus
+from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -39,6 +41,11 @@ def test_get_account_analytics_returns_execution_group(monkeypatch, sqlite_sessi
 
 def test_get_account_analytics_returns_activity_contract_for_populated_account(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    monkeypatch.setattr(
+        analytics_router,
+        "AnalyticsService",
+        lambda repo: AnalyticsService(repo, today_provider=lambda: date(2026, 8, 20)),
+    )
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("api-analytics-populated", Decimal("100000.00"))
