@@ -70,11 +70,13 @@ export function TradePage() {
       {!loading && accounts.length === 0 ? <div className="panel">No paper accounts yet. Create an account before trading.</div> : null}
       {error ? <ErrorBanner message={error} /> : null}
       <div className="grid grid--trade">
-        <div className="grid">
-          <label className="panel form">
-            Chart symbol
-            <input aria-label="Chart symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} />
-          </label>
+        <div className="grid chart-workspace">
+          <div className="panel__header chart-workspace__toolbar">
+            <label className="form">
+              Chart symbol
+              <input aria-label="Chart symbol" value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} />
+            </label>
+          </div>
           <PriceChart symbol={symbol} />
         </div>
         <div className="grid">

@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listAccounts, listPositions, listOrders, listTrades, listCashLedger } from "@/lib/api-client";
 import { TradePage } from "./trade-page";
@@ -8,7 +9,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("lightweight-charts", () => ({
-  createChart: vi.fn(() => ({ remove: vi.fn() }))
+  createChart: vi.fn(() => ({ addLineSeries: vi.fn(), remove: vi.fn() }))
 }));
 
 vi.mock("@/lib/api-client", () => ({
@@ -33,8 +34,14 @@ describe("TradePage", () => {
     // Wait for async account loading and assert core text appears
     expect(await screen.findByText(/Submit paper orders/)).toBeInTheDocument();
 
-    // Core trading UI elements are present
-    expect(screen.getByText("Chart symbol")).toBeInTheDocument();
+    const chartSymbol = screen.getByLabelText("Chart symbol");
+    const orderSymbol = screen.getByLabelText("Symbol");
+    expect(chartSymbol.closest(".chart-workspace__toolbar")).toContainElement(chartSymbol);
+    expect(chartSymbol.closest(".panel")).not.toBeInTheDocument();
+    await userEvent.type(chartSymbol, "600519.SH");
+    await userEvent.type(orderSymbol, "000001.SZ");
+    expect(chartSymbol).toHaveValue("600519.SH");
+    expect(orderSymbol).toHaveValue("000001.SZ");
     expect(screen.getByText("Limit Order")).toBeInTheDocument();
 
     // Account history and management sections are NOT rendered
