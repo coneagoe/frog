@@ -603,10 +603,7 @@ class PaperTradingRepository:
         total = query.count()
         offset = (page - 1) * page_size
         orders = (
-            query.order_by(PaperOrder.trade_date.desc(), PaperOrder.id.desc())
-            .offset(offset)
-            .limit(page_size)
-            .all()
+            query.order_by(PaperOrder.trade_date.desc(), PaperOrder.id.desc()).offset(offset).limit(page_size).all()
         )
         return list(orders), total
 
