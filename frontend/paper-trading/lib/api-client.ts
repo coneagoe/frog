@@ -11,12 +11,14 @@ import type {
   ImportPositionsInput,
   ImportPositionsResult,
   ListOrdersParams,
+  ListTradesParams,
   MatchingRun,
   Order,
   OrderPage,
   Position,
   Snapshot,
   Trade,
+  TradePage,
   UpdateAccountFeesInput
 } from "./types";
 
@@ -93,8 +95,17 @@ export function updateOrderComment(orderId: number, comment: string): Promise<Or
   return apiRequest<Order>(`/orders/${orderId}/comment`, { method: "PATCH", body: JSON.stringify({ comment }) });
 }
 
-export function listTrades(accountId: number): Promise<Trade[]> {
-  return apiGet<Trade[]>(`/accounts/${accountId}/trades`);
+export function listTrades(accountId: number, params?: ListTradesParams): Promise<TradePage> {
+  const query = new URLSearchParams();
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        query.set(key, String(value));
+      }
+    }
+  }
+  const queryString = query.toString();
+  return apiGet<TradePage>(`/accounts/${accountId}/trades${queryString ? `?${queryString}` : ""}`);
 }
 
 export function listCashLedger(accountId: number): Promise<CashLedgerEntry[]> {

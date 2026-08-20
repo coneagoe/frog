@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiGet, createAccount, depositCash, importPositions, listOrders, updateOrderComment, withdrawCash } from "./api-client";
+import {
+  ApiError,
+  apiGet,
+  createAccount,
+  depositCash,
+  importPositions,
+  listOrders,
+  listTrades,
+  updateOrderComment,
+  withdrawCash
+} from "./api-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -124,6 +134,45 @@ describe("listOrders", () => {
     vi.stubGlobal("fetch", fetchMock);
     await listOrders(7);
     expect(fetchMock).toHaveBeenCalledWith("/api/paper/accounts/7/orders", expect.anything());
+  });
+});
+
+describe("listTrades", () => {
+  const tradePage = {
+    items: [{ id: 42, account_id: 7, symbol: "AAPL", quantity: 10 }],
+    page: 2,
+    page_size: 25,
+    total_count: 30,
+    total_pages: 2
+  };
+
+  it("resolves with the TradePage envelope and serializes every defined query param", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(tradePage), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      listTrades(7, { start_date: "2026-08-01", end_date: "2026-08-02", page: 2, page_size: 25 })
+    ).resolves.toEqual(tradePage);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/accounts/7/trades?start_date=2026-08-01&end_date=2026-08-02&page=2&page_size=25",
+      expect.anything()
+    );
+  });
+
+  it("omits undefined query params", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(tradePage), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await listTrades(7, { start_date: undefined, end_date: "2026-08-02", page: undefined, page_size: 25 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/accounts/7/trades?end_date=2026-08-02&page_size=25",
+      expect.anything()
+    );
+  });
+
+  it("omits the query string when no params are given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(tradePage), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await listTrades(7);
+    expect(fetchMock).toHaveBeenCalledWith("/api/paper/accounts/7/trades", expect.anything());
   });
 });
 
