@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { DataTable, type Column } from "@/components/data-table";
 import { MoneyText } from "@/components/money-text";
 import { formatBackendLabel, formatDate, formatPercent, formatQuantity, labelStatus } from "@/lib/format";
-import type { ActivityBucket, AnalyticsResponse, RoundTrip, Snapshot } from "@/lib/types";
+import type { ActivitySummary, AnalyticsResponse, RoundTrip, Snapshot } from "@/lib/types";
 import { MetricValueText } from "./analytics-summary";
 import { AssetChart } from "./asset-chart";
 
@@ -13,18 +13,6 @@ function MetricCard({ label, value }: { label: string; value: ReactNode }) {
       <strong>{value}</strong>
     </div>
   );
-}
-
-function ActivityTable({ title, rows }: { title: string; rows: ActivityBucket[] }) {
-  const columns: Column<ActivityBucket>[] = [
-    { key: "period", header: "Period", render: (row) => row.period },
-    { key: "orders", header: "Orders", align: "right", render: (row) => formatQuantity(row.order_count) },
-    { key: "trades", header: "Trades", align: "right", render: (row) => formatQuantity(row.trade_count) },
-    { key: "filled", header: "Filled", align: "right", render: (row) => formatQuantity(row.filled_count) },
-    { key: "rejected", header: "Rejected", align: "right", render: (row) => formatQuantity(row.rejected_count) }
-  ];
-
-  return <DataTable columns={columns} emptyTitle={`No ${title.toLowerCase()} activity yet`} getRowKey={(row) => row.period} rows={rows} />;
 }
 
 function UnavailableValue() {
@@ -49,14 +37,39 @@ function RoundTripTable({ rows }: { rows: RoundTrip[] }) {
 }
 
 export function AnalyticsActivitySection({ analytics }: { analytics: AnalyticsResponse | null }) {
+  const activity = analytics?.activity;
+
+  if (!activity) {
+    return <div className="muted">Activity unavailable</div>;
+  }
+
+  const units: { label: string; summary: ActivitySummary }[] = [
+    { label: "Daily", summary: activity.daily },
+    { label: "Weekly", summary: activity.weekly },
+    { label: "Monthly", summary: activity.monthly }
+  ];
+
   return (
-    <div className="grid grid--two">
-      <ActivityTable rows={analytics?.activity_daily ?? []} title="Daily" />
-      <ActivityTable rows={analytics?.activity_weekly ?? []} title="Weekly" />
-      <div style={{ gridColumn: "1 / -1" }}>
-        <ActivityTable rows={analytics?.activity_monthly ?? []} title="Monthly" />
+    <>
+      <div className="panel__header">
+        <h3>Activity Coverage</h3>
+        <span className="muted">
+          <span>{formatDate(activity.coverage_start)}</span>
+          {" - "}
+          <span>{formatDate(activity.coverage_end)}</span>
+        </span>
       </div>
-    </div>
+      {units.map((unit) => (
+        <section key={unit.label}>
+          <h3>{unit.label}</h3>
+          <div className="summary-grid">
+            <MetricCard label="Total Orders" value={formatQuantity(Number(unit.summary.total_orders))} />
+            <MetricCard label="Successful Orders" value={formatQuantity(Number(unit.summary.successful_orders))} />
+            <MetricCard label="Failed Orders" value={formatQuantity(Number(unit.summary.failed_orders))} />
+          </div>
+        </section>
+      ))}
+    </>
   );
 }
 

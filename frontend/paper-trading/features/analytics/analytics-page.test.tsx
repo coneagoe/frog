@@ -36,9 +36,13 @@ const analyticsPayload = {
     total_return: { value: "0.060000", reason: null },
     simple_asset_return: { value: "0.050000", reason: null }
   },
-  activity_daily: [{ period: "2026-06-16", order_count: 3, trade_count: 2, filled_count: 2, rejected_count: 1 }],
-  activity_weekly: [{ period: "2026-W25", order_count: 3, trade_count: 2, filled_count: 2, rejected_count: 1 }],
-  activity_monthly: [{ period: "2026-06", order_count: 3, trade_count: 2, filled_count: 2, rejected_count: 1 }],
+  activity: {
+    coverage_start: "2026-08-28",
+    coverage_end: "2026-09-10",
+    daily: { total_orders: "0.285714", successful_orders: "0.142857", failed_orders: "0.071429" },
+    weekly: { total_orders: "1.333333", successful_orders: "0.666667", failed_orders: "0.333333" },
+    monthly: { total_orders: "2.000000", successful_orders: "1.000000", failed_orders: "0.500000" }
+  },
   execution: {
     order_count: 3,
     filled_count: 2,
@@ -101,6 +105,38 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("Risk & Drawdown")).toBeInTheDocument();
     expect(screen.getByText("Insufficient Cash")).toBeInTheDocument();
     expect(screen.getByText("000001.SZ")).toBeInTheDocument();
+  });
+
+  it("renders activity coverage and average order summaries", async () => {
+    render(<AnalyticsPage />);
+
+    expect(await screen.findByText("Activity Coverage")).toBeInTheDocument();
+    expect(screen.getByText("2026-08-28")).toBeInTheDocument();
+    expect(screen.getByText("2026-09-10")).toBeInTheDocument();
+    expect(screen.getByText("Daily")).toBeInTheDocument();
+    expect(screen.getByText("Weekly")).toBeInTheDocument();
+    expect(screen.getByText("Monthly")).toBeInTheDocument();
+    expect(screen.getAllByText("Total Orders")).toHaveLength(3);
+    expect(screen.getAllByText("Successful Orders")).toHaveLength(3);
+    expect(screen.getAllByText("Failed Orders")).toHaveLength(3);
+    expect(screen.queryByText("Period")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trades")).not.toBeInTheDocument();
+  });
+
+  it("shows activity as unavailable when no activity summary is returned", async () => {
+    getAnalyticsMock.mockResolvedValueOnce({ ...analyticsPayload, activity: null });
+    render(<AnalyticsPage />);
+
+    expect(await screen.findByText("Activity unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Activity Coverage")).not.toBeInTheDocument();
+    expect(screen.queryByText("Daily")).not.toBeInTheDocument();
+    expect(screen.queryByText("Weekly")).not.toBeInTheDocument();
+    expect(screen.queryByText("Monthly")).not.toBeInTheDocument();
+    expect(screen.queryByText("Total Orders")).not.toBeInTheDocument();
+    expect(screen.queryByText("Successful Orders")).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed Orders")).not.toBeInTheDocument();
+    expect(screen.queryByText("0.286")).not.toBeInTheDocument();
+    expect(screen.queryByText("1.333")).not.toBeInTheDocument();
   });
 
   it("renders NAV analytics fields", async () => {
