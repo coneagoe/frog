@@ -82,14 +82,14 @@ export function OrderTable({
       render: (row) => {
         if (canEdit && editingOrderId === row.id) {
           return (
-            <>
+            <div className="actions">
               <button className="button" onClick={() => onEditSave?.(row.id)} type="button">Save</button>
               <button className="button button--secondary" onClick={() => onEditCancel?.()} type="button">Cancel</button>
-            </>
+            </div>
           );
         }
         return (
-          <>
+          <div className="actions">
             {cancellable.has(row.status)
               ? <button className="button button--secondary" onClick={() => onCancel(row.id)} type="button">Cancel</button>
               : null}
@@ -104,7 +104,7 @@ export function OrderTable({
                 {deletingOrderId === row.id ? "Deleting..." : "Delete"}
               </button>
             ) : null}
-          </>
+          </div>
         );
       }
     }
