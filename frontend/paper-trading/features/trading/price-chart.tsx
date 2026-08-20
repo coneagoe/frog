@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { createChart } from "lightweight-charts";
+import { createChart, LineSeries } from "lightweight-charts";
 import { EmptyState } from "@/components/empty-state";
 
 export function PriceChart({ symbol }: { symbol: string }) {
@@ -18,7 +18,7 @@ export function PriceChart({ symbol }: { symbol: string }) {
       rightPriceScale: { borderColor: "#ccd4c6" },
       timeScale: { borderColor: "#ccd4c6" }
     });
-    chart.addLineSeries({ color: "#1d4ed8", lineWidth: 2 });
+    chart.addSeries(LineSeries, { color: "#1d4ed8", lineWidth: 2 });
     return () => chart.remove();
   }, [symbol]);
 

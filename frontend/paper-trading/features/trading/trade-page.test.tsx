@@ -9,7 +9,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("lightweight-charts", () => ({
-  createChart: vi.fn(() => ({ addLineSeries: vi.fn(), remove: vi.fn() }))
+  LineSeries: {},
+  createChart: vi.fn(() => ({ addSeries: vi.fn(), remove: vi.fn() }))
 }));
 
 vi.mock("@/lib/api-client", () => ({
