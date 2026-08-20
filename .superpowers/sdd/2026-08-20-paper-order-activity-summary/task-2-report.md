@@ -36,3 +36,13 @@ Implementation commit: `bd575a2` (`feat: calculate paper order activity averages
   invoke. Manual inspection found no targeted simplification worth applying.
 - Validation owner is the primary coordinator; no merge or broader validation
   was performed.
+
+## Review Correction
+
+- Updated `test/paper_trading/api/test_analytics_api.py` to monkeypatch the
+  router's `AnalyticsService` reference for the populated-account test. The
+  test now injects `today_provider=lambda: date(2026, 8, 20)` without changing
+  the production route or its Asia/Shanghai default clock.
+- Validation: `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py -v`
+  passed with 14 tests and 1 existing Starlette/httpx deprecation warning.
+- Correction commit: `a2df96b` (`test: stabilize paper activity coverage date`).
