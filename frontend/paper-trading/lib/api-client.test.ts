@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, apiGet, createAccount, depositCash, importPositions, updateOrderComment, withdrawCash } from "./api-client";
+import { ApiError, apiGet, createAccount, depositCash, importPositions, listOrders, updateOrderComment, withdrawCash } from "./api-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -69,7 +69,7 @@ describe("api client", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await importPositions(7, {
-      positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15" }]
+      positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15", market: "a_share" }]
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -77,10 +77,53 @@ describe("api client", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15" }]
+          positions: [{ symbol: "000001", quantity: 100, cost_price: "10.23", buy_trade_date: "2026-01-15", market: "a_share" }]
         })
       })
     );
+  });
+});
+
+describe("listOrders", () => {
+  const orderPage = {
+    items: [{ id: 42, account_id: 7, symbol: "AAPL", status: "accepted" }],
+    page: 2,
+    page_size: 25,
+    total_count: 30,
+    total_pages: 2
+  };
+
+  it("resolves with the OrderPage envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(orderPage), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listOrders(7)).resolves.toEqual(orderPage);
+  });
+
+  it("serializes every defined query param", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(orderPage), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await listOrders(7, { start_date: "2026-06-01", end_date: "2026-06-30", page: 2, page_size: 25 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/accounts/7/orders?start_date=2026-06-01&end_date=2026-06-30&page=2&page_size=25",
+      expect.anything()
+    );
+  });
+
+  it("omits undefined query params", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(orderPage), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await listOrders(7, { start_date: undefined, end_date: "2026-06-30", page: undefined, page_size: 25 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/accounts/7/orders?end_date=2026-06-30&page_size=25",
+      expect.anything()
+    );
+  });
+
+  it("omits the query string when no params are given", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(orderPage), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await listOrders(7);
+    expect(fetchMock).toHaveBeenCalledWith("/api/paper/accounts/7/orders", expect.anything());
   });
 });
 

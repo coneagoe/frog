@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from paper_trading.domain.enums import OrderSide
 
@@ -39,6 +39,27 @@ class OrderResponse(BaseModel):
     validity_checked_at: datetime | None = None
     market: str = "a_share"
     stock_name: str | None = None
+
+
+class OrderListQuery(BaseModel):
+    start_date: date = date.min
+    end_date: date = date.max
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "OrderListQuery":
+        if self.start_date > self.end_date:
+            raise ValueError("start_date must not be after end_date")
+        return self
+
+
+class OrderListResponse(BaseModel):
+    items: list[OrderResponse]
+    page: int
+    page_size: int
+    total_count: int
+    total_pages: int
 
 
 class UpdateOrderCommentRequest(BaseModel):

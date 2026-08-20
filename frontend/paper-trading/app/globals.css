@@ -113,6 +113,53 @@ button {
   padding: 18px;
 }
 
+.filter-bar {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+
+.filter-bar__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-bar__field {
+  color: var(--muted);
+  display: grid;
+  font-size: 13px;
+  gap: 6px;
+}
+
+.filter-bar__field input {
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 10px 12px;
+}
+
+.filter-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin: 0;
+}
+
+.pagination {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.pagination__info {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .panel__header {
   align-items: center;
   display: flex;

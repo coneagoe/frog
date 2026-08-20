@@ -300,6 +300,39 @@ def test_create_order_persists_accepted_order(tmp_path):
     engine.dispose()
 
 
+def test_list_orders_page_filters_counts_orders_and_slices_pages(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("paged-orders", Decimal("100000.00"))
+    other_account = repo.create_account("other-paged-orders", Decimal("100000.00"))
+
+    first = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), date(2026, 8, 1), OrderStatus.ACCEPTED
+    )
+    same_date = repo.create_order(
+        account.id, "000002", OrderSide.BUY, 100, Decimal("20.00"), date(2026, 8, 2), OrderStatus.ACCEPTED
+    )
+    latest = repo.create_order(
+        account.id, "000003", OrderSide.BUY, 100, Decimal("30.00"), date(2026, 8, 2), OrderStatus.ACCEPTED
+    )
+    repo.create_order(
+        account.id, "000004", OrderSide.BUY, 100, Decimal("40.00"), date(2026, 8, 3), OrderStatus.ACCEPTED
+    )
+    repo.create_order(
+        other_account.id, "000005", OrderSide.BUY, 100, Decimal("50.00"), date(2026, 8, 2), OrderStatus.ACCEPTED
+    )
+
+    rows, total = repo.list_orders_page(account.id, date(2026, 8, 1), date(2026, 8, 2), page=1, page_size=2)
+
+    assert total == 3
+    assert [order.id for order in rows] == [latest.id, same_date.id]
+    rows, total = repo.list_orders_page(account.id, date(2026, 8, 1), date(2026, 8, 2), page=2, page_size=2)
+
+    assert total == 3
+    assert [order.id for order in rows] == [first.id]
+    assert [order.id for order in repo.list_orders(account.id)] == [first.id, same_date.id, latest.id, 4]
+
+
 def test_list_catalogue_etf_a_share_orders_excludes_non_candidates_and_filters_account(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
