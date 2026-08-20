@@ -466,7 +466,7 @@ def test_create_etf_order_resolves_etf_names_and_rejects_unreviewed_etf(monkeypa
     orders = client.get(f"/paper/accounts/{account_id}/orders", headers=headers)
     trades = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
     assert orders.json()["items"][0]["stock_name"] == "CSI 300 ETF"
-    assert trades.json()[0]["stock_name"] == "CSI 300 ETF"
+    assert trades.json()["items"][0]["stock_name"] == "CSI 300 ETF"
 
     rejected = client.post(
         f"/paper/accounts/{account_id}/orders",
@@ -641,7 +641,7 @@ def test_order_comment_is_created_copied_to_trade_and_updated(monkeypatch, sqlit
     # Queued orders do not have trades until the matching workflow runs.
     trades_response = client.get(f"/paper/accounts/{account_id}/trades", headers=headers)
     trades = trades_response.json()
-    assert trades == []
+    assert trades == {"items": [], "page": 1, "page_size": 50, "total_count": 0, "total_pages": 0}
 
     # PATCH updates the queued order comment.
     order_id = payload["id"]
