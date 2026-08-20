@@ -59,4 +59,4 @@ Implementation commit: `bd575a2` (`feat: calculate paper order activity averages
   semantics. No frontend files were changed.
 - Validation: `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py -v`
   passed with 16 tests and 1 existing Starlette/httpx deprecation warning.
-- Future-order correction commit: pending.
+- Future-order correction commit: `600aa37` (`fix: exclude future paper orders from activity`).
