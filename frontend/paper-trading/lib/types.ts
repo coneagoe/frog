@@ -21,12 +21,18 @@ export type MetricValue = {
   reason: string | null;
 };
 
-export type ActivityBucket = {
-  period: string;
-  order_count: number;
-  trade_count: number;
-  filled_count: number;
-  rejected_count: number;
+export type ActivitySummary = {
+  total_orders: string;
+  successful_orders: string;
+  failed_orders: string;
+};
+
+export type ActivityAnalytics = {
+  coverage_start: string;
+  coverage_end: string;
+  daily: ActivitySummary;
+  weekly: ActivitySummary;
+  monthly: ActivitySummary;
 };
 
 export type RejectReasonBucket = {
@@ -92,9 +98,7 @@ export type RiskAnalytics = {
 
 export type AnalyticsResponse = {
   overview: OverviewAnalytics;
-  activity_daily: ActivityBucket[];
-  activity_weekly: ActivityBucket[];
-  activity_monthly: ActivityBucket[];
+  activity: ActivityAnalytics | null;
   execution: ExecutionAnalytics;
   trade_quality: TradeQualityAnalytics;
   risk: RiskAnalytics;

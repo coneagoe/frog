@@ -1,10 +1,12 @@
-from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from statistics import mean, stdev
+from typing import Callable, Literal
+from zoneinfo import ZoneInfo
 
 from paper_trading.schemas.analytics import (
-    ActivityBucket,
+    ActivityAnalytics,
+    ActivitySummary,
     AnalyticsResponse,
     ExecutionAnalytics,
     MetricValue,
@@ -18,7 +20,6 @@ from paper_trading.storage.models import (
     PaperAccountSnapshot,
     PaperOrder,
     PaperPositionRoundTrip,
-    PaperTrade,
 )
 from paper_trading.storage.repository import PaperTradingRepository
 
@@ -26,22 +27,20 @@ _QUANTIZE = Decimal("0.000001")
 
 
 class AnalyticsService:
-    def __init__(self, repo: PaperTradingRepository):
+    def __init__(self, repo: PaperTradingRepository, today_provider: Callable[[], date] | None = None):
         self.repo = repo
+        self.today_provider = today_provider or (lambda: datetime.now(ZoneInfo("Asia/Shanghai")).date())
 
     def get_account_analytics(self, account_id: int) -> AnalyticsResponse:
         account = self.repo.get_account(account_id)
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
         orders = self.repo.list_orders(account_id)
-        trades = self.repo.list_trades(account_id)
         snapshots = self.repo.list_snapshots(account_id)
         round_trips = self.repo.list_round_trips(account_id)
         return AnalyticsResponse(
             overview=self._overview(account.initial_cash, snapshots),
-            activity_daily=self._activity(orders, trades, "daily"),
-            activity_weekly=self._activity(orders, trades, "weekly"),
-            activity_monthly=self._activity(orders, trades, "monthly"),
+            activity=self._activity(orders),
             execution=self._execution(orders),
             trade_quality=self._trade_quality(round_trips),
             risk=self._risk(snapshots, account.initial_cash),
@@ -102,48 +101,51 @@ class AnalyticsService:
     # ------------------------------------------------------------------
     # Activity
     # ------------------------------------------------------------------
-    def _activity(
-        self,
-        orders: list[PaperOrder],
-        trades: list[PaperTrade],
-        granularity: str,
-    ) -> list[ActivityBucket]:
-        buckets: dict[str, dict[str, int]] = defaultdict(
-            lambda: {"order_count": 0, "trade_count": 0, "filled_count": 0, "rejected_count": 0}
+    def _activity(self, orders: list[PaperOrder]) -> ActivityAnalytics | None:
+        coverage_end = self.today_provider()
+        orders = [order for order in orders if order.trade_date <= coverage_end]
+        if not orders:
+            return None
+        coverage_start = min(order.trade_date for order in orders)
+        return ActivityAnalytics(
+            coverage_start=coverage_start,
+            coverage_end=coverage_end,
+            daily=self._activity_summary(orders, coverage_start, coverage_end, "daily"),
+            weekly=self._activity_summary(orders, coverage_start, coverage_end, "weekly"),
+            monthly=self._activity_summary(orders, coverage_start, coverage_end, "monthly"),
         )
 
-        for order in orders:
-            key = self._period_key(order.trade_date, granularity)
-            buckets[key]["order_count"] += 1
-            if order.status == "filled":
-                buckets[key]["filled_count"] += 1
-            elif order.status == "rejected":
-                buckets[key]["rejected_count"] += 1
+    @staticmethod
+    def _activity_summary(
+        orders: list[PaperOrder],
+        coverage_start: date,
+        coverage_end: date,
+        granularity: Literal["daily", "weekly", "monthly"],
+    ) -> ActivitySummary:
+        dates = AnalyticsService._dates_inclusive(coverage_start, coverage_end)
+        if granularity == "daily":
+            denominator = (coverage_end - coverage_start).days + 1
+        elif granularity == "weekly":
+            denominator = len({(current.isocalendar().year, current.isocalendar().week) for current in dates})
+        else:
+            denominator = len({(current.year, current.month) for current in dates})
 
-        for trade in trades:
-            key = self._period_key(trade.trade_date, granularity)
-            buckets[key]["trade_count"] += 1
+        total = len(orders)
+        successful = sum(1 for order in orders if order.status == "filled")
+        failed = sum(1 for order in orders if order.status == "rejected")
 
-        return [
-            ActivityBucket(
-                period=k,
-                order_count=v["order_count"],
-                trade_count=v["trade_count"],
-                filled_count=v["filled_count"],
-                rejected_count=v["rejected_count"],
-            )
-            for k, v in sorted(buckets.items())
-        ]
+        def average(count: int) -> Decimal:
+            return (Decimal(count) / Decimal(denominator)).quantize(_QUANTIZE)
+
+        return ActivitySummary(
+            total_orders=average(total),
+            successful_orders=average(successful),
+            failed_orders=average(failed),
+        )
 
     @staticmethod
-    def _period_key(d: date, granularity: str) -> str:
-        if granularity == "daily":
-            return d.isoformat()
-        if granularity == "weekly":
-            iso = d.isocalendar()
-            return f"{iso[0]}-W{iso[1]:02d}"
-        # monthly
-        return f"{d.year}-{d.month:02d}"
+    def _dates_inclusive(start: date, end: date) -> list[date]:
+        return [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
 
     # ------------------------------------------------------------------
     # Execution

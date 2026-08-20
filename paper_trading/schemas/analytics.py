@@ -9,12 +9,18 @@ class MetricValue(BaseModel):
     reason: str | None = None
 
 
-class ActivityBucket(BaseModel):
-    period: str
-    order_count: int
-    trade_count: int
-    filled_count: int
-    rejected_count: int
+class ActivitySummary(BaseModel):
+    total_orders: Decimal
+    successful_orders: Decimal
+    failed_orders: Decimal
+
+
+class ActivityAnalytics(BaseModel):
+    coverage_start: date
+    coverage_end: date
+    daily: ActivitySummary
+    weekly: ActivitySummary
+    monthly: ActivitySummary
 
 
 class RejectReasonBucket(BaseModel):
@@ -82,9 +88,7 @@ class RiskAnalytics(BaseModel):
 
 class AnalyticsResponse(BaseModel):
     overview: OverviewAnalytics
-    activity_daily: list[ActivityBucket]
-    activity_weekly: list[ActivityBucket]
-    activity_monthly: list[ActivityBucket]
+    activity: ActivityAnalytics | None = None
     execution: ExecutionAnalytics
     trade_quality: TradeQualityAnalytics
     risk: RiskAnalytics
