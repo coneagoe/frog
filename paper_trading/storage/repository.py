@@ -653,6 +653,26 @@ class PaperTradingRepository:
             .all()
         )
 
+    def list_trades_page(
+        self,
+        account_id: int,
+        start_date: date,
+        end_date: date,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[PaperTrade], int]:
+        query = self.session.query(PaperTrade).filter(
+            PaperTrade.account_id == account_id,
+            PaperTrade.trade_date >= start_date,
+            PaperTrade.trade_date <= end_date,
+        )
+        total = query.count()
+        offset = (page - 1) * page_size
+        trades = (
+            query.order_by(PaperTrade.trade_date.desc(), PaperTrade.id.desc()).offset(offset).limit(page_size).all()
+        )
+        return list(trades), total
+
     def list_snapshots(self, account_id: int) -> list[PaperAccountSnapshot]:
         return list(
             self.session.query(PaperAccountSnapshot)
