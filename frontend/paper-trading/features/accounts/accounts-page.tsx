@@ -211,11 +211,11 @@ export function AccountsPage() {
         </section>
       </div>
       {selectedAccountId ? (
-        <div>
+        <div className="grid">
           <div className="panel__header">
             <h2>{selectedAccount?.name ?? `Account #${selectedAccountId}`}</h2>
             {selectedAccount ? (
-              <>
+              <div className="actions">
                 <button
                   className="button button--secondary"
                   onClick={() => {
@@ -242,7 +242,7 @@ export function AccountsPage() {
                 <button className="button button--secondary" onClick={() => setCashFlowMode("withdraw")} type="button">
                   Withdraw
                 </button>
-              </>
+              </div>
             ) : null}
           </div>
           {detailError ? <ErrorBanner message={detailError} /> : null}

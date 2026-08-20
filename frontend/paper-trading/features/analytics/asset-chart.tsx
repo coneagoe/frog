@@ -14,9 +14,12 @@ export function AssetChart({ snapshots }: { snapshots: Snapshot[] }) {
     }
     const chart = createChart(containerRef.current, {
       height: 320,
-      layout: { textColor: "#d6e0f0", background: { color: "#111827" } }
+      layout: { textColor: "#1f2933", background: { color: "#ffffff" } },
+      grid: { vertLines: { color: "#e1e5df" }, horzLines: { color: "#e1e5df" } },
+      rightPriceScale: { borderColor: "#ccd4c6" },
+      timeScale: { borderColor: "#ccd4c6" }
     });
-    const series = chart.addSeries(LineSeries, { color: "#38bdf8" });
+    const series = chart.addSeries(LineSeries, { color: "#1d4ed8", lineWidth: 2 });
     series.setData(
       snapshots.map((snapshot) => ({
         time: snapshot.trade_date,
