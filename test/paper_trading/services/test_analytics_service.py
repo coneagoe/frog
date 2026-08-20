@@ -71,6 +71,77 @@ def test_analytics_computes_execution_and_trade_quality(tmp_path):
     engine.dispose()
 
 
+def test_analytics_activity_counts_order_statuses(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("activity-demo", Decimal("100000.00"))
+    for index, status in enumerate(
+        (OrderStatus.FILLED, OrderStatus.REJECTED, OrderStatus.ACCEPTED, OrderStatus.CANCELLED, OrderStatus.NEW)
+    ):
+        repo.create_order(
+            account.id,
+            f"00000{index + 1}.SZ",
+            OrderSide.BUY,
+            100,
+            Decimal("10.00"),
+            date(2026, 8, 1),
+            status,
+        )
+
+    analytics = AnalyticsService(repo, today_provider=lambda: date(2026, 8, 1)).get_account_analytics(account.id)
+
+    assert analytics.activity is not None
+    assert analytics.activity.daily.total_orders == Decimal("5.000000")
+    assert analytics.activity.daily.successful_orders == Decimal("1.000000")
+    assert analytics.activity.daily.failed_orders == Decimal("1.000000")
+    engine.dispose()
+
+
+def test_analytics_activity_is_none_for_empty_account(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("empty-activity-demo", Decimal("100000.00"))
+
+    analytics = AnalyticsService(repo, today_provider=lambda: date(2026, 8, 20)).get_account_analytics(account.id)
+
+    assert analytics.activity is None
+    engine.dispose()
+
+
+def test_analytics_activity_uses_inclusive_calendar_denominators(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("activity-boundary-demo", Decimal("100000.00"))
+    for index, (trade_date, status) in enumerate(
+        (
+            (date(2026, 8, 28), OrderStatus.FILLED),
+            (date(2026, 8, 31), OrderStatus.FILLED),
+            (date(2026, 9, 1), OrderStatus.REJECTED),
+            (date(2026, 9, 10), OrderStatus.ACCEPTED),
+        )
+    ):
+        repo.create_order(
+            account.id,
+            f"00000{index + 1}.SZ",
+            OrderSide.BUY,
+            100,
+            Decimal("10.00"),
+            trade_date,
+            status,
+        )
+
+    analytics = AnalyticsService(repo, today_provider=lambda: date(2026, 9, 10)).get_account_analytics(account.id)
+
+    assert analytics.activity is not None
+    activity = analytics.activity
+    assert activity.coverage_start == date(2026, 8, 28)
+    assert activity.coverage_end == date(2026, 9, 10)
+    assert activity.daily.total_orders == Decimal("0.285714")
+    assert activity.weekly.total_orders == Decimal("1.333333")
+    assert activity.monthly.total_orders == Decimal("2.000000")
+    assert activity.daily.successful_orders == Decimal("0.142857")
+    assert activity.weekly.failed_orders == Decimal("0.333333")
+    assert activity.monthly.failed_orders == Decimal("0.500000")
+    engine.dispose()
+
+
 def test_analytics_computes_total_return_and_drawdown(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("risk-demo", Decimal("100000.00"))

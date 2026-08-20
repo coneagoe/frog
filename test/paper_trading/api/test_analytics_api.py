@@ -61,4 +61,11 @@ def test_get_account_analytics_returns_activity_contract_for_populated_account(m
     assert response.status_code == 200
     payload = response.json()
     assert set(payload["activity"]) == {"coverage_start", "coverage_end", "daily", "weekly", "monthly"}
+    assert payload["activity"]["coverage_start"] == "2026-08-20"
+    assert payload["activity"]["coverage_end"] == "2026-08-20"
     assert set(payload["activity"]["daily"]) == {"total_orders", "successful_orders", "failed_orders"}
+    assert payload["activity"]["daily"] == {
+        "total_orders": "1.000000",
+        "successful_orders": "0.000000",
+        "failed_orders": "0.000000",
+    }
