@@ -333,6 +333,53 @@ def test_list_orders_page_filters_counts_orders_and_slices_pages(sqlite_session)
     assert [order.id for order in repo.list_orders(account.id)] == [first.id, same_date.id, latest.id, 4]
 
 
+def test_list_trades_page_filters_counts_trades_and_slices_pages(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("paged-trades", Decimal("100000.00"))
+    other_account = repo.create_account("other-paged-trades", Decimal("100000.00"))
+
+    first_order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10.00"), date(2026, 8, 1), OrderStatus.FILLED
+    )
+    same_date_order = repo.create_order(
+        account.id, "000002", OrderSide.BUY, 100, Decimal("20.00"), date(2026, 8, 2), OrderStatus.FILLED
+    )
+    latest_order = repo.create_order(
+        account.id, "000003", OrderSide.BUY, 100, Decimal("30.00"), date(2026, 8, 2), OrderStatus.FILLED
+    )
+    other_order = repo.create_order(
+        other_account.id, "000004", OrderSide.BUY, 100, Decimal("40.00"), date(2026, 8, 2), OrderStatus.FILLED
+    )
+
+    def create_trade_for(order, account_id, symbol, trade_date, price):
+        return repo.create_trade(
+            order_id=order.id,
+            account_id=account_id,
+            symbol=symbol,
+            side=OrderSide.BUY,
+            quantity=100,
+            price=price,
+            amount=price * 100,
+            fees=Decimal("5.0000"),
+            trade_date=trade_date,
+        )
+
+    first = create_trade_for(first_order, account.id, "000001", date(2026, 8, 1), Decimal("10.00"))
+    same_date = create_trade_for(same_date_order, account.id, "000002", date(2026, 8, 2), Decimal("20.00"))
+    latest = create_trade_for(latest_order, account.id, "000003", date(2026, 8, 2), Decimal("30.00"))
+    create_trade_for(other_order, other_account.id, "000004", date(2026, 8, 2), Decimal("40.00"))
+
+    rows, total = repo.list_trades_page(account.id, date(2026, 8, 1), date(2026, 8, 2), page=1, page_size=2)
+
+    assert total == 3
+    assert [trade.id for trade in rows] == [latest.id, same_date.id]
+    rows, total = repo.list_trades_page(account.id, date(2026, 8, 1), date(2026, 8, 2), page=2, page_size=2)
+
+    assert total == 3
+    assert [trade.id for trade in rows] == [first.id]
+
+
 def test_list_catalogue_etf_a_share_orders_excludes_non_candidates_and_filters_account(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from decimal import Decimal
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1577,6 +1578,24 @@ class TestOrderUpdateComment:
 
 
 class TestTradeList:
+    @staticmethod
+    def _trade_page() -> dict[str, Any]:
+        return {
+            "items": [
+                {
+                    "id": 100,
+                    "symbol": "AAPL",
+                    "side": "buy",
+                    "quantity": 100,
+                    "price": "150.00",
+                }
+            ],
+            "page": 1,
+            "page_size": 50,
+            "total_count": 1,
+            "total_pages": 1,
+        }
+
     def test_list_trades_calls_client(self):
         client = _mock_client()
         exit_code = main(["trade", "list", "--account-id", "1"], client=client)
@@ -1585,6 +1604,7 @@ class TestTradeList:
 
     def test_list_trades_json(self, capsys):
         client = _mock_client()
+        client.list_trades.return_value = self._trade_page()["items"]
         exit_code = main(["--json", "trade", "list", "--account-id", "1"], client=client)
         assert exit_code == EXIT_CODES["OK"]
         payload = json.loads(capsys.readouterr().out)
@@ -1593,6 +1613,7 @@ class TestTradeList:
 
     def test_list_trades_text(self, capsys):
         client = _mock_client()
+        client.list_trades.return_value = self._trade_page()["items"]
         exit_code = main(["trade", "list", "--account-id", "1"], client=client)
         assert exit_code == EXIT_CODES["OK"]
         assert "AAPL" in capsys.readouterr().out
@@ -1600,6 +1621,22 @@ class TestTradeList:
     def test_list_trades_missing_account_id(self):
         exit_code = main(["trade", "list"])
         assert exit_code == EXIT_CODES["VALIDATION_ERROR"]
+
+
+class TestPaperTradingApiClientTrades:
+    def test_list_trades_unwraps_pagination_envelope(self):
+        with patch.dict(os.environ, {"PAPER_TRADING_API_TOKEN": "tok"}, clear=True):
+            client = PaperTradingApiClient()
+        response = {
+            "items": [{"id": 100, "symbol": "AAPL"}],
+            "page": 1,
+            "page_size": 50,
+            "total_count": 1,
+            "total_pages": 1,
+        }
+        with patch.object(client, "_request", return_value=response) as request:
+            assert client.list_trades(account_id=1) == response["items"]
+        request.assert_called_once_with("GET", "/paper/accounts/1/trades")
 
 
 # ---------------------------------------------------------------------------

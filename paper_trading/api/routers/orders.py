@@ -19,6 +19,7 @@ from paper_trading.schemas.orders import (
     OrderListQuery,
     OrderListResponse,
     OrderResponse,
+    TradeListResponse,
     TradeResponse,
     TradeValidityCheckResponse,
     UpdateOrderCommentRequest,
@@ -150,11 +151,23 @@ def list_order_validity_checks(account_id: int, order_id: int, session: Session 
     return repo.list_trade_validity_checks(order_id)
 
 
-@router.get("/accounts/{account_id}/trades", response_model=list[TradeResponse])
+@router.get("/accounts/{account_id}/trades", response_model=TradeListResponse)
 def list_trades(
     account_id: int,
+    query: Annotated[OrderListQuery, Query()],
     session: Session = Depends(get_session),
     provider: SecurityNameProvider = Depends(get_security_name_provider),
 ):
-    rows = PaperTradingRepository(session).list_trades(account_id)
-    return enrich_security_names(rows, TradeResponse, provider)
+    repo = PaperTradingRepository(session)
+    rows, total_count = repo.list_trades_page(account_id, query.start_date, query.end_date, query.page, query.page_size)
+    total_pages = ceil(total_count / query.page_size)
+    page = min(query.page, total_pages) if total_pages else 1
+    if page != query.page:
+        rows, total_count = repo.list_trades_page(account_id, query.start_date, query.end_date, page, query.page_size)
+    return TradeListResponse(
+        items=enrich_security_names(rows, TradeResponse, provider),
+        page=page,
+        page_size=query.page_size,
+        total_count=total_count,
+        total_pages=total_pages,
+    )

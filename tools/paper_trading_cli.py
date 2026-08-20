@@ -229,7 +229,8 @@ class PaperTradingApiClient:
         )
 
     def list_trades(self, account_id: int) -> list[dict[str, Any]]:
-        return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/trades"))
+        response = cast(dict[str, Any], self._request("GET", f"/paper/accounts/{account_id}/trades"))
+        return cast(list[dict[str, Any]], response["items"])
 
     def run_matching(self, trade_date: str, account_id: int | None = None) -> dict[str, Any]:
         body: dict[str, Any] = {"trade_date": trade_date}
