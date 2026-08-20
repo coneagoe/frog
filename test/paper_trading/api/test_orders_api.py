@@ -226,7 +226,7 @@ def test_list_orders_and_trades_include_stock_name(monkeypatch, sqlite_session):
     assert orders.status_code == 200
     assert trades.status_code == 200
     assert orders.json()["items"][0]["stock_name"] == "Tencent Holdings"
-    assert trades.json()[0]["stock_name"] == "Tencent Holdings"
+    assert trades.json()["items"][0]["stock_name"] == "Tencent Holdings"
 
 
 def test_list_orders_returns_filtered_pagination_envelope(monkeypatch, sqlite_session):
@@ -297,6 +297,106 @@ def test_list_orders_validates_and_normalizes_pagination(monkeypatch, sqlite_ses
     assert invalid_range.status_code == 422
     assert normalized.json()["page"] == 1
     assert [item["id"] for item in normalized.json()["items"]] == [only_order.id]
+    assert empty.json() == {"items": [], "page": 1, "page_size": 50, "total_count": 0, "total_pages": 0}
+
+
+def test_list_trades_returns_filtered_pagination_envelope(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_security_name_provider] = lambda: _FakeSecurityNameProvider(
+        {("hk_connect", "00700"): "Tencent Holdings"}
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    account_id = client.post(
+        "/paper/accounts", json={"name": "trades", "initial_cash": "100000.00"}, headers=headers
+    ).json()["id"]
+    repo = PaperTradingRepository(session)
+    orders = [
+        repo.create_order(account_id, symbol, OrderSide.BUY, 100, Decimal(price), trade_date, OrderStatus.FILLED)
+        for symbol, price, trade_date in (
+            ("000001", "10", date(2026, 8, 1)),
+            ("00700", "20", date(2026, 8, 2)),
+            ("000003", "30", date(2026, 8, 2)),
+            ("000004", "40", date(2026, 8, 3)),
+        )
+    ]
+    for order in orders:
+        repo.create_trade(
+            order_id=order.id,
+            account_id=account_id,
+            symbol=order.symbol,
+            side=OrderSide.BUY,
+            quantity=100,
+            price=order.limit_price,
+            amount=order.limit_price * 100,
+            fees=Decimal("0"),
+            trade_date=order.trade_date,
+            market="hk_connect" if order.symbol == "00700" else "a_share",
+        )
+    session.commit()
+
+    response = client.get(
+        f"/paper/accounts/{account_id}/trades?start_date=2026-08-01&end_date=2026-08-02&page=1&page_size=2",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["symbol"] for item in payload["items"]] == ["000003", "00700"]
+    assert payload["page"] == 1
+    assert payload["page_size"] == 2
+    assert payload["total_count"] == 3
+    assert payload["total_pages"] == 2
+    assert payload["items"][1]["stock_name"] == "Tencent Holdings"
+
+
+def test_list_trades_validates_and_normalizes_pagination(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    account_id = client.post(
+        "/paper/accounts", json={"name": "trades", "initial_cash": "100000.00"}, headers=headers
+    ).json()["id"]
+    repo = PaperTradingRepository(session)
+    order = repo.create_order(
+        account_id, "000001", OrderSide.BUY, 100, Decimal("10"), date(2026, 8, 1), OrderStatus.FILLED
+    )
+    repo.create_trade(
+        order_id=order.id,
+        account_id=account_id,
+        symbol="000001",
+        side=OrderSide.BUY,
+        quantity=100,
+        price=Decimal("10"),
+        amount=Decimal("1000"),
+        fees=Decimal("0"),
+        trade_date=date(2026, 8, 1),
+    )
+    session.commit()
+
+    invalid_page = client.get(f"/paper/accounts/{account_id}/trades?page=0", headers=headers)
+    invalid_size = client.get(f"/paper/accounts/{account_id}/trades?page_size=101", headers=headers)
+    invalid_range = client.get(
+        f"/paper/accounts/{account_id}/trades?start_date=2026-08-02&end_date=2026-08-01", headers=headers
+    )
+    normalized = client.get(f"/paper/accounts/{account_id}/trades?page=99", headers=headers)
+    empty = client.get(
+        f"/paper/accounts/{account_id}/trades?start_date=2026-08-02&end_date=2026-08-02", headers=headers
+    )
+
+    assert invalid_page.status_code == 422
+    assert invalid_size.status_code == 422
+    assert invalid_range.status_code == 422
+    assert normalized.json()["page"] == 1
+    assert [item["id"] for item in normalized.json()["items"]] == [1]
     assert empty.json() == {"items": [], "page": 1, "page_size": 50, "total_count": 0, "total_pages": 0}
 
 
