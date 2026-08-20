@@ -126,3 +126,43 @@ backend or docs"). No product docs are affected by this frontend-only change.
 3. **Pre-existing lint warnings** (listed above) remain; out of scope.
 4. `formatQuantity` rounds to 3 fraction digits (e.g. `0.285714` → `0.286`); this is the brief's
    prescribed formatting and matches how other counts render.
+
+## Review follow-up: test coverage corrections
+
+Addressed the three Important test-coverage findings from the Task 3 review. Only
+`frontend/paper-trading/features/analytics/analytics-page.test.tsx` changed; no UI structure or
+visual design was modified.
+
+### 1. Per-unit formatted value assertions (9 metrics + mapping)
+
+"renders activity coverage and average order summaries" now scopes into each Daily/Weekly/Monthly
+unit via `getByRole("heading", { level: 3, name })` + nearest `<section>` (`within`), and asserts
+each label's own `.metric-card` contains its `formatQuantity`-formatted value:
+
+- Daily: `0.286` / `0.143` / `0.071`
+- Weekly: `1.333` / `0.667` / `0.333`
+- Monthly: `2` / `1` / `0.5`
+
+Expected literals verified against `Intl.NumberFormat("zh-CN")` on Node 24. The label→card→value
+assertion proves the field mapping (total/successful/failed) per unit, not just value presence.
+
+### 2. Section-scoped unavailable state
+
+The null-activity test now locates the Activity panel via
+`findByRole("heading", { level: 2, name: "Activity" })` + nearest `<section>`, and asserts within
+that section: `Activity unavailable` (with `muted` class) is present; zero level-3 headings; no
+`Activity Coverage`, Daily/Weekly/Monthly, Total/Successful/Failed Orders; no fabricated zero
+(`"0"`) or fixture values (`0.286`, `1.333`). Absence checks are section-scoped so legitimate
+zeros/values elsewhere on the page cannot mask regressions.
+
+### 3. Heading role/level assertions
+
+New test "renders activity headings with the expected levels" asserts the `Activity` h2 and the
+`Activity Coverage`/`Daily`/`Weekly`/`Monthly` h3s via `getByRole("heading", { level, name })`.
+
+### Verification
+
+- `npm test -- --run features/analytics/analytics-page.test.tsx`: 6/6 passed.
+- `npm test` (full frontend suite): 15 files, 179 tests passed (previously 178).
+- `npm run lint`: 0 errors; same 2 pre-existing warnings in untouched files.
+- No production code changed; UI structure and styling identical to commit `57bd299`.

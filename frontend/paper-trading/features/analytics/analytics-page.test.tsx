@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { createChart } from "lightweight-charts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAnalytics, listAccounts, listSnapshots } from "@/lib/api-client";
@@ -23,6 +23,14 @@ const getAnalyticsMock = vi.mocked(getAnalytics);
 const listAccountsMock = vi.mocked(listAccounts);
 const listSnapshotsMock = vi.mocked(listSnapshots);
 const createChartMock = vi.mocked(createChart);
+
+function closestSection(element: HTMLElement): HTMLElement {
+  const section = element.closest("section");
+  if (!section) {
+    throw new Error("Expected element to be wrapped in a <section>");
+  }
+  return section;
+}
 
 const analyticsPayload = {
   overview: {
@@ -121,22 +129,50 @@ describe("AnalyticsPage", () => {
     expect(screen.getAllByText("Failed Orders")).toHaveLength(3);
     expect(screen.queryByText("Period")).not.toBeInTheDocument();
     expect(screen.queryByText("Trades")).not.toBeInTheDocument();
+
+    const expectedUnits = [
+      { label: "Daily", total: "0.286", successful: "0.143", failed: "0.071" },
+      { label: "Weekly", total: "1.333", successful: "0.667", failed: "0.333" },
+      { label: "Monthly", total: "2", successful: "1", failed: "0.5" }
+    ];
+
+    for (const unit of expectedUnits) {
+      const unitQueries = within(closestSection(screen.getByRole("heading", { level: 3, name: unit.label })));
+      expect(unitQueries.getByText("Total Orders").closest(".metric-card")).toHaveTextContent(unit.total);
+      expect(unitQueries.getByText("Successful Orders").closest(".metric-card")).toHaveTextContent(unit.successful);
+      expect(unitQueries.getByText("Failed Orders").closest(".metric-card")).toHaveTextContent(unit.failed);
+    }
+  });
+
+  it("renders activity headings with the expected levels", async () => {
+    render(<AnalyticsPage />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Activity" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Activity Coverage" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Daily" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Weekly" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Monthly" })).toBeInTheDocument();
   });
 
   it("shows activity as unavailable when no activity summary is returned", async () => {
     getAnalyticsMock.mockResolvedValueOnce({ ...analyticsPayload, activity: null });
     render(<AnalyticsPage />);
 
-    expect(await screen.findByText("Activity unavailable")).toBeInTheDocument();
-    expect(screen.queryByText("Activity Coverage")).not.toBeInTheDocument();
-    expect(screen.queryByText("Daily")).not.toBeInTheDocument();
-    expect(screen.queryByText("Weekly")).not.toBeInTheDocument();
-    expect(screen.queryByText("Monthly")).not.toBeInTheDocument();
-    expect(screen.queryByText("Total Orders")).not.toBeInTheDocument();
-    expect(screen.queryByText("Successful Orders")).not.toBeInTheDocument();
-    expect(screen.queryByText("Failed Orders")).not.toBeInTheDocument();
-    expect(screen.queryByText("0.286")).not.toBeInTheDocument();
-    expect(screen.queryByText("1.333")).not.toBeInTheDocument();
+    const activityHeading = await screen.findByRole("heading", { level: 2, name: "Activity" });
+    const activity = within(closestSection(activityHeading));
+
+    expect(activity.getByText("Activity unavailable")).toHaveClass("muted");
+    expect(activity.queryAllByRole("heading", { level: 3 })).toHaveLength(0);
+    expect(activity.queryByText("Activity Coverage")).not.toBeInTheDocument();
+    expect(activity.queryByText("Daily")).not.toBeInTheDocument();
+    expect(activity.queryByText("Weekly")).not.toBeInTheDocument();
+    expect(activity.queryByText("Monthly")).not.toBeInTheDocument();
+    expect(activity.queryByText("Total Orders")).not.toBeInTheDocument();
+    expect(activity.queryByText("Successful Orders")).not.toBeInTheDocument();
+    expect(activity.queryByText("Failed Orders")).not.toBeInTheDocument();
+    expect(activity.queryByText("0")).not.toBeInTheDocument();
+    expect(activity.queryByText("0.286")).not.toBeInTheDocument();
+    expect(activity.queryByText("1.333")).not.toBeInTheDocument();
   });
 
   it("renders NAV analytics fields", async () => {
