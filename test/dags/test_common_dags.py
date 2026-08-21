@@ -1,12 +1,16 @@
 import os
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../dags")))
 
-from common_dags import get_partition_count, get_partition_ids  # noqa: E402
+from common_dags import get_default_args, get_partition_count, get_partition_ids  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[2]
+DAGS_DIR = ROOT / "dags"
 
 
 def test_get_partition_count_uses_download_process_count(monkeypatch):
@@ -49,3 +53,52 @@ def test_get_partition_count_ignores_airflow_variable_when_env_missing(monkeypat
 
     assert get_partition_count() == 4
     assert list(get_partition_ids()) == [0, 1, 2, 3]
+
+
+def test_dags_use_airflow_sdk_skip_exception_imports():
+    dag_sources = list(DAGS_DIR.glob("*.py"))
+
+    assert dag_sources
+    for dag_source in dag_sources:
+        source = dag_source.read_text()
+        assert "from airflow.exceptions import AirflowSkipException" not in source
+        if "AirflowSkipException" in source:
+            assert "from airflow.sdk.exceptions import AirflowSkipException" in source
+
+
+def test_default_args_use_smtp_notifier_only_when_alert_emails_exist(monkeypatch):
+    source = (DAGS_DIR / "common_dags.py").read_text()
+
+    assert "email_on_failure" not in source
+    assert "email_on_retry" not in source
+    assert "email_on_success" not in source
+    assert '"email":' not in source
+    assert "SmtpNotifier" in source
+
+    notifier_module = types.ModuleType("airflow.providers.smtp.notifications.smtp")
+
+    class FakeSmtpNotifier:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    setattr(notifier_module, "SmtpNotifier", FakeSmtpNotifier)
+    monkeypatch.setitem(sys.modules, "airflow.providers.smtp.notifications.smtp", notifier_module)
+    monkeypatch.setenv("ALERT_EMAILS", "first@example.com; second@example.com")
+
+    default_args = get_default_args()
+
+    assert "email" not in default_args
+    assert "email_on_failure" not in default_args
+    assert "email_on_retry" not in default_args
+    assert "email_on_success" not in default_args
+    assert len(default_args["on_failure_callback"]) == 1
+    assert default_args["on_failure_callback"][0].kwargs["to"] == ["first@example.com", "second@example.com"]
+
+
+def test_default_args_do_not_enable_smtp_notifier_without_alert_emails(monkeypatch):
+    monkeypatch.delenv("ALERT_EMAILS", raising=False)
+    monkeypatch.delenv("MAIL_RECEIVERS", raising=False)
+
+    default_args = get_default_args()
+
+    assert "on_failure_callback" not in default_args

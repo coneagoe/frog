@@ -3,9 +3,9 @@
 import os
 import sys
 
-from airflow.exceptions import AirflowSkipException
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import DAG
+from airflow.sdk.exceptions import AirflowSkipException
 
 project_root = os.environ.get("FROG_PROJECT_ROOT") or "/opt/airflow/frog"
 if os.path.isdir(project_root):

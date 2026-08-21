@@ -6,9 +6,9 @@ from datetime import datetime
 from typing import Final
 
 import redis
-from airflow.exceptions import AirflowSkipException
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import DAG
+from airflow.sdk.exceptions import AirflowSkipException
 
 # Ensure project root is on sys.path
 project_root = os.environ.get("FROG_PROJECT_ROOT") or "/opt/airflow/frog"

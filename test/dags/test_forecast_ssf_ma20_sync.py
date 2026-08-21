@@ -55,8 +55,8 @@ def sync_module(monkeypatch):
     airflow_module.__path__ = []
     airflow_sdk = types.ModuleType("airflow.sdk")
     setattr(airflow_sdk, "DAG", FakeDAG)
-    airflow_exceptions = types.ModuleType("airflow.exceptions")
-    setattr(airflow_exceptions, "AirflowSkipException", FakeAirflowSkipException)
+    airflow_sdk_exceptions = types.ModuleType("airflow.sdk.exceptions")
+    setattr(airflow_sdk_exceptions, "AirflowSkipException", FakeAirflowSkipException)
     airflow_providers = types.ModuleType("airflow.providers")
     airflow_providers.__path__ = []
     airflow_standard = types.ModuleType("airflow.providers.standard")
@@ -68,7 +68,7 @@ def sync_module(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
     monkeypatch.setitem(sys.modules, "airflow.sdk", airflow_sdk)
-    monkeypatch.setitem(sys.modules, "airflow.exceptions", airflow_exceptions)
+    monkeypatch.setitem(sys.modules, "airflow.sdk.exceptions", airflow_sdk_exceptions)
     monkeypatch.setitem(sys.modules, "airflow.providers", airflow_providers)
     monkeypatch.setitem(sys.modules, "airflow.providers.standard", airflow_standard)
     monkeypatch.setitem(sys.modules, "airflow.providers.standard.operators", airflow_operators)

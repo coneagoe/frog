@@ -33,17 +33,24 @@ def get_alert_emails() -> list[str]:
 def get_default_args() -> dict:
     """Get default arguments for DAG configuration."""
     alert_emails = get_alert_emails()
-    return {
+    default_args = {
         "owner": "frog",
         "depends_on_past": False,
         "start_date": datetime(2025, 1, 1, tzinfo=LOCAL_TZ),
-        "email": alert_emails,
-        "email_on_failure": bool(alert_emails),
-        "email_on_retry": False,
-        "email_on_success": False,
         "retries": 1,
         "retry_delay": timedelta(minutes=5),
     }
+    if alert_emails:
+        from airflow.providers.smtp.notifications.smtp import SmtpNotifier
+
+        default_args["on_failure_callback"] = [
+            SmtpNotifier(
+                to=alert_emails,
+                subject="Frog Airflow task failed",
+                html_content="Task {{ ti.task_id }} failed in DAG {{ ti.dag_id }}.",
+            )
+        ]
+    return default_args
 
 
 def parse_int(value: str | None) -> int | None:

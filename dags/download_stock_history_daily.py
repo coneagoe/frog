@@ -9,7 +9,7 @@ from datetime import date
 from typing import Any, cast
 
 import redis
-from airflow.exceptions import AirflowSkipException
+from airflow.sdk.exceptions import AirflowSkipException
 from airflow.utils.trigger_rule import TriggerRule
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import DAG
