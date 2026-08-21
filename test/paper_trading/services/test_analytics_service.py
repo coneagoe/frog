@@ -194,6 +194,55 @@ def test_analytics_activity_uses_inclusive_calendar_denominators(tmp_path):
     engine.dispose()
 
 
+def test_analytics_activity_counts_weekend_and_holiday_natural_days(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("calendar-zero-period-demo", Decimal("100000.00"))
+    repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 10, 1),
+        OrderStatus.FILLED,
+    )
+
+    analytics = AnalyticsService(repo, today_provider=lambda: date(2026, 10, 5)).get_account_analytics(account.id)
+
+    assert analytics.activity is not None
+    assert analytics.activity.coverage_start == date(2026, 10, 1)
+    assert analytics.activity.coverage_end == date(2026, 10, 5)
+    assert analytics.activity.daily.total_orders == Decimal("0.200000")
+    assert analytics.activity.weekly.total_orders == Decimal("0.500000")
+    assert analytics.activity.monthly.total_orders == Decimal("1.000000")
+    engine.dispose()
+
+
+def test_analytics_activity_separates_cross_year_iso_week_and_calendar_months(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("cross-year-boundary-demo", Decimal("100000.00"))
+    for index, trade_date in enumerate((date(2025, 12, 29), date(2026, 1, 4))):
+        repo.create_order(
+            account.id,
+            f"00000{index + 1}.SZ",
+            OrderSide.BUY,
+            100,
+            Decimal("10.00"),
+            trade_date,
+            OrderStatus.FILLED,
+        )
+
+    analytics = AnalyticsService(repo, today_provider=lambda: date(2026, 1, 4)).get_account_analytics(account.id)
+
+    assert analytics.activity is not None
+    assert analytics.activity.coverage_start == date(2025, 12, 29)
+    assert analytics.activity.coverage_end == date(2026, 1, 4)
+    assert analytics.activity.daily.total_orders == Decimal("0.285714")
+    assert analytics.activity.weekly.total_orders == Decimal("2.000000")
+    assert analytics.activity.monthly.total_orders == Decimal("1.000000")
+    engine.dispose()
+
+
 def test_analytics_computes_total_return_and_drawdown(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("risk-demo", Decimal("100000.00"))

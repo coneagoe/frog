@@ -3,3 +3,7 @@ node_modules/
 out/
 coverage/
 *.tsbuildinfo
+test-results/
+playwright-report/
+e2e/__screenshots__/*-actual.png
+e2e/__screenshots__/*-diff.png
