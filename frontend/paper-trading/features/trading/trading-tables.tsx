@@ -9,7 +9,7 @@ function StockNameCell({ name, compact }: { name: string | null; compact?: boole
   return <span className={compact ? "stock-name stock-name--compact" : "stock-name"} title={name || undefined}>{stockName}</span>;
 }
 
-export function positionReturnRate(position: Position): number | null {
+function positionReturnRate(position: Position): number | null {
   if (position.unrealized_pnl === null) {
     return null;
   }

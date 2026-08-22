@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { EmptyState } from "./empty-state";
 
-export type SortDirection = "asc" | "desc";
+type SortDirection = "asc" | "desc";
 
 export type Column<T> = {
   key: string;

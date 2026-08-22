@@ -50,7 +50,7 @@ const trade = {
 
 function expectAdjacentStockHeader(table: HTMLElement) {
   const headers = within(table).getAllByRole("columnheader");
-  const symbolIndex = headers.findIndex((header) => header.textContent === "Symbol");
+  const symbolIndex = headers.findIndex((header) => (header.textContent ?? "").startsWith("Symbol"));
   expect(headers[symbolIndex + 1]).toHaveTextContent("Stock");
 }
 
