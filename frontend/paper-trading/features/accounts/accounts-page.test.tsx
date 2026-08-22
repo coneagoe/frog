@@ -394,19 +394,24 @@ describe("AccountsPage", () => {
       { symbol: "ZERO", stock_name: "Zero", total_quantity: 1, frozen_quantity: 0, cost_amount: "3000.00", realized_pnl: "500.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "0.00" },
       { symbol: "NO-COST", stock_name: "No cost", total_quantity: 1, frozen_quantity: 0, cost_amount: "0.00", realized_pnl: "0.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "1.00" },
       { symbol: "NO-PNL", stock_name: "No pnl", total_quantity: 1, frozen_quantity: 0, cost_amount: "1000.00", realized_pnl: "0.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: null },
-      { symbol: "INVALID", stock_name: "Invalid", total_quantity: 1, frozen_quantity: 0, cost_amount: "not-a-number", realized_pnl: "0.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "1.00" }
+      { symbol: "INVALID", stock_name: "Invalid", total_quantity: 1, frozen_quantity: 0, cost_amount: "not-a-number", realized_pnl: "0.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "1.00" },
+      { symbol: "INFINITE", stock_name: "Infinite", total_quantity: 1, frozen_quantity: 0, cost_amount: "1000.00", realized_pnl: "0.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "Infinity" }
     ]);
 
     render(<AccountsPage />);
 
     const positions = within((await screen.findByRole("heading", { name: "Positions" })).closest("section")!);
     const rows = positions.getAllByRole("row").slice(1);
-    expect(within(rows[0]).getByText("+5.00%")).toHaveClass("positive");
-    expect(within(rows[1]).getByText("-2.50%")).toHaveClass("negative");
-    expect(within(rows[2]).getByText("0.00%")).toHaveClass("default");
-    expect(within(rows[3]).getByText("—")).toHaveClass("muted");
-    expect(within(rows[4]).getByText("—")).toHaveClass("muted");
-    expect(within(rows[5]).getByText("—")).toHaveClass("muted");
+    const returnCell = (row: HTMLElement) => within(row).getAllByRole("cell")[4];
+    expect(within(returnCell(rows[0])).getByText("+5.00%")).toHaveClass("positive");
+    expect(within(returnCell(rows[1])).getByText("-2.50%")).toHaveClass("negative");
+    expect(within(returnCell(rows[2])).getByText("0.00%")).toHaveClass("default");
+    expect(within(returnCell(rows[3])).getByText("—")).toHaveClass("muted");
+    expect(within(returnCell(rows[4])).getByText("—")).toHaveClass("muted");
+    expect(within(returnCell(rows[5])).getByText("—")).toHaveClass("muted");
+    expect(within(returnCell(rows[6])).getByText("—")).toHaveClass("muted");
+    expect(returnCell(rows[0])).toHaveClass("numeric");
+    expect(positions.getByRole("columnheader", { name: "Return" })).toHaveClass("numeric");
   });
 
   it("selects account from valid ?accountId search param", async () => {

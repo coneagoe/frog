@@ -78,22 +78,26 @@ describe("shared trading tables", () => {
     expect(nameElement).toHaveAttribute("title", name);
   });
 
-  it("labels the position PnL column Unrealized PnL", () => {
+  it("labels the position return column Return", () => {
     render(<PositionTable positions={[position]} />);
 
-    expect(screen.getByRole("columnheader", { name: "Unrealized PnL" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Return" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Cost" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Unrealized PnL" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Realized PnL" })).not.toBeInTheDocument();
   });
 
-  it("renders the API-supplied unrealized PnL value", () => {
+  it("renders the calculated unrealized return value", () => {
     render(<PositionTable positions={[position]} />);
 
-    expect(screen.getByRole("cell", { name: "¥250.00" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "+25.00%" })).toBeInTheDocument();
   });
 
-  it("renders Unavailable when unrealized PnL is null", () => {
+  it("renders a muted em dash when unrealized PnL is null", () => {
     render(<PositionTable positions={[{ ...position, unrealized_pnl: null }]} />);
 
-    expect(screen.getByRole("cell", { name: "Unavailable" })).toBeInTheDocument();
+    const returnCell = screen.getByRole("cell", { name: "—" });
+    expect(returnCell).toHaveClass("numeric");
+    expect(within(returnCell).getByText("—")).toHaveClass("muted");
   });
 });
