@@ -297,6 +297,32 @@ select:focus {
   text-transform: uppercase;
 }
 
+.table__sort-button {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 5px;
+  letter-spacing: inherit;
+  padding: 0;
+  text-transform: inherit;
+}
+
+.table__sort-button:focus-visible {
+  border-radius: 2px;
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.table__sort-indicator {
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1;
+}
+
 .table tbody tr:hover > td {
   background: var(--row-hover);
 }

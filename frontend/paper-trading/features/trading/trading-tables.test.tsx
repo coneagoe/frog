@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { OrderTable, PositionTable, TradeTable } from "./trading-tables";
 
@@ -99,5 +100,70 @@ describe("shared trading tables", () => {
     const returnCell = screen.getByRole("cell", { name: "—" });
     expect(returnCell).toHaveClass("numeric");
     expect(within(returnCell).getByText("—")).toHaveClass("muted");
+  });
+
+  it.each([
+    ["Symbol", ["000001.SZ", "000002.SZ"]],
+    ["Stock", ["Alpha", "Zulu"]],
+    ["Total", ["10", "20"]],
+    ["Frozen", ["0", "5"]],
+    ["Return", ["-10.00%", "+10.00%"]]
+  ])("sorts %s ascending and descending", async (header, expected) => {
+    const user = userEvent.setup();
+    const rows = [
+      { ...position, symbol: "000002.SZ", stock_name: "Zulu", total_quantity: 20, frozen_quantity: 5, cost_amount: "1000", unrealized_pnl: "100" },
+      { ...position, symbol: "000001.SZ", stock_name: "Alpha", total_quantity: 10, frozen_quantity: 0, cost_amount: "1000", unrealized_pnl: "-100" }
+    ];
+    render(<PositionTable positions={rows} />);
+    const table = screen.getByRole("table");
+    const getValues = () => within(table).getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell")[within(table).getAllByRole("columnheader").findIndex((column) => column.textContent?.startsWith(header))].textContent);
+
+    await user.click(screen.getByRole("button", { name: header }));
+    expect(getValues()).toEqual(expected);
+    await user.click(screen.getByRole("button", { name: header }));
+    expect(getValues()).toEqual([...expected].reverse());
+  });
+
+  it("keeps missing values last in both directions and does not mutate rows", async () => {
+    const user = userEvent.setup();
+    const rows = [
+      { ...position, symbol: "B", stock_name: null, total_quantity: 2 },
+      { ...position, symbol: "A", stock_name: "Alpha", total_quantity: 1 },
+      { ...position, symbol: "C", stock_name: "", total_quantity: Number.NaN }
+    ];
+    const original = [...rows];
+    render(<PositionTable positions={rows} />);
+    const total = screen.getByRole("button", { name: "Total" });
+    await user.click(total);
+    expect(within(screen.getByRole("table")).getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell")[2].textContent)).toEqual(["1", "2", "NaN"]);
+    await user.click(total);
+    expect(within(screen.getByRole("table")).getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell")[0].textContent)).toEqual(["B", "A", "C"]);
+    expect(rows).toEqual(original);
+  });
+
+  it("exposes one active sort state and supports keyboard sorting", async () => {
+    const user = userEvent.setup();
+    render(<PositionTable positions={[{ ...position, symbol: "B" }, { ...position, symbol: "A" }]} />);
+    const table = screen.getByRole("table");
+    const symbol = screen.getByRole("button", { name: "Symbol" });
+    symbol.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("columnheader", { name: /Symbol/ })).toHaveAttribute("aria-sort", "ascending");
+    expect(screen.getAllByRole("columnheader").filter((header) => header.hasAttribute("aria-sort"))).toHaveLength(1);
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("A");
+    await user.click(screen.getByRole("button", { name: "Stock" }));
+    expect(screen.getByRole("columnheader", { name: /Stock/ })).toHaveAttribute("aria-sort", "ascending");
+    expect(screen.getByRole("columnheader", { name: /Symbol/ })).not.toHaveAttribute("aria-sort");
+  });
+
+  it("resets sorting when the positions array is replaced", async () => {
+    const user = userEvent.setup();
+    const first = [{ ...position, symbol: "B" }, { ...position, symbol: "A" }];
+    const { rerender } = render(<PositionTable positions={first} />);
+    await user.click(screen.getByRole("button", { name: "Symbol" }));
+    const fresh = [{ ...position, symbol: "C" }, { ...position, symbol: "B" }];
+    rerender(<PositionTable positions={fresh} />);
+    expect(screen.getByRole("columnheader", { name: "Symbol" })).not.toHaveAttribute("aria-sort");
+    expect(within(screen.getByRole("table")).getAllByRole("row")[1]).toHaveTextContent("C");
   });
 });

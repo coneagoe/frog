@@ -9,7 +9,7 @@ function StockNameCell({ name, compact }: { name: string | null; compact?: boole
   return <span className={compact ? "stock-name stock-name--compact" : "stock-name"} title={name || undefined}>{stockName}</span>;
 }
 
-function positionReturn(position: Position): { value: string; className: "positive" | "negative" | "default" } | null {
+function positionReturnPercent(position: Position): number | null {
   if (position.unrealized_pnl === null) {
     return null;
   }
@@ -25,6 +25,15 @@ function positionReturn(position: Position): { value: string; className: "positi
     return null;
   }
 
+  return returnPercent;
+}
+
+function positionReturn(position: Position): { value: string; className: "positive" | "negative" | "default" } | null {
+  const returnPercent = positionReturnPercent(position);
+  if (returnPercent === null) {
+    return null;
+  }
+
   return {
     value: `${returnPercent > 0 ? "+" : ""}${returnPercent.toFixed(2)}%`,
     className: returnPercent > 0 ? "positive" : returnPercent < 0 ? "negative" : "default"
@@ -33,10 +42,10 @@ function positionReturn(position: Position): { value: string; className: "positi
 
 export function PositionTable({ density, positions }: { density?: "default" | "compact"; positions: Position[] }) {
   const columns: Column<Position>[] = [
-    { key: "symbol", header: "Symbol", render: (row) => row.symbol },
-    { key: "stock", header: "Stock", render: (row) => <StockNameCell compact={density === "compact"} name={row.stock_name} /> },
-    { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity) },
-    { key: "frozen", header: "Frozen", align: "right", render: (row) => formatQuantity(row.frozen_quantity) },
+    { key: "symbol", header: "Symbol", render: (row) => row.symbol, sortable: (row) => row.symbol },
+    { key: "stock", header: "Stock", render: (row) => <StockNameCell compact={density === "compact"} name={row.stock_name} />, sortable: (row) => row.stock_name },
+    { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity), sortable: (row) => row.total_quantity },
+    { key: "frozen", header: "Frozen", align: "right", render: (row) => formatQuantity(row.frozen_quantity), sortable: (row) => row.frozen_quantity },
     {
       key: "return",
       header: "Return",
@@ -44,10 +53,11 @@ export function PositionTable({ density, positions }: { density?: "default" | "c
       render: (row) => {
         const result = positionReturn(row);
         return result ? <span className={result.className}>{result.value}</span> : <span className="muted">—</span>;
-      }
+      },
+      sortable: positionReturnPercent
     }
   ];
-  return <DataTable columns={columns} density={density} emptyTitle="No positions" getRowKey={(row) => row.symbol} rows={positions} />;
+  return <DataTable columns={columns} density={density} emptyTitle="No positions" getRowKey={(row) => row.symbol} resetKey={positions} rows={positions} />;
 }
 
 export function OrderTable({
