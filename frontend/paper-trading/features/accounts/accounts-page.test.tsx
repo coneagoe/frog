@@ -361,6 +361,54 @@ describe("AccountsPage", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("renders compact positions columns in backend order", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([
+      { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "200.00", mark_price: "12.50", price_source: "real_time", unrealized_pnl: "250.00" },
+      { symbol: "000002", stock_name: "Vanke", total_quantity: 200, frozen_quantity: 10, cost_amount: "4000.00", realized_pnl: "100.00", mark_price: "8.00", price_source: "real_time", unrealized_pnl: "-100.00" }
+    ]);
+
+    render(<AccountsPage />);
+
+    const positions = within((await screen.findByRole("heading", { name: "Positions" })).closest("section")!);
+    expect(positions.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Symbol",
+      "Stock",
+      "Total",
+      "Frozen",
+      "Return"
+    ]);
+    expect(positions.queryByRole("columnheader", { name: "Cost" })).not.toBeInTheDocument();
+    expect(positions.queryByRole("columnheader", { name: "Unrealized PnL" })).not.toBeInTheDocument();
+    expect(positions.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell").map((cell) => cell.textContent).join(""))).toEqual([
+      "000001Ping An Bank1000+5.00%",
+      "000002Vanke20010-2.50%"
+    ]);
+  });
+
+  it("formats position returns and marks unavailable values", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([
+      { symbol: "POSITIVE", stock_name: "Positive", total_quantity: 1, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "999999.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "250.00" },
+      { symbol: "NEGATIVE", stock_name: "Negative", total_quantity: 1, frozen_quantity: 0, cost_amount: "4000.00", realized_pnl: "-999999.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "-100.00" },
+      { symbol: "ZERO", stock_name: "Zero", total_quantity: 1, frozen_quantity: 0, cost_amount: "3000.00", realized_pnl: "500.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "0.00" },
+      { symbol: "NO-COST", stock_name: "No cost", total_quantity: 1, frozen_quantity: 0, cost_amount: "0.00", realized_pnl: "0.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "1.00" },
+      { symbol: "NO-PNL", stock_name: "No pnl", total_quantity: 1, frozen_quantity: 0, cost_amount: "1000.00", realized_pnl: "0.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: null },
+      { symbol: "INVALID", stock_name: "Invalid", total_quantity: 1, frozen_quantity: 0, cost_amount: "not-a-number", realized_pnl: "0.00", mark_price: "1.00", price_source: "real_time", unrealized_pnl: "1.00" }
+    ]);
+
+    render(<AccountsPage />);
+
+    const positions = within((await screen.findByRole("heading", { name: "Positions" })).closest("section")!);
+    const rows = positions.getAllByRole("row").slice(1);
+    expect(within(rows[0]).getByText("+5.00%")).toHaveClass("positive");
+    expect(within(rows[1]).getByText("-2.50%")).toHaveClass("negative");
+    expect(within(rows[2]).getByText("0.00%")).toHaveClass("default");
+    expect(within(rows[3]).getByText("—")).toHaveClass("muted");
+    expect(within(rows[4]).getByText("—")).toHaveClass("muted");
+    expect(within(rows[5]).getByText("—")).toHaveClass("muted");
+  });
+
   it("selects account from valid ?accountId search param", async () => {
     // Set accountId=2 which is valid
     mockSearchParams.set("accountId", "2");

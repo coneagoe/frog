@@ -9,18 +9,42 @@ function StockNameCell({ name, compact }: { name: string | null; compact?: boole
   return <span className={compact ? "stock-name stock-name--compact" : "stock-name"} title={name || undefined}>{stockName}</span>;
 }
 
+function positionReturn(position: Position): { value: string; className: "positive" | "negative" | "default" } | null {
+  if (position.unrealized_pnl === null) {
+    return null;
+  }
+
+  const cost = Number(position.cost_amount);
+  const unrealizedPnl = Number(position.unrealized_pnl);
+  if (!Number.isFinite(cost) || cost === 0 || !Number.isFinite(unrealizedPnl)) {
+    return null;
+  }
+
+  const returnPercent = (unrealizedPnl / cost) * 100;
+  if (!Number.isFinite(returnPercent)) {
+    return null;
+  }
+
+  return {
+    value: `${returnPercent > 0 ? "+" : ""}${returnPercent.toFixed(2)}%`,
+    className: returnPercent > 0 ? "positive" : returnPercent < 0 ? "negative" : "default"
+  };
+}
+
 export function PositionTable({ density, positions }: { density?: "default" | "compact"; positions: Position[] }) {
   const columns: Column<Position>[] = [
     { key: "symbol", header: "Symbol", render: (row) => row.symbol },
     { key: "stock", header: "Stock", render: (row) => <StockNameCell compact={density === "compact"} name={row.stock_name} /> },
     { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity) },
     { key: "frozen", header: "Frozen", align: "right", render: (row) => formatQuantity(row.frozen_quantity) },
-    { key: "cost", header: "Cost", align: "right", render: (row) => <MoneyText value={row.cost_amount} /> },
     {
-      key: "pnl",
-      header: "Unrealized PnL",
+      key: "return",
+      header: "Return",
       align: "right",
-      render: (row) => row.unrealized_pnl === null ? "Unavailable" : <MoneyText value={row.unrealized_pnl} />
+      render: (row) => {
+        const result = positionReturn(row);
+        return result ? <span className={result.className}>{result.value}</span> : <span className="muted">—</span>;
+      }
     }
   ];
   return <DataTable columns={columns} density={density} emptyTitle="No positions" getRowKey={(row) => row.symbol} rows={positions} />;
