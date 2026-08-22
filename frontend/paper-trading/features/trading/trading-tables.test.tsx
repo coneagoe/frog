@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { OrderTable, PositionTable, TradeTable } from "./trading-tables";
 
@@ -49,7 +50,7 @@ const trade = {
 
 function expectAdjacentStockHeader(table: HTMLElement) {
   const headers = within(table).getAllByRole("columnheader");
-  const symbolIndex = headers.findIndex((header) => header.textContent === "Symbol");
+  const symbolIndex = headers.findIndex((header) => (header.textContent ?? "").startsWith("Symbol"));
   expect(headers[symbolIndex + 1]).toHaveTextContent("Stock");
 }
 
@@ -94,6 +95,47 @@ describe("shared trading tables", () => {
   it("renders Unavailable when unrealized PnL is null", () => {
     render(<PositionTable positions={[{ ...position, unrealized_pnl: null }]} />);
 
-    expect(screen.getByRole("cell", { name: "Unavailable" })).toBeInTheDocument();
+    expect(screen.getAllByRole("cell", { name: "Unavailable" })).toHaveLength(2);
+  });
+
+  it("replaces Cost with 收益率 computed from unrealized PnL over cost", () => {
+    render(<PositionTable positions={[position]} />);
+
+    expect(screen.queryByRole("columnheader", { name: "Cost" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "收益率" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "25.00%" })).toBeInTheDocument();
+  });
+
+  it("renders Unavailable for 收益率 when cost or unrealized PnL cannot be used", () => {
+    render(
+      <PositionTable
+        positions={[
+          { ...position, symbol: "000002", cost_amount: "0.00", unrealized_pnl: "10.00" },
+          { ...position, symbol: "000003", unrealized_pnl: null }
+        ]}
+      />
+    );
+
+    expect(screen.getAllByRole("cell", { name: "Unavailable" })).toHaveLength(3);
+  });
+
+  it("sorts positions when a column header is clicked", async () => {
+    const user = userEvent.setup();
+    render(
+      <PositionTable
+        positions={[
+          { ...position, symbol: "000002", stock_name: "Beta", total_quantity: 50, cost_amount: "1000.00", unrealized_pnl: "100.00" },
+          { ...position, symbol: "000001", stock_name: "Alpha", total_quantity: 200, cost_amount: "1000.00", unrealized_pnl: "250.00" }
+        ]}
+      />
+    );
+
+    expect(screen.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell")[0].textContent)).toEqual(["000002", "000001"]);
+
+    await user.click(within(screen.getByRole("columnheader", { name: "Symbol" })).getByRole("button", { name: "Symbol" }));
+    expect(screen.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell")[0].textContent)).toEqual(["000001", "000002"]);
+
+    await user.click(within(screen.getByRole("columnheader", { name: "收益率" })).getByRole("button", { name: "收益率" }));
+    expect(screen.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell")[0].textContent)).toEqual(["000002", "000001"]);
   });
 });

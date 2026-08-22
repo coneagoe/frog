@@ -487,6 +487,12 @@ Accounts Positions card:
 - `unrealized_pnl`: `total_quantity * mark_price - cost_amount`, or `null`
   when neither price source is available.
 
+The Accounts Positions card hides `cost_amount` and shows a `收益率` column of
+`unrealized_pnl / cost_amount`, formatted as a percentage. The value is
+`Unavailable` when unrealized PnL is missing or cost is zero. Clicking a
+Positions column header sorts that column (ascending, then descending, then
+back to the API order).
+
 The positions endpoint batches real-time quote retrieval for A-share and HK
 Connect positions. A missing or invalid quote falls back per position to the
 latest stored BFQ close using its market route. ETF positions bypass the

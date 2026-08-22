@@ -1,7 +1,7 @@
 import { DataTable, type Column } from "@/components/data-table";
 import { MoneyText } from "@/components/money-text";
 import { StatusBadge } from "@/components/status-badge";
-import { formatDate, formatQuantity } from "@/lib/format";
+import { formatDate, formatPercent, formatQuantity } from "@/lib/format";
 import type { CashLedgerEntry, Order, Position, Trade } from "@/lib/types";
 
 function StockNameCell({ name, compact }: { name: string | null; compact?: boolean }) {
@@ -9,18 +9,40 @@ function StockNameCell({ name, compact }: { name: string | null; compact?: boole
   return <span className={compact ? "stock-name stock-name--compact" : "stock-name"} title={name || undefined}>{stockName}</span>;
 }
 
+function positionReturnRate(position: Position): number | null {
+  if (position.unrealized_pnl === null) {
+    return null;
+  }
+  const costAmount = Number(position.cost_amount);
+  const unrealizedPnl = Number(position.unrealized_pnl);
+  if (!Number.isFinite(costAmount) || costAmount === 0 || !Number.isFinite(unrealizedPnl)) {
+    return null;
+  }
+  return unrealizedPnl / costAmount;
+}
+
 export function PositionTable({ density, positions }: { density?: "default" | "compact"; positions: Position[] }) {
   const columns: Column<Position>[] = [
-    { key: "symbol", header: "Symbol", render: (row) => row.symbol },
-    { key: "stock", header: "Stock", render: (row) => <StockNameCell compact={density === "compact"} name={row.stock_name} /> },
-    { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity) },
-    { key: "frozen", header: "Frozen", align: "right", render: (row) => formatQuantity(row.frozen_quantity) },
-    { key: "cost", header: "Cost", align: "right", render: (row) => <MoneyText value={row.cost_amount} /> },
+    { key: "symbol", header: "Symbol", render: (row) => row.symbol, sortValue: (row) => row.symbol },
+    { key: "stock", header: "Stock", render: (row) => <StockNameCell compact={density === "compact"} name={row.stock_name} />, sortValue: (row) => row.stock_name },
+    { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity), sortValue: (row) => row.total_quantity },
+    { key: "frozen", header: "Frozen", align: "right", render: (row) => formatQuantity(row.frozen_quantity), sortValue: (row) => row.frozen_quantity },
+    {
+      key: "return",
+      header: "收益率",
+      align: "right",
+      render: (row) => {
+        const returnRate = positionReturnRate(row);
+        return returnRate === null ? "Unavailable" : formatPercent(returnRate);
+      },
+      sortValue: (row) => positionReturnRate(row)
+    },
     {
       key: "pnl",
       header: "Unrealized PnL",
       align: "right",
-      render: (row) => row.unrealized_pnl === null ? "Unavailable" : <MoneyText value={row.unrealized_pnl} />
+      render: (row) => row.unrealized_pnl === null ? "Unavailable" : <MoneyText value={row.unrealized_pnl} />,
+      sortValue: (row) => (row.unrealized_pnl === null ? null : Number(row.unrealized_pnl))
     }
   ];
   return <DataTable columns={columns} density={density} emptyTitle="No positions" getRowKey={(row) => row.symbol} rows={positions} />;
