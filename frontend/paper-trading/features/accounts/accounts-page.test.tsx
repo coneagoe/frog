@@ -348,6 +348,30 @@ describe("AccountsPage", () => {
     expect(listPositionsMock).toHaveBeenCalledWith(2);
   });
 
+  it("resets position sorting when switching accounts", async () => {
+    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
+    const account1Positions = [
+      { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "5000.00", realized_pnl: "0.00", mark_price: "12.50", price_source: "real_time", unrealized_pnl: "250.00" },
+      { symbol: "000002", stock_name: "Vanke", total_quantity: 200, frozen_quantity: 10, cost_amount: "4000.00", realized_pnl: "0.00", mark_price: "8.00", price_source: "real_time", unrealized_pnl: "-100.00" }
+    ];
+    const account2Positions = [
+      { symbol: "000003", stock_name: "China Merchants Bank", total_quantity: 300, frozen_quantity: 0, cost_amount: "3000.00", realized_pnl: "0.00", mark_price: "10.00", price_source: "real_time", unrealized_pnl: "100.00" },
+      { symbol: "000004", stock_name: "Midea", total_quantity: 400, frozen_quantity: 0, cost_amount: "2000.00", realized_pnl: "0.00", mark_price: "5.00", price_source: "real_time", unrealized_pnl: "50.00" }
+    ];
+    listAccountsMock.mockResolvedValue([demoAccount, account2]);
+    listPositionsMock.mockImplementation(async (accountId) => accountId === 1 ? account1Positions : account2Positions);
+
+    render(<AccountsPage />);
+    const positions = within((await screen.findByRole("heading", { name: "Positions" })).closest("section")!);
+    await userEvent.click(positions.getByRole("button", { name: "Symbol" }));
+    await userEvent.click(positions.getByRole("button", { name: "Symbol" }));
+    expect(positions.getAllByRole("row")[1]).toHaveTextContent("000002");
+
+    await userEvent.click(screen.getByRole("button", { name: "View prod" }));
+    await waitFor(() => expect(positions.getAllByRole("row")[1]).toHaveTextContent("000003"));
+    expect(positions.getAllByRole("row")[2]).toHaveTextContent("000004");
+  });
+
   it("renders positions without a detail error when the request succeeds", async () => {
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([
