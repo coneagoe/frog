@@ -28,6 +28,38 @@ function positionReturnPercent(position: Position): number | null {
   return returnPercent;
 }
 
+function positionWeightPercent(
+  position: Position,
+  accountNav: string | null | undefined,
+  accountShareCount: string | null | undefined
+): number | null {
+  const nav = Number(accountNav);
+  const shareCount = Number(accountShareCount);
+  const quantity = Number(position.total_quantity);
+  const markPrice = Number(position.mark_price);
+
+  if (
+    accountNav === null ||
+    accountNav === undefined ||
+    accountShareCount === null ||
+    accountShareCount === undefined ||
+    position.mark_price === null ||
+    !Number.isFinite(nav) ||
+    nav <= 0 ||
+    !Number.isFinite(shareCount) ||
+    shareCount <= 0 ||
+    !Number.isFinite(quantity) ||
+    quantity <= 0 ||
+    !Number.isFinite(markPrice) ||
+    markPrice < 0
+  ) {
+    return null;
+  }
+
+  const weightPercent = (quantity * markPrice / (nav * shareCount)) * 100;
+  return Number.isFinite(weightPercent) ? weightPercent : null;
+}
+
 function positionReturn(position: Position): { value: string; className: "positive" | "negative" | "default" } | null {
   const returnPercent = positionReturnPercent(position);
   if (returnPercent === null) {
@@ -40,12 +72,34 @@ function positionReturn(position: Position): { value: string; className: "positi
   };
 }
 
-export function PositionTable({ density, positions }: { density?: "default" | "compact"; positions: Position[] }) {
+export function PositionTable({
+  accountNav,
+  accountShareCount,
+  density,
+  positions
+}: {
+  accountNav?: string | null;
+  accountShareCount?: string | null;
+  density?: "default" | "compact";
+  positions: Position[];
+}) {
   const columns: Column<Position>[] = [
     { key: "symbol", header: "Symbol", render: (row) => row.symbol, sortable: (row) => row.symbol },
     { key: "stock", header: "Stock", render: (row) => <StockNameCell compact={density === "compact"} name={row.stock_name} />, sortable: (row) => row.stock_name },
     { key: "total", header: "Total", align: "right", render: (row) => formatQuantity(row.total_quantity), sortable: (row) => row.total_quantity },
     { key: "frozen", header: "Frozen", align: "right", render: (row) => formatQuantity(row.frozen_quantity), sortable: (row) => row.frozen_quantity },
+    ...(accountNav !== undefined && accountShareCount !== undefined
+      ? [{
+          key: "weight",
+          header: "Weight",
+          align: "right" as const,
+          render: (row: Position) => {
+            const weightPercent = positionWeightPercent(row, accountNav, accountShareCount);
+            return weightPercent === null ? <span className="muted">—</span> : `${weightPercent.toFixed(2)}%`;
+          },
+          sortable: (row: Position) => positionWeightPercent(row, accountNav, accountShareCount)
+        }]
+      : []),
     {
       key: "return",
       header: "Return",
