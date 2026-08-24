@@ -338,7 +338,7 @@ describe("AccountsPage", () => {
       name: "prod",
       initial_cash: "50000.00",
       cash_available: "50000.0000",
-      net_asset_value: "2.000000",
+      net_asset_value: "1.000000",
       share_count: "50000.000000"
     };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
@@ -356,7 +356,7 @@ describe("AccountsPage", () => {
     // Wait for the Positions panel to appear for account 2
     expect(await screen.findByText("Positions")).toBeInTheDocument();
     expect(listPositionsMock).toHaveBeenCalledWith(2);
-    expect(screen.getByRole("cell", { name: "1.25%" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "2.50%" })).toBeInTheDocument();
   });
 
   it("resets position sorting when switching accounts", async () => {
