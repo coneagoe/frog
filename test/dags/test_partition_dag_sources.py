@@ -400,6 +400,7 @@ def test_daily_dag_has_both_hfq_and_bfq_partition_tasks():
 def test_daily_dag_uses_weekdays_dag_id_without_hfq_suffix():
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
 
+    assert 'schedule="0 18 * * 1-5"' in source
     assert '"download_stock_history_weekdays"' in source
     assert '"download_stock_history_hfq_weekdays"' not in source
 

@@ -265,7 +265,7 @@ dag = DAG(
     "download_stock_history_weekdays",
     default_args=get_default_args(),
     description="Weekdays stock history HFQ download",
-    schedule="0 16 * * 1-5",
+    schedule="0 18 * * 1-5",
     catchup=False,
     max_active_runs=1,
 )
