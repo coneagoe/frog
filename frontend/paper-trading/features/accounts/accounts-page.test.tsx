@@ -338,11 +338,12 @@ describe("AccountsPage", () => {
       name: "prod",
       initial_cash: "50000.00",
       cash_available: "50000.0000",
+      net_asset_value: "2.000000",
       share_count: "50000.000000"
     };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
     listPositionsMock.mockResolvedValue([
-      { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "1000.00", realized_pnl: "0.00", mark_price: "12.50", price_source: "real_time", unrealized_pnl: "0.00" }
+      { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "1000.00", realized_pnl: "0.00", mark_price: "12.50", price_source: "real_time" as const, unrealized_pnl: "0.00" }
     ]);
 
     render(<AccountsPage />);
@@ -355,7 +356,7 @@ describe("AccountsPage", () => {
     // Wait for the Positions panel to appear for account 2
     expect(await screen.findByText("Positions")).toBeInTheDocument();
     expect(listPositionsMock).toHaveBeenCalledWith(2);
-    expect(screen.getByRole("cell", { name: "2.50%" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "1.25%" })).toBeInTheDocument();
   });
 
   it("resets position sorting when switching accounts", async () => {
