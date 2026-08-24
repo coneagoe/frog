@@ -332,9 +332,19 @@ describe("AccountsPage", () => {
   });
 
   it("switches positions without requesting the cash ledger when selecting a different account", async () => {
-    const account2 = { ...demoAccount, id: 2, name: "prod", initial_cash: "50000.00", cash_available: "50000.0000" };
+    const account2 = {
+      ...demoAccount,
+      id: 2,
+      name: "prod",
+      initial_cash: "50000.00",
+      cash_available: "50000.0000",
+      net_asset_value: "1.000000",
+      share_count: "50000.000000"
+    };
     listAccountsMock.mockResolvedValue([demoAccount, account2]);
-    listPositionsMock.mockResolvedValue([]);
+    listPositionsMock.mockResolvedValue([
+      { symbol: "000001", stock_name: "Ping An Bank", total_quantity: 100, frozen_quantity: 0, cost_amount: "1000.00", realized_pnl: "0.00", mark_price: "12.50", price_source: "real_time" as const, unrealized_pnl: "0.00" }
+    ]);
 
     render(<AccountsPage />);
 
@@ -346,6 +356,7 @@ describe("AccountsPage", () => {
     // Wait for the Positions panel to appear for account 2
     expect(await screen.findByText("Positions")).toBeInTheDocument();
     expect(listPositionsMock).toHaveBeenCalledWith(2);
+    expect(screen.getByRole("cell", { name: "2.50%" })).toBeInTheDocument();
   });
 
   it("resets position sorting when switching accounts", async () => {
@@ -400,13 +411,14 @@ describe("AccountsPage", () => {
       "Stock",
       "Total",
       "Frozen",
+      "Weight",
       "Return"
     ]);
     expect(positions.queryByRole("columnheader", { name: "Cost" })).not.toBeInTheDocument();
     expect(positions.queryByRole("columnheader", { name: "Unrealized PnL" })).not.toBeInTheDocument();
     expect(positions.getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell").map((cell) => cell.textContent).join(""))).toEqual([
-      "000001Ping An Bank1000+5.00%",
-      "000002Vanke20010-2.50%"
+      "000001Ping An Bank10001.25%+5.00%",
+      "000002Vanke200101.60%-2.50%"
     ]);
   });
 
@@ -426,7 +438,7 @@ describe("AccountsPage", () => {
 
     const positions = within((await screen.findByRole("heading", { name: "Positions" })).closest("section")!);
     const rows = positions.getAllByRole("row").slice(1);
-    const returnCell = (row: HTMLElement) => within(row).getAllByRole("cell")[4];
+    const returnCell = (row: HTMLElement) => within(row).getAllByRole("cell")[5];
     expect(within(returnCell(rows[0])).getByText("+5.00%")).toHaveClass("positive");
     expect(within(returnCell(rows[1])).getByText("-2.50%")).toHaveClass("negative");
     expect(within(returnCell(rows[2])).getByText("0.00%")).toHaveClass("default");

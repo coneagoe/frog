@@ -253,7 +253,12 @@ export function AccountsPage() {
           ) : null}
           <section className="panel">
             <h2>Positions</h2>
-            <PositionTable density="compact" positions={positions} />
+            <PositionTable
+              accountNav={selectedAccount?.net_asset_value}
+              accountShareCount={selectedAccount?.share_count}
+              density="compact"
+              positions={positions}
+            />
           </section>
         </div>
       ) : null}

@@ -79,6 +79,44 @@ describe("shared trading tables", () => {
     expect(nameElement).toHaveAttribute("title", name);
   });
 
+  it("adds Weight before Return only when account scale is provided", () => {
+    const { rerender } = render(<PositionTable positions={[position]} />);
+
+    expect(screen.queryByRole("columnheader", { name: "Weight" })).not.toBeInTheDocument();
+
+    rerender(<PositionTable accountNav="1.000000" accountShareCount="100000.000000" positions={[position]} />);
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Symbol",
+      "Stock",
+      "Total",
+      "Frozen",
+      "Weight",
+      "Return"
+    ]);
+  });
+
+  it("renders market value as a percentage of total account assets", () => {
+    render(<PositionTable accountNav="1.000000" accountShareCount="100000.000000" positions={[position]} />);
+
+    expect(screen.getByRole("cell", { name: "1.25%" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["missing unit NAV", null, "100000.000000", position],
+    ["zero unit NAV", "0", "100000.000000", position],
+    ["non-finite unit NAV", "Infinity", "100000.000000", position],
+    ["invalid share count", "1.000000", "not-a-number", position],
+    ["zero quantity", "1.000000", "100000.000000", { ...position, total_quantity: 0 }],
+    ["non-finite quantity", "1.000000", "100000.000000", { ...position, total_quantity: Number.NaN }],
+    ["missing mark price", "1.000000", "100000.000000", { ...position, mark_price: null }]
+  ])("renders a muted em dash for %s", (_name, accountNav, accountShareCount, invalidPosition) => {
+    render(<PositionTable accountNav={accountNav} accountShareCount={accountShareCount} positions={[invalidPosition]} />);
+
+    const weightCell = screen.getAllByRole("cell")[4];
+    expect(within(weightCell).getByText("—")).toHaveClass("muted");
+    expect(weightCell).not.toHaveTextContent("0.00%");
+  });
+
   it("labels the position return column Return", () => {
     render(<PositionTable positions={[position]} />);
 
