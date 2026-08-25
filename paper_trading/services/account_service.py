@@ -22,6 +22,8 @@ class AccountService:
         transfer_fee_rate: Decimal | None = None,
         etf_commission_rate: Decimal | None = None,
     ) -> PaperAccount:
+        if initial_cash <= 0:
+            raise ValueError("initial_cash must be positive")
         return self.repo.create_account(
             name=name,
             initial_cash=initial_cash,

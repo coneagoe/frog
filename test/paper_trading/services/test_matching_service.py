@@ -1429,7 +1429,7 @@ def test_hk_connect_matching_sell_creates_pending_settlement(sqlite_session):
 
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
-    account = repo.create_account("hk-sell", Decimal("0.00"))
+    account = repo.create_account("hk-sell", Decimal("1.00"))
     session = sqlite_session
     session.add(GeneralInfoGGT(股票代码="00700", 股票名称="Tencent"))
     session.flush()
@@ -1464,7 +1464,7 @@ def test_hk_connect_matching_sell_creates_pending_settlement(sqlite_session):
     assert len(pending) == 1
     assert pending[0].settled is False
     # Cash should NOT be immediately available for HK sell
-    assert repo.get_cash_available(account.id) == Decimal("0.0000")
+    assert repo.get_cash_available(account.id) == Decimal("1.0000")
 
 
 def test_hk_connect_matching_buy_does_not_create_pending_settlement(sqlite_session):

@@ -1,12 +1,14 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_position_valuation_service, get_security_name_provider, get_session
 from paper_trading.domain.enums import Market
 from paper_trading.services.position_valuation_service import PositionValuation
+from paper_trading.storage.models import PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import _FakeSecurityNameProvider
@@ -143,6 +145,54 @@ def test_account_responses_include_ledger_derived_cash_available(monkeypatch, sq
     assert listed.json()[0]["cash_available"] == "125000.0000"
     assert detailed.json()["cash_available"] == "125000.0000"
     assert fee_updated.json()["cash_available"] == "125000.0000"
+
+
+@pytest.mark.parametrize("initial_cash", ["0", "-1"])
+def test_create_account_rejects_non_positive_initial_cash(monkeypatch, sqlite_session, initial_cash):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+
+    response = client.post(
+        "/paper/accounts",
+        json={"name": "invalid", "initial_cash": initial_cash},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_account_persists_one_initial_nav_snapshot(monkeypatch, sqlite_session):
+    client, headers, session = _client(monkeypatch, sqlite_session)
+
+    response = client.post(
+        "/paper/accounts",
+        json={"name": "primary", "initial_cash": "1000"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    account_id = response.json()["id"]
+    snapshots = PaperTradingRepository(session).list_snapshots(account_id)
+    assert [(row.point_type, row.net_asset_value) for row in snapshots] == [("initial", Decimal("1.000000"))]
+
+
+def test_create_account_rolls_back_when_snapshot_insert_fails(monkeypatch, sqlite_session):
+    client, headers, session = _client(monkeypatch, sqlite_session)
+
+    def fail_snapshot(*args, **kwargs):
+        raise RuntimeError("snapshot insert failed")
+
+    monkeypatch.setattr(PaperTradingRepository, "create_initial_snapshot", fail_snapshot)
+
+    with pytest.raises(RuntimeError, match="snapshot insert failed"):
+        client.post(
+            "/paper/accounts",
+            json={"name": "primary", "initial_cash": "1000"},
+            headers=headers,
+        )
+    session.rollback()
+
+    assert PaperTradingRepository(session).list_accounts() == []
+    assert session.query(PaperCashLedger).count() == 0
 
 
 def test_create_account_rejects_negative_fee_config(monkeypatch, sqlite_session):

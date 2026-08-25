@@ -10,7 +10,7 @@ from paper_trading.domain.enums import Market
 
 class CreateAccountRequest(BaseModel):
     name: str
-    initial_cash: Decimal
+    initial_cash: Decimal = Field(gt=0)
     fee_preset: str | None = "a_share"
     commission_rate: Decimal | None = Field(default=None, ge=0)
     min_commission: Decimal | None = Field(default=None, ge=0)

@@ -2,13 +2,15 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from paper_trading.domain.enums import Market, OrderSide, OrderStatus
-from paper_trading.schemas.accounts import ImportPositionItem
+from paper_trading.schemas.accounts import CreateAccountRequest, ImportPositionItem
 from paper_trading.services.account_service import AccountService
 from paper_trading.storage.models import (
+    PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
     PaperMatchingRun,
@@ -42,6 +44,49 @@ def test_create_account_returns_active_account_with_initial_cash(tmp_path):
     assert account.name == "demo"
     assert account.status == "active"
     assert repo.get_cash_available(account.id) == Decimal("100000.0000")
+    engine.dispose()
+
+
+@pytest.mark.parametrize("initial_cash", [Decimal("0"), Decimal("-1")])
+def test_create_account_rejects_non_positive_initial_cash(initial_cash):
+    with pytest.raises(ValidationError):
+        CreateAccountRequest(name="invalid", initial_cash=initial_cash)
+
+
+def test_account_creation_persists_initial_nav_snapshot(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    request = CreateAccountRequest(name="primary", initial_cash=Decimal("1000"))
+
+    account = service.create_account(request.name, request.initial_cash)
+    snapshots = repo.list_snapshots(account.id)
+
+    assert [(row.point_type, row.net_asset_value) for row in snapshots] == [("initial", Decimal("1.000000"))]
+    engine.dispose()
+
+
+@pytest.mark.parametrize("initial_cash", [Decimal("0"), Decimal("-1")])
+def test_create_account_service_rejects_non_positive_initial_cash(tmp_path, initial_cash):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+
+    with pytest.raises(ValueError, match="initial_cash"):
+        service.create_account("invalid", initial_cash)
+    engine.dispose()
+
+
+def test_account_creation_rolls_back_when_snapshot_insert_fails(tmp_path, monkeypatch):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+
+    def fail_snapshot(*args, **kwargs):
+        raise RuntimeError("snapshot insert failed")
+
+    monkeypatch.setattr(repo, "create_initial_snapshot", fail_snapshot)
+
+    with pytest.raises(RuntimeError, match="snapshot insert failed"):
+        service.create_account("primary", Decimal("1000"))
+    session.rollback()
+
+    assert session.query(PaperAccount).count() == 0
+    assert session.query(PaperCashLedger).count() == 0
     engine.dispose()
 
 
