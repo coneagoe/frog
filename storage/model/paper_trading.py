@@ -34,6 +34,8 @@ from paper_trading.domain.enums import (
     PendingSettlementSource,
     PositionSource,
     RoundTripStatus,
+    SnapshotPointType,
+    SnapshotQualityStatus,
     TradeValidityGranularity,
     TradeValidityStatus,
 )
@@ -304,13 +306,28 @@ class PaperPositionRoundTrip(Base):
 
 class PaperAccountSnapshot(Base):
     __tablename__ = tb_name_paper_account_snapshots
-    __table_args__ = (UniqueConstraint("account_id", "trade_date", name="uq_paper_account_snapshots_account_date"),)
+    __table_args__ = (
+        Index("ix_paper_account_snapshots_account_event", "account_id", "event_at", "id"),
+        Index(
+            "uq_paper_account_snapshots_account_initial",
+            "account_id",
+            unique=True,
+            postgresql_where=text("point_type = 'initial'"),
+            sqlite_where=text("point_type = 'initial'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[int] = mapped_column(
         Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True
     )
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    point_type: Mapped[str] = mapped_column(_value_enum(SnapshotPointType, "paper_snapshot_point_type"), nullable=False)
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    quality_status: Mapped[str] = mapped_column(
+        _value_enum(SnapshotQualityStatus, "paper_snapshot_quality_status"), nullable=False
+    )
+    invalid_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     cash_available: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     cash_frozen: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     market_value: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)

@@ -84,6 +84,16 @@ class ETFEligibilityStatus(StrEnum):
     DISABLED = "disabled"
 
 
+class SnapshotPointType(StrEnum):
+    INITIAL = "initial"
+    TRADING = "trading"
+
+
+class SnapshotQualityStatus(StrEnum):
+    VALID = "valid"
+    INVALID = "invalid"
+
+
 # Marker prefix for rejection reasons set by OrderDeleteService replay.
 # reset_orders_for_replay uses this to distinguish replay-induced rejections
 # (which may become resolvable after a later delete) from original/business

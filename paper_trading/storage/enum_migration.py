@@ -20,6 +20,8 @@ from paper_trading.domain.enums import (
     PendingSettlementSource,
     PositionSource,
     RoundTripStatus,
+    SnapshotPointType,
+    SnapshotQualityStatus,
     TradeValidityGranularity,
     TradeValidityStatus,
 )
@@ -104,6 +106,10 @@ _MATCHING_INDEX_SQL = (
     "CREATE UNIQUE INDEX uq_matching_active_scope ON paper_matching_runs "
     "(trade_date, scope_key) WHERE status = 'running'"
 )
+_SNAPSHOT_INITIAL_INDEX_SQL = (
+    "CREATE UNIQUE INDEX uq_paper_account_snapshots_account_initial "
+    "ON paper_account_snapshots (account_id) WHERE point_type = 'initial'"
+)
 
 
 def _index(name: str, table_name: str, column_name: str) -> tuple[str, str]:
@@ -111,6 +117,7 @@ def _index(name: str, table_name: str, column_name: str) -> tuple[str, str]:
 
 
 _MATCHING_INDEX = ("uq_matching_active_scope", _MATCHING_INDEX_SQL)
+_SNAPSHOT_INITIAL_INDEX = ("uq_paper_account_snapshots_account_initial", _SNAPSHOT_INITIAL_INDEX_SQL)
 
 PAPER_TRADING_ENUM_GROUPS = (
     PaperTradingEnumGroup(
@@ -287,6 +294,23 @@ PAPER_TRADING_ENUM_GROUPS = (
             ),
         ),
     ),
+    PaperTradingEnumGroup(
+        "paper_snapshot_point_type",
+        _labels(SnapshotPointType),
+        (
+            _column(
+                "paper_account_snapshots",
+                "point_type",
+                "VARCHAR(20)",
+                indexes=(_SNAPSHOT_INITIAL_INDEX,),
+            ),
+        ),
+    ),
+    PaperTradingEnumGroup(
+        "paper_snapshot_quality_status",
+        _labels(SnapshotQualityStatus),
+        (_column("paper_account_snapshots", "quality_status", "VARCHAR(20)"),),
+    ),
 )
 
 _GOVERNED_TABLES = (
@@ -317,6 +341,28 @@ _OPERATIONAL_TABLES = (
 )
 _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_status", re.IGNORECASE)
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)
+_SNAPSHOT_ENUM_TYPES = frozenset({"paper_snapshot_point_type", "paper_snapshot_quality_status"})
+_SNAPSHOT_INITIAL_ENUM_PREDICATE = re.compile(
+    r"point_type\s*=\s*'initial'\s*::\s*paper_snapshot_point_type", re.IGNORECASE
+)
+_SNAPSHOT_INITIAL_LEGACY_PREDICATE = re.compile(r"point_type.*=.*'initial'", re.IGNORECASE)
+
+
+def _is_optional_snapshot_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
+    return group.type_name in _SNAPSHOT_ENUM_TYPES and column.table_name == "paper_account_snapshots"
+
+
+def _has_pending_enum_column_changes(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]) -> bool:
+    for group in groups:
+        for column in group.columns:
+            if not _table_exists(connection, column.table_name):
+                continue
+            facts = _column_facts(connection, column)
+            if facts is None and _is_optional_snapshot_column(group, column):
+                continue
+            if facts is None or not _column_has_type(connection, column, group.type_name):
+                return True
+    return False
 
 
 def _result(
@@ -358,12 +404,7 @@ def _adapter_apply(connection: Connection) -> bool:
     groups = PAPER_TRADING_ENUM_GROUPS
     _adapter_preflight(connection, rollback=False)
     missing_tables = _preflight(connection, groups, rollback=False)
-    changed = bool(missing_tables) or any(
-        _column_facts(connection, column) is None or not _column_has_type(connection, column, group.type_name)
-        for group in groups
-        for column in group.columns
-        if _table_exists(connection, column.table_name)
-    )
+    changed = bool(missing_tables) or _has_pending_enum_column_changes(connection, groups)
     changed = _ensure_etf_eligibility_symbol_check(connection) or changed
     if missing_tables:
         for group in groups:
@@ -578,7 +619,9 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
                 continue
             facts = _column_facts(connection, column)
             if facts is None:
-                if not rollback and group.type_name == "paper_market" and column.column_name == "market":
+                if _is_optional_snapshot_column(group, column) or (
+                    not rollback and group.type_name == "paper_market" and column.column_name == "market"
+                ):
                     continue
                 raise PaperTradingEnumMigrationError(
                     f"{group.type_name}: missing {column.table_name}.{column.column_name}"
@@ -665,6 +708,8 @@ def _alter_group(connection: Connection, group: PaperTradingEnumGroup, *, rollba
             continue
         if not rollback and _column_has_type(connection, column, group.type_name):
             continue
+        if _column_facts(connection, column) is None:
+            continue
         for index_name, _ in column.indexes:
             connection.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
         if column.default_sql is not None:
@@ -750,11 +795,13 @@ def _verify(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...], *
                 continue
             expected = _normalized_type(column.legacy_type_sql) if rollback else group.type_name
             facts = _column_facts(connection, column)
-            if (
-                rollback
-                and facts is None
-                and group.type_name == "paper_market"
-                and column.table_name in _MARKET_COLUMNS_REMOVED_ON_ROLLBACK
+            if facts is None and (
+                (
+                    rollback
+                    and group.type_name == "paper_market"
+                    and column.table_name in _MARKET_COLUMNS_REMOVED_ON_ROLLBACK
+                )
+                or _is_optional_snapshot_column(group, column)
             ):
                 continue
             if facts is None or facts[0] != expected:
@@ -1108,7 +1155,7 @@ def _indexes_ready(connection: Connection, column: PaperTradingEnumColumn, *, en
     return True
 
 
-def _validate_matching_index(connection: Connection, index_name: str, *, enum_typed: bool) -> None:
+def _partial_unique_index_facts(connection: Connection, index_name: str) -> tuple[bool, tuple[str, ...], str] | None:
     facts = connection.execute(
         text(
             "SELECT i.indisunique, array_agg(a.attname ORDER BY k.ordinality), pg_get_expr(i.indpred, i.indrelid) "
@@ -1121,18 +1168,51 @@ def _validate_matching_index(connection: Connection, index_name: str, *, enum_ty
         ),
         {"index_name": index_name},
     ).one_or_none()
-    predicate = facts[2] if facts else ""
-    pattern = _ENUM_PREDICATE if enum_typed else _LEGACY_PREDICATE
-    if not facts or not facts[0] or tuple(facts[1]) != ("trade_date", "scope_key") or not pattern.search(predicate):
-        raise PaperTradingEnumMigrationError(
-            "paper_matching_run_status: active matching-run partial index is missing or invalid"
-        )
+    if facts is None:
+        return None
+    return bool(facts[0]), tuple(facts[1]), facts[2] or ""
+
+
+def _validate_partial_unique_index(
+    connection: Connection,
+    index_name: str,
+    *,
+    columns: tuple[str, ...],
+    pattern: re.Pattern[str],
+    error: str,
+) -> None:
+    facts = _partial_unique_index_facts(connection, index_name)
+    if facts is None or not facts[0] or facts[1] != columns or not pattern.search(facts[2]):
+        raise PaperTradingEnumMigrationError(error)
+
+
+def _validate_matching_index(connection: Connection, index_name: str, *, enum_typed: bool) -> None:
+    _validate_partial_unique_index(
+        connection,
+        index_name,
+        columns=("trade_date", "scope_key"),
+        pattern=_ENUM_PREDICATE if enum_typed else _LEGACY_PREDICATE,
+        error="paper_matching_run_status: active matching-run partial index is missing or invalid",
+    )
+
+
+def _validate_snapshot_initial_index(connection: Connection, index_name: str, *, enum_typed: bool) -> None:
+    _validate_partial_unique_index(
+        connection,
+        index_name,
+        columns=("account_id",),
+        pattern=_SNAPSHOT_INITIAL_ENUM_PREDICATE if enum_typed else _SNAPSHOT_INITIAL_LEGACY_PREDICATE,
+        error="paper_snapshot_point_type: initial snapshot partial unique index is missing or invalid",
+    )
 
 
 def _validate_indexes(connection: Connection, column: PaperTradingEnumColumn, *, enum_typed: bool) -> None:
     for index_name, index_sql in column.indexes:
         if index_name == "uq_matching_active_scope":
             _validate_matching_index(connection, index_name, enum_typed=enum_typed)
+            continue
+        if index_name == "uq_paper_account_snapshots_account_initial":
+            _validate_snapshot_initial_index(connection, index_name, enum_typed=enum_typed)
             continue
         facts = connection.execute(
             text(

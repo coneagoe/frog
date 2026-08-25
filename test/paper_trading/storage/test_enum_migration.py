@@ -78,6 +78,7 @@ def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
         "CREATE TABLE daily_bar_diagnostics (id integer primary key, business_date date NOT NULL, stock_id varchar(20) NOT NULL, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL, CONSTRAINT uq_daily_bar_diagnostics_business_key UNIQUE (business_date, stock_id, adjust))",
         "CREATE TABLE paper_matching_runs (id integer primary key, trade_date date NOT NULL, scope_key varchar(40) NOT NULL, status varchar(32) NOT NULL)",
         "CREATE TABLE paper_etf_eligibility (symbol varchar(20) primary key, name varchar(200) NOT NULL, exchange varchar(10) NOT NULL, list_status varchar(10) NOT NULL, last_seen_at timestamptz NOT NULL, last_refresh_at timestamptz NOT NULL, status varchar(20) NOT NULL DEFAULT 'unknown', reviewed_at timestamptz, reviewed_by varchar(100), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())",
+        "CREATE TABLE paper_account_snapshots (id integer primary key, account_id integer NOT NULL, point_type varchar(20) NOT NULL, quality_status varchar(20) NOT NULL)",
         "CREATE INDEX ix_paper_positions_market ON paper_positions (market)",
         "CREATE INDEX ix_paper_position_lots_market ON paper_position_lots (market)",
         "CREATE INDEX ix_paper_orders_status ON paper_orders (status)",
@@ -90,6 +91,7 @@ def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
         "CREATE INDEX ix_paper_ledger_rebuilds_status ON paper_ledger_rebuilds (status)",
         "CREATE UNIQUE INDEX uq_matching_active_scope ON paper_matching_runs (trade_date, scope_key) WHERE status = 'running'",
         "CREATE INDEX ix_paper_etf_eligibility_status ON paper_etf_eligibility (status)",
+        "CREATE UNIQUE INDEX uq_paper_account_snapshots_account_initial ON paper_account_snapshots (account_id) WHERE point_type = 'initial'",
     )
     for statement in statements:
         connection.execute(text(statement))
@@ -218,6 +220,11 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
             "money_market",
             "disabled",
         )
+        assert _enum_labels(connection, "paper_snapshot_point_type") == ("initial", "trading")
+        assert _enum_labels(connection, "paper_snapshot_quality_status") == ("valid", "invalid")
+        assert _column_type(connection, "paper_account_snapshots", "point_type") == "paper_snapshot_point_type"
+        assert _column_type(connection, "paper_account_snapshots", "quality_status") == "paper_snapshot_quality_status"
+        assert _index_exists(connection, "uq_paper_account_snapshots_account_initial")
         assert "completed_with_warnings" in _enum_labels(connection, "paper_matching_run_status")
 
         PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=True)
@@ -229,6 +236,9 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
         assert _index_exists(connection, "uq_matching_active_scope")
         assert _column_type(connection, "paper_etf_eligibility", "status") == "character varying(20)"
         assert _index_exists(connection, "ix_paper_etf_eligibility_status")
+        assert _column_type(connection, "paper_account_snapshots", "point_type") == "character varying(20)"
+        assert _column_type(connection, "paper_account_snapshots", "quality_status") == "character varying(20)"
+        assert _index_exists(connection, "uq_paper_account_snapshots_account_initial")
 
 
 def test_rollback_removes_additive_etf_commission_rate_column(postgres_schema):
@@ -372,9 +382,11 @@ def test_apply_creates_missing_dependent_operational_tables_after_enum_conversio
 
         result = migrate_paper_trading_enums(connection)
 
-        assert result.converted is False
+        assert result.converted is True
         assert _table_exists(connection, "paper_account_snapshots")
         assert _table_exists(connection, "paper_valuation_gaps")
+        assert _column_type(connection, "paper_account_snapshots", "point_type") == "paper_snapshot_point_type"
+        assert _column_type(connection, "paper_account_snapshots", "quality_status") == "paper_snapshot_quality_status"
 
 
 def test_apply_creates_missing_etf_eligibility_table_after_enum_conversion(postgres_schema):

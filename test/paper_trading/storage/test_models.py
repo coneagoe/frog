@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import Boolean, Enum, create_engine, inspect
+from sqlalchemy import Boolean, Enum, UniqueConstraint, create_engine, inspect
 from sqlalchemy.dialects.postgresql import dialect
 from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
@@ -10,10 +10,11 @@ from sqlalchemy.schema import CreateTable
 
 # Initialize the storage facade before its paper-trading model re-export.
 import storage  # noqa: F401
-from paper_trading.domain.enums import Market, MatchingRunStatus
+from paper_trading.domain.enums import Market, MatchingRunStatus, SnapshotPointType, SnapshotQualityStatus
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
     PaperAccount,
+    PaperAccountSnapshot,
     PaperCashLedger,
     PaperLedgerRebuild,
     PaperMatchingRun,
@@ -228,6 +229,8 @@ def test_selected_paper_columns_use_shared_value_enums():
     assert PaperPendingSettlement.__table__.c.source.type.name == "paper_pending_settlement_source"
     assert PaperLedgerRebuild.__table__.c.status.type.name == "paper_ledger_rebuild_status"
     assert PaperMatchingRun.__table__.c.status.type.name == "paper_matching_run_status"
+    assert PaperAccountSnapshot.__table__.c.point_type.type.name == "paper_snapshot_point_type"
+    assert PaperAccountSnapshot.__table__.c.quality_status.type.name == "paper_snapshot_quality_status"
 
 
 def test_selected_paper_enum_columns_reject_unknown_values(tmp_path):
@@ -330,5 +333,99 @@ def test_selected_paper_enum_defaults_round_trip_as_readable_strings(tmp_path):
         assert loaded_rebuild.status == "completed"
         assert loaded_rebuild.trigger_evidence == {"source": "test"}
         assert loaded_rebuild.finished_at is None
+
+    engine.dispose()
+
+
+def _snapshot_financials() -> dict[str, Decimal | int]:
+    return {
+        "cash_available": Decimal("100000.0000"),
+        "cash_frozen": Decimal("0.0000"),
+        "market_value": Decimal("0.0000"),
+        "total_assets": Decimal("100000.0000"),
+        "realized_pnl": Decimal("0.0000"),
+        "unrealized_pnl": Decimal("0.0000"),
+        "position_count": 0,
+        "order_count": 0,
+        "trade_count": 0,
+        "pending_settlement": Decimal("0.0000"),
+    }
+
+
+def test_snapshot_model_supports_ordered_quality_aware_points() -> None:
+    snapshot = PaperAccountSnapshot(
+        account_id=1,
+        trade_date=date(2026, 8, 25),
+        point_type=SnapshotPointType.INITIAL.value,
+        event_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+        quality_status=SnapshotQualityStatus.VALID.value,
+        invalid_reason=None,
+        **_snapshot_financials(),
+    )
+    assert snapshot.point_type == "initial"
+    assert snapshot.quality_status == "valid"
+    assert snapshot.event_at == datetime(2026, 8, 25, tzinfo=timezone.utc)
+    assert snapshot.invalid_reason is None
+    assert PaperAccountSnapshot.__table__.c.point_type.nullable is False
+    assert PaperAccountSnapshot.__table__.c.event_at.nullable is False
+    assert PaperAccountSnapshot.__table__.c.quality_status.nullable is False
+    assert PaperAccountSnapshot.__table__.c.invalid_reason.nullable is True
+    assert SnapshotPointType.INITIAL == "initial"
+    assert SnapshotPointType.TRADING == "trading"
+    assert SnapshotQualityStatus.VALID == "valid"
+    assert SnapshotQualityStatus.INVALID == "invalid"
+
+    unique_constraints = {
+        constraint.name
+        for constraint in PaperAccountSnapshot.__table__.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert "uq_paper_account_snapshots_account_date" not in unique_constraints
+
+    index_by_name = {index.name: index for index in PaperAccountSnapshot.__table__.indexes}
+    event_index = index_by_name["ix_paper_account_snapshots_account_event"]
+    assert tuple(column.name for column in event_index.columns) == ("account_id", "event_at", "id")
+    assert event_index.unique is False
+
+    initial_index = index_by_name["uq_paper_account_snapshots_account_initial"]
+    assert tuple(column.name for column in initial_index.columns) == ("account_id",)
+    assert initial_index.unique is True
+    assert str(initial_index.dialect_options["postgresql"]["where"]) == "point_type = 'initial'"
+    assert str(initial_index.dialect_options["sqlite"]["where"]) == "point_type = 'initial'"
+
+
+def test_snapshot_point_and_quality_enums_reject_unknown_values(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(
+            PaperAccountSnapshot(
+                account_id=1,
+                trade_date=date(2026, 8, 25),
+                point_type="opening",
+                event_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+                quality_status=SnapshotQualityStatus.VALID.value,
+                invalid_reason=None,
+                **_snapshot_financials(),
+            )
+        )
+        with pytest.raises((StatementError, ValueError)):
+            session.flush()
+
+    with Session(engine) as session:
+        session.add(
+            PaperAccountSnapshot(
+                account_id=1,
+                trade_date=date(2026, 8, 25),
+                point_type=SnapshotPointType.TRADING.value,
+                event_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+                quality_status="suspect",
+                invalid_reason="missing bar",
+                **_snapshot_financials(),
+            )
+        )
+        with pytest.raises((StatementError, ValueError)):
+            session.flush()
 
     engine.dispose()
