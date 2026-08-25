@@ -45,3 +45,22 @@ Completed. `Snapshot` now includes the API's required `pending_settlement` decim
 ### Concerns
 
 - Scoped re-review remains the validation owner.
+
+## Final Review Fix
+
+### Status
+
+Completed. Valid chart points now receive a deterministic strictly increasing render timestamp in server order, so multiple points sharing one `event_at` second remain renderable by `lightweight-charts`.
+
+### Tests
+
+- Passed: `npm test -- --run features/analytics/asset-chart.test.tsx features/analytics/analytics-page.test.tsx` (2 files, 10 tests).
+- Passed with existing warnings: `npm run lint` (unused `withdrawCashMock` in `features/accounts/accounts-page.test.tsx` and unused `MoneyText` in `features/analytics/analytics-summary.tsx`).
+
+### Commit
+
+`fix(paper-trading): keep chart timestamps unique`
+
+### Concerns
+
+- Parent orchestrator owns the final scoped re-review.

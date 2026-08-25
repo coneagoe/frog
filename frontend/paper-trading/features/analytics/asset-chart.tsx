@@ -8,20 +8,25 @@ import type { Snapshot } from "@/lib/types";
 export function AssetChart({ snapshots }: { snapshots: Snapshot[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartData = useMemo(
-    () => snapshots.flatMap((snapshot) => {
-      const nav = Number(snapshot.net_asset_value);
-      const timestamp = Math.floor(new Date(snapshot.event_at).getTime() / 1000);
-      if (
-        snapshot.quality_status !== "valid"
-        || snapshot.net_asset_value === null
-        || !Number.isFinite(nav)
-        || nav <= 0
-        || !Number.isFinite(timestamp)
-      ) {
-        return [];
-      }
-      return [{ time: timestamp as UTCTimestamp, value: nav }];
-    }),
+    () => {
+      let previousTime: number | null = null;
+      return snapshots.flatMap((snapshot) => {
+        const nav = Number(snapshot.net_asset_value);
+        const timestamp = Math.floor(new Date(snapshot.event_at).getTime() / 1000);
+        if (
+          snapshot.quality_status !== "valid"
+          || snapshot.net_asset_value === null
+          || !Number.isFinite(nav)
+          || nav <= 0
+          || !Number.isFinite(timestamp)
+        ) {
+          return [];
+        }
+        const time = Math.max(timestamp, (previousTime ?? timestamp - 1) + 1);
+        previousTime = time;
+        return [{ time: time as UTCTimestamp, value: nav }];
+      });
+    },
     [snapshots]
   );
 

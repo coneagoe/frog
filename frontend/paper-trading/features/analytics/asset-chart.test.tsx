@@ -89,4 +89,20 @@ describe("AssetChart", () => {
     expect(screen.getByText("No snapshots yet")).toBeInTheDocument();
     expect(createChartMock).not.toHaveBeenCalled();
   });
+
+  it("renders same-second valid NAV points in server order", () => {
+    const sameSecondPoint: Snapshot = {
+      ...initialPoint,
+      id: 2,
+      point_type: "trading",
+      net_asset_value: "1.1"
+    };
+
+    render(<AssetChart snapshots={[initialPoint, sameSecondPoint]} />);
+
+    expect(setDataMock).toHaveBeenCalledWith([
+      { time: toChartTime(initialPoint.event_at), value: 1 },
+      { time: toChartTime(initialPoint.event_at) + 1, value: 1.1 }
+    ]);
+  });
 });
