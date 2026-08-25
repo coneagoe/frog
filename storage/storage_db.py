@@ -389,6 +389,14 @@ _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
     tb_name_paper_valuation_gaps,
 }
 _PAPER_SNAPSHOT_SERIES_LOCK_KEY = "paper_account_snapshots.nav_series"
+_PAPER_SNAPSHOT_NAV_COLUMNS = {
+    "net_asset_value": "NUMERIC(20, 6)",
+    "share_count": "NUMERIC(20, 6)",
+    "cumulative_deposit": "NUMERIC(20, 4)",
+    "cumulative_withdrawal": "NUMERIC(20, 4)",
+    "net_cash_flow": "NUMERIC(20, 4)",
+    "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
+}
 
 
 def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
@@ -4066,15 +4074,7 @@ class StorageDb:
                 snapshot_columns = {
                     column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_account_snapshots)
                 }
-                snapshot_nav_columns = {
-                    "net_asset_value": "NUMERIC(20, 6)",
-                    "share_count": "NUMERIC(20, 6)",
-                    "cumulative_deposit": "NUMERIC(20, 4)",
-                    "cumulative_withdrawal": "NUMERIC(20, 4)",
-                    "net_cash_flow": "NUMERIC(20, 4)",
-                    "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
-                }
-                for column_name, ddl in snapshot_nav_columns.items():
+                for column_name, ddl in _PAPER_SNAPSHOT_NAV_COLUMNS.items():
                     if column_name not in snapshot_columns:
                         with self.engine.begin() as conn:
                             conn.execute(
@@ -4139,16 +4139,8 @@ class StorageDb:
         if not inspect(conn).has_table(tb_name_paper_account_snapshots):
             return
         ensure_snapshot_series_enum_types(conn)
-        snapshot_nav_columns = {
-            "net_asset_value": "NUMERIC(20, 6)",
-            "share_count": "NUMERIC(20, 6)",
-            "cumulative_deposit": "NUMERIC(20, 4)",
-            "cumulative_withdrawal": "NUMERIC(20, 4)",
-            "net_cash_flow": "NUMERIC(20, 4)",
-            "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
-        }
         snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
-        for column_name, ddl in snapshot_nav_columns.items():
+        for column_name, ddl in _PAPER_SNAPSHOT_NAV_COLUMNS.items():
             if column_name not in snapshot_columns:
                 conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))
         snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
