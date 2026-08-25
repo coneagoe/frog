@@ -1,11 +1,13 @@
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from paper_trading.domain.enums import Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus, SnapshotPointType, SnapshotQualityStatus
 from paper_trading.services.analytics_service import AnalyticsService
+from paper_trading.storage.models import PaperAccountSnapshot
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -15,6 +17,69 @@ def _repo(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     return engine, session, PaperTradingRepository(session)
+
+
+def seed_initial_point(repo, account):
+    snapshots = repo.list_snapshots(account.id)
+    assert snapshots
+    initial = snapshots[0]
+    assert initial.point_type == SnapshotPointType.INITIAL.value
+    assert initial.quality_status == SnapshotQualityStatus.VALID.value
+    assert initial.net_asset_value == Decimal("1.000000")
+    return initial
+
+
+def seed_trading_point(
+    repo,
+    account,
+    nav: Decimal | None,
+    trade_date: date | None = None,
+    *,
+    total_assets: Decimal = Decimal("100000.0000"),
+    quality_status: str = SnapshotQualityStatus.VALID.value,
+    event_at: datetime | None = None,
+    invalid_reason: str | None = None,
+    cash_available: Decimal | None = None,
+    market_value: Decimal = Decimal("0"),
+    realized_pnl: Decimal = Decimal("0"),
+    unrealized_pnl: Decimal = Decimal("0"),
+) -> PaperAccountSnapshot:
+    if event_at is None:
+        last = repo.list_snapshots(account.id)[-1]
+        event_at = last.event_at + timedelta(days=1)
+    if trade_date is None:
+        trade_date = event_at.date()
+    return repo.save_snapshot(
+        account_id=account.id,
+        trade_date=trade_date,
+        event_at=event_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=quality_status,
+        invalid_reason=invalid_reason,
+        cash_available=total_assets if cash_available is None else cash_available,
+        cash_frozen=Decimal("0"),
+        market_value=market_value,
+        total_assets=total_assets,
+        realized_pnl=realized_pnl,
+        unrealized_pnl=unrealized_pnl,
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=nav,
+    )
+
+
+def _nav_snapshot(
+    *,
+    nav: Decimal | None,
+    quality_status: str = SnapshotQualityStatus.VALID.value,
+    total_assets: Decimal = Decimal("200000.0000"),
+) -> PaperAccountSnapshot:
+    snapshot = PaperAccountSnapshot()
+    snapshot.quality_status = quality_status
+    snapshot.net_asset_value = nav
+    snapshot.total_assets = total_assets
+    return snapshot
 
 
 def test_analytics_computes_execution_and_trade_quality(tmp_path):
@@ -246,45 +311,9 @@ def test_analytics_activity_separates_cross_year_iso_week_and_calendar_months(tm
 def test_analytics_computes_total_return_and_drawdown(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("risk-demo", Decimal("100000.00"))
-    repo.save_snapshot(
-        account_id=account.id,
-        trade_date=date(2026, 6, 16),
-        cash_available=Decimal("100000.0000"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
-        total_assets=Decimal("100000.0000"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
-    )
-    repo.save_snapshot(
-        account_id=account.id,
-        trade_date=date(2026, 6, 17),
-        cash_available=Decimal("110000.0000"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
-        total_assets=Decimal("110000.0000"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
-    )
-    repo.save_snapshot(
-        account_id=account.id,
-        trade_date=date(2026, 6, 18),
-        cash_available=Decimal("99000.0000"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
-        total_assets=Decimal("99000.0000"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
-    )
+    seed_initial_point(repo, account)
+    seed_trading_point(repo, account, nav=Decimal("1.100000"), trade_date=date(2026, 6, 17))
+    seed_trading_point(repo, account, nav=Decimal("0.990000"), trade_date=date(2026, 6, 18))
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
@@ -308,32 +337,13 @@ def test_analytics_no_orders_returns_insufficient_data_for_rates(tmp_path):
     engine.dispose()
 
 
-def test_analytics_zero_initial_cash_preserves_snapshot_fields(tmp_path):
+@pytest.mark.parametrize("initial_cash", [Decimal("0"), Decimal("-1")])
+def test_analytics_zero_initial_cash_is_rejected(tmp_path, initial_cash):
     engine, session, repo = _repo(tmp_path)
-    account = repo.create_account("zero-cash-demo", Decimal("0"))
-    repo.save_snapshot(
-        account_id=account.id,
-        trade_date=date(2026, 6, 16),
-        cash_available=Decimal("50000.0000"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("30000.0000"),
-        total_assets=Decimal("80000.0000"),
-        realized_pnl=Decimal("2000.0000"),
-        unrealized_pnl=Decimal("-1000.0000"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
-    )
 
-    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+    with pytest.raises(ValueError, match="initial_cash"):
+        repo.create_account("zero-cash-demo", initial_cash)
 
-    assert analytics.overview.total_return.reason == "invalid_nav"
-    assert analytics.overview.total_return.value is None
-    assert analytics.overview.total_assets == Decimal("80000.0000")
-    assert analytics.overview.cash_available == Decimal("50000.0000")
-    assert analytics.overview.market_value == Decimal("30000.0000")
-    assert analytics.overview.realized_pnl == Decimal("2000.0000")
-    assert analytics.overview.unrealized_pnl == Decimal("-1000.0000")
     engine.dispose()
 
 
@@ -476,40 +486,36 @@ def test_analytics_recent_round_trips_limit_open_only(tmp_path):
     engine.dispose()
 
 
-def test_analytics_zero_first_snapshot_assets_returns_invalid_initial_assets_for_calmar(tmp_path):
+def test_analytics_insufficient_valid_points_keep_established_metric_reasons(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("calmar-demo", Decimal("100000.00"))
-    # First snapshot has total_assets = 0 (invalid denominator)
-    repo.save_snapshot(
-        account_id=account.id,
+    seed_initial_point(repo, account)
+    seed_trading_point(
+        repo,
+        account,
+        nav=None,
         trade_date=date(2026, 6, 16),
-        cash_available=Decimal("0"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
         total_assets=Decimal("0"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
+        quality_status=SnapshotQualityStatus.INVALID.value,
+        invalid_reason="missing_nav",
     )
-    repo.save_snapshot(
-        account_id=account.id,
+    seed_trading_point(
+        repo,
+        account,
+        nav=None,
         trade_date=date(2026, 6, 17),
-        cash_available=Decimal("100000.0000"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
-        total_assets=Decimal("100000.0000"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
+        quality_status=SnapshotQualityStatus.INVALID.value,
+        invalid_reason="missing_nav",
     )
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.risk.calmar.reason == "invalid_initial_assets"
+    assert analytics.overview.total_return.value == Decimal("0.000000")
+    assert analytics.risk.max_drawdown.reason == "insufficient_data"
+    assert analytics.risk.current_drawdown.reason == "insufficient_data"
+    assert analytics.risk.sharpe.reason == "insufficient_data"
+    assert analytics.risk.sortino.reason == "insufficient_data"
+    assert analytics.risk.calmar.reason == "insufficient_data"
     assert analytics.risk.calmar.value is None
     engine.dispose()
 
@@ -517,41 +523,13 @@ def test_analytics_zero_first_snapshot_assets_returns_invalid_initial_assets_for
 def test_analytics_uses_nav_return_not_total_assets_after_deposit(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("nav-return-demo", Decimal("100000.00"))
-    repo.save_snapshot(
-        account_id=account.id,
-        trade_date=date(2026, 6, 16),
-        cash_available=Decimal("100000.0000"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
-        total_assets=Decimal("100000.0000"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
-        net_asset_value=Decimal("1.000000"),
-        share_count=Decimal("100000.000000"),
-        cumulative_deposit=Decimal("100000.0000"),
-        cumulative_withdrawal=Decimal("0.0000"),
-        net_cash_flow=Decimal("100000.0000"),
-    )
-    repo.save_snapshot(
-        account_id=account.id,
+    seed_initial_point(repo, account)
+    seed_trading_point(
+        repo,
+        account,
+        nav=Decimal("1.000000"),
         trade_date=date(2026, 6, 17),
-        cash_available=Decimal("150000.0000"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
         total_assets=Decimal("150000.0000"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
-        net_asset_value=Decimal("1.000000"),
-        share_count=Decimal("150000.000000"),
-        cumulative_deposit=Decimal("150000.0000"),
-        cumulative_withdrawal=Decimal("0.0000"),
-        net_cash_flow=Decimal("150000.0000"),
     )
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
@@ -562,3 +540,169 @@ def test_analytics_uses_nav_return_not_total_assets_after_deposit(tmp_path):
     assert simple_asset_return.value == Decimal("0.500000")
     assert analytics.risk.max_drawdown.value == Decimal("0.000000")
     engine.dispose()
+
+
+def test_total_return_uses_persisted_initial_nav_not_assets(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("persisted-nav-demo", Decimal("100000.00"))
+    seed_initial_point(repo, account)
+    seed_trading_point(
+        repo,
+        account,
+        nav=Decimal("1.100000"),
+        trade_date=date(2026, 6, 17),
+        total_assets=Decimal("250000.0000"),
+    )
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert response.overview.total_return.value == Decimal("0.100000")
+    assert response.overview.simple_asset_return is not None
+    assert response.overview.simple_asset_return.value == Decimal("1.500000")
+    engine.dispose()
+
+
+def test_total_return_and_risk_preserve_same_day_repository_order(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("same-day-nav-demo", Decimal("100000.00"))
+    seed_initial_point(repo, account)
+    created_at = account.created_at
+    later = created_at + timedelta(hours=2)
+    earlier = created_at + timedelta(hours=1)
+    seed_trading_point(
+        repo,
+        account,
+        nav=Decimal("1.200000"),
+        trade_date=later.date(),
+        event_at=later,
+    )
+    seed_trading_point(
+        repo,
+        account,
+        nav=Decimal("0.900000"),
+        trade_date=earlier.date(),
+        event_at=earlier,
+    )
+
+    snapshots = repo.list_snapshots(account.id)
+    navs = AnalyticsService._nav_series(snapshots)
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert [snapshot.event_at for snapshot in snapshots[1:]] == [earlier, later]
+    assert navs == [Decimal("1.000000"), Decimal("0.900000"), Decimal("1.200000")]
+    assert analytics.overview.total_return.value == Decimal("0.200000")
+    assert analytics.risk.max_drawdown.value == Decimal("-0.100000")
+    engine.dispose()
+
+
+def test_invalid_nav_points_are_ignored_by_total_return_and_risk(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("ignore-invalid-nav", Decimal("100000.00"))
+    seed_initial_point(repo, account)
+    seed_trading_point(
+        repo,
+        account,
+        nav=None,
+        trade_date=date(2026, 6, 17),
+        total_assets=Decimal("50000.0000"),
+        quality_status=SnapshotQualityStatus.INVALID.value,
+        invalid_reason="missing_nav",
+    )
+    seed_trading_point(repo, account, nav=Decimal("1.100000"), trade_date=date(2026, 6, 18))
+    seed_trading_point(
+        repo,
+        account,
+        nav=Decimal("0"),
+        trade_date=date(2026, 6, 19),
+        total_assets=Decimal("0"),
+        quality_status=SnapshotQualityStatus.INVALID.value,
+        invalid_reason="non_positive_nav",
+    )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert analytics.overview.total_return.value == Decimal("0.100000")
+    assert analytics.risk.max_drawdown.value == Decimal("0.000000")
+    assert analytics.overview.simple_asset_return is not None
+    assert analytics.overview.simple_asset_return.value == Decimal("-1.000000")
+    engine.dispose()
+
+
+def test_overview_keeps_latest_persisted_fields_when_latest_nav_is_invalid(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("latest-invalid-overview", Decimal("100000.00"))
+    seed_initial_point(repo, account)
+    seed_trading_point(
+        repo,
+        account,
+        nav=Decimal("1.100000"),
+        trade_date=date(2026, 6, 17),
+        total_assets=Decimal("110000.0000"),
+    )
+    seed_trading_point(
+        repo,
+        account,
+        nav=None,
+        trade_date=date(2026, 6, 18),
+        total_assets=Decimal("80000.0000"),
+        cash_available=Decimal("50000.0000"),
+        market_value=Decimal("30000.0000"),
+        realized_pnl=Decimal("2000.0000"),
+        unrealized_pnl=Decimal("-1000.0000"),
+        quality_status=SnapshotQualityStatus.INVALID.value,
+        invalid_reason="missing_nav",
+    )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert analytics.overview.total_return.value == Decimal("0.100000")
+    assert analytics.overview.net_asset_value is None
+    assert analytics.overview.total_assets == Decimal("80000.0000")
+    assert analytics.overview.cash_available == Decimal("50000.0000")
+    assert analytics.overview.market_value == Decimal("30000.0000")
+    assert analytics.overview.realized_pnl == Decimal("2000.0000")
+    assert analytics.overview.unrealized_pnl == Decimal("-1000.0000")
+    assert analytics.overview.simple_asset_return is not None
+    assert analytics.overview.simple_asset_return.value == Decimal("-0.200000")
+    assert analytics.risk.max_drawdown.value == Decimal("0.000000")
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("nav", "quality_status"),
+    [
+        (None, SnapshotQualityStatus.INVALID.value),
+        (None, SnapshotQualityStatus.VALID.value),
+        (Decimal("0"), SnapshotQualityStatus.VALID.value),
+        (Decimal("-1.000000"), SnapshotQualityStatus.VALID.value),
+        (Decimal("NaN"), SnapshotQualityStatus.VALID.value),
+        (Decimal("Infinity"), SnapshotQualityStatus.VALID.value),
+        (Decimal("1.250000"), SnapshotQualityStatus.INVALID.value),
+        (Decimal("1.250000"), SnapshotQualityStatus.VALID.value),
+    ],
+)
+def test_snapshot_nav_never_derives_fallback_from_total_assets(nav, quality_status):
+    snapshot = _nav_snapshot(nav=nav, quality_status=quality_status, total_assets=Decimal("250000.0000"))
+
+    result = AnalyticsService._snapshot_nav(snapshot)
+
+    if quality_status == SnapshotQualityStatus.VALID.value and nav == Decimal("1.250000"):
+        assert result == Decimal("1.250000")
+    else:
+        assert result is None
+
+
+def test_nav_series_preserves_input_order_and_excludes_invalid_points():
+    snapshots = [
+        _nav_snapshot(nav=Decimal("1.000000")),
+        _nav_snapshot(nav=None, quality_status=SnapshotQualityStatus.INVALID.value),
+        _nav_snapshot(nav=Decimal("1.050000")),
+        _nav_snapshot(nav=Decimal("0"), quality_status=SnapshotQualityStatus.INVALID.value),
+        _nav_snapshot(nav=Decimal("1.020000")),
+    ]
+
+    assert AnalyticsService._nav_series(snapshots) == [
+        Decimal("1.000000"),
+        Decimal("1.050000"),
+        Decimal("1.020000"),
+    ]

@@ -4,6 +4,7 @@ from statistics import mean, stdev
 from typing import Callable, Literal
 from zoneinfo import ZoneInfo
 
+from paper_trading.domain.enums import SnapshotQualityStatus
 from paper_trading.schemas.analytics import (
     ActivityAnalytics,
     ActivitySummary,
@@ -43,24 +44,29 @@ class AnalyticsService:
             activity=self._activity(orders),
             execution=self._execution(orders),
             trade_quality=self._trade_quality(round_trips),
-            risk=self._risk(snapshots, account.initial_cash),
+            risk=self._risk(snapshots),
         )
 
     # ------------------------------------------------------------------
     # Overview
     # ------------------------------------------------------------------
     @staticmethod
-    def _snapshot_nav(snapshot: PaperAccountSnapshot, initial_cash: Decimal) -> Decimal | None:
-        if snapshot.net_asset_value is not None:
-            return Decimal(snapshot.net_asset_value).quantize(_QUANTIZE)
-        if initial_cash and initial_cash > 0:
-            return (Decimal(snapshot.total_assets) / initial_cash).quantize(_QUANTIZE)
-        return None
+    def _snapshot_nav(snapshot: PaperAccountSnapshot) -> Decimal | None:
+        if snapshot.quality_status != SnapshotQualityStatus.VALID.value or snapshot.net_asset_value is None:
+            return None
+        nav = Decimal(snapshot.net_asset_value)
+        if not nav.is_finite() or nav <= 0:
+            return None
+        return nav.quantize(_QUANTIZE)
 
     @staticmethod
-    def _nav_series(snapshots: list[PaperAccountSnapshot], initial_cash: Decimal) -> list[Decimal]:
-        values = [AnalyticsService._snapshot_nav(snapshot, initial_cash) for snapshot in snapshots]
-        return [value for value in values if value is not None]
+    def _nav_series(snapshots: list[PaperAccountSnapshot]) -> list[Decimal]:
+        values: list[Decimal] = []
+        for snapshot in snapshots:
+            nav = AnalyticsService._snapshot_nav(snapshot)
+            if nav is not None:
+                values.append(nav)
+        return values
 
     def _overview(
         self,
@@ -71,12 +77,12 @@ class AnalyticsService:
             return OverviewAnalytics(total_return=MetricValue(value=None, reason="insufficient_data"))
 
         latest = snapshots[-1]
-
-        first_nav = self._snapshot_nav(snapshots[0], initial_cash)
-        latest_nav = self._snapshot_nav(latest, initial_cash)
-        if first_nav is None or first_nav <= 0 or latest_nav is None:
+        navs = self._nav_series(snapshots)
+        if not navs:
             total_return = MetricValue(value=None, reason="invalid_nav")
         else:
+            first_nav = navs[0]
+            latest_nav = navs[-1]
             total_return = MetricValue(value=((latest_nav - first_nav) / first_nav).quantize(_QUANTIZE))
         simple_asset_return = MetricValue(value=None, reason="invalid_initial_cash")
         if initial_cash and initial_cash > 0:
@@ -314,8 +320,8 @@ class AnalyticsService:
     # ------------------------------------------------------------------
     # Risk
     # ------------------------------------------------------------------
-    def _risk(self, snapshots: list[PaperAccountSnapshot], initial_cash: Decimal) -> RiskAnalytics:
-        navs = self._nav_series(snapshots, initial_cash)
+    def _risk(self, snapshots: list[PaperAccountSnapshot]) -> RiskAnalytics:
+        navs = self._nav_series(snapshots)
         if len(navs) < 2:
             metric = MetricValue(value=None, reason="insufficient_data")
             return RiskAnalytics(
@@ -346,11 +352,8 @@ class AnalyticsService:
 
         sharpe = self._compute_sharpe(daily_returns)
         sortino = self._compute_sortino(daily_returns)
-        if not navs[0]:
-            calmar = MetricValue(value=None, reason="invalid_initial_assets")
-        else:
-            total_ret = ((navs[-1] - navs[0]) / navs[0]).quantize(_QUANTIZE)
-            calmar = self._compute_calmar(total_returns=total_ret, max_drawdown=max_dd)
+        total_ret = ((navs[-1] - navs[0]) / navs[0]).quantize(_QUANTIZE)
+        calmar = self._compute_calmar(total_returns=total_ret, max_drawdown=max_dd)
 
         return RiskAnalytics(
             max_drawdown=MetricValue(value=max_dd.quantize(_QUANTIZE)),
