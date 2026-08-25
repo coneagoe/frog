@@ -451,23 +451,14 @@ def test_snapshot_with_zero_or_negative_nav_is_invalid(sqlite_session, cash_adju
     assert account.net_asset_value == previous_nav
 
 
-@pytest.mark.parametrize("cash", [Decimal("NaN"), Decimal("Infinity")])
-def test_snapshot_with_non_finite_nav_is_invalid(cash):
-    account = SimpleNamespace(
-        id=1,
-        share_count=Decimal("100000"),
-        net_asset_value=Decimal("1.000000"),
-        realized_pnl=Decimal("0"),
-        cumulative_deposit=Decimal("100000"),
-        cumulative_withdrawal=Decimal("0"),
-    )
+def _fake_snapshot_repo(account: SimpleNamespace, *, cash_available: Decimal = Decimal("100000")):
     saved: dict[str, Any] = {}
 
     class Repository:
         updated = False
 
         def get_cash_available(self, account_id):
-            return cash
+            return cash_available
 
         def get_cash_frozen(self, account_id):
             return Decimal("0")
@@ -494,7 +485,25 @@ def test_snapshot_with_non_finite_nav_is_invalid(cash):
             saved.update(values)
             return SimpleNamespace(**values)
 
-    repo = Repository()
+    return Repository(), saved
+
+
+def _trading_account(**overrides: Any) -> SimpleNamespace:
+    values = {
+        "id": 1,
+        "share_count": Decimal("100000"),
+        "net_asset_value": Decimal("1.000000"),
+        "realized_pnl": Decimal("0"),
+        "cumulative_deposit": Decimal("100000"),
+        "cumulative_withdrawal": Decimal("0"),
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+@pytest.mark.parametrize("cash", [Decimal("NaN"), Decimal("Infinity")])
+def test_snapshot_with_non_finite_nav_is_invalid(cash):
+    repo, saved = _fake_snapshot_repo(_trading_account(), cash_available=cash)
     snapshot = SnapshotService(cast(Any, repo), FakeMarketDataProvider()).generate_snapshot(1, date(2026, 8, 25))
 
     assert snapshot.quality_status == SnapshotQualityStatus.INVALID.value
@@ -505,9 +514,29 @@ def test_snapshot_with_non_finite_nav_is_invalid(cash):
     assert saved["net_asset_value"] is None
 
 
+@pytest.mark.parametrize("share_count", [None, Decimal("0"), Decimal("-1"), Decimal("NaN"), Decimal("Infinity")])
+def test_snapshot_with_invalid_share_count_persists_missing_share_state(share_count):
+    account = _trading_account(share_count=share_count)
+    repo, saved = _fake_snapshot_repo(account)
+    snapshot = SnapshotService(cast(Any, repo), FakeMarketDataProvider()).generate_snapshot(1, date(2026, 8, 25))
+
+    assert snapshot.quality_status == SnapshotQualityStatus.INVALID.value
+    assert snapshot.point_type == SnapshotPointType.TRADING.value
+    assert snapshot.event_at.tzinfo == timezone.utc
+    assert snapshot.net_asset_value is None
+    assert snapshot.invalid_reason == "missing_share_state"
+    assert snapshot.total_assets == Decimal("100000.0000")
+    assert snapshot.net_asset_value != snapshot.total_assets
+    assert repo.updated is False
+    assert saved["net_asset_value"] is None
+    assert saved["invalid_reason"] == "missing_share_state"
+
+
 def test_validated_trading_nav_maps_invalid_conditions():
     assert _validated_trading_nav(None, Decimal("1")) == (None, "missing_share_state")
     assert _validated_trading_nav(Decimal("0"), Decimal("1")) == (None, "missing_share_state")
+    assert _validated_trading_nav(Decimal("NaN"), Decimal("1")) == (None, "missing_share_state")
+    assert _validated_trading_nav(Decimal("Infinity"), Decimal("1")) == (None, "missing_share_state")
     assert _validated_trading_nav(Decimal("100"), None) == (None, "missing_nav")
     assert _validated_trading_nav(Decimal("100"), Decimal("NaN")) == (None, "non_finite_nav")
     assert _validated_trading_nav(Decimal("100"), Decimal("Infinity")) == (None, "non_finite_nav")

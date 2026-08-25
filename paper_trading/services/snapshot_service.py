@@ -58,7 +58,7 @@ class SnapshotService:
         account = self.repo.get_account(account_id)
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
-        share_count = None if account.share_count is None else Decimal(account.share_count).quantize(_NAV)
+        share_count = None if account.share_count is None else _quantize_finite(Decimal(account.share_count), _NAV)
         raw_total = cash_available + cash_frozen + market_value + pending_settlement
         total_assets = _quantize_finite(raw_total, _MONEY)
         candidate = None
