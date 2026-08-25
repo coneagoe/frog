@@ -13,6 +13,7 @@ from paper_trading.storage.enum_migration import (
     PAPER_TRADING_ENUM_ADAPTER,
     PAPER_TRADING_ENUM_GROUPS,
     PaperTradingEnumMigrationError,
+    ensure_snapshot_series_enum_types,
     migrate_paper_trading_enums,
 )
 
@@ -385,6 +386,30 @@ def test_apply_creates_missing_dependent_operational_tables_after_enum_conversio
         assert result.converted is True
         assert _table_exists(connection, "paper_account_snapshots")
         assert _table_exists(connection, "paper_valuation_gaps")
+        assert _column_type(connection, "paper_account_snapshots", "point_type") == "paper_snapshot_point_type"
+        assert _column_type(connection, "paper_account_snapshots", "quality_status") == "paper_snapshot_quality_status"
+
+
+def test_ensure_snapshot_series_enum_types_is_idempotent_and_leaves_columns_to_startup(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("DROP TABLE paper_account_snapshots"))
+        connection.execute(
+            text("CREATE TABLE paper_account_snapshots (id integer primary key, account_id integer NOT NULL)")
+        )
+
+        ensure_snapshot_series_enum_types(connection)
+        ensure_snapshot_series_enum_types(connection)
+
+        assert _enum_labels(connection, "paper_snapshot_point_type") == ("initial", "trading")
+        assert _enum_labels(connection, "paper_snapshot_quality_status") == ("valid", "invalid")
+        assert _column_type(connection, "paper_account_snapshots", "point_type") is None
+        assert _column_type(connection, "paper_account_snapshots", "quality_status") is None
+        assert not _index_exists(connection, "uq_paper_account_snapshots_account_initial")
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
         assert _column_type(connection, "paper_account_snapshots", "point_type") == "paper_snapshot_point_type"
         assert _column_type(connection, "paper_account_snapshots", "quality_status") == "paper_snapshot_quality_status"
 

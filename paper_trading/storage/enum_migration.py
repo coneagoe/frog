@@ -353,6 +353,13 @@ def _is_addable_snapshot_column(group: PaperTradingEnumGroup, column: PaperTradi
     return group.type_name in _SNAPSHOT_ENUM_TYPES and column.table_name == "paper_account_snapshots"
 
 
+def ensure_snapshot_series_enum_types(connection: Connection) -> None:
+    """Create snapshot series enum types when they are missing."""
+    for group in PAPER_TRADING_ENUM_GROUPS:
+        if group.type_name in _SNAPSHOT_ENUM_TYPES:
+            _create_type(connection, group)
+
+
 def _has_pending_enum_column_changes(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]) -> bool:
     for group in groups:
         for column in group.columns:

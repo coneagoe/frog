@@ -693,8 +693,13 @@ tables and the dependent operational `paper_account_snapshots` and
 restores either missing dependent operational table after converting or
 verifying an otherwise complete governed schema. Normal PostgreSQL storage
 startup intentionally does not create or convert those governed tables; use the
-migration command for that explicit schema change. It also does not create or
-alter governed PostgreSQL enum types or legacy varchar columns.
+migration command for that explicit schema change. Startup may create the
+snapshot series enum types and add nullable series columns on an existing
+`paper_account_snapshots` table so it can backfill `event_at`, mark legacy
+rows as `trading`, derive quality from stored NAV, drop the old account/date
+unique constraint, and insert at most one `initial` NAV=1 point for each
+account whose legacy `initial_cash` is positive. It does not convert other
+governed enum columns or rewrite financial snapshot fields.
 
 Selected-table clean export is unsupported. Selected-table clean import refuses
 to run when an unselected table has a foreign key referencing the selected

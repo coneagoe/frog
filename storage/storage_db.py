@@ -3869,6 +3869,9 @@ class StorageDb:
           predates the configurable-fees feature.
         - Adds ``comment`` column to ``paper_orders`` and ``paper_trades``
           for the optional order/trade comment feature.
+        - Adds snapshot series metadata, backfills legacy rows, drops the
+          old account/date unique constraint, and inserts at most one
+          initial NAV=1 point for each eligible positive-cash account.
 
         Safe to call even when the ``paper_orders`` table does not exist yet
         (e.g. on a fresh install where ``Base.metadata.create_all`` will
@@ -4071,6 +4074,9 @@ class StorageDb:
                         conn.execute(
                             text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}")
                         )
+            if self.engine.dialect.name == "postgresql":
+                with self.engine.begin() as conn:
+                    self._ensure_paper_account_snapshot_series(conn)
 
         if inspect(self.engine).has_table(tb_name_paper_ledger_rebuilds):
             rebuild_columns = {
@@ -4119,6 +4125,146 @@ class StorageDb:
                 if "market" not in market_columns:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name} ADD COLUMN market {market_ddl}"))
+
+    def _ensure_paper_account_snapshot_series(self, conn) -> None:
+        from paper_trading.storage.enum_migration import ensure_snapshot_series_enum_types
+
+        ensure_snapshot_series_enum_types(conn)
+        snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
+        series_columns = {
+            "point_type": "paper_snapshot_point_type",
+            "event_at": "TIMESTAMP WITH TIME ZONE",
+            "quality_status": "paper_snapshot_quality_status",
+            "invalid_reason": "TEXT",
+        }
+        for column_name, ddl in series_columns.items():
+            if column_name not in snapshot_columns:
+                conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))
+
+        conn.execute(
+            text(
+                f"""
+                UPDATE {tb_name_paper_account_snapshots}
+                SET
+                    point_type = COALESCE(point_type, 'trading'),
+                    quality_status = CASE
+                        WHEN event_at IS NOT NULL AND quality_status IS NOT NULL THEN quality_status
+                        WHEN net_asset_value IS NULL THEN 'invalid'
+                        WHEN net_asset_value = 'NaN'::numeric THEN 'invalid'
+                        WHEN net_asset_value <= 0 THEN 'invalid'
+                        ELSE 'valid'
+                    END,
+                    invalid_reason = CASE
+                        WHEN event_at IS NOT NULL AND quality_status IS NOT NULL THEN invalid_reason
+                        WHEN net_asset_value IS NULL THEN 'missing_nav'
+                        WHEN net_asset_value = 'NaN'::numeric THEN 'non_finite_nav'
+                        WHEN net_asset_value <= 0 THEN 'non_positive_nav'
+                        ELSE NULL
+                    END,
+                    event_at = COALESCE(event_at, created_at)
+                WHERE point_type IS NULL
+                   OR event_at IS NULL
+                   OR quality_status IS NULL
+                """
+            )
+        )
+        conn.execute(
+            text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN point_type SET DEFAULT 'trading'")
+        )
+        conn.execute(
+            text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN quality_status SET DEFAULT 'valid'")
+        )
+        conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN event_at SET DEFAULT now()"))
+        conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN point_type SET NOT NULL"))
+        conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN event_at SET NOT NULL"))
+        conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN quality_status SET NOT NULL"))
+
+        legacy_constraint = conn.execute(
+            text(
+                """
+                SELECT con.conname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+                WHERE nsp.nspname = current_schema()
+                  AND rel.relname = :table_name
+                  AND con.contype = 'u'
+                  AND pg_get_constraintdef(con.oid) LIKE '%UNIQUE (account_id, trade_date)%'
+                """
+            ),
+            {"table_name": tb_name_paper_account_snapshots},
+        ).scalar_one_or_none()
+        if legacy_constraint:
+            conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} DROP CONSTRAINT {legacy_constraint}"))
+
+        conn.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS ix_paper_account_snapshots_account_event "
+                f"ON {tb_name_paper_account_snapshots} (account_id, event_at, id)"
+            )
+        )
+        conn.execute(
+            text(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_account_snapshots_account_initial "
+                f"ON {tb_name_paper_account_snapshots} (account_id) WHERE point_type = 'initial'"
+            )
+        )
+        assign_ids = (
+            conn.execute(
+                text("SELECT pg_get_serial_sequence(:table_name, 'id')"),
+                {"table_name": tb_name_paper_account_snapshots},
+            ).scalar_one_or_none()
+            is None
+        )
+        id_column = "id, " if assign_ids else ""
+        id_value = (
+            f"COALESCE((SELECT MAX(existing.id) FROM {tb_name_paper_account_snapshots} AS existing), 0) "
+            "+ ROW_NUMBER() OVER (ORDER BY account.id), "
+            if assign_ids
+            else ""
+        )
+        conn.execute(
+            text(
+                f"""
+                INSERT INTO {tb_name_paper_account_snapshots} (
+                    {id_column}account_id, trade_date, point_type, event_at, quality_status, invalid_reason,
+                    cash_available, cash_frozen, market_value, total_assets, realized_pnl,
+                    unrealized_pnl, position_count, order_count, trade_count, pending_settlement,
+                    net_asset_value, share_count, cumulative_deposit, cumulative_withdrawal, net_cash_flow
+                )
+                SELECT
+                    {id_value}account.id,
+                    CAST(account.created_at AS date),
+                    'initial',
+                    account.created_at,
+                    'valid',
+                    NULL,
+                    account.initial_cash,
+                    0,
+                    0,
+                    account.initial_cash,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    account.share_count,
+                    account.initial_cash,
+                    0,
+                    account.initial_cash
+                FROM {tb_name_paper_accounts} AS account
+                WHERE account.initial_cash > 0
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM {tb_name_paper_account_snapshots} AS snapshot
+                      WHERE snapshot.account_id = account.id
+                        AND snapshot.point_type = 'initial'
+                  )
+                """
+            )
+        )
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
