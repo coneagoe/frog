@@ -24,6 +24,7 @@ from paper_trading.domain.enums import (
     MatchingRunStatus,
     OrderSide,
     OrderStatus,
+    SnapshotPointType,
 )
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.matching_service import MatchingService
@@ -613,7 +614,7 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     first_run = matching_service.run(trade_date)
     assert first_run.warning_count == 1
     assert repo.get_valuation_gap(account.id, trade_date).resolved is False
-    assert repo.list_snapshots(account.id) == []
+    assert [row.point_type for row in repo.list_snapshots(account.id)] == [SnapshotPointType.INITIAL.value]
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
     cash_after_fill = repo.get_cash_available(account.id)
     position_after_fill = repo.get_position(account.id, Market.A_SHARE, "000001.SZ").total_quantity
@@ -626,7 +627,11 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     assert len(repo.list_trades(account.id)) == 1
     assert repo.get_cash_available(account.id) == cash_after_fill
     assert repo.get_position(account.id, Market.A_SHARE, "000001.SZ").total_quantity == position_after_fill
-    assert len(repo.list_snapshots(account.id)) == 1
+    snapshots = repo.list_snapshots(account.id)
+    assert [row.point_type for row in snapshots] == [
+        SnapshotPointType.INITIAL.value,
+        SnapshotPointType.TRADING.value,
+    ]
     gap = repo.get_valuation_gap(account.id, trade_date)
     assert gap is not None
     assert gap.resolved is True
@@ -634,7 +639,7 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     assert gap.details == [
         {"symbol": "300996", "market": "a_share", "error": "'No daily bar for 300996 on 2026-06-16'"}
     ]
-    assert repo.list_snapshots(account.id)[0].market_value == Decimal("2000.0000")
+    assert snapshots[1].market_value == Decimal("2000.0000")
     engine.dispose()
 
 
@@ -667,7 +672,11 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
     session.commit()
 
     assert run.warning_count == 1
-    assert len(repo.list_snapshots(complete.id)) == 1
+    assert [row.point_type for row in repo.list_snapshots(complete.id)] == [
+        SnapshotPointType.INITIAL.value,
+        SnapshotPointType.TRADING.value,
+    ]
+    assert [row.point_type for row in repo.list_snapshots(incomplete.id)] == [SnapshotPointType.INITIAL.value]
     assert repo.get_valuation_gap(complete.id, trade_date) is None
     gap = repo.get_valuation_gap(incomplete.id, trade_date)
     assert gap is not None
@@ -926,7 +935,7 @@ def test_snapshot_market_data_failure_marks_run_failed_and_preserves_fill(tmp_pa
     assert run.status == MatchingRunStatus.FAILED.value
     assert f"account={account.id}, trade_date={trade_date}" in run.error_details
     assert str(snapshot_exception) in run.error_details
-    assert repo.list_snapshots(account.id) == []
+    assert [row.point_type for row in repo.list_snapshots(account.id)] == [SnapshotPointType.INITIAL.value]
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
     assert len(repo.list_trades(account.id)) == 1
     engine.dispose()

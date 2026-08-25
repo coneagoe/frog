@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_market_data_provider, get_session
-from paper_trading.domain.enums import Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus, SnapshotPointType
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.storage.market_data import DailyBar
@@ -71,7 +71,7 @@ def test_matching_api_records_snapshot_market_data_failure(monkeypatch, sqlite_s
     assert gap is not None
     assert gap.resolved is False
     assert gap.missing_symbols == ["00700"]
-    assert repo.list_snapshots(account.id) == []
+    assert [row.point_type for row in repo.list_snapshots(account.id)] == [SnapshotPointType.INITIAL.value]
     assert repo.get_order(order.id).status == OrderStatus.FILLED.value
     assert len(repo.list_trades(account.id)) == 1
 

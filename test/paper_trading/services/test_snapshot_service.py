@@ -17,10 +17,9 @@ from common.const import (
     AdjustType,
     PeriodType,
 )
-from paper_trading.domain.enums import Market
+from paper_trading.domain.enums import Market, SnapshotPointType
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
-from paper_trading.storage.models import PaperAccountSnapshot
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
@@ -146,7 +145,7 @@ def test_generate_snapshot_persists_nav_fields(tmp_path):
     engine.dispose()
 
 
-def test_generate_snapshot_updates_existing_account_date_snapshot(tmp_path):
+def test_generate_snapshot_appends_trading_points_for_same_account_date(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_upsert.db'}")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
@@ -170,12 +169,19 @@ def test_generate_snapshot_updates_existing_account_date_snapshot(tmp_path):
     market_data = StorageMarketDataProvider(storage, FakeTradeCalendar([date(2026, 6, 16)]))
     snapshot_service = SnapshotService(repo, market_data)
 
-    snapshot_service.generate_snapshot(account.id, date(2026, 6, 16))
+    first = snapshot_service.generate_snapshot(account.id, date(2026, 6, 16))
     repo.upsert_position(account.id, Market.A_SHARE, "000001.SZ", 200, 0, Decimal("1800.00"))
     snapshot = snapshot_service.generate_snapshot(account.id, date(2026, 6, 16))
     session.commit()
 
-    assert session.query(PaperAccountSnapshot).filter_by(account_id=account.id).count() == 1
+    snapshots = repo.list_snapshots(account.id)
+    assert [row.point_type for row in snapshots] == [
+        SnapshotPointType.INITIAL.value,
+        SnapshotPointType.TRADING.value,
+        SnapshotPointType.TRADING.value,
+    ]
+    assert first.id != snapshot.id
+    assert first.market_value == Decimal("1000.0000")
     assert snapshot.market_value == Decimal("2000.0000")
     assert snapshot.total_assets == Decimal("102000.0000")
     assert snapshot.unrealized_pnl == Decimal("200.0000")
@@ -274,7 +280,8 @@ def test_missing_exact_date_position_bar_records_valuation_gap(sqlite_session):
     outcome = SnapshotService(repo, MissingBarProvider()).generate_snapshot_or_gap(account.id, date(2026, 7, 28))
 
     assert outcome.status == "valuation_gap"
-    assert repo.list_snapshots(account.id) == []
+    snapshots = repo.list_snapshots(account.id)
+    assert [row.point_type for row in snapshots] == [SnapshotPointType.INITIAL.value]
     gap = repo.get_valuation_gap(account.id, date(2026, 7, 28))
     assert gap is not None
     assert gap.missing_symbols == ["300996"]
