@@ -25,6 +25,7 @@ from paper_trading.domain.enums import (
     OrderSide,
     OrderStatus,
     SnapshotPointType,
+    SnapshotQualityStatus,
 )
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.matching_service import MatchingService
@@ -640,6 +641,10 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
         {"symbol": "300996", "market": "a_share", "error": "'No daily bar for 300996 on 2026-06-16'"}
     ]
     assert snapshots[1].market_value == Decimal("2000.0000")
+    assert snapshots[1].point_type == SnapshotPointType.TRADING.value
+    assert snapshots[1].quality_status == SnapshotQualityStatus.VALID.value
+    assert snapshots[1].invalid_reason is None
+    assert snapshots[1].event_at is not None
     engine.dispose()
 
 
@@ -672,10 +677,14 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
     session.commit()
 
     assert run.warning_count == 1
-    assert [row.point_type for row in repo.list_snapshots(complete.id)] == [
+    complete_snapshots = repo.list_snapshots(complete.id)
+    assert [row.point_type for row in complete_snapshots] == [
         SnapshotPointType.INITIAL.value,
         SnapshotPointType.TRADING.value,
     ]
+    assert complete_snapshots[1].quality_status == SnapshotQualityStatus.VALID.value
+    assert complete_snapshots[1].invalid_reason is None
+    assert complete_snapshots[1].event_at is not None
     assert [row.point_type for row in repo.list_snapshots(incomplete.id)] == [SnapshotPointType.INITIAL.value]
     assert repo.get_valuation_gap(complete.id, trade_date) is None
     gap = repo.get_valuation_gap(incomplete.id, trade_date)

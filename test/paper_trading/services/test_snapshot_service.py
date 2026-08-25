@@ -1,9 +1,10 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pandas as pd
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -17,8 +18,8 @@ from common.const import (
     AdjustType,
     PeriodType,
 )
-from paper_trading.domain.enums import Market, SnapshotPointType
-from paper_trading.services.snapshot_service import SnapshotService
+from paper_trading.domain.enums import CashEventType, Market, SnapshotPointType, SnapshotQualityStatus
+from paper_trading.services.snapshot_service import SnapshotService, _validated_trading_nav
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -135,6 +136,10 @@ def test_generate_snapshot_persists_nav_fields(tmp_path):
 
     snapshot = SnapshotService(repo, market_data).generate_snapshot(account.id, date(2026, 6, 16))
 
+    assert snapshot.point_type == SnapshotPointType.TRADING.value
+    assert snapshot.quality_status == SnapshotQualityStatus.VALID.value
+    assert snapshot.invalid_reason is None
+    assert snapshot.event_at.tzinfo == timezone.utc
     assert snapshot.total_assets == Decimal("101000.0000")
     assert snapshot.share_count == Decimal("100000.000000")
     assert snapshot.net_asset_value == Decimal("1.010000")
@@ -185,6 +190,9 @@ def test_generate_snapshot_appends_trading_points_for_same_account_date(tmp_path
     assert snapshot.market_value == Decimal("2000.0000")
     assert snapshot.total_assets == Decimal("102000.0000")
     assert snapshot.unrealized_pnl == Decimal("200.0000")
+    assert snapshot.point_type == SnapshotPointType.TRADING.value
+    assert snapshot.quality_status == SnapshotQualityStatus.VALID.value
+    assert snapshot.invalid_reason is None
     engine.dispose()
 
 
@@ -379,3 +387,130 @@ def test_missing_same_symbol_bars_are_market_qualified_and_deterministic(sqlite_
             "error": "'No daily bar for hk_connect:000001 on 2026-07-28'",
         },
     ]
+
+
+def test_generate_snapshot_sets_explicit_utc_trading_metadata(sqlite_session, monkeypatch):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("utc-meta", Decimal("100000.00"))
+    frozen = datetime(2026, 8, 25, 15, 30, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+
+    monkeypatch.setattr("paper_trading.services.snapshot_service.datetime", FrozenDateTime)
+
+    snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 8, 25))
+
+    assert snapshot.event_at == frozen
+    assert snapshot.event_at.tzinfo == timezone.utc
+    assert snapshot.point_type == SnapshotPointType.TRADING.value
+    assert snapshot.quality_status == SnapshotQualityStatus.VALID.value
+    assert snapshot.invalid_reason is None
+    assert snapshot.net_asset_value == Decimal("1.000000")
+
+
+def test_snapshot_with_non_positive_or_non_finite_nav_is_invalid(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("missing-shares", Decimal("100000.00"))
+    previous_nav = account.net_asset_value
+    account.share_count = Decimal("0")
+
+    snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 8, 25))
+
+    assert snapshot.quality_status == SnapshotQualityStatus.INVALID.value
+    assert snapshot.point_type == SnapshotPointType.TRADING.value
+    assert snapshot.net_asset_value is None
+    assert snapshot.invalid_reason == "missing_share_state"
+    assert snapshot.total_assets == Decimal("100000.0000")
+    assert snapshot.net_asset_value != snapshot.total_assets
+    assert account.net_asset_value == previous_nav
+
+
+@pytest.mark.parametrize(
+    ("cash_adjustment", "expected_assets"),
+    [
+        (Decimal("-100000.00"), Decimal("0.0000")),
+        (Decimal("-150000.00"), Decimal("-50000.0000")),
+    ],
+)
+def test_snapshot_with_zero_or_negative_nav_is_invalid(sqlite_session, cash_adjustment, expected_assets):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("non-positive-nav", Decimal("100000.00"))
+    previous_nav = account.net_asset_value
+    repo.add_cash_event(account.id, CashEventType.FEE, cash_adjustment)
+
+    snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 8, 25))
+
+    assert snapshot.quality_status == SnapshotQualityStatus.INVALID.value
+    assert snapshot.net_asset_value is None
+    assert snapshot.invalid_reason == "non_positive_nav"
+    assert snapshot.total_assets == expected_assets
+    assert snapshot.net_asset_value != snapshot.total_assets
+    assert account.net_asset_value == previous_nav
+
+
+@pytest.mark.parametrize("cash", [Decimal("NaN"), Decimal("Infinity")])
+def test_snapshot_with_non_finite_nav_is_invalid(cash):
+    account = SimpleNamespace(
+        id=1,
+        share_count=Decimal("100000"),
+        net_asset_value=Decimal("1.000000"),
+        realized_pnl=Decimal("0"),
+        cumulative_deposit=Decimal("100000"),
+        cumulative_withdrawal=Decimal("0"),
+    )
+    saved: dict[str, Any] = {}
+
+    class Repository:
+        updated = False
+
+        def get_cash_available(self, account_id):
+            return cash
+
+        def get_cash_frozen(self, account_id):
+            return Decimal("0")
+
+        def get_pending_settlement_total(self, account_id):
+            return Decimal("0")
+
+        def get_positions(self, account_id):
+            return []
+
+        def get_account(self, account_id):
+            return account
+
+        def count_orders(self, account_id, trade_date):
+            return 0
+
+        def count_trades(self, account_id, trade_date):
+            return 0
+
+        def update_account_nav_state(self, *args, **kwargs):
+            self.updated = True
+
+        def save_snapshot(self, **values):
+            saved.update(values)
+            return SimpleNamespace(**values)
+
+    repo = Repository()
+    snapshot = SnapshotService(cast(Any, repo), FakeMarketDataProvider()).generate_snapshot(1, date(2026, 8, 25))
+
+    assert snapshot.quality_status == SnapshotQualityStatus.INVALID.value
+    assert snapshot.net_asset_value is None
+    assert snapshot.invalid_reason == "non_finite_nav"
+    assert snapshot.net_asset_value != snapshot.total_assets
+    assert repo.updated is False
+    assert saved["net_asset_value"] is None
+
+
+def test_validated_trading_nav_maps_invalid_conditions():
+    assert _validated_trading_nav(None, Decimal("1")) == (None, "missing_share_state")
+    assert _validated_trading_nav(Decimal("0"), Decimal("1")) == (None, "missing_share_state")
+    assert _validated_trading_nav(Decimal("100"), None) == (None, "missing_nav")
+    assert _validated_trading_nav(Decimal("100"), Decimal("NaN")) == (None, "non_finite_nav")
+    assert _validated_trading_nav(Decimal("100"), Decimal("Infinity")) == (None, "non_finite_nav")
+    assert _validated_trading_nav(Decimal("100"), Decimal("0")) == (None, "non_positive_nav")
+    assert _validated_trading_nav(Decimal("100"), Decimal("-1")) == (None, "non_positive_nav")
+    assert _validated_trading_nav(Decimal("100"), Decimal("1.25")) == (Decimal("1.25"), None)

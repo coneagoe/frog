@@ -451,6 +451,8 @@ Matching processes accepted orders for the trade date. Tradable orders fill at l
 
 Snapshots require a daily bar for every held position. When one is unavailable, matching preserves fills, records a valuation gap, and completes with `status="completed_with_warnings"` and a non-zero `warning_count` instead of discarding the run. The account snapshot is created on a later retry once the missing data is available, and the valuation gap is marked resolved. Other matching or persistence errors remain failures and are reported in `error_details`.
 
+Trading snapshots persist a UTC `event_at`, `point_type="trading"`, and a quality status. A valid NAV must be a finite, strictly positive Decimal. Missing, non-finite, zero, or negative NAV is stored as `net_asset_value=None` with `quality_status="invalid"` and one of `missing_share_state`, `missing_nav`, `non_finite_nav`, or `non_positive_nav`. Invalid points keep the other financial fields and do not update account NAV state. NAV is never replaced with `total_assets`.
+
 ### 日期语义
 
 - API/CLI 下单必须显式提供 `trade_date`，不使用默认日期；匹配同样必须显式提供 `trade_date`，并以它进行订单选择、行情柱、成交、结算和快照处理。
