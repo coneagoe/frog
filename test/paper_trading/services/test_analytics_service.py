@@ -74,8 +74,10 @@ def _nav_snapshot(
     nav: Decimal | None,
     quality_status: str = SnapshotQualityStatus.VALID.value,
     total_assets: Decimal = Decimal("200000.0000"),
+    point_type: str = SnapshotPointType.TRADING.value,
 ) -> PaperAccountSnapshot:
     snapshot = PaperAccountSnapshot()
+    snapshot.point_type = point_type
     snapshot.quality_status = quality_status
     snapshot.net_asset_value = nav
     snapshot.total_assets = total_assets
@@ -668,6 +670,31 @@ def test_overview_keeps_latest_persisted_fields_when_latest_nav_is_invalid(tmp_p
     engine.dispose()
 
 
+def test_invalid_initial_nav_does_not_anchor_total_return_or_risk_on_later_trading_point(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("invalid-initial-nav", Decimal("100000.00"))
+    initial = seed_initial_point(repo, account)
+    initial.quality_status = SnapshotQualityStatus.INVALID.value
+    initial.net_asset_value = None
+    initial.invalid_reason = "missing_nav"
+    session.flush()
+    seed_trading_point(repo, account, nav=Decimal("1.100000"), trade_date=date(2026, 6, 17))
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert analytics.overview.total_return.value is None
+    assert analytics.overview.total_return.reason == "invalid_nav"
+    assert analytics.risk.max_drawdown.value is None
+    assert analytics.risk.max_drawdown.reason == "insufficient_data"
+    assert analytics.risk.current_drawdown.reason == "insufficient_data"
+    assert analytics.risk.sharpe.reason == "insufficient_data"
+    assert analytics.risk.sortino.reason == "insufficient_data"
+    assert analytics.risk.calmar.reason == "insufficient_data"
+    assert analytics.overview.simple_asset_return is not None
+    assert analytics.overview.simple_asset_return.value == Decimal("0.000000")
+    engine.dispose()
+
+
 @pytest.mark.parametrize(
     ("nav", "quality_status"),
     [
@@ -694,7 +721,7 @@ def test_snapshot_nav_never_derives_fallback_from_total_assets(nav, quality_stat
 
 def test_nav_series_preserves_input_order_and_excludes_invalid_points():
     snapshots = [
-        _nav_snapshot(nav=Decimal("1.000000")),
+        _nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value),
         _nav_snapshot(nav=None, quality_status=SnapshotQualityStatus.INVALID.value),
         _nav_snapshot(nav=Decimal("1.050000")),
         _nav_snapshot(nav=Decimal("0"), quality_status=SnapshotQualityStatus.INVALID.value),
@@ -706,3 +733,21 @@ def test_nav_series_preserves_input_order_and_excludes_invalid_points():
         Decimal("1.050000"),
         Decimal("1.020000"),
     ]
+
+
+def test_nav_series_is_empty_when_first_point_is_not_valid_initial():
+    invalid_initial = [
+        _nav_snapshot(
+            nav=None,
+            quality_status=SnapshotQualityStatus.INVALID.value,
+            point_type=SnapshotPointType.INITIAL.value,
+        ),
+        _nav_snapshot(nav=Decimal("1.100000")),
+    ]
+    trading_first = [
+        _nav_snapshot(nav=Decimal("1.000000")),
+        _nav_snapshot(nav=Decimal("1.100000")),
+    ]
+
+    assert AnalyticsService._nav_series(invalid_initial) == []
+    assert AnalyticsService._nav_series(trading_first) == []

@@ -4,7 +4,7 @@ from statistics import mean, stdev
 from typing import Callable, Literal
 from zoneinfo import ZoneInfo
 
-from paper_trading.domain.enums import SnapshotQualityStatus
+from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus
 from paper_trading.schemas.analytics import (
     ActivityAnalytics,
     ActivitySummary,
@@ -61,8 +61,16 @@ class AnalyticsService:
 
     @staticmethod
     def _nav_series(snapshots: list[PaperAccountSnapshot]) -> list[Decimal]:
-        values: list[Decimal] = []
-        for snapshot in snapshots:
+        if not snapshots:
+            return []
+        first = snapshots[0]
+        if first.point_type != SnapshotPointType.INITIAL.value:
+            return []
+        first_nav = AnalyticsService._snapshot_nav(first)
+        if first_nav is None:
+            return []
+        values = [first_nav]
+        for snapshot in snapshots[1:]:
             nav = AnalyticsService._snapshot_nav(snapshot)
             if nav is not None:
                 values.append(nav)
