@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from paper_trading.domain.enums import Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus, SnapshotPointType
 from paper_trading.services.historical_etf_market_repair_service import (
     HistoricalEtfMarketRepairService,
     RepairCandidate,
@@ -109,7 +109,11 @@ def test_apply_applies_catalogue_etf_order_and_rebuilds_derived_state(tmp_path):
     assert all(item.market == Market.ETF.value for item in repo.get_lots(account.id, Market.ETF, "518880"))
     assert repo.list_cash_ledger(account.id)
     assert repo.list_round_trips(account.id)
-    assert repo.list_snapshots(account.id)
+    snapshots = repo.list_snapshots(account.id)
+    assert [row.point_type for row in snapshots] == [
+        SnapshotPointType.INITIAL.value,
+        SnapshotPointType.TRADING.value,
+    ]
     assert repo.list_matching_runs()
     assert repo.get_valuation_gap(account.id, trade_date) is None
     diagnostics = repo.list_daily_bar_diagnostics()

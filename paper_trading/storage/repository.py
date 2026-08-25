@@ -1325,7 +1325,11 @@ class PaperTradingRepository:
         )
         counts["snapshots"] = (
             self.session.query(PaperAccountSnapshot)
-            .filter(PaperAccountSnapshot.account_id == account_id, PaperAccountSnapshot.trade_date >= start_date)
+            .filter(
+                PaperAccountSnapshot.account_id == account_id,
+                PaperAccountSnapshot.trade_date >= start_date,
+                PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
+            )
             .delete(synchronize_session=False)
         )
         counts["valuation_gaps"] = (
@@ -1407,7 +1411,10 @@ class PaperTradingRepository:
         )
         counts["snapshots"] = (
             self.session.query(PaperAccountSnapshot)
-            .filter(PaperAccountSnapshot.account_id == account_id)
+            .filter(
+                PaperAccountSnapshot.account_id == account_id,
+                PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
+            )
             .delete(synchronize_session=False)
         )
         counts["pending_settlements"] = (

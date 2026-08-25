@@ -208,7 +208,11 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     buy_trade = repo.list_trades(account.id)[0]
     buy_position = repo.get_position(account.id, Market.ETF, "510300")
     buy_lot = repo.get_lots(account.id, Market.ETF, "510300")[0]
-    buy_snapshot = repo.list_snapshots(account.id)[0]
+    buy_snapshot = next(
+        snapshot
+        for snapshot in repo.list_snapshots(account.id)
+        if snapshot.point_type == SnapshotPointType.TRADING.value
+    )
 
     assert (buy_trade.order_id, buy_trade.price, buy_trade.amount, buy_trade.trade_date) == (
         buy.id,
@@ -289,7 +293,11 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     ]
     assert repo.get_cash_available(account.id) == Decimal("100009.9360")
     assert repo.list_pending_settlements(account.id) == []
-    assert [snapshot.trade_date for snapshot in repo.list_snapshots(account.id)] == [buy_date, sell_date]
+    assert [snapshot.trade_date for snapshot in repo.list_snapshots(account.id)] == [
+        account.created_at.date(),
+        buy_date,
+        sell_date,
+    ]
     round_trips = repo.list_round_trips(account.id)
     assert len(round_trips) == 1
     assert round_trips[0].market == Market.ETF.value
@@ -314,19 +322,26 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         (CashEventType.TRADE.value, Decimal("324.9675"), sell.id, trades[1].id),
     ]
     snapshots = repo.list_snapshots(account.id)
+    assert [snapshot.point_type for snapshot in snapshots] == [
+        SnapshotPointType.INITIAL.value,
+        SnapshotPointType.TRADING.value,
+        SnapshotPointType.TRADING.value,
+    ]
     assert [
         (snapshot.trade_date, snapshot.cash_available, snapshot.market_value, snapshot.total_assets)
         for snapshot in snapshots
+        if snapshot.point_type == SnapshotPointType.TRADING.value
     ] == [
         (buy_date, Decimal("99684.9685"), Decimal("315.0000"), Decimal("99999.9685")),
         (sell_date, Decimal("100009.9360"), Decimal("0.0000"), Decimal("100009.9360")),
     ]
+    sell_snapshot = snapshots[2]
     assert (
-        snapshots[1].realized_pnl,
-        snapshots[1].unrealized_pnl,
-        snapshots[1].position_count,
-        snapshots[1].order_count,
-        snapshots[1].trade_count,
+        sell_snapshot.realized_pnl,
+        sell_snapshot.unrealized_pnl,
+        sell_snapshot.position_count,
+        sell_snapshot.order_count,
+        sell_snapshot.trade_count,
     ) == (Decimal("9.9675"), Decimal("0.0000"), 0, 1, 1)
     round_trip = repo.list_round_trips(account.id)[0]
     assert (

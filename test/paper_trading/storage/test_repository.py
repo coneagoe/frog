@@ -1240,7 +1240,10 @@ def test_clear_account_rebuild_state_from_date_preserves_source_facts_and_histor
     assert repo.get_order(cancelled_order.id).status == OrderStatus.CANCELLED.value
     assert repo.list_matching_runs()[0].id == historical_run.id
     assert repo.list_trade_validity_checks(after_order.id) != []
-    assert [snapshot.trade_date for snapshot in repo.list_snapshots(account.id)] == [before_date]
+    assert [(snapshot.point_type, snapshot.trade_date) for snapshot in repo.list_snapshots(account.id)] == [
+        (SnapshotPointType.INITIAL.value, account.created_at.date()),
+        (SnapshotPointType.TRADING.value, before_date),
+    ]
     assert sqlite_session.query(PaperValuationGap).filter_by(account_id=account.id).one().trade_date == before_date
     assert sqlite_session.query(PaperPendingSettlement).filter_by(account_id=account.id).count() == 0
     assert [(position.symbol, position.total_quantity) for position in repo.get_positions(account.id)] == [
@@ -1432,7 +1435,8 @@ def test_clear_account_rebuild_state_preserves_initial_cash(sqlite_session):
     assert positions[0].source == "imported"
     assert positions[0].total_quantity == 300
     assert positions[0].cost_amount == Decimal("2700.0000")  # 300 * 9.00
-    assert repo.list_snapshots(account.id) == []
+    snapshots = repo.list_snapshots(account.id)
+    assert [snapshot.point_type for snapshot in snapshots] == [SnapshotPointType.INITIAL.value]
     ledger = repo.list_cash_ledger(account.id)
     assert len(ledger) == 1
     assert ledger[0].note == "initial_cash"
