@@ -30,7 +30,7 @@ def seed_initial_point(repo, account):
 
 
 def seed_trading_point(
-    repo,
+    repo: PaperTradingRepository,
     account,
     nav: Decimal | None,
     trade_date: date | None = None,
