@@ -23,6 +23,8 @@ from paper_trading.domain.enums import (
     PendingSettlementSource,
     PositionSource,
     RoundTripStatus,
+    SnapshotPointType,
+    SnapshotQualityStatus,
     TradeValidityStatus,
 )
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
@@ -271,11 +273,15 @@ class PaperTradingRepository:
         )
         preset_name = FeePreset(fee_preset or DEFAULT_FEE_PRESET)
         preset = get_fee_preset(preset_name)
+        cash = Decimal(initial_cash)
+        if cash <= 0:
+            raise ValueError("initial_cash must be positive")
         initial_nav = Decimal("1.000000")
-        initial_shares = Decimal(initial_cash).quantize(Decimal("0.000001"))
+        initial_shares = cash.quantize(Decimal("0.000001"))
+        initial_deposit = cash.quantize(Decimal("0.0001"))
         account = PaperAccount(
             name=name,
-            initial_cash=initial_cash,
+            initial_cash=cash,
             fee_preset=preset_name,
             commission_rate=commission_rate if commission_rate is not None else preset.commission_rate,
             min_commission=min_commission if min_commission is not None else preset.min_commission,
@@ -284,19 +290,25 @@ class PaperTradingRepository:
             etf_commission_rate=etf_commission_rate,
             share_count=initial_shares,
             net_asset_value=initial_nav,
-            cumulative_deposit=Decimal(initial_cash).quantize(Decimal("0.0001")),
+            cumulative_deposit=initial_deposit,
             cumulative_withdrawal=Decimal("0.0000"),
         )
         self.session.add(account)
         self.session.flush()
+        if account.created_at is None:
+            self.session.refresh(account)
+        event_at = account.created_at
+        if event_at is None:
+            raise RuntimeError("paper account created_at is missing after flush")
         self.add_cash_event(
             account.id,
             CashEventType.DEPOSIT,
-            Decimal(initial_cash).quantize(Decimal("0.0001")),
+            initial_deposit,
             net_asset_value=initial_nav,
             share_delta=initial_shares,
             note="initial_cash",
         )
+        self.create_initial_snapshot(account, event_at=event_at)
         return account
 
     def get_account(self, account_id: int) -> PaperAccount | None:
@@ -677,7 +689,7 @@ class PaperTradingRepository:
         return list(
             self.session.query(PaperAccountSnapshot)
             .filter(PaperAccountSnapshot.account_id == account_id)
-            .order_by(PaperAccountSnapshot.trade_date.asc())
+            .order_by(PaperAccountSnapshot.event_at.asc(), PaperAccountSnapshot.id.asc())
             .all()
         )
 
@@ -848,21 +860,35 @@ class PaperTradingRepository:
         self.session.flush()
         return lot
 
-    def save_snapshot(self, **values: Any) -> PaperAccountSnapshot:
-        existing: PaperAccountSnapshot | None = (
-            self.session.query(PaperAccountSnapshot)
-            .filter(
-                PaperAccountSnapshot.account_id == values["account_id"],
-                PaperAccountSnapshot.trade_date == values["trade_date"],
-            )
-            .one_or_none()
+    def create_initial_snapshot(self, account: PaperAccount, *, event_at: datetime) -> PaperAccountSnapshot:
+        initial_cash = Decimal(account.initial_cash).quantize(Decimal("0.0001"))
+        snapshot = PaperAccountSnapshot(
+            account_id=account.id,
+            trade_date=event_at.date(),
+            event_at=event_at,
+            point_type=SnapshotPointType.INITIAL.value,
+            quality_status=SnapshotQualityStatus.VALID.value,
+            cash_available=initial_cash,
+            cash_frozen=Decimal("0.0000"),
+            market_value=Decimal("0.0000"),
+            total_assets=initial_cash,
+            realized_pnl=Decimal("0.0000"),
+            unrealized_pnl=Decimal("0.0000"),
+            position_count=0,
+            order_count=0,
+            trade_count=0,
+            pending_settlement=Decimal("0.0000"),
+            net_asset_value=Decimal("1.000000"),
+            share_count=account.share_count,
+            cumulative_deposit=initial_cash,
+            cumulative_withdrawal=Decimal("0.0000"),
+            net_cash_flow=initial_cash,
         )
-        if existing is not None:
-            for key, value in values.items():
-                setattr(existing, key, value)
-            self.session.flush()
-            return existing
+        self.session.add(snapshot)
+        self.session.flush()
+        return snapshot
 
+    def save_snapshot(self, **values: Any) -> PaperAccountSnapshot:
         snapshot = PaperAccountSnapshot(**values)
         self.session.add(snapshot)
         self.session.flush()

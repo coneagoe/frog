@@ -1,9 +1,10 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, cast
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.domain.enums import (
@@ -14,6 +15,8 @@ from paper_trading.domain.enums import (
     MatchingRunStatus,
     OrderSide,
     OrderStatus,
+    SnapshotPointType,
+    SnapshotQualityStatus,
 )
 from paper_trading.storage.models import PaperPendingSettlement, PaperTradeValidityCheck, PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
@@ -123,6 +126,133 @@ def test_create_account_persists_etf_commission_rate(sqlite_session):
     account = repo.create_account("etf-fees", Decimal("100000"), etf_commission_rate=Decimal("0.00008"))
 
     assert account.etf_commission_rate == Decimal("0.00008000")
+
+
+def _trading_snapshot_values(account_id: int, trade_date: date, event_at: datetime) -> dict[str, Any]:
+    return {
+        "account_id": account_id,
+        "trade_date": trade_date,
+        "event_at": event_at,
+        "point_type": SnapshotPointType.TRADING.value,
+        "quality_status": SnapshotQualityStatus.VALID.value,
+        "cash_available": Decimal("99000.0000"),
+        "cash_frozen": Decimal("0.0000"),
+        "market_value": Decimal("1000.0000"),
+        "total_assets": Decimal("100000.0000"),
+        "realized_pnl": Decimal("0.0000"),
+        "unrealized_pnl": Decimal("0.0000"),
+        "position_count": 1,
+        "order_count": 1,
+        "trade_count": 1,
+        "pending_settlement": Decimal("0.0000"),
+    }
+
+
+@pytest.mark.parametrize("initial_cash", [Decimal("0"), Decimal("-1.00")])
+def test_create_account_rejects_non_positive_initial_cash(sqlite_session, initial_cash: Decimal) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    with pytest.raises(ValueError, match="initial_cash"):
+        repo.create_account("bad-cash", initial_cash)
+
+
+def test_create_account_persists_initial_snapshot(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    account = repo.create_account("initial-snapshot", Decimal("100000.00"))
+    snapshots = repo.list_snapshots(account.id)
+
+    assert len(snapshots) == 1
+    snapshot = snapshots[0]
+    assert snapshot.point_type == SnapshotPointType.INITIAL.value
+    assert snapshot.quality_status == SnapshotQualityStatus.VALID.value
+    assert snapshot.event_at == account.created_at
+    assert snapshot.trade_date == account.created_at.date()
+    assert snapshot.cash_available == Decimal("100000.0000")
+    assert snapshot.cash_frozen == Decimal("0.0000")
+    assert snapshot.market_value == Decimal("0.0000")
+    assert snapshot.total_assets == Decimal("100000.0000")
+    assert snapshot.realized_pnl == Decimal("0.0000")
+    assert snapshot.unrealized_pnl == Decimal("0.0000")
+    assert snapshot.position_count == 0
+    assert snapshot.order_count == 0
+    assert snapshot.trade_count == 0
+    assert snapshot.pending_settlement == Decimal("0.0000")
+    assert snapshot.share_count == account.share_count
+    assert snapshot.cumulative_deposit == Decimal("100000.0000")
+    assert snapshot.cumulative_withdrawal == Decimal("0.0000")
+    assert snapshot.net_cash_flow == Decimal("100000.0000")
+    assert snapshot.net_asset_value == Decimal("1.000000")
+
+
+def test_list_snapshots_orders_same_day_initial_before_trading(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("same-day-order", Decimal("100000.00"))
+    created_at = account.created_at
+
+    initial = repo.list_snapshots(account.id)[0]
+    trading = repo.save_snapshot(
+        **_trading_snapshot_values(account.id, created_at.date(), created_at + timedelta(seconds=1))
+    )
+
+    assert initial.point_type == SnapshotPointType.INITIAL.value
+    assert [row.id for row in repo.list_snapshots(account.id)] == [initial.id, trading.id]
+
+
+def test_save_snapshot_appends_two_trading_points_on_one_date(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("same-day-trading", Decimal("100000.00"))
+    trade_date = date(2026, 8, 25)
+    first_event = datetime(2026, 8, 25, 10, 0, tzinfo=timezone.utc)
+    second_event = datetime(2026, 8, 25, 15, 0, tzinfo=timezone.utc)
+
+    first = repo.save_snapshot(**_trading_snapshot_values(account.id, trade_date, first_event))
+    second = repo.save_snapshot(
+        **{
+            **_trading_snapshot_values(account.id, trade_date, second_event),
+            "cash_available": Decimal("98000.0000"),
+            "market_value": Decimal("2000.0000"),
+        }
+    )
+
+    snapshots = [row for row in repo.list_snapshots(account.id) if row.point_type == SnapshotPointType.TRADING.value]
+    assert [row.id for row in snapshots] == [first.id, second.id]
+    assert first.id != second.id
+    assert snapshots[0].cash_available == Decimal("99000.0000")
+    assert snapshots[1].cash_available == Decimal("98000.0000")
+
+
+def test_list_snapshots_orders_timestamp_ties_by_id(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("timestamp-tie", Decimal("100000.00"))
+    event_at = datetime(2026, 8, 25, 10, 0, tzinfo=timezone.utc)
+
+    first = repo.save_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
+    second = repo.save_snapshot(
+        **{
+            **_trading_snapshot_values(account.id, event_at.date(), event_at),
+            "cash_available": Decimal("98000.0000"),
+            "market_value": Decimal("2000.0000"),
+        }
+    )
+
+    snapshots = [row for row in repo.list_snapshots(account.id) if row.point_type == SnapshotPointType.TRADING.value]
+    assert first.id < second.id
+    assert [row.id for row in snapshots] == [first.id, second.id]
+
+
+def test_create_initial_snapshot_rejects_duplicate_initial_point(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("duplicate-initial", Decimal("100000.00"))
+
+    with pytest.raises(IntegrityError):
+        repo.create_initial_snapshot(account, event_at=account.created_at + timedelta(seconds=1))
 
 
 def test_acquire_matching_run_uses_canonical_active_status(sqlite_session):

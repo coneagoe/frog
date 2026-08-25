@@ -282,7 +282,7 @@ curl -X POST http://localhost:8000/paper/accounts \
   -d '{"name":"custom-fee","initial_cash":"100000.00","fee_preset":"a_share","commission_rate":"0.00025","min_commission":"5.00","stamp_duty_rate":"0.0005","transfer_fee_rate":"0.00001"}'
 ```
 
-The only built-in preset is `a_share`. Fee values must be non-negative decimals; zero is valid for fee-free test accounts.
+The only built-in preset is `a_share`. Fee values must be non-negative decimals; zero is valid for fee-free test accounts. Account creation requires positive `initial_cash` and writes one `initial` snapshot at NAV `1.000000`. Later trading valuations append additional snapshot points instead of replacing the same `trade_date`.
 
 ## Update Account Fees
 
