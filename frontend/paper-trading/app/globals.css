@@ -234,6 +234,10 @@ select:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.chart-surface {
+  margin-top: 16px;
+}
+
 .metric-card {
   display: grid;
   gap: 8px;

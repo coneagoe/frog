@@ -1,7 +1,8 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { createChart } from "lightweight-charts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAnalytics, listAccounts, listSnapshots } from "@/lib/api-client";
+import type { Snapshot } from "@/lib/types";
 import { AnalyticsPage } from "./analytics-page";
 
 vi.mock("lightweight-charts", () => ({
@@ -101,6 +102,38 @@ describe("AnalyticsPage", () => {
     listAccountsMock.mockResolvedValue([{ id: 1, name: "demo", initial_cash: "100000.00", status: "active", base_currency: "CNY" }]);
     listSnapshotsMock.mockResolvedValue([]);
     getAnalyticsMock.mockResolvedValue(analyticsPayload);
+  });
+
+  it("renders the asset chart in Overview instead of Risk & Drawdown", async () => {
+    const snapshots: Snapshot[] = [{
+      id: 1,
+      account_id: 1,
+      trade_date: "2026-09-10",
+      cash_available: "90000.0000",
+      cash_frozen: "0.0000",
+      market_value: "16000.0000",
+      total_assets: "106000.0000",
+      realized_pnl: "6000.0000",
+      unrealized_pnl: "500.0000",
+      net_asset_value: "1.050000",
+      share_count: "1000",
+      cumulative_deposit: "100000.0000",
+      cumulative_withdrawal: "0.0000",
+      net_cash_flow: "100000.0000",
+      position_count: 1,
+      order_count: 2,
+      trade_count: 2
+    }];
+    listSnapshotsMock.mockResolvedValue(snapshots);
+    render(<AnalyticsPage />);
+
+    const overview = closestSection(screen.getByRole("heading", { level: 2, name: "Overview" }));
+    const risk = closestSection(screen.getByRole("heading", { level: 2, name: "Risk & Drawdown" }));
+
+    await waitFor(() => {
+      expect(overview.querySelector(".chart-surface")).toBeInTheDocument();
+    });
+    expect(risk.querySelector(".chart-surface")).not.toBeInTheDocument();
   });
 
   it("renders the analytics dashboard sections", async () => {

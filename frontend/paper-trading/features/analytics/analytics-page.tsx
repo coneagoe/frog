@@ -6,6 +6,7 @@ import { ErrorBanner } from "@/components/error-banner";
 import { getAnalytics, listAccounts, listSnapshots } from "@/lib/api-client";
 import type { Account, AnalyticsResponse, Snapshot } from "@/lib/types";
 import { AnalyticsSummary } from "./analytics-summary";
+import { AssetChart } from "./asset-chart";
 import {
   AnalyticsActivitySection,
   AnalyticsExecutionSection,
@@ -112,6 +113,7 @@ export function AnalyticsPage() {
       <section className="panel">
         <h2>Overview</h2>
         <AnalyticsSummary analytics={analytics} snapshot={latestSnapshot} />
+        <AssetChart snapshots={snapshots} />
       </section>
       <section className="panel">
         <h2>Activity</h2>
@@ -127,7 +129,7 @@ export function AnalyticsPage() {
       </section>
       <section className="panel">
         <h2>Risk &amp; Drawdown</h2>
-        <AnalyticsRiskSection analytics={analytics} snapshots={snapshots} />
+        <AnalyticsRiskSection analytics={analytics} />
       </section>
     </section>
   );

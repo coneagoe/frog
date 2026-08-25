@@ -2,9 +2,8 @@ import type { ReactNode } from "react";
 import { DataTable, type Column } from "@/components/data-table";
 import { MoneyText } from "@/components/money-text";
 import { formatBackendLabel, formatDate, formatPercent, formatQuantity, labelStatus } from "@/lib/format";
-import type { ActivitySummary, AnalyticsResponse, RoundTrip, Snapshot } from "@/lib/types";
+import type { ActivitySummary, AnalyticsResponse, RoundTrip } from "@/lib/types";
 import { MetricValueText } from "./analytics-summary";
-import { AssetChart } from "./asset-chart";
 
 function MetricCard({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -137,7 +136,7 @@ export function AnalyticsTradeQualitySection({ analytics }: { analytics: Analyti
   );
 }
 
-export function AnalyticsRiskSection({ analytics, snapshots }: { analytics: AnalyticsResponse | null; snapshots: Snapshot[] }) {
+export function AnalyticsRiskSection({ analytics }: { analytics: AnalyticsResponse | null }) {
   const risk = analytics?.risk;
 
   return (
@@ -149,7 +148,6 @@ export function AnalyticsRiskSection({ analytics, snapshots }: { analytics: Anal
         <MetricCard label="Sortino" value={<MetricValueText metric={risk?.sortino} />} />
         <MetricCard label="Calmar" value={<MetricValueText metric={risk?.calmar} />} />
       </div>
-      <AssetChart snapshots={snapshots} />
     </>
   );
 }
