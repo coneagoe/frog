@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
@@ -322,10 +322,20 @@ class PaperAccountSnapshot(Base):
         Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True
     )
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    point_type: Mapped[str] = mapped_column(_value_enum(SnapshotPointType, "paper_snapshot_point_type"), nullable=False)
-    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    point_type: Mapped[str] = mapped_column(
+        _value_enum(SnapshotPointType, "paper_snapshot_point_type"),
+        nullable=False,
+        default=SnapshotPointType.TRADING.value,
+        server_default="trading",
+    )
+    event_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
     quality_status: Mapped[str] = mapped_column(
-        _value_enum(SnapshotQualityStatus, "paper_snapshot_quality_status"), nullable=False
+        _value_enum(SnapshotQualityStatus, "paper_snapshot_quality_status"),
+        nullable=False,
+        default=SnapshotQualityStatus.VALID.value,
+        server_default="valid",
     )
     invalid_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     cash_available: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)

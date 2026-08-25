@@ -302,6 +302,7 @@ PAPER_TRADING_ENUM_GROUPS = (
                 "paper_account_snapshots",
                 "point_type",
                 "VARCHAR(20)",
+                "'trading'",
                 indexes=(_SNAPSHOT_INITIAL_INDEX,),
             ),
         ),
@@ -309,7 +310,7 @@ PAPER_TRADING_ENUM_GROUPS = (
     PaperTradingEnumGroup(
         "paper_snapshot_quality_status",
         _labels(SnapshotQualityStatus),
-        (_column("paper_account_snapshots", "quality_status", "VARCHAR(20)"),),
+        (_column("paper_account_snapshots", "quality_status", "VARCHAR(20)", "'valid'"),),
     ),
 )
 
@@ -348,7 +349,7 @@ _SNAPSHOT_INITIAL_ENUM_PREDICATE = re.compile(
 _SNAPSHOT_INITIAL_LEGACY_PREDICATE = re.compile(r"point_type.*=.*'initial'", re.IGNORECASE)
 
 
-def _is_optional_snapshot_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
+def _is_addable_snapshot_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
     return group.type_name in _SNAPSHOT_ENUM_TYPES and column.table_name == "paper_account_snapshots"
 
 
@@ -358,8 +359,6 @@ def _has_pending_enum_column_changes(connection: Connection, groups: tuple[Paper
             if not _table_exists(connection, column.table_name):
                 continue
             facts = _column_facts(connection, column)
-            if facts is None and _is_optional_snapshot_column(group, column):
-                continue
             if facts is None or not _column_has_type(connection, column, group.type_name):
                 return True
     return False
@@ -415,6 +414,7 @@ def _adapter_apply(connection: Connection) -> bool:
             create_operational_tables=groups is PAPER_TRADING_ENUM_GROUPS,
         )
         _add_market_columns(connection)
+        _add_snapshot_columns(connection)
         for group in groups:
             _alter_group(connection, group, rollback=False)
         _upgrade_market_qualified_keys(connection)
@@ -425,6 +425,7 @@ def _adapter_apply(connection: Connection) -> bool:
         for group in groups:
             _create_type(connection, group)
         _add_market_columns(connection)
+        _add_snapshot_columns(connection)
         for group in groups:
             _alter_group(connection, group, rollback=False)
     _upgrade_market_qualified_keys(connection)
@@ -619,8 +620,9 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
                 continue
             facts = _column_facts(connection, column)
             if facts is None:
-                if _is_optional_snapshot_column(group, column) or (
-                    not rollback and group.type_name == "paper_market" and column.column_name == "market"
+                if not rollback and (
+                    (group.type_name == "paper_market" and column.column_name == "market")
+                    or _is_addable_snapshot_column(group, column)
                 ):
                     continue
                 raise PaperTradingEnumMigrationError(
@@ -795,13 +797,11 @@ def _verify(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...], *
                 continue
             expected = _normalized_type(column.legacy_type_sql) if rollback else group.type_name
             facts = _column_facts(connection, column)
-            if facts is None and (
-                (
-                    rollback
-                    and group.type_name == "paper_market"
-                    and column.table_name in _MARKET_COLUMNS_REMOVED_ON_ROLLBACK
-                )
-                or _is_optional_snapshot_column(group, column)
+            if (
+                rollback
+                and facts is None
+                and group.type_name == "paper_market"
+                and column.table_name in _MARKET_COLUMNS_REMOVED_ON_ROLLBACK
             ):
                 continue
             if facts is None or facts[0] != expected:
@@ -885,6 +885,24 @@ def _add_market_columns(connection: Connection) -> None:
                 text(
                     f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} VARCHAR(20) NOT NULL "
                     "DEFAULT 'a_share'::character varying"
+                )
+            )
+            for _, index_sql in column.indexes:
+                connection.execute(text(index_sql))
+
+
+def _add_snapshot_columns(connection: Connection) -> None:
+    for group in PAPER_TRADING_ENUM_GROUPS:
+        for column in group.columns:
+            if not _is_addable_snapshot_column(group, column):
+                continue
+            if not _table_exists(connection, column.table_name) or _column_facts(connection, column) is not None:
+                continue
+            default_sql = column.default_sql or "'trading'::character varying"
+            connection.execute(
+                text(
+                    f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} VARCHAR(20) NOT NULL "
+                    f"DEFAULT {default_sql}"
                 )
             )
             for _, index_sql in column.indexes:

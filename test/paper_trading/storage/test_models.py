@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import Boolean, Enum, UniqueConstraint, create_engine, inspect
 from sqlalchemy.dialects.postgresql import dialect
-from sqlalchemy.exc import StatementError
+from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
@@ -370,6 +370,11 @@ def test_snapshot_model_supports_ordered_quality_aware_points() -> None:
     assert PaperAccountSnapshot.__table__.c.event_at.nullable is False
     assert PaperAccountSnapshot.__table__.c.quality_status.nullable is False
     assert PaperAccountSnapshot.__table__.c.invalid_reason.nullable is True
+    assert PaperAccountSnapshot.__table__.c.point_type.default.arg == SnapshotPointType.TRADING.value
+    assert PaperAccountSnapshot.__table__.c.quality_status.default.arg == SnapshotQualityStatus.VALID.value
+    assert PaperAccountSnapshot.__table__.c.point_type.server_default is not None
+    assert PaperAccountSnapshot.__table__.c.quality_status.server_default is not None
+    assert PaperAccountSnapshot.__table__.c.event_at.server_default is not None
     assert SnapshotPointType.INITIAL == "initial"
     assert SnapshotPointType.TRADING == "trading"
     assert SnapshotQualityStatus.VALID == "valid"
@@ -426,6 +431,55 @@ def test_snapshot_point_and_quality_enums_reject_unknown_values(tmp_path) -> Non
             )
         )
         with pytest.raises((StatementError, ValueError)):
+            session.flush()
+
+    engine.dispose()
+
+
+def test_snapshot_model_defaults_support_legacy_writers(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        snapshot = PaperAccountSnapshot(account_id=1, trade_date=date(2026, 8, 25), **_snapshot_financials())
+        session.add(snapshot)
+        session.flush()
+
+        assert snapshot.point_type == SnapshotPointType.TRADING.value
+        assert snapshot.quality_status == SnapshotQualityStatus.VALID.value
+        assert snapshot.event_at.tzinfo is not None
+        assert snapshot.invalid_reason is None
+
+    engine.dispose()
+
+
+def test_snapshot_model_rejects_duplicate_initial_points(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(
+            PaperAccountSnapshot(
+                account_id=1,
+                trade_date=date(2026, 8, 25),
+                point_type=SnapshotPointType.INITIAL.value,
+                event_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+                quality_status=SnapshotQualityStatus.VALID.value,
+                **_snapshot_financials(),
+            )
+        )
+        session.flush()
+        session.add(
+            PaperAccountSnapshot(
+                account_id=1,
+                trade_date=date(2026, 8, 26),
+                point_type=SnapshotPointType.INITIAL.value,
+                event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+                quality_status=SnapshotQualityStatus.VALID.value,
+                **_snapshot_financials(),
+            )
+        )
+        with pytest.raises(IntegrityError):
             session.flush()
 
     engine.dispose()

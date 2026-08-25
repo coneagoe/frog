@@ -655,13 +655,14 @@ production operator interface for the governed Paper Trading, Monitor, Forecast
 SSF, and Storage schemas. Keep the maintenance record, verified backup, and
 every command's JSON output together.
 
-The governed types are the 15 Paper Trading types:
+The governed types are the 16 Paper Trading types:
 `paper_account_status`, `paper_fee_preset`, `paper_cash_event_type`,
 `paper_order_side`, `paper_order_status`, `paper_trade_validity_status`,
 `paper_market`, `paper_position_source`, `paper_round_trip_status`,
 `paper_trade_validity_granularity`, `paper_pending_settlement_source`,
 `paper_ledger_rebuild_status`, `paper_matching_run_status`,
-`paper_snapshot_point_type`, and `paper_snapshot_quality_status`; the four
+`paper_etf_eligibility_status`, `paper_snapshot_point_type`, and
+`paper_snapshot_quality_status`; the four
 Monitor and Forecast SSF types: `monitor_market`, `monitor_frequency`,
 `monitor_reset_mode`, and `forecast_ssf_candidate_state`; and the five Storage
 types: `blackroom_market`, `blackroom_source`,
@@ -783,6 +784,7 @@ WITH expected(type_name, labels) AS (
     ('paper_pending_settlement_source', ARRAY['hk_sell']),
     ('paper_ledger_rebuild_status', ARRAY['completed']),
     ('paper_matching_run_status', ARRAY['running','completed','completed_with_warnings','failed']),
+    ('paper_etf_eligibility_status', ARRAY['unknown','supported','money_market','disabled']),
     ('paper_snapshot_point_type', ARRAY['initial','trading']),
     ('paper_snapshot_quality_status', ARRAY['valid','invalid']),
     ('monitor_market', ARRAY['A','HK','ETF']),
@@ -830,6 +832,7 @@ WITH expected(table_name, column_name, type_name) AS (
     ('paper_trade_validity_checks','data_granularity','paper_trade_validity_granularity'),
     ('paper_pending_settlement','source','paper_pending_settlement_source'),
     ('paper_ledger_rebuilds','status','paper_ledger_rebuild_status'), ('paper_matching_runs','status','paper_matching_run_status'),
+    ('paper_etf_eligibility','status','paper_etf_eligibility_status'),
     ('paper_account_snapshots','point_type','paper_snapshot_point_type'),
     ('paper_account_snapshots','quality_status','paper_snapshot_quality_status'),
     ('stock_monitor_targets','market','monitor_market'), ('forecast_ssf_candidates','market','monitor_market'),
@@ -850,7 +853,7 @@ ORDER BY e.table_name, e.column_name;
 SQL
 ```
 
-Expected result: zero rows. This proves all 33 governed columns use their
+Expected result: zero rows. This proves all 34 governed columns use their
 managed enum types.
 
 ```bash
