@@ -197,6 +197,10 @@ export type Snapshot = {
   id: number;
   account_id: number;
   trade_date: string;
+  point_type: "initial" | "trading";
+  event_at: string;
+  quality_status: "valid" | "invalid";
+  invalid_reason: string | null;
   cash_available: string;
   cash_frozen: string;
   market_value: string;

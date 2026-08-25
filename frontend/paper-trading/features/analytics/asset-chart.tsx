@@ -1,15 +1,25 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { createChart, LineSeries } from "lightweight-charts";
+import { useEffect, useMemo, useRef } from "react";
+import { createChart, LineSeries, type UTCTimestamp } from "lightweight-charts";
 import { EmptyState } from "@/components/empty-state";
 import type { Snapshot } from "@/lib/types";
 
 export function AssetChart({ snapshots }: { snapshots: Snapshot[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartData = useMemo(
+    () => snapshots.flatMap((snapshot) => {
+      const nav = Number(snapshot.net_asset_value);
+      if (snapshot.quality_status !== "valid" || snapshot.net_asset_value === null || !Number.isFinite(nav) || nav <= 0) {
+        return [];
+      }
+      return [{ time: Math.floor(new Date(snapshot.event_at).getTime() / 1000) as UTCTimestamp, value: nav }];
+    }),
+    [snapshots]
+  );
 
   useEffect(() => {
-    if (!containerRef.current || snapshots.length === 0) {
+    if (!containerRef.current || chartData.length === 0) {
       return;
     }
     const chart = createChart(containerRef.current, {
@@ -20,16 +30,11 @@ export function AssetChart({ snapshots }: { snapshots: Snapshot[] }) {
       timeScale: { borderColor: "#ccd4c6" }
     });
     const series = chart.addSeries(LineSeries, { color: "#1d4ed8", lineWidth: 2 });
-    series.setData(
-      snapshots.map((snapshot) => ({
-        time: snapshot.trade_date,
-        value: Number(snapshot.net_asset_value ?? snapshot.total_assets)
-      }))
-    );
+    series.setData(chartData);
     return () => chart.remove();
-  }, [snapshots]);
+  }, [chartData]);
 
-  if (snapshots.length === 0) {
+  if (chartData.length === 0) {
     return <EmptyState title="No snapshots yet" description="Run matching to generate account valuation snapshots." />;
   }
 
