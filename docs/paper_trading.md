@@ -697,7 +697,8 @@ migration command for that explicit schema change. Startup may create the
 snapshot series enum types and add nullable series columns on an existing
 `paper_account_snapshots` table so it can backfill `event_at`, mark legacy
 rows as `trading`, derive quality from stored NAV, drop the old account/date
-unique constraint, and insert at most one `initial` NAV=1 point for each
+unique constraint or standalone unique index, and insert at most one `initial`
+NAV=1 point for each
 account whose legacy `initial_cash` is positive. It does not convert other
 governed enum columns or rewrite financial snapshot fields.
 

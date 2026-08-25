@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import os
+import threading
 import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import OperationalError
 
-from storage.storage_db import StorageDb
+from storage.storage_db import _PAPER_SNAPSHOT_SERIES_LOCK_KEY, StorageDb
 
 _FINANCIAL_COLUMNS = (
     "cash_available",
@@ -37,23 +39,25 @@ def _engine() -> Engine:
     return create_engine(url)
 
 
+def _schema_engine(url, schema: str, *, lock_timeout: str | None = None) -> Engine:
+    options = f"-csearch_path={schema}"
+    if lock_timeout is not None:
+        options = f"{options} -clock_timeout={lock_timeout}"
+    return create_engine(url, connect_args={"options": options})
+
+
 @pytest.fixture()
 def postgres_legacy_db():
     engine = _engine()
     schema = f"nav_series_{uuid.uuid4().hex}"
     with engine.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-    bound = create_engine(engine.url)
-    event.listen(
-        bound,
-        "connect",
-        lambda dbapi_connection, _: dbapi_connection.cursor().execute(f'SET search_path TO "{schema}"'),
-    )
+    bound = _schema_engine(engine.url, schema)
     with bound.begin() as connection:
         _create_legacy_schema(connection)
         _seed_legacy_rows(connection)
     try:
-        yield bound
+        yield bound, schema
     finally:
         with engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
@@ -61,7 +65,12 @@ def postgres_legacy_db():
         engine.dispose()
 
 
-def _create_legacy_schema(connection: Connection) -> None:
+def _create_legacy_schema(
+    connection: Connection,
+    *,
+    unique: str = "constraint",
+    nav_type: str = "NUMERIC(20, 6)",
+) -> None:
     connection.execute(
         text(
             """
@@ -92,7 +101,7 @@ def _create_legacy_schema(connection: Connection) -> None:
     )
     connection.execute(
         text(
-            """
+            f"""
             CREATE TABLE paper_account_snapshots (
                 id integer PRIMARY KEY,
                 account_id integer NOT NULL REFERENCES paper_accounts (id),
@@ -106,18 +115,34 @@ def _create_legacy_schema(connection: Connection) -> None:
                 position_count integer NOT NULL,
                 order_count integer NOT NULL,
                 trade_count integer NOT NULL,
-                net_asset_value numeric(20, 6),
+                net_asset_value {nav_type},
                 share_count numeric(20, 6),
                 cumulative_deposit numeric(20, 4),
                 cumulative_withdrawal numeric(20, 4),
                 net_cash_flow numeric(20, 4),
                 pending_settlement numeric(20, 4) NOT NULL DEFAULT 0,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                CONSTRAINT uq_paper_account_snapshots_account_date UNIQUE (account_id, trade_date)
+                created_at timestamptz NOT NULL DEFAULT now()
             )
             """
         )
     )
+    if unique == "constraint":
+        connection.execute(
+            text(
+                "ALTER TABLE paper_account_snapshots "
+                "ADD CONSTRAINT uq_paper_account_snapshots_account_date UNIQUE (account_id, trade_date)"
+            )
+        )
+    elif unique == "index":
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX uq_paper_account_snapshots_account_date "
+                "ON paper_account_snapshots (account_id, trade_date)"
+            )
+        )
+        connection.execute(
+            text("CREATE INDEX ix_paper_account_snapshots_trade_date ON paper_account_snapshots (trade_date)")
+        )
 
 
 def _seed_legacy_rows(connection: Connection) -> None:
@@ -238,12 +263,11 @@ def _index_exists(engine: Engine, index_name: str) -> bool:
 
 
 def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(postgres_legacy_db):
-    original = {
-        snapshot_id: _financials(_snapshot_by_id(postgres_legacy_db, snapshot_id)) for snapshot_id in range(1, 8)
-    }
+    engine, _schema = postgres_legacy_db
+    original = {snapshot_id: _financials(_snapshot_by_id(engine, snapshot_id)) for snapshot_id in range(1, 8)}
 
-    ensure_paper_trading_schema(postgres_legacy_db)
-    rows = fetch_snapshots(postgres_legacy_db, account_id=1)
+    ensure_paper_trading_schema(engine)
+    rows = fetch_snapshots(engine, account_id=1)
 
     assert rows[0]["point_type"] == "initial"
     assert Decimal(str(rows[0]["net_asset_value"])) == Decimal("1.000000")
@@ -264,10 +288,10 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
     assert [row["event_at"] for row in rows[1:]] == [row["created_at"] for row in rows[1:]]
 
     for snapshot_id, financials in original.items():
-        assert _financials(_snapshot_by_id(postgres_legacy_db, snapshot_id)) == financials
+        assert _financials(_snapshot_by_id(engine, snapshot_id)) == financials
 
-    zero_rows = fetch_snapshots(postgres_legacy_db, account_id=2)
-    negative_rows = fetch_snapshots(postgres_legacy_db, account_id=3)
+    zero_rows = fetch_snapshots(engine, account_id=2)
+    negative_rows = fetch_snapshots(engine, account_id=3)
     assert [row["id"] for row in zero_rows] == [6]
     assert [row["id"] for row in negative_rows] == [7]
     assert zero_rows[0]["point_type"] == "trading"
@@ -284,11 +308,11 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
     assert Decimal(str(initial["net_cash_flow"])) == Decimal("10000.0000")
     assert initial["quality_status"] == "valid"
 
-    assert not _constraint_exists(postgres_legacy_db, "uq_paper_account_snapshots_account_date")
-    assert _index_exists(postgres_legacy_db, "ix_paper_account_snapshots_account_event")
-    assert _index_exists(postgres_legacy_db, "uq_paper_account_snapshots_account_initial")
+    assert not _constraint_exists(engine, "uq_paper_account_snapshots_account_date")
+    assert _index_exists(engine, "ix_paper_account_snapshots_account_event")
+    assert _index_exists(engine, "uq_paper_account_snapshots_account_initial")
 
-    with postgres_legacy_db.begin() as connection:
+    with engine.begin() as connection:
         connection.execute(
             text(
                 """
@@ -304,11 +328,178 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
             )
         )
 
-    ensure_paper_trading_schema(postgres_legacy_db)
-    rerun_rows = fetch_snapshots(postgres_legacy_db, account_id=1)
+    ensure_paper_trading_schema(engine)
+    rerun_rows = fetch_snapshots(engine, account_id=1)
     assert [row["point_type"] for row in rerun_rows if row["point_type"] == "initial"] == ["initial"]
-    assert [row["id"] for row in fetch_snapshots(postgres_legacy_db, account_id=2)] == [6]
-    assert [row["id"] for row in fetch_snapshots(postgres_legacy_db, account_id=3)] == [7]
-    inspector = inspect(postgres_legacy_db)
+    assert [row["id"] for row in fetch_snapshots(engine, account_id=2)] == [6]
+    assert [row["id"] for row in fetch_snapshots(engine, account_id=3)] == [7]
+    inspector = inspect(engine)
     snapshot_columns = {column["name"] for column in inspector.get_columns("paper_account_snapshots")}
     assert {"point_type", "event_at", "quality_status", "invalid_reason"} <= snapshot_columns
+
+
+def test_nav_series_migration_marks_infinity_and_nan_nav_invalid():
+    engine = _engine()
+    schema = f"nav_series_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    bound = _schema_engine(engine.url, schema)
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection, nav_type="NUMERIC")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+                    VALUES (1, 'positive', 10000.0000, 10000.000000, '2026-01-01 08:00:00+00')
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_account_snapshots (
+                        id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                        total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                        trade_count, net_asset_value, created_at
+                    ) VALUES
+                        (1, 1, '2026-01-01', 1, 0, 0, 1, 0, 0, 0, 0, 0, 'NaN'::numeric,
+                         '2026-01-01 16:00:00+00'),
+                        (2, 1, '2026-01-02', 1, 0, 0, 1, 0, 0, 0, 0, 0, 'Infinity'::numeric,
+                         '2026-01-02 16:00:00+00'),
+                        (3, 1, '2026-01-03', 1, 0, 0, 1, 0, 0, 0, 0, 0, '-Infinity'::numeric,
+                         '2026-01-03 16:00:00+00')
+                    """
+                )
+            )
+        original = {snapshot_id: _financials(_snapshot_by_id(bound, snapshot_id)) for snapshot_id in (1, 2, 3)}
+
+        ensure_paper_trading_schema(bound)
+        rows = fetch_snapshots(bound, account_id=1)
+
+        trading = [row for row in rows if row["point_type"] == "trading"]
+        assert [row["id"] for row in trading] == [1, 2, 3]
+        assert [row["quality_status"] for row in trading] == ["invalid", "invalid", "invalid"]
+        assert [row["invalid_reason"] for row in trading] == [
+            "non_finite_nav",
+            "non_finite_nav",
+            "non_finite_nav",
+        ]
+        for snapshot_id, financials in original.items():
+            assert _financials(_snapshot_by_id(bound, snapshot_id)) == financials
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        bound.dispose()
+        engine.dispose()
+
+
+def test_nav_series_migration_drops_standalone_account_date_unique_index():
+    engine = _engine()
+    schema = f"nav_series_{uuid.uuid4().hex}"
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    bound = _schema_engine(engine.url, schema)
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection, unique="index")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+                    VALUES (1, 'positive', 10000.0000, 10000.000000, '2026-01-01 08:00:00+00')
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_account_snapshots (
+                        id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                        total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                        trade_count, net_asset_value, created_at
+                    ) VALUES (1, 1, '2026-01-01', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                              '2026-01-01 16:00:00+00')
+                    """
+                )
+            )
+
+        ensure_paper_trading_schema(bound)
+
+        assert not _constraint_exists(bound, "uq_paper_account_snapshots_account_date")
+        assert not _index_exists(bound, "uq_paper_account_snapshots_account_date")
+        assert _index_exists(bound, "ix_paper_account_snapshots_trade_date")
+        assert _index_exists(bound, "ix_paper_account_snapshots_account_event")
+        assert _index_exists(bound, "uq_paper_account_snapshots_account_initial")
+
+        with bound.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_account_snapshots (
+                        id, account_id, trade_date, point_type, event_at, quality_status,
+                        cash_available, cash_frozen, market_value, total_assets, realized_pnl,
+                        unrealized_pnl, position_count, order_count, trade_count, net_asset_value
+                    ) VALUES (
+                        100, 1, '2026-01-01', 'trading', '2026-01-01 18:00:00+00', 'valid',
+                        9000.0000, 0, 0, 9000.0000, 0, 0, 0, 0, 0, 1.100000
+                    )
+                    """
+                )
+            )
+        rows = fetch_snapshots(bound, account_id=1)
+        assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == ["initial"]
+        assert [row["id"] for row in rows if row["point_type"] == "trading"] == [1, 100]
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        bound.dispose()
+        engine.dispose()
+
+
+def test_nav_series_migration_waits_on_transaction_advisory_lock(postgres_legacy_db):
+    engine, schema = postgres_legacy_db
+    with engine.connect() as holder:
+        trans = holder.begin()
+        holder.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:lock_key AS text), 0))"),
+            {"lock_key": _PAPER_SNAPSHOT_SERIES_LOCK_KEY},
+        )
+        waiter = _schema_engine(engine.url, schema, lock_timeout="200ms")
+        try:
+            with pytest.raises(OperationalError, match="lock timeout"):
+                ensure_paper_trading_schema(waiter)
+        finally:
+            waiter.dispose()
+            trans.rollback()
+
+    ensure_paper_trading_schema(engine)
+    rows = fetch_snapshots(engine, account_id=1)
+    assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == ["initial"]
+
+
+def test_nav_series_migration_serializes_concurrent_startup(postgres_legacy_db):
+    engine, schema = postgres_legacy_db
+    errors: list[BaseException] = []
+    workers_engines = [_schema_engine(engine.url, schema) for _ in range(2)]
+
+    def _run(worker_engine: Engine) -> None:
+        try:
+            db = _storage(worker_engine)
+            with worker_engine.begin() as connection:
+                db._ensure_paper_account_snapshot_series(connection)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    workers = [threading.Thread(target=_run, args=(worker_engine,)) for worker_engine in workers_engines]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    for worker_engine in workers_engines:
+        worker_engine.dispose()
+
+    assert errors == []
+    rows = fetch_snapshots(engine, account_id=1)
+    assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == ["initial"]
+    assert len({row["id"] for row in rows}) == len(rows)

@@ -388,6 +388,7 @@ _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
     tb_name_paper_account_snapshots,
     tb_name_paper_valuation_gaps,
 }
+_PAPER_SNAPSHOT_SERIES_LOCK_KEY = "paper_account_snapshots.nav_series"
 
 
 def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
@@ -3870,8 +3871,9 @@ class StorageDb:
         - Adds ``comment`` column to ``paper_orders`` and ``paper_trades``
           for the optional order/trade comment feature.
         - Adds snapshot series metadata, backfills legacy rows, drops the
-          old account/date unique constraint, and inserts at most one
-          initial NAV=1 point for each eligible positive-cash account.
+          old account/date unique constraint or unique index, and inserts
+          at most one initial NAV=1 point for each eligible positive-cash
+          account.
 
         Safe to call even when the ``paper_orders`` table does not exist yet
         (e.g. on a fresh install where ``Base.metadata.create_all`` will
@@ -4057,26 +4059,27 @@ class StorageDb:
                         conn.execute(text(f"ALTER TABLE {tb_name_paper_cash_ledger} ADD COLUMN {column_name} {ddl}"))
 
         if inspect(self.engine).has_table(tb_name_paper_account_snapshots):
-            snapshot_columns = {
-                column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_account_snapshots)
-            }
-            snapshot_nav_columns = {
-                "net_asset_value": "NUMERIC(20, 6)",
-                "share_count": "NUMERIC(20, 6)",
-                "cumulative_deposit": "NUMERIC(20, 4)",
-                "cumulative_withdrawal": "NUMERIC(20, 4)",
-                "net_cash_flow": "NUMERIC(20, 4)",
-                "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
-            }
-            for column_name, ddl in snapshot_nav_columns.items():
-                if column_name not in snapshot_columns:
-                    with self.engine.begin() as conn:
-                        conn.execute(
-                            text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}")
-                        )
             if self.engine.dialect.name == "postgresql":
                 with self.engine.begin() as conn:
                     self._ensure_paper_account_snapshot_series(conn)
+            else:
+                snapshot_columns = {
+                    column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_account_snapshots)
+                }
+                snapshot_nav_columns = {
+                    "net_asset_value": "NUMERIC(20, 6)",
+                    "share_count": "NUMERIC(20, 6)",
+                    "cumulative_deposit": "NUMERIC(20, 4)",
+                    "cumulative_withdrawal": "NUMERIC(20, 4)",
+                    "net_cash_flow": "NUMERIC(20, 4)",
+                    "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
+                }
+                for column_name, ddl in snapshot_nav_columns.items():
+                    if column_name not in snapshot_columns:
+                        with self.engine.begin() as conn:
+                            conn.execute(
+                                text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}")
+                            )
 
         if inspect(self.engine).has_table(tb_name_paper_ledger_rebuilds):
             rebuild_columns = {
@@ -4129,7 +4132,25 @@ class StorageDb:
     def _ensure_paper_account_snapshot_series(self, conn) -> None:
         from paper_trading.storage.enum_migration import ensure_snapshot_series_enum_types
 
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:lock_key AS text), 0))"),
+            {"lock_key": _PAPER_SNAPSHOT_SERIES_LOCK_KEY},
+        )
+        if not inspect(conn).has_table(tb_name_paper_account_snapshots):
+            return
         ensure_snapshot_series_enum_types(conn)
+        snapshot_nav_columns = {
+            "net_asset_value": "NUMERIC(20, 6)",
+            "share_count": "NUMERIC(20, 6)",
+            "cumulative_deposit": "NUMERIC(20, 4)",
+            "cumulative_withdrawal": "NUMERIC(20, 4)",
+            "net_cash_flow": "NUMERIC(20, 4)",
+            "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
+        }
+        snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
+        for column_name, ddl in snapshot_nav_columns.items():
+            if column_name not in snapshot_columns:
+                conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))
         snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
         series_columns = {
             "point_type": "paper_snapshot_point_type",
@@ -4150,14 +4171,14 @@ class StorageDb:
                     quality_status = CASE
                         WHEN event_at IS NOT NULL AND quality_status IS NOT NULL THEN quality_status
                         WHEN net_asset_value IS NULL THEN 'invalid'
-                        WHEN net_asset_value = 'NaN'::numeric THEN 'invalid'
+                        WHEN net_asset_value::text IN ('NaN', 'Infinity', '-Infinity') THEN 'invalid'
                         WHEN net_asset_value <= 0 THEN 'invalid'
                         ELSE 'valid'
                     END,
                     invalid_reason = CASE
                         WHEN event_at IS NOT NULL AND quality_status IS NOT NULL THEN invalid_reason
                         WHEN net_asset_value IS NULL THEN 'missing_nav'
-                        WHEN net_asset_value = 'NaN'::numeric THEN 'non_finite_nav'
+                        WHEN net_asset_value::text IN ('NaN', 'Infinity', '-Infinity') THEN 'non_finite_nav'
                         WHEN net_asset_value <= 0 THEN 'non_positive_nav'
                         ELSE NULL
                     END,
@@ -4178,24 +4199,7 @@ class StorageDb:
         conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN point_type SET NOT NULL"))
         conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN event_at SET NOT NULL"))
         conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN quality_status SET NOT NULL"))
-
-        legacy_constraint = conn.execute(
-            text(
-                """
-                SELECT con.conname
-                FROM pg_constraint con
-                JOIN pg_class rel ON rel.oid = con.conrelid
-                JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
-                WHERE nsp.nspname = current_schema()
-                  AND rel.relname = :table_name
-                  AND con.contype = 'u'
-                  AND pg_get_constraintdef(con.oid) LIKE '%UNIQUE (account_id, trade_date)%'
-                """
-            ),
-            {"table_name": tb_name_paper_account_snapshots},
-        ).scalar_one_or_none()
-        if legacy_constraint:
-            conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} DROP CONSTRAINT {legacy_constraint}"))
+        self._drop_legacy_snapshot_account_date_uniqueness(conn)
 
         conn.execute(
             text(
@@ -4265,6 +4269,50 @@ class StorageDb:
                 """
             )
         )
+
+    def _drop_legacy_snapshot_account_date_uniqueness(self, conn) -> None:
+        for constraint_name in conn.execute(
+            text(
+                """
+                SELECT con.conname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+                WHERE nsp.nspname = current_schema()
+                  AND rel.relname = :table_name
+                  AND con.contype = 'u'
+                  AND pg_get_constraintdef(con.oid) LIKE '%UNIQUE (account_id, trade_date)%'
+                """
+            ),
+            {"table_name": tb_name_paper_account_snapshots},
+        ).scalars():
+            conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} DROP CONSTRAINT {constraint_name}"))
+        for index_name in conn.execute(
+            text(
+                """
+                SELECT ic.relname
+                FROM pg_index i
+                JOIN pg_class ic ON ic.oid = i.indexrelid
+                JOIN pg_class tc ON tc.oid = i.indrelid
+                JOIN pg_namespace nsp ON nsp.oid = tc.relnamespace
+                WHERE nsp.nspname = current_schema()
+                  AND tc.relname = :table_name
+                  AND i.indisunique
+                  AND NOT i.indisprimary
+                  AND i.indpred IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM pg_constraint con WHERE con.conindid = i.indexrelid
+                  )
+                  AND (
+                      SELECT array_agg(a.attname ORDER BY key.ordinality)
+                      FROM unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality)
+                      JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = key.attnum
+                  ) = ARRAY['account_id', 'trade_date']::name[]
+                """
+            ),
+            {"table_name": tb_name_paper_account_snapshots},
+        ).scalars():
+            conn.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
 
 
 def get_storage(config: Optional[StorageConfig] = None) -> StorageDb:
