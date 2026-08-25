@@ -969,6 +969,10 @@ class TestEnsurePaperTradingSchema:
             "cumulative_deposit",
             "cumulative_withdrawal",
             "net_cash_flow",
+            "point_type",
+            "event_at",
+            "quality_status",
+            "invalid_reason",
         }.issubset(snapshot_columns)
 
         with engine.connect() as conn:

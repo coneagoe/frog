@@ -706,7 +706,10 @@ rows as `trading`, derive quality from stored NAV, drop the old account/date
 unique constraint or standalone unique index, and insert at most one `initial`
 NAV=1 point for each
 account whose legacy `initial_cash` is positive. It does not convert other
-governed enum columns or rewrite financial snapshot fields.
+governed enum columns or rewrite financial snapshot fields. On an existing
+non-PostgreSQL `paper_account_snapshots` table, startup adds the same series
+columns with SQLite-compatible DDL, backfills `event_at` from `created_at`,
+and marks legacy rows as `trading` so ORM listing by `event_at` works.
 
 Selected-table clean export is unsupported. Selected-table clean import refuses
 to run when an unselected table has a foreign key referencing the selected

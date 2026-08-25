@@ -87,6 +87,7 @@ def test_account_creation_rolls_back_when_snapshot_insert_fails(tmp_path, monkey
 
     assert session.query(PaperAccount).count() == 0
     assert session.query(PaperCashLedger).count() == 0
+    assert session.query(PaperAccountSnapshot).count() == 0
     engine.dispose()
 
 

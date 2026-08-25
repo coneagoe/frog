@@ -9,7 +9,9 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
+from paper_trading.storage.repository import PaperTradingRepository
 from storage.storage_db import _PAPER_SNAPSHOT_SERIES_LOCK_KEY, StorageDb
 
 _FINANCIAL_COLUMNS = (
@@ -469,6 +471,8 @@ def test_nav_series_migration_waits_on_transaction_advisory_lock(postgres_legacy
         try:
             with pytest.raises(OperationalError, match="lock timeout"):
                 ensure_paper_trading_schema(waiter)
+            with engine.connect() as connection:
+                assert connection.execute(text("SELECT COUNT(*) FROM paper_account_snapshots")).scalar_one() == 7
         finally:
             waiter.dispose()
             trans.rollback()
@@ -503,3 +507,77 @@ def test_nav_series_migration_serializes_concurrent_startup(postgres_legacy_db):
     rows = fetch_snapshots(engine, account_id=1)
     assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == ["initial"]
     assert len({row["id"] for row in rows}) == len(rows)
+
+
+def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy_snapshots.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE paper_orders (
+                    id INTEGER PRIMARY KEY,
+                    account_id INTEGER NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE paper_account_snapshots (
+                    id INTEGER PRIMARY KEY,
+                    account_id INTEGER NOT NULL,
+                    trade_date DATE NOT NULL,
+                    cash_available NUMERIC(20, 4) NOT NULL,
+                    cash_frozen NUMERIC(20, 4) NOT NULL,
+                    market_value NUMERIC(20, 4) NOT NULL,
+                    total_assets NUMERIC(20, 4) NOT NULL,
+                    realized_pnl NUMERIC(20, 4) NOT NULL,
+                    unrealized_pnl NUMERIC(20, 4) NOT NULL,
+                    position_count INTEGER NOT NULL,
+                    order_count INTEGER NOT NULL,
+                    trade_count INTEGER NOT NULL,
+                    net_asset_value NUMERIC(20, 6),
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_account_snapshots (
+                    id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                    total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                    trade_count, net_asset_value, created_at
+                ) VALUES
+                    (1, 1, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                     '2026-01-02 16:00:00'),
+                    (2, 1, '2026-01-01', 8000, 0, 0, 8000, 0, 0, 0, 0, 0, NULL,
+                     '2026-01-01 16:00:00'),
+                    (3, 1, '2026-01-03', 7000, 0, 0, 7000, 0, 0, 0, 0, 0, 0,
+                     '2026-01-03 16:00:00')
+                """
+            )
+        )
+
+    ensure_paper_trading_schema(engine)
+    inspector = inspect(engine)
+    snapshot_columns = {column["name"] for column in inspector.get_columns("paper_account_snapshots")}
+    assert {"point_type", "event_at", "quality_status", "invalid_reason"} <= snapshot_columns
+
+    with Session(engine) as session:
+        rows = PaperTradingRepository(session).list_snapshots(1)
+
+    assert [row.id for row in rows] == [2, 1, 3]
+    assert all(row.event_at is not None for row in rows)
+    assert all(row.point_type == "trading" for row in rows)
+    assert [row.quality_status for row in rows] == ["invalid", "valid", "invalid"]
+    assert [row.invalid_reason for row in rows] == ["missing_nav", None, "non_positive_nav"]
+
+    ensure_paper_trading_schema(engine)
+    with Session(engine) as session:
+        rerun_rows = PaperTradingRepository(session).list_snapshots(1)
+    assert [row.id for row in rerun_rows] == [2, 1, 3]
+    engine.dispose()

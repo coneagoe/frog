@@ -397,6 +397,12 @@ _PAPER_SNAPSHOT_NAV_COLUMNS = {
     "net_cash_flow": "NUMERIC(20, 4)",
     "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
 }
+_SQLITE_PAPER_SNAPSHOT_SERIES_COLUMNS = {
+    "point_type": "VARCHAR(20) NOT NULL DEFAULT 'trading'",
+    "event_at": "DATETIME",
+    "quality_status": "VARCHAR(20) NOT NULL DEFAULT 'valid'",
+    "invalid_reason": "TEXT",
+}
 
 
 def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
@@ -4071,15 +4077,7 @@ class StorageDb:
                 with self.engine.begin() as conn:
                     self._ensure_paper_account_snapshot_series(conn)
             else:
-                snapshot_columns = {
-                    column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_account_snapshots)
-                }
-                for column_name, ddl in _PAPER_SNAPSHOT_NAV_COLUMNS.items():
-                    if column_name not in snapshot_columns:
-                        with self.engine.begin() as conn:
-                            conn.execute(
-                                text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}")
-                            )
+                self._ensure_sqlite_paper_account_snapshot_series()
 
         if inspect(self.engine).has_table(tb_name_paper_ledger_rebuilds):
             rebuild_columns = {
@@ -4128,6 +4126,62 @@ class StorageDb:
                 if "market" not in market_columns:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name} ADD COLUMN market {market_ddl}"))
+
+    def _ensure_sqlite_paper_account_snapshot_series(self) -> None:
+        snapshot_columns = {
+            column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_account_snapshots)
+        }
+        for column_name, ddl in _PAPER_SNAPSHOT_NAV_COLUMNS.items():
+            if column_name not in snapshot_columns:
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))
+        snapshot_columns = {
+            column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_account_snapshots)
+        }
+        missing_series = {
+            column_name: ddl
+            for column_name, ddl in _SQLITE_PAPER_SNAPSHOT_SERIES_COLUMNS.items()
+            if column_name not in snapshot_columns
+        }
+        for column_name, ddl in missing_series.items():
+            with self.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))
+        if missing_series:
+            assignments: list[str] = []
+            if "event_at" in missing_series:
+                assignments.append("event_at = COALESCE(created_at, event_at)")
+            if "quality_status" in missing_series:
+                assignments.append(
+                    "quality_status = CASE "
+                    "WHEN net_asset_value IS NULL THEN 'invalid' "
+                    "WHEN CAST(net_asset_value AS TEXT) IN ('NaN', 'Infinity', '-Infinity') THEN 'invalid' "
+                    "WHEN CAST(net_asset_value AS REAL) <= 0 THEN 'invalid' "
+                    "ELSE 'valid' END"
+                )
+            if "invalid_reason" in missing_series:
+                assignments.append(
+                    "invalid_reason = CASE "
+                    "WHEN net_asset_value IS NULL THEN 'missing_nav' "
+                    "WHEN CAST(net_asset_value AS TEXT) IN ('NaN', 'Infinity', '-Infinity') THEN 'non_finite_nav' "
+                    "WHEN CAST(net_asset_value AS REAL) <= 0 THEN 'non_positive_nav' "
+                    "ELSE NULL END"
+                )
+            if assignments:
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"UPDATE {tb_name_paper_account_snapshots} SET {', '.join(assignments)}"))
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_paper_account_snapshots_account_event "
+                    f"ON {tb_name_paper_account_snapshots} (account_id, event_at, id)"
+                )
+            )
+            conn.execute(
+                text(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_account_snapshots_account_initial "
+                    f"ON {tb_name_paper_account_snapshots} (account_id) WHERE point_type = 'initial'"
+                )
+            )
 
     def _ensure_paper_account_snapshot_series(self, conn) -> None:
         from paper_trading.storage.enum_migration import ensure_snapshot_series_enum_types

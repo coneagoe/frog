@@ -8,7 +8,7 @@ from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_position_valuation_service, get_security_name_provider, get_session
 from paper_trading.domain.enums import Market
 from paper_trading.services.position_valuation_service import PositionValuation
-from paper_trading.storage.models import PaperCashLedger
+from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import _FakeSecurityNameProvider
@@ -204,6 +204,7 @@ def test_create_account_rolls_back_when_snapshot_insert_fails(monkeypatch, sqlit
 
     assert PaperTradingRepository(session).list_accounts() == []
     assert session.query(PaperCashLedger).count() == 0
+    assert session.query(PaperAccountSnapshot).count() == 0
 
 
 def test_create_account_rejects_negative_fee_config(monkeypatch, sqlite_session):
