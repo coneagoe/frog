@@ -10,10 +10,17 @@ export function AssetChart({ snapshots }: { snapshots: Snapshot[] }) {
   const chartData = useMemo(
     () => snapshots.flatMap((snapshot) => {
       const nav = Number(snapshot.net_asset_value);
-      if (snapshot.quality_status !== "valid" || snapshot.net_asset_value === null || !Number.isFinite(nav) || nav <= 0) {
+      const timestamp = Math.floor(new Date(snapshot.event_at).getTime() / 1000);
+      if (
+        snapshot.quality_status !== "valid"
+        || snapshot.net_asset_value === null
+        || !Number.isFinite(nav)
+        || nav <= 0
+        || !Number.isFinite(timestamp)
+      ) {
         return [];
       }
-      return [{ time: Math.floor(new Date(snapshot.event_at).getTime() / 1000) as UTCTimestamp, value: nav }];
+      return [{ time: timestamp as UTCTimestamp, value: nav }];
     }),
     [snapshots]
   );

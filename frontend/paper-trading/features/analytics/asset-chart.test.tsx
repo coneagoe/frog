@@ -34,6 +34,7 @@ const initialPoint: Snapshot = {
   cumulative_deposit: "100000",
   cumulative_withdrawal: "0",
   net_cash_flow: "100000",
+  pending_settlement: "0",
   position_count: 0,
   order_count: 0,
   trade_count: 0
@@ -67,8 +68,14 @@ describe("AssetChart", () => {
       event_at: "2026-09-10T15:00:00Z",
       net_asset_value: "1.1"
     };
+    const malformedTimestampPoint: Snapshot = {
+      ...initialPoint,
+      id: 4,
+      event_at: "not-a-timestamp",
+      net_asset_value: "1.2"
+    };
 
-    render(<AssetChart snapshots={[initialPoint, invalidPoint, tradingPoint]} />);
+    render(<AssetChart snapshots={[initialPoint, invalidPoint, malformedTimestampPoint, tradingPoint]} />);
 
     expect(setDataMock).toHaveBeenCalledWith([
       { time: toChartTime(initialPoint.event_at), value: 1 },

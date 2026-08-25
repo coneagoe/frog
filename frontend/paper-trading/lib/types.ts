@@ -212,6 +212,7 @@ export type Snapshot = {
   cumulative_deposit: string | null;
   cumulative_withdrawal: string | null;
   net_cash_flow: string | null;
+  pending_settlement: string;
   position_count: number;
   order_count: number;
   trade_count: number;

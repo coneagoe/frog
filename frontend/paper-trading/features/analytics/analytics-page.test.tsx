@@ -124,6 +124,7 @@ describe("AnalyticsPage", () => {
       cumulative_deposit: "100000.0000",
       cumulative_withdrawal: "0.0000",
       net_cash_flow: "100000.0000",
+      pending_settlement: "0.0000",
       position_count: 1,
       order_count: 2,
       trade_count: 2
