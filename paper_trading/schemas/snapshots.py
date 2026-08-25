@@ -1,7 +1,8 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class SnapshotResponse(BaseModel):
@@ -10,6 +11,10 @@ class SnapshotResponse(BaseModel):
     id: int
     account_id: int
     trade_date: date
+    point_type: Literal["initial", "trading"]
+    event_at: datetime
+    quality_status: Literal["valid", "invalid"]
+    invalid_reason: str | None = None
     cash_available: Decimal
     cash_frozen: Decimal
     market_value: Decimal
@@ -25,3 +30,10 @@ class SnapshotResponse(BaseModel):
     cumulative_withdrawal: Decimal | None = None
     net_cash_flow: Decimal | None = None
     pending_settlement: Decimal = Decimal("0.0000")
+
+    @field_validator("event_at", mode="before")
+    @classmethod
+    def _aware_event_at(cls, value: datetime) -> datetime:
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value

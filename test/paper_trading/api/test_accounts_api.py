@@ -174,6 +174,17 @@ def test_create_account_persists_one_initial_nav_snapshot(monkeypatch, sqlite_se
     snapshots = PaperTradingRepository(session).list_snapshots(account_id)
     assert [(row.point_type, row.net_asset_value) for row in snapshots] == [("initial", Decimal("1.000000"))]
 
+    listed = client.get(f"/paper/accounts/{account_id}/snapshots", headers=headers)
+    assert listed.status_code == 200
+    payload = listed.json()
+    assert len(payload) == 1
+    assert payload[0]["id"] == snapshots[0].id
+    assert payload[0]["point_type"] == "initial"
+    assert payload[0]["quality_status"] == "valid"
+    assert payload[0]["invalid_reason"] is None
+    assert payload[0]["net_asset_value"] == "1.000000"
+    assert "event_at" in payload[0]
+
 
 def test_create_account_rolls_back_when_snapshot_insert_fails(monkeypatch, sqlite_session):
     client, headers, session = _client(monkeypatch, sqlite_session)

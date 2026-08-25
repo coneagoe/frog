@@ -471,6 +471,12 @@ curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1
 curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1/cash-ledger
 ```
 
+Snapshot list responses keep repository order (`event_at`, then `id`) and include
+`point_type` (`initial` or `trading`), timezone-aware `event_at`,
+`quality_status` (`valid` or `invalid`), and nullable `invalid_reason`.
+`id` is the stable same-timestamp order key. Invalid points are returned with
+their stored financial fields; `total_assets` is never substituted for NAV.
+
 Trade responses include the `comment` field:
 
 Position, order, and trade list responses also include the nullable `stock_name`
