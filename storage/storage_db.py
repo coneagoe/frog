@@ -4415,6 +4415,8 @@ class StorageDb:
         if table_name == tb_name_paper_matching_runs:
             if "account_id" not in columns:
                 return "TRUE"
+            if "scope_key" in columns:
+                return "(source.account_id = account.id OR (source.account_id IS NULL AND source.scope_key = 'all'))"
             return "(source.account_id = account.id OR source.account_id IS NULL)"
         account_match = "source.account_id = account.id"
         if table_name == tb_name_paper_account_snapshots and "point_type" in columns:

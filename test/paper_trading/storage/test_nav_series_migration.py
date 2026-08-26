@@ -1039,6 +1039,75 @@ def test_nav_series_migration_marks_global_pre_creation_matching_run():
         _drop_isolated_postgres_schema(engine, bound, schema)
 
 
+def _create_matching_runs_with_scope(connection: Connection) -> None:
+    connection.execute(
+        text(
+            """
+            CREATE TABLE paper_matching_runs (
+                id integer PRIMARY KEY,
+                account_id integer,
+                scope_key varchar(40),
+                trade_date date NOT NULL
+            )
+            """
+        )
+    )
+
+
+def test_nav_series_migration_ignores_null_account_non_global_matching_run():
+    engine, bound, schema = _isolated_postgres_schema()
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection)
+            _create_matching_runs_with_scope(connection)
+            _insert_positive_account_and_later_snapshot(connection, account_id=1, name="unrelated", snapshot_id=1)
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_matching_runs (id, account_id, scope_key, trade_date)
+                    VALUES (1, NULL, 'other', '2026-01-01')
+                    """
+                )
+            )
+        original = _financials(_snapshot_by_id(bound, 1))
+
+        db = _storage(bound)
+        with bound.begin() as connection:
+            db._ensure_paper_account_snapshot_series(connection)
+
+        assert _repair_reasons(bound) == {1: None}
+        assert len(_initial_ids(bound, 1)) == 1
+        assert _financials(_snapshot_by_id(bound, 1)) == original
+    finally:
+        _drop_isolated_postgres_schema(engine, bound, schema)
+
+    engine, bound, schema = _isolated_postgres_schema()
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection)
+            _create_matching_runs_with_scope(connection)
+            _insert_positive_account_and_later_snapshot(connection, account_id=1, name="global-run", snapshot_id=1)
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_matching_runs (id, account_id, scope_key, trade_date)
+                    VALUES (1, NULL, 'all', '2026-01-01')
+                    """
+                )
+            )
+        original = _financials(_snapshot_by_id(bound, 1))
+
+        db = _storage(bound)
+        with bound.begin() as connection:
+            db._ensure_paper_account_snapshot_series(connection)
+
+        assert _repair_reasons(bound) == {1: "legacy_ordering_uncertain"}
+        assert _initial_ids(bound, 1) == []
+        assert _financials(_snapshot_by_id(bound, 1)) == original
+    finally:
+        _drop_isolated_postgres_schema(engine, bound, schema)
+
+
 def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy_snapshots.db'}")
     with engine.begin() as connection:
