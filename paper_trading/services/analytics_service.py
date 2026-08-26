@@ -4,7 +4,7 @@ from statistics import mean, stdev
 from typing import Callable, Literal
 from zoneinfo import ZoneInfo
 
-from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import MigrationRepairReason, SnapshotPointType, SnapshotQualityStatus
 from paper_trading.schemas.analytics import (
     ActivityAnalytics,
     ActivitySummary,
@@ -38,7 +38,7 @@ class AnalyticsService:
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
         if account.migration_repair_reason is not None:
-            return AnalyticsUnavailableResponse(reason=account.migration_repair_reason)
+            return AnalyticsUnavailableResponse(reason=MigrationRepairReason(account.migration_repair_reason))
         orders = self.repo.list_orders(account_id)
         snapshots = self.repo.list_snapshots(account_id)
         round_trips = self.repo.list_round_trips(account_id)
