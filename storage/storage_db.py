@@ -411,6 +411,10 @@ _LEGACY_CHRONOLOGY_SOURCES = (
     (tb_name_paper_cash_ledger, ("occurred_at",), ("trade_date",)),
     (tb_name_paper_trades, ("trade_time",), ("trade_date",)),
     (tb_name_paper_orders, ("created_at",), ("trade_date",)),
+    (tb_name_paper_position_lots, (), ("buy_trade_date",)),
+    (tb_name_paper_position_round_trips, (), ("open_trade_date", "close_trade_date")),
+    (tb_name_paper_matching_runs, (), ("trade_date",)),
+    (tb_name_paper_trade_validity_checks, (), ("trade_date",)),
 )
 
 
@@ -4378,23 +4382,32 @@ class StorageDb:
             if not inspect(conn).has_table(table_name):
                 continue
             columns = self._table_column_names(conn, table_name)
-            checks: list[str] = []
-            for column_name in timestamp_columns:
-                if column_name in columns:
-                    checks.append(f"(source.{column_name} IS NOT NULL AND source.{column_name} < account.created_at)")
-            for column_name in date_columns:
-                if column_name in columns:
-                    checks.append(
-                        f"(source.{column_name} IS NOT NULL "
-                        f"AND source.{column_name} < CAST(account.created_at AS date))"
-                    )
-            if not checks:
+            expected_columns = (*timestamp_columns, *date_columns)
+            account_match = "source.account_id = account.id"
+            if table_name == tb_name_paper_account_snapshots and "point_type" in columns:
+                account_match += " AND source.point_type IS DISTINCT FROM 'initial'"
+            if any(column_name not in columns for column_name in expected_columns):
+                predicates.append(
+                    f"""EXISTS (
+                    SELECT 1
+                    FROM {table_name} AS source
+                    WHERE {account_match}
+                )"""
+                )
                 continue
+            checks = [
+                f"(source.{column_name} IS NULL OR source.{column_name} < account.created_at)"
+                for column_name in timestamp_columns
+            ]
+            checks.extend(
+                f"(source.{column_name} IS NULL OR source.{column_name} <= CAST(account.created_at AS date))"
+                for column_name in date_columns
+            )
             predicates.append(
                 f"""EXISTS (
                     SELECT 1
                     FROM {table_name} AS source
-                    WHERE source.account_id = account.id
+                    WHERE {account_match}
                       AND ({" OR ".join(checks)})
                 )"""
             )

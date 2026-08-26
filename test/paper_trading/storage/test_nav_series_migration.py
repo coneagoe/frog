@@ -156,9 +156,9 @@ def _seed_legacy_rows(connection: Connection) -> None:
                 cumulative_deposit, cumulative_withdrawal, realized_pnl, created_at
             ) VALUES
                 (1, 'positive', 10000.0000, 10000.000000, 1.250000, 10000.0000, 0, 0,
-                 '2026-01-01 08:00:00+00'),
-                (2, 'zero', 0.0000, 0, 1.000000, 0, 0, 0, '2026-01-01 08:00:00+00'),
-                (3, 'negative', -100.0000, 0, 1.000000, 0, 0, 0, '2026-01-01 08:00:00+00')
+                 '2025-12-31 08:00:00+00'),
+                (2, 'zero', 0.0000, 0, 1.000000, 0, 0, 0, '2025-12-31 08:00:00+00'),
+                (3, 'negative', -100.0000, 0, 1.000000, 0, 0, 0, '2025-12-31 08:00:00+00')
             """
         )
     )
@@ -308,6 +308,39 @@ def _create_trades_table(connection: Connection) -> None:
     )
 
 
+def _insert_positive_account_and_later_snapshot(
+    connection: Connection,
+    *,
+    account_id: int = 1,
+    name: str = "later",
+    snapshot_id: int = 1,
+) -> None:
+    connection.execute(
+        text(
+            """
+            INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+            VALUES (:account_id, :name, 10000.0000, 10000.000000, '2026-01-01 08:00:00+00')
+            """
+        ),
+        {"account_id": account_id, "name": name},
+    )
+    connection.execute(
+        text(
+            """
+            INSERT INTO paper_account_snapshots (
+                id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                trade_count, net_asset_value, created_at
+            ) VALUES (
+                :snapshot_id, :account_id, '2026-01-03', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                '2026-01-03 16:00:00+00'
+            )
+            """
+        ),
+        {"snapshot_id": snapshot_id, "account_id": account_id},
+    )
+
+
 def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(postgres_legacy_db):
     engine, _schema = postgres_legacy_db
     original = {snapshot_id: _financials(_snapshot_by_id(engine, snapshot_id)) for snapshot_id in range(1, 8)}
@@ -346,7 +379,7 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
     assert _financials(negative_rows[0]) == original[7]
 
     initial = rows[0]
-    assert initial["trade_date"].isoformat() == "2026-01-01"
+    assert initial["trade_date"].isoformat() == "2025-12-31"
     assert Decimal(str(initial["cash_available"])) == Decimal("10000.0000")
     assert Decimal(str(initial["total_assets"])) == Decimal("10000.0000")
     assert Decimal(str(initial["share_count"])) == Decimal("10000.000000")
@@ -399,7 +432,7 @@ def test_nav_series_migration_marks_infinity_and_nan_nav_invalid():
                 text(
                     """
                     INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
-                    VALUES (1, 'positive', 10000.0000, 10000.000000, '2026-01-01 08:00:00+00')
+                    VALUES (1, 'positive', 10000.0000, 10000.000000, '2025-12-31 08:00:00+00')
                     """
                 )
             )
@@ -466,8 +499,8 @@ def test_nav_series_migration_drops_standalone_account_date_unique_index():
                         id, account_id, trade_date, cash_available, cash_frozen, market_value,
                         total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
                         trade_count, net_asset_value, created_at
-                    ) VALUES (1, 1, '2026-01-01', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
-                              '2026-01-01 16:00:00+00')
+                    ) VALUES (1, 1, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                              '2026-01-02 16:00:00+00')
                     """
                 )
             )
@@ -497,7 +530,7 @@ def test_nav_series_migration_drops_standalone_account_date_unique_index():
             )
         rows = fetch_snapshots(bound, account_id=1)
         assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == ["initial"]
-        assert [row["id"] for row in rows if row["point_type"] == "trading"] == [1, 100]
+        assert [row["id"] for row in rows if row["point_type"] == "trading"] == [100, 1]
     finally:
         with engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
@@ -643,8 +676,8 @@ def test_nav_series_migration_marks_pre_creation_snapshot_event_time_and_date():
                          '2026-01-01 16:00:00+00'),
                         (2, 2, '2026-01-01', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
                          '2026-01-02 16:00:00+00'),
-                        (3, 3, '2026-01-01', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
-                         '2026-01-01 16:00:00+00')
+                        (3, 3, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                         '2026-01-02 16:00:00+00')
                     """
                 )
             )
@@ -703,16 +736,16 @@ def test_nav_series_migration_marks_pre_creation_cash_flow_and_trading_times():
                         total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
                         trade_count, net_asset_value, created_at
                     ) VALUES
-                        (1, 1, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
-                         '2026-01-02 16:00:00+00'),
-                        (2, 2, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
-                         '2026-01-02 16:00:00+00'),
-                        (3, 3, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
-                         '2026-01-02 16:00:00+00'),
-                        (4, 4, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
-                         '2026-01-02 16:00:00+00'),
-                        (5, 5, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
-                         '2026-01-02 16:00:00+00')
+                        (1, 1, '2026-01-03', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                         '2026-01-03 16:00:00+00'),
+                        (2, 2, '2026-01-03', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                         '2026-01-03 16:00:00+00'),
+                        (3, 3, '2026-01-03', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                         '2026-01-03 16:00:00+00'),
+                        (4, 4, '2026-01-03', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                         '2026-01-03 16:00:00+00'),
+                        (5, 5, '2026-01-03', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                         '2026-01-03 16:00:00+00')
                     """
                 )
             )
@@ -801,6 +834,174 @@ def test_nav_series_migration_preserves_existing_repair_state_and_skips_baseline
         assert _repair_reasons(bound) == {1: "legacy_ordering_uncertain"}
         assert _initial_ids(bound, 1) == []
         assert _financials(_snapshot_by_id(bound, 1)) == original
+    finally:
+        _drop_isolated_postgres_schema(engine, bound, schema)
+
+
+def test_nav_series_migration_marks_equal_day_date_only_evidence():
+    engine, bound, schema = _isolated_postgres_schema()
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection)
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+                    VALUES (1, 'same-day', 10000.0000, 10000.000000, '2026-01-02 08:00:00+00')
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_account_snapshots (
+                        id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                        total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                        trade_count, net_asset_value, created_at
+                    ) VALUES (1, 1, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                              '2026-01-02 16:00:00+00')
+                    """
+                )
+            )
+        original = _financials(_snapshot_by_id(bound, 1))
+
+        ensure_paper_trading_schema(bound)
+
+        assert _repair_reasons(bound) == {1: "legacy_ordering_uncertain"}
+        assert _initial_ids(bound, 1) == []
+        assert _financials(_snapshot_by_id(bound, 1)) == original
+    finally:
+        _drop_isolated_postgres_schema(engine, bound, schema)
+
+
+def test_nav_series_migration_marks_null_and_missing_source_temporal_evidence():
+    engine, bound, schema = _isolated_postgres_schema()
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection)
+            _create_cash_ledger_table(connection)
+            connection.execute(text("ALTER TABLE paper_cash_ledger ALTER COLUMN occurred_at DROP NOT NULL"))
+            _insert_positive_account_and_later_snapshot(connection, account_id=1, name="null-time", snapshot_id=1)
+            _insert_positive_account_and_later_snapshot(connection, account_id=2, name="null-date", snapshot_id=2)
+            _insert_positive_account_and_later_snapshot(connection, account_id=3, name="missing-columns", snapshot_id=3)
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_cash_ledger (id, account_id, event_type, amount, occurred_at, trade_date)
+                    VALUES
+                        (1, 1, 'deposit', 10000.0000, NULL, '2026-01-03'),
+                        (2, 2, 'deposit', 10000.0000, '2026-01-03 16:00:00+00', NULL)
+                    """
+                )
+            )
+            connection.execute(
+                text("INSERT INTO paper_orders (id, account_id, idempotency_key) VALUES (1, 3, 'legacy')")
+            )
+        original = {snapshot_id: _financials(_snapshot_by_id(bound, snapshot_id)) for snapshot_id in (1, 2, 3)}
+
+        ensure_paper_trading_schema(bound)
+
+        assert _repair_reasons(bound) == {
+            1: "legacy_ordering_uncertain",
+            2: "legacy_ordering_uncertain",
+            3: "legacy_ordering_uncertain",
+        }
+        for account_id in (1, 2, 3):
+            assert _initial_ids(bound, account_id) == []
+        for snapshot_id, financials in original.items():
+            assert _financials(_snapshot_by_id(bound, snapshot_id)) == financials
+    finally:
+        _drop_isolated_postgres_schema(engine, bound, schema)
+
+
+def test_nav_series_migration_marks_omitted_historical_trading_tables():
+    engine, bound, schema = _isolated_postgres_schema()
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection)
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE paper_position_lots (
+                        id integer PRIMARY KEY,
+                        account_id integer NOT NULL,
+                        buy_trade_date date NOT NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE paper_position_round_trips (
+                        id integer PRIMARY KEY,
+                        account_id integer NOT NULL,
+                        open_trade_date date NOT NULL,
+                        close_trade_date date
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE paper_matching_runs (
+                        id integer PRIMARY KEY,
+                        account_id integer,
+                        trade_date date NOT NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE paper_trade_validity_checks (
+                        id integer PRIMARY KEY,
+                        account_id integer NOT NULL,
+                        trade_date date NOT NULL
+                    )
+                    """
+                )
+            )
+            _insert_positive_account_and_later_snapshot(connection, account_id=1, name="lots", snapshot_id=1)
+            _insert_positive_account_and_later_snapshot(connection, account_id=2, name="round-trips", snapshot_id=2)
+            _insert_positive_account_and_later_snapshot(connection, account_id=3, name="matching", snapshot_id=3)
+            _insert_positive_account_and_later_snapshot(connection, account_id=4, name="validity", snapshot_id=4)
+            connection.execute(
+                text("INSERT INTO paper_position_lots (id, account_id, buy_trade_date) VALUES (1, 1, '2026-01-01')")
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_position_round_trips (
+                        id, account_id, open_trade_date, close_trade_date
+                    ) VALUES (1, 2, '2026-01-03', '2026-01-01')
+                    """
+                )
+            )
+            connection.execute(
+                text("INSERT INTO paper_matching_runs (id, account_id, trade_date) VALUES (1, 3, '2026-01-01')")
+            )
+            connection.execute(
+                text("INSERT INTO paper_trade_validity_checks (id, account_id, trade_date) VALUES (1, 4, '2026-01-01')")
+            )
+        original = {snapshot_id: _financials(_snapshot_by_id(bound, snapshot_id)) for snapshot_id in range(1, 5)}
+
+        db = _storage(bound)
+        with bound.begin() as connection:
+            db._ensure_paper_account_snapshot_series(connection)
+
+        assert _repair_reasons(bound) == {
+            1: "legacy_ordering_uncertain",
+            2: "legacy_ordering_uncertain",
+            3: "legacy_ordering_uncertain",
+            4: "legacy_ordering_uncertain",
+        }
+        for account_id in range(1, 5):
+            assert _initial_ids(bound, account_id) == []
+        for snapshot_id, financials in original.items():
+            assert _financials(_snapshot_by_id(bound, snapshot_id)) == financials
     finally:
         _drop_isolated_postgres_schema(engine, bound, schema)
 
