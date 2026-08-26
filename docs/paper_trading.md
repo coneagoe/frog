@@ -573,12 +573,13 @@ warning, not a synthetic snapshot. The closed PostgreSQL enum
 `NULL` for new accounts and for chronology-safe legacy accounts.
 
 PostgreSQL storage startup serializes the snapshot-series upgrade with the
-transaction advisory lock `paper_account_snapshots.nav_series`. Inside that
-lock it upgrades repair metadata, backfills snapshot quality, classifies
-legacy chronology, then inserts at most one initial baseline. Concurrent
-startups wait on the lock. Reruns are idempotent: they do not overwrite a
-stored repair reason, do not rewrite valid snapshot financial fields, and do
-not insert a second `initial` point.
+transaction advisory lock `paper_account_snapshots.nav_series` whenever
+`paper_accounts` or `paper_account_snapshots` exists. Inside that lock it
+upgrades repair metadata even when snapshots are absent. Snapshot DDL,
+quality backfill, chronology classification, and baseline insertion remain
+snapshot-gated. Concurrent startups wait on the lock. Reruns are idempotent:
+they do not overwrite a stored repair reason, do not rewrite valid snapshot
+financial fields, and do not insert a second `initial` point.
 
 Baseline eligibility is proof-based. The migration inserts one `initial`
 NAV=`1.000000` point only when `initial_cash` is positive, `created_at` is
@@ -604,10 +605,12 @@ When chronology cannot be proven, the migration sets
 leaves stored snapshot financial fields unchanged, including invalid NAV
 points. Valid history is never rewritten to invent returns.
 
-SQLite startup adds nullable `VARCHAR(40) migration_repair_reason` when the
-column is missing and upgrades snapshot series metadata, but it never
-classifies chronology and never inserts an initial baseline. Baseline
-insertion is a PostgreSQL production startup behavior.
+SQLite startup adds nullable `VARCHAR(40) migration_repair_reason` whenever
+`paper_accounts` exists and the column is missing, even when snapshots are
+absent. Snapshot series metadata is upgraded only when
+`paper_account_snapshots` exists. SQLite never classifies chronology and never
+inserts an initial baseline. Baseline insertion is a PostgreSQL production
+startup behavior.
 
 ## Closed Position Cleanup
 
@@ -765,20 +768,22 @@ verifying an otherwise complete governed schema. Normal PostgreSQL storage
 startup intentionally does not create or convert those governed tables; use the
 migration command for that explicit schema change. Startup may create the
 snapshot series enum types and the additive
-`paper_account_migration_repair_reason` type, add nullable
-`paper_accounts.migration_repair_reason` and snapshot series columns on
-existing tables, backfill `event_at`, mark legacy rows as `trading`, derive
-quality from stored NAV, drop the old account/date unique constraint or
-standalone unique index, classify unprovable chronology as
-`legacy_ordering_uncertain`, and insert at most one `initial` NAV=1 point for
-each chronology-safe account whose legacy `initial_cash` is positive. It does
-not convert other governed enum columns, overwrite a stored repair reason, or
-rewrite financial snapshot fields. On an existing non-PostgreSQL
-`paper_account_snapshots` table, startup adds nullable
-`VARCHAR(40) migration_repair_reason` and the same series columns with
-SQLite-compatible DDL, backfills `event_at` from `created_at`, and marks
-legacy rows as `trading` so ORM listing by `event_at` works. SQLite does not
-insert an initial baseline.
+`paper_account_migration_repair_reason` type and add nullable
+`paper_accounts.migration_repair_reason` whenever `paper_accounts` exists,
+even when snapshots are absent. When `paper_account_snapshots` exists it also
+adds snapshot series columns on existing tables, backfills `event_at`, marks
+legacy rows as `trading`, derives quality from stored NAV, drops the old
+account/date unique constraint or standalone unique index, classifies
+unprovable chronology as `legacy_ordering_uncertain`, and inserts at most one
+`initial` NAV=1 point for each chronology-safe account whose legacy
+`initial_cash` is positive. It does not convert other governed enum columns,
+overwrite a stored repair reason, or rewrite financial snapshot fields. On
+SQLite, startup adds nullable `VARCHAR(40) migration_repair_reason` whenever
+`paper_accounts` exists, even when snapshots are absent. Snapshot series
+columns use SQLite-compatible DDL only when `paper_account_snapshots` exists:
+startup then backfills `event_at` from `created_at` and marks legacy rows as
+`trading` so ORM listing by `event_at` works. SQLite does not insert an
+initial baseline.
 
 Selected-table clean export is unsupported. Selected-table clean import refuses
 to run when an unselected table has a foreign key referencing the selected
