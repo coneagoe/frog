@@ -43,11 +43,12 @@ class FakeStorageWithEngine:
 
 class _LatestCloseStorage:
     def __init__(self):
-        self.calls = []
+        self.calls: list[tuple[str, object, object, object]] = []
+        self.latest_stock_row: dict[str, object] | None = None
 
     def load_latest_history_data_stock(self, stock_id, adjust, end_date):
         self.calls.append(("a_share", stock_id, adjust, end_date))
-        return {COL_DATE: end_date, COL_CLOSE: 10}
+        return self.latest_stock_row or {COL_DATE: end_date, COL_CLOSE: 10}
 
     def load_latest_history_data_stock_hk_ggt(self, stock_id, adjust, end_date):
         self.calls.append(("hk_connect", stock_id, adjust, end_date))
@@ -332,7 +333,7 @@ def test_provider_reports_explicit_a_share_suspension(monkeypatch):
 
 def test_provider_returns_prior_close_with_its_date():
     storage = _LatestCloseStorage()
-    storage.load_latest_history_data_stock = lambda *_args, **_kwargs: {
+    storage.latest_stock_row = {
         COL_DATE: "2026-08-22",
         COL_CLOSE: "10.25",
     }

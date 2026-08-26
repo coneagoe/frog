@@ -585,12 +585,12 @@ def test_analytics_orders_same_date_gaps_by_persisted_id():
     ]
 
     class Query:
-        order_by_args = ()
+        order_by_args: tuple[object, ...] = ()
 
         def filter(self, *_args):
             return self
 
-        def order_by(self, *args):
+        def order_by(self, *args: object):
             self.order_by_args = args
             return self
 

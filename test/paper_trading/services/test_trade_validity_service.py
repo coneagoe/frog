@@ -33,6 +33,14 @@ class StaticMarketData:
     def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
         return self.bar.close if self.bar is not None else None
 
+    def is_symbol_suspended(self, symbol: str, trade_date: date, market: str | None = None) -> bool:
+        return False
+
+    def get_latest_daily_close_with_date(
+        self, symbol: str, trade_date: date, market: str | None = None
+    ) -> tuple[Decimal, date] | None:
+        return None if self.bar is None else (self.bar.close, self.bar.trade_date)
+
 
 class FailingMarketData:
     """Market data that raises an unexpected (non-market-data) error."""
@@ -47,6 +55,14 @@ class FailingMarketData:
         raise RuntimeError("Unexpected infrastructure failure")
 
     def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+        return None
+
+    def is_symbol_suspended(self, symbol: str, trade_date: date, market: str | None = None) -> bool:
+        return False
+
+    def get_latest_daily_close_with_date(
+        self, symbol: str, trade_date: date, market: str | None = None
+    ) -> tuple[Decimal, date] | None:
         return None
 
 

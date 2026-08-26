@@ -1,6 +1,6 @@
 from datetime import date, timezone
 from decimal import Decimal
-from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService
 from paper_trading.services.snapshot_service import SnapshotOutcome, SnapshotService
+from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.models import PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
-from test.paper_trading.fakes import FakeMarketDataProvider
+from test.paper_trading.fakes import FakeMarketDataProvider, MarketDataProviderCompatibility
 
 
 def _sqlite_factory(tmp_path) -> sessionmaker[Session]:
@@ -130,8 +131,9 @@ def test_historical_recalculation_preserves_live_nav_and_event_order(tmp_path):
     session = factory()
     try:
         repo = PaperTradingRepository(session)
-        account = repo.get_account(account_id)
-        assert account is not None
+        account_optional = repo.get_account(account_id)
+        assert account_optional is not None
+        account = account_optional
         assert account.share_count == Decimal("120000.000000")
         assert account.net_asset_value == Decimal("1.250000")
         trading = [row for row in repo.list_snapshots(account_id) if row.point_type == "trading"]
@@ -149,9 +151,16 @@ def test_invalid_close_creates_deterministic_valuation_gap(sqlite_session, close
     account = repo.create_account("invalid-close", Decimal("100000"))
     repo.upsert_position(account.id, "a_share", "000001", 100, 0, Decimal("900"))
 
-    class InvalidCloseProvider:
-        def get_daily_bar(self, symbol, trade_date, market=None):
-            return SimpleNamespace(close=close)
+    class InvalidCloseProvider(MarketDataProviderCompatibility):
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            return DailyBar(
+                symbol,
+                trade_date,
+                Decimal("10"),
+                Decimal("10"),
+                Decimal("10"),
+                cast(Decimal, close),
+            )
 
     outcome = SnapshotService(repo, InvalidCloseProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 25))
 
@@ -173,8 +182,8 @@ def test_market_data_exception_creates_deterministic_valuation_gap(sqlite_sessio
     account = repo.create_account("provider-error", Decimal("100000"))
     repo.upsert_position(account.id, "a_share", "000001", 100, 0, Decimal("900"))
 
-    class FailingProvider:
-        def get_daily_bar(self, symbol, trade_date, market=None):
+    class FailingProvider(MarketDataProviderCompatibility):
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None):
             raise RuntimeError("provider unavailable")
 
     outcome = SnapshotService(repo, FailingProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 25))

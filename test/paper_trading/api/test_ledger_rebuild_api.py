@@ -12,9 +12,10 @@ from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.models import PaperLedgerRebuild
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from test.paper_trading.fakes import MarketDataProviderCompatibility
 
 
-class _MarketData:
+class _MarketData(MarketDataProviderCompatibility):
     def is_trade_date(self, trade_date: date) -> bool:
         return True
 

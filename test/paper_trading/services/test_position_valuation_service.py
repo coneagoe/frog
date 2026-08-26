@@ -31,6 +31,15 @@ class _FakeMarketData:
         self.calls.append((symbol, trade_date, market))
         return self.closes.get((symbol, market))
 
+    def is_symbol_suspended(self, symbol: str, trade_date: date, market: str | None = None) -> bool:
+        return False
+
+    def get_latest_daily_close_with_date(
+        self, symbol: str, trade_date: date, market: str | None = None
+    ) -> tuple[Decimal, date] | None:
+        close = self.get_latest_daily_close(symbol, trade_date, market)
+        return None if close is None else (close, trade_date)
+
     def is_trade_date(self, trade_date):
         return True
 

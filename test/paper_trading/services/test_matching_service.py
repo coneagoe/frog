@@ -36,7 +36,12 @@ from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvide
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from storage.model.etf_basic import ETFBasic
-from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
+from test.paper_trading.fakes import (
+    FakeHistoryStorage,
+    FakeMarketDataProvider,
+    FakeTradeCalendar,
+    MarketDataProviderCompatibility,
+)
 
 
 class _TestDate(date):
@@ -604,7 +609,7 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
-    class MutableMarketData:
+    class MutableMarketData(MarketDataProviderCompatibility):
         available = False
 
         def is_trade_date(self, trade_date: date) -> bool:
@@ -675,7 +680,7 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
     repo.upsert_position(complete.id, Market.A_SHARE, "000001.SZ", 100, 0, Decimal("900.00"))
     repo.upsert_position(incomplete.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
 
-    class MixedMarketData:
+    class MixedMarketData(MarketDataProviderCompatibility):
         def is_trade_date(self, trade_date: date) -> bool:
             return True
 
@@ -720,23 +725,23 @@ def test_matching_stale_suspended_snapshot_does_not_add_warning(tmp_path):
     repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
 
     class SuspendedMarketData:
-        def is_trade_date(self, current_date: date) -> bool:
+        def is_trade_date(self, trade_date: date) -> bool:
             return True
 
-        def next_trade_date(self, current_date: date) -> date:
-            return current_date
+        def next_trade_date(self, trade_date: date) -> date:
+            return trade_date
 
-        def get_latest_daily_close(self, symbol: str, current_date: date, market: str | None = None) -> Decimal | None:
+        def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
             return Decimal("10.25")
 
-        def get_daily_bar(self, symbol: str, current_date: date, market: str | None = None) -> DailyBar:
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
             raise KeyError("no bar")
 
-        def is_symbol_suspended(self, symbol: str, current_date: date, market: str | None = None) -> bool:
+        def is_symbol_suspended(self, symbol: str, trade_date: date, market: str | None = None) -> bool:
             return True
 
         def get_latest_daily_close_with_date(
-            self, symbol: str, current_date: date, market: str | None = None
+            self, symbol: str, trade_date: date, market: str | None = None
         ) -> tuple[Decimal, date] | None:
             return Decimal("10.25"), date(2026, 6, 13)
 
@@ -994,7 +999,7 @@ def test_snapshot_market_data_failure_marks_run_failed_and_preserves_fill(tmp_pa
             assert snapshot_date == trade_date
             raise snapshot_exception
 
-    matching_service.snapshot_service = FailingSnapshotService()
+    matching_service.snapshot_service = cast(SnapshotService, FailingSnapshotService())
     run = matching_service.run(trade_date, account.id)
     session.commit()
 
@@ -1017,7 +1022,7 @@ def test_snapshot_failure_does_not_attempt_another_market(tmp_path):
         def generate_snapshot_or_gap(self, account_id, snapshot_date):
             raise KeyError("No daily bar for 00700")
 
-    class CapturingMarketData:
+    class CapturingMarketData(MarketDataProviderCompatibility):
         def is_trade_date(self, trade_date: date) -> bool:
             return True
 
@@ -1032,7 +1037,7 @@ def test_snapshot_failure_does_not_attempt_another_market(tmp_path):
             calls.append((symbol, snapshot_date, market))
             return DailyBar(symbol, snapshot_date, Decimal("10"), Decimal("100"), Decimal("1"), Decimal("50"))
 
-    matching_service.snapshot_service = FailingSnapshotService()
+    matching_service.snapshot_service = cast(SnapshotService, FailingSnapshotService())
     matching_service.market_data = CapturingMarketData()
     matching_service.run(trade_date, account.id)
 
@@ -1049,7 +1054,7 @@ def test_non_market_data_snapshot_exception_still_raises(tmp_path):
         def generate_snapshot_or_gap(self, account_id, snapshot_date):
             raise RuntimeError("database failure")
 
-    matching_service.snapshot_service = FailingSnapshotService()
+    matching_service.snapshot_service = cast(SnapshotService, FailingSnapshotService())
     with pytest.raises(RuntimeError, match="database failure"):
         matching_service.run(trade_date, account.id)
     engine.dispose()
@@ -1070,7 +1075,7 @@ def test_matching_mixed_exact_date_data_keeps_missing_order_accepted(tmp_path):
         )
     }
 
-    class MixedMarketData:
+    class MixedMarketData(MarketDataProviderCompatibility):
         def is_trade_date(self, trade_date: date) -> bool:
             return True
 
@@ -1140,9 +1145,9 @@ def test_match_order_missing_exact_date_records_warning_diagnostic(tmp_path):
     account = repo.create_account("missing-bar", Decimal("100000.00"))
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
-    class MissingMarketData:
-        def get_daily_bar(self, symbol, requested_date, market=None):
-            raise KeyError(f"No daily bar for {symbol} on {requested_date}")
+    class MissingMarketData(MarketDataProviderCompatibility):
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            raise KeyError(f"No daily bar for {symbol} on {trade_date}")
 
     matching_service.market_data = MissingMarketData()
 
@@ -1161,7 +1166,7 @@ def test_matching_etf_missing_bar_warns_then_same_date_retry_fills(tmp_path):
         account.id, "510300", OrderSide.BUY, 100, Decimal("3.100"), trade_date, market=Market.ETF
     )
 
-    class RetryETFMarketData:
+    class RetryETFMarketData(MarketDataProviderCompatibility):
         available = False
 
         def is_trade_date(self, trade_date: date) -> bool:
@@ -1242,7 +1247,7 @@ def test_matching_same_date_retry_fills_only_previously_accepted_order(tmp_path)
     missing = order_service.place_order(account.id, "000002.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
     missing_bar: dict[str, object] = {}
 
-    class RetryMarketData:
+    class RetryMarketData(MarketDataProviderCompatibility):
         def is_trade_date(self, trade_date: date) -> bool:
             return True
 
@@ -1285,7 +1290,7 @@ def test_matching_fill_resolves_historical_retry_diagnostic(tmp_path):
     )
     order = order_service.place_order(account.id, "000001.SZ", OrderSide.BUY, 100, Decimal("10.00"), trade_date)
 
-    class ExactDateMarketData:
+    class ExactDateMarketData(MarketDataProviderCompatibility):
         def is_trade_date(self, trade_date: date) -> bool:
             return True
 
@@ -1331,7 +1336,7 @@ def test_matching_hk_fill_does_not_resolve_historical_bfq_diagnostic(tmp_path):
         account.id, "00700", OrderSide.BUY, 100, Decimal("400.00"), trade_date, market=Market.HK_CONNECT
     )
 
-    class ExactDateMarketData:
+    class ExactDateMarketData(MarketDataProviderCompatibility):
         def is_trade_date(self, trade_date: date) -> bool:
             return True
 
