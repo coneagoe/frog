@@ -17,11 +17,13 @@ from paper_trading.schemas.analytics import (
     RiskAnalytics,
     RoundTripResponse,
     TradeQualityAnalytics,
+    ValuationGapResponse,
 )
 from paper_trading.storage.models import (
     PaperAccountSnapshot,
     PaperOrder,
     PaperPositionRoundTrip,
+    PaperValuationGap,
 )
 from paper_trading.storage.repository import PaperTradingRepository
 
@@ -48,7 +50,25 @@ class AnalyticsService:
             execution=self._execution(orders),
             trade_quality=self._trade_quality(round_trips),
             risk=self._risk(snapshots),
+            valuation_gaps=self._valuation_gaps(account_id),
         )
+
+    def _valuation_gaps(self, account_id: int) -> list[ValuationGapResponse]:
+        gaps = (
+            self.repo.session.query(PaperValuationGap)
+            .filter(PaperValuationGap.account_id == account_id)
+            .order_by(PaperValuationGap.trade_date.asc(), PaperValuationGap.id.asc())
+            .all()
+        )
+        return [
+            ValuationGapResponse(
+                trade_date=gap.trade_date,
+                missing_symbols=list(gap.missing_symbols),
+                details=list(gap.details),
+                resolved=gap.resolved,
+            )
+            for gap in gaps
+        ]
 
     # ------------------------------------------------------------------
     # Overview

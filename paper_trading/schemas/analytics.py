@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -89,6 +89,13 @@ class RiskAnalytics(BaseModel):
     calmar: MetricValue
 
 
+class ValuationGapResponse(BaseModel):
+    trade_date: date
+    missing_symbols: list[str]
+    details: list[dict[str, Any]]
+    resolved: bool
+
+
 class AnalyticsResponse(BaseModel):
     available: Literal[True] = True
     overview: OverviewAnalytics
@@ -96,6 +103,7 @@ class AnalyticsResponse(BaseModel):
     execution: ExecutionAnalytics
     trade_quality: TradeQualityAnalytics
     risk: RiskAnalytics
+    valuation_gaps: list[ValuationGapResponse]
 
 
 class AnalyticsUnavailableResponse(BaseModel):

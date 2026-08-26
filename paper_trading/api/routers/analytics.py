@@ -5,7 +5,7 @@ from pydantic import Field
 from sqlalchemy.orm import Session
 
 from paper_trading.api.deps import get_session, require_api_token
-from paper_trading.schemas.analytics import AnalyticsResponse, AnalyticsUnavailableResponse
+from paper_trading.schemas.analytics import AnalyticsResponse, AnalyticsUnavailableResponse, ValuationGapResponse
 from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.storage.repository import PaperTradingRepository
 
@@ -15,6 +15,8 @@ AnalyticsPayload = Annotated[
     AnalyticsResponse | AnalyticsUnavailableResponse,
     Field(discriminator="available"),
 ]
+
+__all__ = ["AnalyticsPayload", "ValuationGapResponse", "get_account_analytics", "router"]
 
 
 @router.get("/{account_id}/analytics", response_model=AnalyticsPayload)

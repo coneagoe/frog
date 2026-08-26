@@ -530,6 +530,38 @@ def test_analytics_insufficient_valid_points_keep_established_metric_reasons(tmp
     engine.dispose()
 
 
+def test_analytics_includes_unresolved_gap_without_assets_as_nav(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("valuation-gap-demo", Decimal("100000.00"))
+    seed_initial_point(repo, account)
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 25), ["000001.SZ"], [{"reason": "no bar"}])
+
+    payload = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert payload.valuation_gaps[0].trade_date == date(2026, 8, 25)
+    assert payload.valuation_gaps[0].resolved is False
+    assert AnalyticsService._nav_series(repo.list_snapshots(account.id)) == [Decimal("1.000000")]
+    engine.dispose()
+
+
+def test_stale_valid_snapshot_remains_in_nav_series(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("stale-snapshot-demo", Decimal("100000.00"))
+    seed_initial_point(repo, account)
+    snapshot = seed_trading_point(repo, account, nav=Decimal("1.100000"))
+    snapshot.valuation_quality = "stale_suspended"
+    session.flush()
+
+    payload = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert payload.available is True
+    assert AnalyticsService._nav_series(repo.list_snapshots(account.id)) == [
+        Decimal("1.000000"),
+        Decimal("1.100000"),
+    ]
+    engine.dispose()
+
+
 def test_analytics_uses_nav_return_not_total_assets_after_deposit(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("nav-return-demo", Decimal("100000.00"))

@@ -453,6 +453,8 @@ Snapshots require a daily bar for every held position. When one is unavailable, 
 
 Trading snapshots persist a UTC `event_at`, `point_type="trading"`, and a quality status. A valid NAV must be a finite, strictly positive Decimal. Missing, non-finite, zero, or negative NAV is stored as `net_asset_value=None` with `quality_status="invalid"` and one of `missing_share_state`, `missing_nav`, `non_finite_nav`, or `non_positive_nav`. Invalid points keep the other financial fields and do not update account NAV state. NAV is never replaced with `total_assets`. Nullable `valuation_quality` (`current` or `stale_suspended`) and JSON `valuation_details` record later stale-price evidence; both stay `null` on `initial` points and on legacy rows until a later valuation writes them.
 
+Analytics reports valuation gaps separately in date order through `valuation_gaps`. Each entry contains the exact `trade_date`, missing symbols, diagnostic details, and whether the gap has been resolved. A valid snapshot with `valuation_quality="stale_suspended"` remains a NAV input; invalid or unavailable valuation points are excluded from NAV calculations and never fall back to `total_assets`. The bounded snapshot recalculation endpoint may be used to retry one account and trading date after market data is available; it preserves baseline, orders, and ledger data while retaining one trading snapshot for that scope.
+
 ### 日期语义
 
 - API/CLI 下单必须显式提供 `trade_date`，不使用默认日期；匹配同样必须显式提供 `trade_date`，并以它进行订单选择、行情柱、成交、结算和快照处理。

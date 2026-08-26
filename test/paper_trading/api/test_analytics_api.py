@@ -133,6 +133,34 @@ def test_get_account_analytics_uses_persisted_nav_not_total_assets(monkeypatch, 
     assert payload["risk"]["max_drawdown"]["value"] == "0.000000"
 
 
+def test_get_account_analytics_returns_date_ordered_valuation_gaps(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-valuation-gaps", Decimal("100000.00"))
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 26), ["000002.SZ"], [{"reason": "later"}])
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 25), ["000001.SZ"], [{"reason": "earlier"}])
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 27), [], [], resolved=True)
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["valuation_gaps"] == [
+        {
+            "trade_date": "2026-08-25",
+            "missing_symbols": ["000001.SZ"],
+            "details": [{"reason": "earlier"}],
+            "resolved": False,
+        },
+        {
+            "trade_date": "2026-08-26",
+            "missing_symbols": ["000002.SZ"],
+            "details": [{"reason": "later"}],
+            "resolved": False,
+        },
+        {"trade_date": "2026-08-27", "missing_symbols": [], "details": [], "resolved": True},
+    ]
+
+
 def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_assets(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
     Base.metadata.create_all(sqlite_session.get_bind())
