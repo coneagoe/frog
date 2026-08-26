@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus, SnapshotValuationQuality
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperAccountSnapshot, PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
@@ -35,12 +35,28 @@ class SnapshotOutcome:
     valuation_gap: PaperValuationGap | None = None
 
 
+@dataclass(frozen=True)
+class PositionValuation:
+    symbol: str
+    market: str | None
+    requested_date: date
+    price: Decimal | None
+    source_date: date | None
+    quality: str | None
+    error: str | None
+
+
 class SnapshotService:
     def __init__(self, repo: PaperTradingRepository, market_data: MarketDataProvider):
         self.repo = repo
         self.market_data = market_data
 
-    def generate_snapshot(self, account_id: int, trade_date: date) -> PaperAccountSnapshot:
+    def generate_snapshot(
+        self,
+        account_id: int,
+        trade_date: date,
+        valuations: list[PositionValuation] | None = None,
+    ) -> PaperAccountSnapshot:
         cash_available = self.repo.get_cash_available(account_id)
         cash_frozen = self.repo.get_cash_frozen(account_id)
         pending_settlement = self.repo.get_pending_settlement_total(account_id)
@@ -48,9 +64,13 @@ class SnapshotService:
         unrealized_pnl = Decimal("0.0000")
         positions = self.repo.get_positions(account_id)
         active_positions = [position for position in positions if int(position.total_quantity or 0) > 0]
+        resolved = valuations if valuations is not None else self._resolve_valuations(active_positions, trade_date)
+        prices = {(item.market, item.symbol): item.price for item in resolved}
         for position in active_positions:
-            position_market = getattr(position, "market", None)
-            close = self.market_data.get_daily_bar(position.symbol, trade_date, market=position_market).close
+            market = self._normalized_market(getattr(position, "market", None))
+            close = prices[(market, position.symbol)]
+            if close is None:
+                raise KeyError(f"No valuation available for {position.symbol} on {trade_date.isoformat()}")
             position_value = (Decimal(position.total_quantity) * close).quantize(_MONEY)
             market_value += position_value
             unrealized_pnl += position_value - Decimal(position.cost_amount or 0)
@@ -76,13 +96,23 @@ class SnapshotService:
         quality_status = (
             SnapshotQualityStatus.VALID.value if invalid_reason is None else SnapshotQualityStatus.INVALID.value
         )
-        return self.repo.save_snapshot(
+        stale_details = sorted(
+            (self._valuation_detail(item) for item in resolved if item.quality == "stale_suspended"),
+            key=self._detail_sort_key,
+        )
+        return self.repo.save_trading_snapshot(
             account_id=account_id,
             trade_date=trade_date,
             event_at=datetime.now(timezone.utc),
             point_type=SnapshotPointType.TRADING.value,
             quality_status=quality_status,
             invalid_reason=invalid_reason,
+            valuation_quality=(
+                SnapshotValuationQuality.STALE_SUSPENDED.value
+                if stale_details
+                else SnapshotValuationQuality.CURRENT.value
+            ),
+            valuation_details=stale_details or None,
             cash_available=cash_available,
             cash_frozen=cash_frozen,
             market_value=market_value.quantize(_MONEY),
@@ -103,30 +133,77 @@ class SnapshotService:
         )
 
     def generate_snapshot_or_gap(self, account_id: int, trade_date: date) -> SnapshotOutcome:
-        missing_symbols: list[str] = []
-        details: list[dict[str, Any]] = []
-        for position in self.repo.get_positions(account_id):
-            if int(position.total_quantity or 0) <= 0:
-                continue
-            position_market = getattr(position, "market", None)
-            market = getattr(position_market, "value", position_market)
-            try:
-                self.market_data.get_daily_bar(position.symbol, trade_date, market=market)
-            except KeyError as exc:
-                missing_symbols.append(position.symbol)
-                details.append({"symbol": position.symbol, "market": market, "error": str(exc)})
-        if missing_symbols:
+        positions = [position for position in self.repo.get_positions(account_id) if int(position.total_quantity or 0) > 0]
+        valuations = self._resolve_valuations(positions, trade_date)
+        unavailable = [item for item in valuations if item.price is None]
+        if unavailable:
+            details = sorted((self._valuation_detail(item) for item in unavailable), key=self._detail_sort_key)
             gap = self.repo.upsert_valuation_gap(
                 account_id,
                 trade_date,
-                sorted(missing_symbols),
-                sorted(details, key=lambda detail: (detail["market"] or "", detail["symbol"])),
+                [detail["symbol"] for detail in details],
+                details,
             )
+            delete_snapshot = getattr(self.repo, "delete_trading_snapshot", None)
+            if delete_snapshot is not None:
+                delete_snapshot(account_id, trade_date)
             return SnapshotOutcome(status="valuation_gap", valuation_gap=gap)
 
-        snapshot = self.generate_snapshot(account_id, trade_date)
+        snapshot = self.generate_snapshot(account_id, trade_date, valuations)
         existing_gap = self.repo.get_valuation_gap(account_id, trade_date)
         resolved_gap = existing_gap
         if existing_gap is not None and not existing_gap.resolved:
             resolved_gap = self.repo.upsert_valuation_gap(account_id, trade_date, [], [], resolved=True)
         return SnapshotOutcome(status="complete", snapshot=snapshot, valuation_gap=resolved_gap)
+
+    def _resolve_valuations(self, positions: list[Any], trade_date: date) -> list[PositionValuation]:
+        valuations: list[PositionValuation] = []
+        for position in positions:
+            market = self._normalized_market(getattr(position, "market", None))
+            try:
+                bar = self.market_data.get_daily_bar(position.symbol, trade_date, market=market)
+            except KeyError:
+                if getattr(self.market_data, "is_symbol_suspended", lambda *_args, **_kwargs: False)(
+                    position.symbol, trade_date, market=market
+                ):
+                    dated_close = getattr(self.market_data, "get_latest_daily_close_with_date", lambda *_args, **_kwargs: None)(
+                        position.symbol, trade_date, market=market
+                    )
+                    if dated_close is not None:
+                        price, source_date = dated_close
+                        valuations.append(
+                            PositionValuation(
+                                position.symbol, market, trade_date, price, source_date, "stale_suspended", None
+                            )
+                        )
+                        continue
+                    error = "missing_prior_close"
+                else:
+                    error = "missing_exact_bar"
+                valuations.append(PositionValuation(position.symbol, market, trade_date, None, None, None, error))
+            else:
+                valuations.append(PositionValuation(position.symbol, market, trade_date, bar.close, trade_date, "current", None))
+        return valuations
+
+    @staticmethod
+    def _normalized_market(market: Any) -> str | None:
+        return getattr(market, "value", market)
+
+    @staticmethod
+    def _valuation_detail(valuation: PositionValuation) -> dict[str, Any]:
+        return {
+            "symbol": valuation.symbol,
+            "market": valuation.market,
+            "requested_date": valuation.requested_date.isoformat(),
+            "source_date": valuation.source_date.isoformat() if valuation.source_date else None,
+            "reason": valuation.error or "suspended_prior_close",
+        }
+
+    @staticmethod
+    def _detail_sort_key(detail: dict[str, Any]) -> tuple[str, str, str, str]:
+        return (
+            detail["market"] or "",
+            detail["symbol"],
+            detail["requested_date"],
+            detail["reason"],
+        )

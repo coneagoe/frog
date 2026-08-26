@@ -150,7 +150,7 @@ def test_generate_snapshot_persists_nav_fields(tmp_path):
     engine.dispose()
 
 
-def test_generate_snapshot_appends_trading_points_for_same_account_date(tmp_path):
+def test_generate_snapshot_updates_trading_point_for_same_account_date(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_upsert.db'}")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
@@ -183,10 +183,8 @@ def test_generate_snapshot_appends_trading_points_for_same_account_date(tmp_path
     assert [row.point_type for row in snapshots] == [
         SnapshotPointType.INITIAL.value,
         SnapshotPointType.TRADING.value,
-        SnapshotPointType.TRADING.value,
     ]
-    assert first.id != snapshot.id
-    assert first.market_value == Decimal("1000.0000")
+    assert first.id == snapshot.id
     assert snapshot.market_value == Decimal("2000.0000")
     assert snapshot.total_assets == Decimal("102000.0000")
     assert snapshot.unrealized_pnl == Decimal("200.0000")
@@ -194,6 +192,86 @@ def test_generate_snapshot_appends_trading_points_for_same_account_date(tmp_path
     assert snapshot.quality_status == SnapshotQualityStatus.VALID.value
     assert snapshot.invalid_reason is None
     engine.dispose()
+
+
+def test_suspended_position_uses_prior_close_and_marks_snapshot_stale(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("suspended-stale", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+
+    class SuspendedProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError("no bar")
+
+        def is_symbol_suspended(self, symbol, trade_date, market=None):
+            return True
+
+        def get_latest_daily_close_with_date(self, symbol, trade_date, market=None):
+            return Decimal("10.25"), date(2026, 8, 22)
+
+    result = SnapshotService(repo, SuspendedProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 25))
+
+    assert result.status == "complete"
+    assert result.snapshot is not None
+    assert result.snapshot.valuation_quality == "stale_suspended"
+    assert result.snapshot.valuation_details == [
+        {
+            "symbol": "300996",
+            "market": "a_share",
+            "requested_date": "2026-08-25",
+            "source_date": "2026-08-22",
+            "reason": "suspended_prior_close",
+        }
+    ]
+
+
+def test_unmarked_missing_bar_creates_gap_even_with_prior_close(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("missing-gap", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+
+    class MissingProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError("no bar")
+
+        def is_symbol_suspended(self, symbol, trade_date, market=None):
+            return False
+
+        def get_latest_daily_close_with_date(self, symbol, trade_date, market=None):
+            return Decimal("10.25"), date(2026, 8, 22)
+
+    result = SnapshotService(repo, MissingProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 25))
+
+    assert result.status == "valuation_gap"
+    assert result.snapshot is None
+    snapshots = repo.list_snapshots(account.id)
+    assert [snapshot.point_type for snapshot in snapshots] == [SnapshotPointType.INITIAL.value]
+
+
+def test_revised_close_updates_existing_snapshot_in_place(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("revised-close", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+    market_data = FakeMarketDataProvider(
+        {
+            ("300996", date(2026, 8, 25)): DailyBar(
+                "300996", date(2026, 8, 25), Decimal("10"), Decimal("10"), Decimal("10"), Decimal("10")
+            )
+        }
+    )
+    service = SnapshotService(repo, market_data)
+
+    first = service.generate_snapshot_or_gap(account.id, date(2026, 8, 25)).snapshot
+    assert first is not None
+    first_market_value = first.market_value
+    market_data._bars[("300996", date(2026, 8, 25))] = DailyBar(
+        "300996", date(2026, 8, 25), Decimal("11"), Decimal("11"), Decimal("11"), Decimal("11")
+    )
+    second = service.generate_snapshot_or_gap(account.id, date(2026, 8, 25)).snapshot
+
+    assert second is not None
+    assert second.id == first.id
+    assert second.market_value > first_market_value
 
 
 def test_snapshot_includes_pending_settlement(sqlite_session):
@@ -319,7 +397,13 @@ def test_missing_etf_snapshot_bar_creates_etf_qualified_valuation_gap(sqlite_ses
     assert outcome.valuation_gap is not None
     assert market_data.calls == [("510300", "etf")]
     assert outcome.valuation_gap.details == [
-        {"symbol": "510300", "market": "etf", "error": "'No ETF daily bar for 510300 on 2026-08-10'"}
+        {
+            "symbol": "510300",
+            "market": "etf",
+            "requested_date": "2026-08-10",
+            "source_date": None,
+            "reason": "missing_exact_bar",
+        }
     ]
 
 
@@ -354,7 +438,13 @@ def test_missing_bar_details_support_legacy_position_without_market():
     assert outcome.status == "valuation_gap"
     assert outcome.valuation_gap is not None
     assert outcome.valuation_gap.details == [
-        {"symbol": "300996", "market": None, "error": "'No daily bar for 300996 on 2026-07-28'"}
+        {
+            "symbol": "300996",
+            "market": None,
+            "requested_date": "2026-07-28",
+            "source_date": None,
+            "reason": "missing_exact_bar",
+        }
     ]
 
 
@@ -379,12 +469,16 @@ def test_missing_same_symbol_bars_are_market_qualified_and_deterministic(sqlite_
         {
             "symbol": "000001",
             "market": "a_share",
-            "error": "'No daily bar for a_share:000001 on 2026-07-28'",
+            "requested_date": "2026-07-28",
+            "source_date": None,
+            "reason": "missing_exact_bar",
         },
         {
             "symbol": "000001",
             "market": "hk_connect",
-            "error": "'No daily bar for hk_connect:000001 on 2026-07-28'",
+            "requested_date": "2026-07-28",
+            "source_date": None,
+            "reason": "missing_exact_bar",
         },
     ]
 
@@ -484,6 +578,8 @@ def _fake_snapshot_repo(account: SimpleNamespace, *, cash_available: Decimal = D
         def save_snapshot(self, **values):
             saved.update(values)
             return SimpleNamespace(**values)
+
+        save_trading_snapshot = save_snapshot
 
     return Repository(), saved
 

@@ -894,6 +894,40 @@ class PaperTradingRepository:
         self.session.flush()
         return snapshot
 
+    def save_trading_snapshot(self, **values: Any) -> PaperAccountSnapshot:
+        """Create or update the single trading snapshot for an account date."""
+        account_id = values["account_id"]
+        trade_date = values["trade_date"]
+        snapshot = (
+            self.session.query(PaperAccountSnapshot)
+            .filter_by(
+                account_id=account_id,
+                trade_date=trade_date,
+                point_type=SnapshotPointType.TRADING.value,
+            )
+            .one_or_none()
+        )
+        if snapshot is None:
+            snapshot = PaperAccountSnapshot(**values)
+            self.session.add(snapshot)
+        else:
+            for field, value in values.items():
+                setattr(snapshot, field, value)
+        self.session.flush()
+        return snapshot
+
+    def delete_trading_snapshot(self, account_id: int, trade_date: date) -> None:
+        (
+            self.session.query(PaperAccountSnapshot)
+            .filter_by(
+                account_id=account_id,
+                trade_date=trade_date,
+                point_type=SnapshotPointType.TRADING.value,
+            )
+            .delete(synchronize_session="fetch")
+        )
+        self.session.flush()
+
     def count_orders(self, account_id: int, trade_date: date) -> int:
         return int(
             self.session.query(func.count(PaperOrder.id))

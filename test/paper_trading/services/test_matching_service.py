@@ -262,7 +262,6 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         ("510300", buy_date, Market.ETF),
         ("510300", buy_date, Market.ETF.value),
         ("510300", buy_date, Market.ETF),
-        ("510300", buy_date, Market.ETF),
     ]
 
     market_data.requested_bars.clear()
@@ -653,7 +652,13 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     assert gap.resolved is True
     assert gap.missing_symbols == ["300996"]
     assert gap.details == [
-        {"symbol": "300996", "market": "a_share", "error": "'No daily bar for 300996 on 2026-06-16'"}
+        {
+            "symbol": "300996",
+            "market": "a_share",
+            "requested_date": "2026-06-16",
+            "source_date": None,
+            "reason": "missing_exact_bar",
+        }
     ]
     assert snapshots[1].market_value == Decimal("2000.0000")
     assert snapshots[1].point_type == SnapshotPointType.TRADING.value
@@ -706,6 +711,43 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
     assert gap is not None
     assert gap.resolved is False
     assert gap.missing_symbols == ["300996"]
+    engine.dispose()
+
+
+def test_matching_stale_suspended_snapshot_does_not_add_warning(tmp_path):
+    engine, session, repo, _, _, trade_date = _services(tmp_path)
+    account = repo.create_account("stale-suspended", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+
+    class SuspendedMarketData:
+        def is_trade_date(self, current_date: date) -> bool:
+            return True
+
+        def next_trade_date(self, current_date: date) -> date:
+            return current_date
+
+        def get_latest_daily_close(self, symbol: str, current_date: date, market: str | None = None) -> Decimal | None:
+            return Decimal("10.25")
+
+        def get_daily_bar(self, symbol: str, current_date: date, market: str | None = None) -> DailyBar:
+            raise KeyError("no bar")
+
+        def is_symbol_suspended(self, symbol: str, current_date: date, market: str | None = None) -> bool:
+            return True
+
+        def get_latest_daily_close_with_date(
+            self, symbol: str, current_date: date, market: str | None = None
+        ) -> tuple[Decimal, date] | None:
+            return Decimal("10.25"), date(2026, 6, 13)
+
+    market_data = SuspendedMarketData()
+    run = MatchingService(repo, market_data, SnapshotService(repo, market_data)).run(trade_date, account.id)
+    session.commit()
+
+    snapshots = repo.list_snapshots(account.id)
+    assert run.warning_count == 0
+    assert run.status == "completed"
+    assert snapshots[-1].valuation_quality == "stale_suspended"
     engine.dispose()
 
 

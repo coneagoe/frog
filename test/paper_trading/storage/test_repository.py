@@ -202,7 +202,7 @@ def test_list_snapshots_orders_same_day_initial_before_trading(sqlite_session) -
     assert [row.id for row in repo.list_snapshots(account.id)] == [initial.id, trading.id]
 
 
-def test_save_snapshot_appends_two_trading_points_on_one_date(sqlite_session) -> None:
+def test_save_trading_snapshot_updates_same_account_date_in_place(sqlite_session) -> None:
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("same-day-trading", Decimal("100000.00"))
@@ -210,8 +210,8 @@ def test_save_snapshot_appends_two_trading_points_on_one_date(sqlite_session) ->
     first_event = datetime(2026, 8, 25, 10, 0, tzinfo=timezone.utc)
     second_event = datetime(2026, 8, 25, 15, 0, tzinfo=timezone.utc)
 
-    first = repo.save_snapshot(**_trading_snapshot_values(account.id, trade_date, first_event))
-    second = repo.save_snapshot(
+    first = repo.save_trading_snapshot(**_trading_snapshot_values(account.id, trade_date, first_event))
+    second = repo.save_trading_snapshot(
         **{
             **_trading_snapshot_values(account.id, trade_date, second_event),
             "cash_available": Decimal("98000.0000"),
@@ -220,30 +220,9 @@ def test_save_snapshot_appends_two_trading_points_on_one_date(sqlite_session) ->
     )
 
     snapshots = [row for row in repo.list_snapshots(account.id) if row.point_type == SnapshotPointType.TRADING.value]
-    assert [row.id for row in snapshots] == [first.id, second.id]
-    assert first.id != second.id
-    assert snapshots[0].cash_available == Decimal("99000.0000")
-    assert snapshots[1].cash_available == Decimal("98000.0000")
-
-
-def test_list_snapshots_orders_timestamp_ties_by_id(sqlite_session) -> None:
-    Base.metadata.create_all(sqlite_session.get_bind())
-    repo = PaperTradingRepository(sqlite_session)
-    account = repo.create_account("timestamp-tie", Decimal("100000.00"))
-    event_at = datetime(2026, 8, 25, 10, 0, tzinfo=timezone.utc)
-
-    first = repo.save_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
-    second = repo.save_snapshot(
-        **{
-            **_trading_snapshot_values(account.id, event_at.date(), event_at),
-            "cash_available": Decimal("98000.0000"),
-            "market_value": Decimal("2000.0000"),
-        }
-    )
-
-    snapshots = [row for row in repo.list_snapshots(account.id) if row.point_type == SnapshotPointType.TRADING.value]
-    assert first.id < second.id
-    assert [row.id for row in snapshots] == [first.id, second.id]
+    assert [row.id for row in snapshots] == [first.id]
+    assert second.id == first.id
+    assert snapshots[0].cash_available == Decimal("98000.0000")
 
 
 def test_create_initial_snapshot_rejects_duplicate_initial_point(sqlite_session) -> None:
