@@ -38,9 +38,9 @@ def test_recalculation_selects_only_bounded_repository_dates_and_is_idempotent(t
 
     session = factory()
     try:
-        out_of_range_gap = session.query(PaperValuationGap).filter_by(
-            account_id=account_id, trade_date=date(2026, 8, 28)
-        ).one()
+        out_of_range_gap = (
+            session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=date(2026, 8, 28)).one()
+        )
         assert out_of_range_gap.resolved is False
     finally:
         session.close()
@@ -66,7 +66,9 @@ def test_recalculation_selects_only_bounded_repository_dates_and_is_idempotent(t
 
     session = factory()
     try:
-        rows = [row for row in PaperTradingRepository(session).list_snapshots(account_id) if row.point_type == "trading"]
+        rows = [
+            row for row in PaperTradingRepository(session).list_snapshots(account_id) if row.point_type == "trading"
+        ]
         assert len(rows) == count
         assert {row.trade_date: row.id for row in rows} == ids_by_date
     finally:
@@ -130,9 +132,7 @@ def test_recalculation_does_not_invoke_matching_order_ledger_or_settlement():
 
 def test_recalculation_rejects_inverted_range():
     with pytest.raises(ValueError, match="start_date"):
-        SnapshotRecalculationService(MagicMock(), MagicMock()).recalculate(
-            1, date(2026, 8, 26), date(2026, 8, 25)
-        )
+        SnapshotRecalculationService(MagicMock(), MagicMock()).recalculate(1, date(2026, 8, 26), date(2026, 8, 25))
 
 
 def test_recalculation_rejects_unknown_account():
@@ -143,6 +143,4 @@ def test_recalculation_rejects_unknown_account():
 
     with patch("paper_trading.services.snapshot_recalculation_service.PaperTradingRepository", return_value=repo):
         with pytest.raises(KeyError, match="not found"):
-            SnapshotRecalculationService(factory, MagicMock()).recalculate(
-                1, date(2026, 8, 25), date(2026, 8, 25)
-            )
+            SnapshotRecalculationService(factory, MagicMock()).recalculate(1, date(2026, 8, 25), date(2026, 8, 25))

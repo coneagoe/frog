@@ -22,10 +22,15 @@ def _client(monkeypatch, session_factory=None):
 
 
 def test_recalculation_api_requires_token():
-    assert TestClient(create_app()).post(
-        "/paper/accounts/1/snapshots/recalculate",
-        json={"start_date": "2026-08-25", "end_date": "2026-08-25"},
-    ).status_code == 401
+    assert (
+        TestClient(create_app())
+        .post(
+            "/paper/accounts/1/snapshots/recalculate",
+            json={"start_date": "2026-08-25", "end_date": "2026-08-25"},
+        )
+        .status_code
+        == 401
+    )
 
 
 def test_recalculation_api_rejects_inverted_range(monkeypatch):
@@ -38,9 +43,7 @@ def test_recalculation_api_rejects_inverted_range(monkeypatch):
 
 
 def test_recalculation_api_serializes_result(monkeypatch):
-    result = SnapshotRecalculationResult(
-        1, [date(2026, 8, 25)], [date(2026, 8, 26)], [], []
-    )
+    result = SnapshotRecalculationResult(1, [date(2026, 8, 25)], [date(2026, 8, 26)], [], [])
     with patch(
         "paper_trading.api.routers.snapshot_recalculation.SnapshotRecalculationService.recalculate",
         return_value=result,

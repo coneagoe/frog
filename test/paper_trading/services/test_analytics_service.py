@@ -670,14 +670,14 @@ def test_total_return_and_risk_preserve_same_day_repository_order(tmp_path):
         repo,
         account,
         nav=Decimal("1.200000"),
-        trade_date=later.date(),
+        trade_date=date(2026, 6, 18),
         event_at=later,
     )
     seed_trading_point(
         repo,
         account,
         nav=Decimal("0.900000"),
-        trade_date=earlier.date(),
+        trade_date=date(2026, 6, 17),
         event_at=earlier,
     )
 

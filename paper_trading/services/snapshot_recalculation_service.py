@@ -56,9 +56,7 @@ class SnapshotRecalculationService:
                     errors.append(f"{trade_date.isoformat()}: {exc}")
 
             session.commit()
-            return SnapshotRecalculationResult(
-                account_id, updated_dates, unavailable_dates, failed_dates, errors
-            )
+            return SnapshotRecalculationResult(account_id, updated_dates, unavailable_dates, failed_dates, errors)
         finally:
             session.close()
 

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus, SnapshotValuationQuality
 from paper_trading.storage.market_data import MarketDataProvider
@@ -133,7 +133,9 @@ class SnapshotService:
         )
 
     def generate_snapshot_or_gap(self, account_id: int, trade_date: date) -> SnapshotOutcome:
-        positions = [position for position in self.repo.get_positions(account_id) if int(position.total_quantity or 0) > 0]
+        positions = [
+            position for position in self.repo.get_positions(account_id) if int(position.total_quantity or 0) > 0
+        ]
         valuations = self._resolve_valuations(positions, trade_date)
         unavailable = [item for item in valuations if item.price is None]
         if unavailable:
@@ -169,9 +171,9 @@ class SnapshotService:
                     )
                     is True
                 ):
-                    dated_close = getattr(self.market_data, "get_latest_daily_close_with_date", lambda *_args, **_kwargs: None)(
-                        position.symbol, trade_date, market=market
-                    )
+                    dated_close = getattr(
+                        self.market_data, "get_latest_daily_close_with_date", lambda *_args, **_kwargs: None
+                    )(position.symbol, trade_date, market=market)
                     if dated_close is not None:
                         price, source_date = dated_close
                         valuations.append(
@@ -185,21 +187,24 @@ class SnapshotService:
                     error = "missing_exact_bar"
                 valuations.append(PositionValuation(position.symbol, market, trade_date, None, None, None, error))
             else:
-                valuations.append(PositionValuation(position.symbol, market, trade_date, bar.close, trade_date, "current", None))
+                valuations.append(
+                    PositionValuation(position.symbol, market, trade_date, bar.close, trade_date, "current", None)
+                )
         return valuations
 
     @staticmethod
     def _normalized_market(market: Any) -> str | None:
-        return getattr(market, "value", market)
+        return cast(str | None, getattr(market, "value", market))
 
     @staticmethod
     def _valuation_detail(valuation: PositionValuation) -> dict[str, Any]:
+        reason = valuation.error or "suspended_prior_close"
         return {
             "symbol": valuation.symbol,
             "market": valuation.market,
             "requested_date": valuation.requested_date.isoformat(),
             "source_date": valuation.source_date.isoformat() if valuation.source_date else None,
-            "reason": valuation.error or "suspended_prior_close",
+            "reason": reason,
         }
 
     @staticmethod
