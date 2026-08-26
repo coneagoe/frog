@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { DataTable, type Column } from "@/components/data-table";
 import { MoneyText } from "@/components/money-text";
 import { formatBackendLabel, formatDate, formatPercent, formatQuantity, labelStatus } from "@/lib/format";
-import type { ActivitySummary, AnalyticsResponse, RoundTrip } from "@/lib/types";
+import type { ActivitySummary, AvailableAnalyticsResponse, RoundTrip } from "@/lib/types";
 import { MetricValueText } from "./analytics-summary";
 
 function MetricCard({ label, value }: { label: string; value: ReactNode }) {
@@ -35,7 +35,7 @@ function RoundTripTable({ rows }: { rows: RoundTrip[] }) {
   return <DataTable columns={columns} emptyTitle="No round trips yet" getRowKey={(row) => row.id} rows={rows} />;
 }
 
-export function AnalyticsActivitySection({ analytics }: { analytics: AnalyticsResponse | null }) {
+export function AnalyticsActivitySection({ analytics }: { analytics: AvailableAnalyticsResponse | null }) {
   const activity = analytics?.activity;
 
   if (!activity) {
@@ -72,7 +72,7 @@ export function AnalyticsActivitySection({ analytics }: { analytics: AnalyticsRe
   );
 }
 
-export function AnalyticsExecutionSection({ analytics }: { analytics: AnalyticsResponse | null }) {
+export function AnalyticsExecutionSection({ analytics }: { analytics: AvailableAnalyticsResponse | null }) {
   const execution = analytics?.execution;
   const hasExecution = execution !== undefined && execution !== null;
 
@@ -99,7 +99,7 @@ export function AnalyticsExecutionSection({ analytics }: { analytics: AnalyticsR
   );
 }
 
-export function AnalyticsTradeQualitySection({ analytics }: { analytics: AnalyticsResponse | null }) {
+export function AnalyticsTradeQualitySection({ analytics }: { analytics: AvailableAnalyticsResponse | null }) {
   const tradeQuality = analytics?.trade_quality;
   const hasTradeQuality = tradeQuality !== undefined && tradeQuality !== null;
 
@@ -136,7 +136,7 @@ export function AnalyticsTradeQualitySection({ analytics }: { analytics: Analyti
   );
 }
 
-export function AnalyticsRiskSection({ analytics }: { analytics: AnalyticsResponse | null }) {
+export function AnalyticsRiskSection({ analytics }: { analytics: AvailableAnalyticsResponse | null }) {
   const risk = analytics?.risk;
 
   return (
