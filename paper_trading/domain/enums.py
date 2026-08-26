@@ -98,6 +98,11 @@ class SnapshotQualityStatus(StrEnum):
     INVALID = "invalid"
 
 
+class SnapshotValuationQuality(StrEnum):
+    CURRENT = "current"
+    STALE_SUSPENDED = "stale_suspended"
+
+
 # Marker prefix for rejection reasons set by OrderDeleteService replay.
 # reset_orders_for_replay uses this to distinguish replay-induced rejections
 # (which may become resolvable after a later delete) from original/business

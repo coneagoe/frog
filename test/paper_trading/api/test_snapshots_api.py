@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -27,10 +27,11 @@ def _seed_trading_point(
     invalid_reason: str | None,
     nav: Decimal | None,
     total_assets: Decimal,
+    trade_date: date | None = None,
 ):
     return repo.save_snapshot(
         account_id=account_id,
-        trade_date=event_at.date(),
+        trade_date=event_at.date() if trade_date is None else trade_date,
         event_at=event_at,
         point_type=SnapshotPointType.TRADING.value,
         quality_status=quality_status,
@@ -71,6 +72,7 @@ def test_snapshots_api_returns_ordered_nav_point_metadata(monkeypatch, sqlite_se
         invalid_reason=None,
         nav=Decimal("1.100000"),
         total_assets=Decimal("110000.0000"),
+        trade_date=day.date(),
     )
     invalid = _seed_trading_point(
         repo,
@@ -80,6 +82,7 @@ def test_snapshots_api_returns_ordered_nav_point_metadata(monkeypatch, sqlite_se
         invalid_reason="missing_nav",
         nav=None,
         total_assets=Decimal("250000.0000"),
+        trade_date=date(2026, 8, 26),
     )
     session.commit()
 
@@ -94,7 +97,7 @@ def test_snapshots_api_returns_ordered_nav_point_metadata(monkeypatch, sqlite_se
     ]
     assert all("event_at" in item and "id" in item for item in payload)
     assert [item["id"] for item in payload] == [initial.id, valid.id, invalid.id]
-    assert {item["trade_date"] for item in payload} == {"2026-08-25"}
+    assert {item["trade_date"] for item in payload} == {"2026-08-25", "2026-08-26"}
     event_times = [_assert_iso8601_offset(item["event_at"]) for item in payload]
     assert event_times == [
         day.replace(hour=1),
@@ -106,6 +109,42 @@ def test_snapshots_api_returns_ordered_nav_point_metadata(monkeypatch, sqlite_se
     assert payload[2]["invalid_reason"] == "missing_nav"
     assert payload[2]["net_asset_value"] is None
     assert payload[2]["total_assets"] == "250000.0000"
+    assert all(item["valuation_quality"] is None for item in payload)
+    assert all(item["valuation_details"] is None for item in payload)
+
+
+def test_snapshots_api_serializes_stale_valuation_metadata(monkeypatch, sqlite_session):
+    client, headers, session = _client(monkeypatch, sqlite_session)
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("stale-nav", Decimal("100000.00"))
+    initial = repo.list_snapshots(account.id)[0]
+    day = datetime(2026, 8, 25, tzinfo=timezone.utc)
+    initial.event_at = day.replace(hour=1)
+    initial.trade_date = day.date()
+    stale = _seed_trading_point(
+        repo,
+        account.id,
+        event_at=day.replace(hour=10),
+        quality_status=SnapshotQualityStatus.VALID.value,
+        invalid_reason=None,
+        nav=Decimal("1.100000"),
+        total_assets=Decimal("110000.0000"),
+    )
+    stale.valuation_quality = "stale_suspended"
+    stale.valuation_details = [{"symbol": "000001.SZ", "source_date": "2026-08-22", "reason": "suspended"}]
+    session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/snapshots", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["valuation_quality"] is None
+    assert payload[0]["valuation_details"] is None
+    assert payload[1]["id"] == stale.id
+    assert payload[1]["valuation_quality"] == "stale_suspended"
+    assert payload[1]["valuation_details"] == [
+        {"symbol": "000001.SZ", "source_date": "2026-08-22", "reason": "suspended"}
+    ]
 
 
 def test_snapshots_api_preserves_repository_order_for_same_day_and_tied_event_at(monkeypatch, sqlite_session):
@@ -125,6 +164,7 @@ def test_snapshots_api_preserves_repository_order_for_same_day_and_tied_event_at
         invalid_reason=None,
         nav=Decimal("1.200000"),
         total_assets=Decimal("120000.0000"),
+        trade_date=date(2026, 8, 27),
     )
     first_tied = _seed_trading_point(
         repo,
@@ -134,6 +174,7 @@ def test_snapshots_api_preserves_repository_order_for_same_day_and_tied_event_at
         invalid_reason=None,
         nav=Decimal("1.050000"),
         total_assets=Decimal("105000.0000"),
+        trade_date=date(2026, 8, 25),
     )
     second_tied = _seed_trading_point(
         repo,
@@ -143,6 +184,7 @@ def test_snapshots_api_preserves_repository_order_for_same_day_and_tied_event_at
         invalid_reason="missing_nav",
         nav=None,
         total_assets=Decimal("999999.0000"),
+        trade_date=date(2026, 8, 26),
     )
     session.commit()
 
@@ -177,6 +219,7 @@ def test_snapshots_api_keeps_event_at_id_order_for_repair_marked_account(monkeyp
         invalid_reason=None,
         nav=Decimal("1.200000"),
         total_assets=Decimal("120000.0000"),
+        trade_date=date(2026, 8, 27),
     )
     first_tied = _seed_trading_point(
         repo,
@@ -186,6 +229,7 @@ def test_snapshots_api_keeps_event_at_id_order_for_repair_marked_account(monkeyp
         invalid_reason=None,
         nav=Decimal("1.050000"),
         total_assets=Decimal("105000.0000"),
+        trade_date=date(2026, 8, 25),
     )
     second_tied = _seed_trading_point(
         repo,
@@ -195,6 +239,7 @@ def test_snapshots_api_keeps_event_at_id_order_for_repair_marked_account(monkeyp
         invalid_reason="missing_nav",
         nav=None,
         total_assets=Decimal("999999.0000"),
+        trade_date=date(2026, 8, 26),
     )
     account.migration_repair_reason = MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
     session.commit()

@@ -391,6 +391,7 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
     assert not _constraint_exists(engine, "uq_paper_account_snapshots_account_date")
     assert _index_exists(engine, "ix_paper_account_snapshots_account_event")
     assert _index_exists(engine, "uq_paper_account_snapshots_account_initial")
+    assert _index_exists(engine, "uq_paper_account_snapshots_account_trading")
 
     with engine.begin() as connection:
         connection.execute(
@@ -401,7 +402,7 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
                     cash_available, cash_frozen, market_value, total_assets, realized_pnl,
                     unrealized_pnl, position_count, order_count, trade_count, net_asset_value
                 ) VALUES (
-                    100, 1, '2026-01-01', 'trading', '2026-01-01 18:00:00+00', 'valid',
+                    100, 1, '2026-01-06', 'trading', '2026-01-06 18:00:00+00', 'valid',
                     9000.0000, 0, 0, 9000.0000, 0, 0, 0, 0, 0, 1.100000
                 )
                 """
@@ -416,7 +417,18 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
     assert [row["id"] for row in fetch_snapshots(engine, account_id=3)] == [7]
     inspector = inspect(engine)
     snapshot_columns = {column["name"] for column in inspector.get_columns("paper_account_snapshots")}
-    assert {"point_type", "event_at", "quality_status", "invalid_reason"} <= snapshot_columns
+    assert {
+        "point_type",
+        "event_at",
+        "quality_status",
+        "invalid_reason",
+        "valuation_quality",
+        "valuation_details",
+    } <= snapshot_columns
+    assert _index_exists(engine, "uq_paper_account_snapshots_account_trading")
+    for row in rerun_rows:
+        assert row["valuation_quality"] is None
+        assert row["valuation_details"] is None
 
 
 def test_nav_series_migration_marks_infinity_and_nan_nav_invalid():
@@ -512,6 +524,7 @@ def test_nav_series_migration_drops_standalone_account_date_unique_index():
         assert _index_exists(bound, "ix_paper_account_snapshots_trade_date")
         assert _index_exists(bound, "ix_paper_account_snapshots_account_event")
         assert _index_exists(bound, "uq_paper_account_snapshots_account_initial")
+        assert _index_exists(bound, "uq_paper_account_snapshots_account_trading")
 
         with bound.begin() as connection:
             connection.execute(
@@ -1313,7 +1326,14 @@ def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
     ensure_paper_trading_schema(engine)
     inspector = inspect(engine)
     snapshot_columns = {column["name"] for column in inspector.get_columns("paper_account_snapshots")}
-    assert {"point_type", "event_at", "quality_status", "invalid_reason"} <= snapshot_columns
+    assert {
+        "point_type",
+        "event_at",
+        "quality_status",
+        "invalid_reason",
+        "valuation_quality",
+        "valuation_details",
+    } <= snapshot_columns
     account_columns = {column["name"]: column for column in inspector.get_columns("paper_accounts")}
     assert "migration_repair_reason" in account_columns
     assert account_columns["migration_repair_reason"]["nullable"] is True
@@ -1340,6 +1360,37 @@ def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
     assert [row.id for row in rerun_rows] == [2, 1, 3]
     assert _initial_ids(engine, 1) == []
     engine.dispose()
+
+
+def _insert_two_trading_snapshots_for_one_account_date(postgres_legacy_db) -> None:
+    engine, _schema = postgres_legacy_db
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE paper_account_snapshots DROP CONSTRAINT IF EXISTS uq_paper_account_snapshots_account_date"
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_account_snapshots (
+                    id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                    total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                    trade_count, net_asset_value, created_at
+                ) VALUES (
+                    100, 1, '2026-01-01', 8500.0000, 0, 0, 8500.0000, 0, 0, 0, 0, 0, 1.050000,
+                    '2026-01-01 18:00:00+00'
+                )
+                """
+            )
+        )
+
+
+def test_schema_upgrade_rejects_duplicate_trading_dates(postgres_legacy_db):
+    _insert_two_trading_snapshots_for_one_account_date(postgres_legacy_db)
+    engine, _schema = postgres_legacy_db
+    with pytest.raises(RuntimeError, match="duplicate trading snapshots"):
+        ensure_paper_trading_schema(engine)
 
 
 def _create_accounts_without_orders_or_snapshots(connection: Connection, *, sqlite: bool = False) -> None:

@@ -402,6 +402,8 @@ _SQLITE_PAPER_SNAPSHOT_SERIES_COLUMNS = {
     "event_at": "DATETIME",
     "quality_status": "VARCHAR(20) NOT NULL DEFAULT 'valid'",
     "invalid_reason": "TEXT",
+    "valuation_quality": "VARCHAR(20)",
+    "valuation_details": "JSON",
 }
 _PAPER_ACCOUNT_REPAIR_REASON_TYPE = "paper_account_migration_repair_reason"
 _PAPER_ACCOUNT_REPAIR_REASON_COLUMN = "migration_repair_reason"
@@ -4224,6 +4226,12 @@ class StorageDb:
                     f"ON {tb_name_paper_account_snapshots} (account_id) WHERE point_type = 'initial'"
                 )
             )
+            conn.execute(
+                text(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_account_snapshots_account_trading "
+                    f"ON {tb_name_paper_account_snapshots} (account_id, trade_date) WHERE point_type = 'trading'"
+                )
+            )
 
     def _ensure_paper_account_snapshot_series(self, conn) -> None:
         conn.execute(
@@ -4235,6 +4243,9 @@ class StorageDb:
             return
         self._ensure_paper_snapshot_series_metadata(conn)
         self._backfill_paper_snapshot_series_quality(conn)
+        from paper_trading.storage.enum_migration import ensure_snapshot_valuation_metadata
+
+        ensure_snapshot_valuation_metadata(conn)
         self._classify_legacy_paper_account_chronology(conn)
         self._insert_paper_account_initial_baselines(conn)
 

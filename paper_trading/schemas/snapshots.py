@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -15,6 +15,8 @@ class SnapshotResponse(BaseModel):
     event_at: datetime
     quality_status: Literal["valid", "invalid"]
     invalid_reason: str | None = None
+    valuation_quality: Literal["current", "stale_suspended"] | None = None
+    valuation_details: list[dict[str, Any]] | None = None
     cash_available: Decimal
     cash_frozen: Decimal
     market_value: Decimal

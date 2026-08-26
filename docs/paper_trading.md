@@ -282,7 +282,7 @@ curl -X POST http://localhost:8000/paper/accounts \
   -d '{"name":"custom-fee","initial_cash":"100000.00","fee_preset":"a_share","commission_rate":"0.00025","min_commission":"5.00","stamp_duty_rate":"0.0005","transfer_fee_rate":"0.00001"}'
 ```
 
-The only built-in preset is `a_share`. Fee values must be non-negative decimals; zero is valid for fee-free test accounts. Account creation requires positive `initial_cash` and writes one `initial` snapshot at NAV `1.000000`. New accounts have no `migration_repair_reason`. Later trading valuations append additional snapshot points instead of replacing the same `trade_date`.
+The only built-in preset is `a_share`. Fee values must be non-negative decimals; zero is valid for fee-free test accounts. Account creation requires positive `initial_cash` and writes one `initial` snapshot at NAV `1.000000`. New accounts have no `migration_repair_reason`. Later trading valuations keep one `trading` snapshot per account and `trade_date`; `initial` points keep their existing one-per-account identity.
 
 ## Update Account Fees
 
@@ -451,7 +451,7 @@ Matching processes accepted orders for the trade date. Tradable orders fill at l
 
 Snapshots require a daily bar for every held position. When one is unavailable, matching preserves fills, records a valuation gap, and completes with `status="completed_with_warnings"` and a non-zero `warning_count` instead of discarding the run. The account snapshot is created on a later retry once the missing data is available, and the valuation gap is marked resolved. Other matching or persistence errors remain failures and are reported in `error_details`.
 
-Trading snapshots persist a UTC `event_at`, `point_type="trading"`, and a quality status. A valid NAV must be a finite, strictly positive Decimal. Missing, non-finite, zero, or negative NAV is stored as `net_asset_value=None` with `quality_status="invalid"` and one of `missing_share_state`, `missing_nav`, `non_finite_nav`, or `non_positive_nav`. Invalid points keep the other financial fields and do not update account NAV state. NAV is never replaced with `total_assets`.
+Trading snapshots persist a UTC `event_at`, `point_type="trading"`, and a quality status. A valid NAV must be a finite, strictly positive Decimal. Missing, non-finite, zero, or negative NAV is stored as `net_asset_value=None` with `quality_status="invalid"` and one of `missing_share_state`, `missing_nav`, `non_finite_nav`, or `non_positive_nav`. Invalid points keep the other financial fields and do not update account NAV state. NAV is never replaced with `total_assets`. Nullable `valuation_quality` (`current` or `stale_suspended`) and JSON `valuation_details` record later stale-price evidence; both stay `null` on `initial` points and on legacy rows until a later valuation writes them.
 
 ### 日期语义
 
@@ -477,11 +477,12 @@ accounts return `legacy_ordering_uncertain`.
 
 Snapshot list responses keep repository order (`event_at`, then `id`) and include
 `point_type` (`initial` or `trading`), timezone-aware `event_at`,
-`quality_status` (`valid` or `invalid`), and nullable `invalid_reason`.
-`id` is the stable same-timestamp order key. Invalid points are returned with
-their stored financial fields; `total_assets` is never substituted for NAV.
-Snapshot listing remains available for repair-marked accounts and does not
-invent a baseline point.
+`quality_status` (`valid` or `invalid`), nullable `invalid_reason`, nullable
+`valuation_quality` (`current` or `stale_suspended`), and nullable
+`valuation_details`. `id` is the stable same-timestamp order key. Invalid points
+are returned with their stored financial fields; `total_assets` is never
+substituted for NAV. Snapshot listing remains available for repair-marked
+accounts and does not invent a baseline point.
 
 Trade responses include the `comment` field:
 
@@ -577,7 +578,12 @@ transaction advisory lock `paper_account_snapshots.nav_series` whenever
 `paper_accounts` or `paper_account_snapshots` exists, including when
 `paper_orders` is absent. Inside that lock it upgrades repair metadata even
 when snapshots and orders are absent. Snapshot DDL, quality backfill,
-chronology classification, and baseline insertion remain snapshot-gated.
+valuation metadata, chronology classification, and baseline insertion remain
+snapshot-gated. After quality backfill, PostgreSQL startup rejects duplicate
+`trading` rows for the same account and `trade_date` rather than merging them,
+then adds nullable `valuation_quality`/`valuation_details` and the partial unique
+index `uq_paper_account_snapshots_account_trading`. The existing
+`uq_paper_account_snapshots_account_initial` identity is unchanged.
 Missing `paper_orders` does not create orders or snapshots. Concurrent
 startups wait on the lock. Reruns are idempotent: they do not overwrite a
 stored repair reason, do not rewrite valid snapshot financial fields, and do
@@ -734,14 +740,14 @@ production operator interface for the governed Paper Trading, Monitor, Forecast
 SSF, and Storage schemas. Keep the maintenance record, verified backup, and
 every command's JSON output together.
 
-The governed types are the 17 Paper Trading types:
+The governed types are the 18 Paper Trading types:
 `paper_account_status`, `paper_fee_preset`, `paper_cash_event_type`,
 `paper_order_side`, `paper_order_status`, `paper_trade_validity_status`,
 `paper_market`, `paper_position_source`, `paper_round_trip_status`,
 `paper_trade_validity_granularity`, `paper_pending_settlement_source`,
 `paper_ledger_rebuild_status`, `paper_matching_run_status`,
 `paper_etf_eligibility_status`, `paper_snapshot_point_type`,
-`paper_snapshot_quality_status`, and
+`paper_snapshot_quality_status`, `paper_snapshot_valuation_quality`, and
 `paper_account_migration_repair_reason`; the four
 Monitor and Forecast SSF types: `monitor_market`, `monitor_frequency`,
 `monitor_reset_mode`, and `forecast_ssf_candidate_state`; and the five Storage
@@ -885,6 +891,7 @@ WITH expected(type_name, labels) AS (
     ('paper_etf_eligibility_status', ARRAY['unknown','supported','money_market','disabled']),
     ('paper_snapshot_point_type', ARRAY['initial','trading']),
     ('paper_snapshot_quality_status', ARRAY['valid','invalid']),
+    ('paper_snapshot_valuation_quality', ARRAY['current','stale_suspended']),
     ('paper_account_migration_repair_reason', ARRAY['legacy_ordering_uncertain']),
     ('monitor_market', ARRAY['A','HK','ETF']),
     ('monitor_frequency', ARRAY['daily','intraday']),
@@ -934,6 +941,7 @@ WITH expected(table_name, column_name, type_name) AS (
     ('paper_etf_eligibility','status','paper_etf_eligibility_status'),
     ('paper_account_snapshots','point_type','paper_snapshot_point_type'),
     ('paper_account_snapshots','quality_status','paper_snapshot_quality_status'),
+    ('paper_account_snapshots','valuation_quality','paper_snapshot_valuation_quality'),
     ('paper_accounts','migration_repair_reason','paper_account_migration_repair_reason'),
     ('stock_monitor_targets','market','monitor_market'), ('forecast_ssf_candidates','market','monitor_market'),
     ('stock_monitor_targets','frequency','monitor_frequency'), ('stock_monitor_targets','reset_mode','monitor_reset_mode'),

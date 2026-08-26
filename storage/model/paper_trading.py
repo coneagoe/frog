@@ -37,6 +37,7 @@ from paper_trading.domain.enums import (
     RoundTripStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
+    SnapshotValuationQuality,
     TradeValidityGranularity,
     TradeValidityStatus,
 )
@@ -319,6 +320,14 @@ class PaperAccountSnapshot(Base):
             postgresql_where=text("point_type = 'initial'"),
             sqlite_where=text("point_type = 'initial'"),
         ),
+        Index(
+            "uq_paper_account_snapshots_account_trading",
+            "account_id",
+            "trade_date",
+            unique=True,
+            postgresql_where=text("point_type = 'trading'"),
+            sqlite_where=text("point_type = 'trading'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -342,6 +351,10 @@ class PaperAccountSnapshot(Base):
         server_default="valid",
     )
     invalid_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    valuation_quality: Mapped[str | None] = mapped_column(
+        _value_enum(SnapshotValuationQuality, "paper_snapshot_valuation_quality"), nullable=True
+    )
+    valuation_details: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     cash_available: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     cash_frozen: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     market_value: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)

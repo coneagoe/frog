@@ -23,6 +23,7 @@ from paper_trading.domain.enums import (
     RoundTripStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
+    SnapshotValuationQuality,
     TradeValidityGranularity,
     TradeValidityStatus,
 )
@@ -111,6 +112,10 @@ _SNAPSHOT_INITIAL_INDEX_SQL = (
     "CREATE UNIQUE INDEX uq_paper_account_snapshots_account_initial "
     "ON paper_account_snapshots (account_id) WHERE point_type = 'initial'"
 )
+_SNAPSHOT_TRADING_INDEX_SQL = (
+    "CREATE UNIQUE INDEX uq_paper_account_snapshots_account_trading "
+    "ON paper_account_snapshots (account_id, trade_date) WHERE point_type = 'trading'"
+)
 
 
 def _index(name: str, table_name: str, column_name: str) -> tuple[str, str]:
@@ -119,6 +124,7 @@ def _index(name: str, table_name: str, column_name: str) -> tuple[str, str]:
 
 _MATCHING_INDEX = ("uq_matching_active_scope", _MATCHING_INDEX_SQL)
 _SNAPSHOT_INITIAL_INDEX = ("uq_paper_account_snapshots_account_initial", _SNAPSHOT_INITIAL_INDEX_SQL)
+_SNAPSHOT_TRADING_INDEX = ("uq_paper_account_snapshots_account_trading", _SNAPSHOT_TRADING_INDEX_SQL)
 
 PAPER_TRADING_ENUM_GROUPS = (
     PaperTradingEnumGroup(
@@ -304,7 +310,7 @@ PAPER_TRADING_ENUM_GROUPS = (
                 "point_type",
                 "VARCHAR(20)",
                 "'trading'",
-                indexes=(_SNAPSHOT_INITIAL_INDEX,),
+                indexes=(_SNAPSHOT_INITIAL_INDEX, _SNAPSHOT_TRADING_INDEX),
             ),
         ),
     ),
@@ -312,6 +318,11 @@ PAPER_TRADING_ENUM_GROUPS = (
         "paper_snapshot_quality_status",
         _labels(SnapshotQualityStatus),
         (_column("paper_account_snapshots", "quality_status", "VARCHAR(20)", "'valid'"),),
+    ),
+    PaperTradingEnumGroup(
+        "paper_snapshot_valuation_quality",
+        _labels(SnapshotValuationQuality),
+        (_column("paper_account_snapshots", "valuation_quality", "VARCHAR(20)", nullable=True),),
     ),
     PaperTradingEnumGroup(
         "paper_account_migration_repair_reason",
@@ -349,10 +360,16 @@ _OPERATIONAL_TABLES = (
 _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_status", re.IGNORECASE)
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)
 _SNAPSHOT_ENUM_TYPES = frozenset({"paper_snapshot_point_type", "paper_snapshot_quality_status"})
+_SNAPSHOT_STARTUP_ENUM_TYPES = _SNAPSHOT_ENUM_TYPES | {"paper_snapshot_valuation_quality"}
 _SNAPSHOT_INITIAL_ENUM_PREDICATE = re.compile(
     r"point_type\s*=\s*'initial'\s*::\s*paper_snapshot_point_type", re.IGNORECASE
 )
 _SNAPSHOT_INITIAL_LEGACY_PREDICATE = re.compile(r"point_type.*=.*'initial'", re.IGNORECASE)
+_SNAPSHOT_TRADING_ENUM_PREDICATE = re.compile(
+    r"point_type\s*=\s*'trading'\s*::\s*paper_snapshot_point_type", re.IGNORECASE
+)
+_SNAPSHOT_TRADING_LEGACY_PREDICATE = re.compile(r"point_type.*=.*'trading'", re.IGNORECASE)
+_VALUATION_DETAILS_COLUMN = PaperTradingEnumColumn("paper_account_snapshots", "valuation_details", "json", None, True)
 
 
 def _is_addable_snapshot_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
@@ -367,19 +384,39 @@ def _is_addable_repair_reason_column(group: PaperTradingEnumGroup, column: Paper
     )
 
 
+def _is_addable_valuation_quality_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
+    return (
+        group.type_name == "paper_snapshot_valuation_quality"
+        and column.table_name == "paper_account_snapshots"
+        and column.column_name == "valuation_quality"
+    )
+
+
 def _is_addable_missing_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
     return (
         (group.type_name == "paper_market" and column.column_name == "market")
         or _is_addable_snapshot_column(group, column)
         or _is_addable_repair_reason_column(group, column)
+        or _is_addable_valuation_quality_column(group, column)
     )
 
 
 def ensure_snapshot_series_enum_types(connection: Connection) -> None:
     """Create snapshot series enum types when they are missing."""
     for group in PAPER_TRADING_ENUM_GROUPS:
-        if group.type_name in _SNAPSHOT_ENUM_TYPES:
+        if group.type_name in _SNAPSHOT_STARTUP_ENUM_TYPES:
             _create_type(connection, group)
+
+
+def ensure_snapshot_valuation_metadata(connection: Connection) -> bool:
+    """Add valuation metadata and the trading identity index after series backfill."""
+    if connection.dialect.name != "postgresql" or not _table_exists(connection, "paper_account_snapshots"):
+        return False
+    ensure_snapshot_series_enum_types(connection)
+    _reject_duplicate_trading_snapshots(connection)
+    changed = _add_valuation_quality_column(connection)
+    changed = _add_valuation_details_column(connection) or changed
+    return _ensure_snapshot_trading_index(connection) or changed
 
 
 def _has_pending_enum_column_changes(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]) -> bool:
@@ -447,6 +484,7 @@ def _adapter_apply(connection: Connection) -> bool:
         _add_repair_reason_column(connection)
         for group in groups:
             _alter_group(connection, group, rollback=False)
+        ensure_snapshot_valuation_metadata(connection)
         _upgrade_market_qualified_keys(connection)
         _preflight(connection, groups, rollback=False)
         return True
@@ -459,6 +497,7 @@ def _adapter_apply(connection: Connection) -> bool:
         _add_repair_reason_column(connection)
         for group in groups:
             _alter_group(connection, group, rollback=False)
+    changed = ensure_snapshot_valuation_metadata(connection) or changed
     _upgrade_market_qualified_keys(connection)
     if groups is PAPER_TRADING_ENUM_GROUPS:
         _create_missing_tables(connection, set(), create_operational_tables=True)
@@ -470,6 +509,8 @@ def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
         return
     _verify(connection, PAPER_TRADING_ENUM_GROUPS, rollback=rollback)
     _verify_etf_eligibility_symbol_check(connection, rollback=rollback)
+    if not rollback and _has_snapshot_trading_identity_columns(connection):
+        _validate_snapshot_trading_index(connection, "uq_paper_account_snapshots_account_trading", enum_typed=True)
     if rollback and _column_facts(connection, _ETF_COMMISSION_RATE_COLUMN) is not None:
         raise PaperTradingEnumMigrationError("etf_commission_rate was not removed during rollback")
     if not rollback:
@@ -732,6 +773,15 @@ def rollback_diagnostics_only_market(connection: Connection) -> bool:
     return rolled_back
 
 
+def _create_column_indexes(connection: Connection, column: PaperTradingEnumColumn) -> None:
+    for index_name, index_sql in column.indexes:
+        if index_name == "uq_paper_account_snapshots_account_trading" and not _has_snapshot_trading_identity_columns(
+            connection
+        ):
+            continue
+        connection.execute(text(index_sql))
+
+
 def _alter_group(connection: Connection, group: PaperTradingEnumGroup, *, rollback: bool) -> None:
     for column in group.columns:
         if not _table_exists(connection, column.table_name):
@@ -756,8 +806,9 @@ def _alter_group(connection: Connection, group: PaperTradingEnumGroup, *, rollba
             connection.execute(
                 text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} SET DEFAULT {default}")
             )
-        for _, index_sql in column.indexes:
-            connection.execute(text(index_sql))
+        if not rollback and column.column_name == "point_type":
+            _reject_duplicate_trading_snapshots(connection)
+        _create_column_indexes(connection, column)
 
 
 def _rollback(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]) -> bool:
@@ -933,8 +984,9 @@ def _add_snapshot_columns(connection: Connection) -> None:
                     f"DEFAULT {default_sql}"
                 )
             )
-            for _, index_sql in column.indexes:
-                connection.execute(text(index_sql))
+            if column.column_name == "point_type":
+                _reject_duplicate_trading_snapshots(connection)
+            _create_column_indexes(connection, column)
 
 
 def _add_repair_reason_column(connection: Connection) -> None:
@@ -947,6 +999,65 @@ def _add_repair_reason_column(connection: Connection) -> None:
         connection.execute(
             text(f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} {column.legacy_type_sql}")
         )
+
+
+def _add_valuation_quality_column(connection: Connection) -> bool:
+    group = next(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == "paper_snapshot_valuation_quality")
+    changed = False
+    for column in group.columns:
+        if not _table_exists(connection, column.table_name) or _column_facts(connection, column) is not None:
+            continue
+        connection.execute(text(f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} {group.type_name}"))
+        changed = True
+    return changed
+
+
+def _add_valuation_details_column(connection: Connection) -> bool:
+    if not _table_exists(connection, _VALUATION_DETAILS_COLUMN.table_name):
+        return False
+    if _column_facts(connection, _VALUATION_DETAILS_COLUMN) is not None:
+        return False
+    connection.execute(
+        text(
+            f"ALTER TABLE {_VALUATION_DETAILS_COLUMN.table_name} "
+            f"ADD COLUMN {_VALUATION_DETAILS_COLUMN.column_name} JSON"
+        )
+    )
+    return True
+
+
+def _has_snapshot_trading_identity_columns(connection: Connection) -> bool:
+    return (
+        _column_facts(connection, _column("paper_account_snapshots", "point_type", "VARCHAR(20)")) is not None
+        and _column_facts(connection, _column("paper_account_snapshots", "trade_date", "DATE")) is not None
+    )
+
+
+def _reject_duplicate_trading_snapshots(connection: Connection) -> None:
+    if not _has_snapshot_trading_identity_columns(connection):
+        return
+    duplicates = connection.execute(
+        text(
+            """
+            SELECT account_id, trade_date
+            FROM paper_account_snapshots
+            WHERE point_type = 'trading'
+            GROUP BY account_id, trade_date
+            HAVING COUNT(*) > 1
+            """
+        )
+    ).all()
+    if duplicates:
+        raise RuntimeError("duplicate trading snapshots")
+
+
+def _ensure_snapshot_trading_index(connection: Connection) -> bool:
+    if not _has_snapshot_trading_identity_columns(connection):
+        return False
+    if _partial_unique_index_facts(connection, "uq_paper_account_snapshots_account_trading") is not None:
+        return False
+    connection.execute(text(_SNAPSHOT_TRADING_INDEX_SQL))
+    return True
 
 
 def _diagnostics_only_market_state(connection: Connection) -> bool:
@@ -1264,6 +1375,16 @@ def _validate_snapshot_initial_index(connection: Connection, index_name: str, *,
     )
 
 
+def _validate_snapshot_trading_index(connection: Connection, index_name: str, *, enum_typed: bool) -> None:
+    _validate_partial_unique_index(
+        connection,
+        index_name,
+        columns=("account_id", "trade_date"),
+        pattern=_SNAPSHOT_TRADING_ENUM_PREDICATE if enum_typed else _SNAPSHOT_TRADING_LEGACY_PREDICATE,
+        error="paper_snapshot_point_type: trading snapshot partial unique index is missing or invalid",
+    )
+
+
 def _validate_indexes(connection: Connection, column: PaperTradingEnumColumn, *, enum_typed: bool) -> None:
     for index_name, index_sql in column.indexes:
         if index_name == "uq_matching_active_scope":
@@ -1271,6 +1392,11 @@ def _validate_indexes(connection: Connection, column: PaperTradingEnumColumn, *,
             continue
         if index_name == "uq_paper_account_snapshots_account_initial":
             _validate_snapshot_initial_index(connection, index_name, enum_typed=enum_typed)
+            continue
+        if index_name == "uq_paper_account_snapshots_account_trading":
+            if _partial_unique_index_facts(connection, index_name) is None:
+                continue
+            _validate_snapshot_trading_index(connection, index_name, enum_typed=enum_typed)
             continue
         facts = connection.execute(
             text(

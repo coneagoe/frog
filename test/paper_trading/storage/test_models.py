@@ -16,6 +16,7 @@ from paper_trading.domain.enums import (
     MigrationRepairReason,
     SnapshotPointType,
     SnapshotQualityStatus,
+    SnapshotValuationQuality,
 )
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
@@ -288,6 +289,7 @@ def test_selected_paper_columns_use_shared_value_enums():
     assert PaperMatchingRun.__table__.c.status.type.name == "paper_matching_run_status"
     assert PaperAccountSnapshot.__table__.c.point_type.type.name == "paper_snapshot_point_type"
     assert PaperAccountSnapshot.__table__.c.quality_status.type.name == "paper_snapshot_quality_status"
+    assert PaperAccountSnapshot.__table__.c.valuation_quality.type.name == "paper_snapshot_valuation_quality"
 
 
 def test_selected_paper_enum_columns_reject_unknown_values(tmp_path):
@@ -409,6 +411,19 @@ def _snapshot_financials() -> dict[str, Decimal | int]:
     }
 
 
+def _trading_snapshot(**overrides: object) -> PaperAccountSnapshot:
+    values: dict[str, object] = {
+        "account_id": 1,
+        "trade_date": date(2026, 8, 25),
+        "point_type": SnapshotPointType.TRADING.value,
+        "event_at": datetime(2026, 8, 25, tzinfo=timezone.utc),
+        "quality_status": SnapshotQualityStatus.VALID.value,
+        **_snapshot_financials(),
+    }
+    values.update(overrides)
+    return PaperAccountSnapshot(**values)
+
+
 def test_snapshot_model_supports_ordered_quality_aware_points() -> None:
     snapshot = PaperAccountSnapshot(
         account_id=1,
@@ -454,6 +469,49 @@ def test_snapshot_model_supports_ordered_quality_aware_points() -> None:
     assert initial_index.unique is True
     assert str(initial_index.dialect_options["postgresql"]["where"]) == "point_type = 'initial'"
     assert str(initial_index.dialect_options["sqlite"]["where"]) == "point_type = 'initial'"
+
+    trading_index = index_by_name["uq_paper_account_snapshots_account_trading"]
+    assert tuple(column.name for column in trading_index.columns) == ("account_id", "trade_date")
+    assert trading_index.unique is True
+    assert str(trading_index.dialect_options["postgresql"]["where"]) == "point_type = 'trading'"
+    assert str(trading_index.dialect_options["sqlite"]["where"]) == "point_type = 'trading'"
+
+    assert PaperAccountSnapshot.__table__.c.valuation_quality.nullable is True
+    assert PaperAccountSnapshot.__table__.c.valuation_details.nullable is True
+    assert SnapshotValuationQuality.CURRENT == "current"
+    assert SnapshotValuationQuality.STALE_SUSPENDED == "stale_suspended"
+
+
+def test_snapshot_model_persists_stale_metadata(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        snapshot = _trading_snapshot(
+            valuation_quality="stale_suspended",
+            valuation_details=[{"symbol": "000001.SZ", "source_date": "2026-08-22", "reason": "suspended"}],
+        )
+        session.add(snapshot)
+        session.flush()
+        assert snapshot.valuation_quality == "stale_suspended"
+        assert snapshot.valuation_details == [
+            {"symbol": "000001.SZ", "source_date": "2026-08-22", "reason": "suspended"}
+        ]
+
+        initial = PaperAccountSnapshot(
+            account_id=1,
+            trade_date=date(2026, 8, 25),
+            point_type=SnapshotPointType.INITIAL.value,
+            event_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+            quality_status=SnapshotQualityStatus.VALID.value,
+            **_snapshot_financials(),
+        )
+        session.add(initial)
+        session.flush()
+        assert initial.valuation_quality is None
+        assert initial.valuation_details is None
+
+    engine.dispose()
 
 
 def test_snapshot_point_and_quality_enums_reject_unknown_values(tmp_path) -> None:
@@ -506,6 +564,8 @@ def test_snapshot_model_defaults_support_legacy_writers(tmp_path) -> None:
         assert snapshot.quality_status == SnapshotQualityStatus.VALID.value
         assert snapshot.event_at.tzinfo is not None
         assert snapshot.invalid_reason is None
+        assert snapshot.valuation_quality is None
+        assert snapshot.valuation_details is None
 
     engine.dispose()
 
@@ -534,6 +594,25 @@ def test_snapshot_model_rejects_duplicate_initial_points(tmp_path) -> None:
                 event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
                 quality_status=SnapshotQualityStatus.VALID.value,
                 **_snapshot_financials(),
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.flush()
+
+    engine.dispose()
+
+
+def test_snapshot_model_rejects_duplicate_trading_dates(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(_trading_snapshot())
+        session.flush()
+        session.add(
+            _trading_snapshot(
+                event_at=datetime(2026, 8, 25, 15, tzinfo=timezone.utc),
+                cash_available=Decimal("98000.0000"),
             )
         )
         with pytest.raises(IntegrityError):
