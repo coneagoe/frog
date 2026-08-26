@@ -23,7 +23,7 @@ from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvide
 from storage.model.base import Base
 from storage.model.stk_limit_a_stock import StkLimitAStock
 from storage.model.suspend_d_a_stock import SuspendDAStock
-from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
+from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
 
 
 class FakeStorageWithEngine:
@@ -435,3 +435,10 @@ def test_provider_returns_hk_and_etf_prior_close_with_date():
         Decimal("8.9"),
         date(2026, 8, 10),
     )
+
+
+def test_fake_market_data_provider_returns_none_for_unconfigured_prior_close():
+    provider = FakeMarketDataProvider()
+
+    assert provider.get_latest_daily_close("000001.SZ", date(2026, 8, 25), "a_share") is None
+    assert provider.get_latest_daily_close_with_date("000001.SZ", date(2026, 8, 25), "a_share") is None

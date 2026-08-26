@@ -145,7 +145,11 @@ class FakeMarketDataProvider:
         return bar
 
     def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
-        return self.get_daily_bar(symbol, trade_date, market).close
+        key = (symbol, trade_date)
+        if key not in self._bars:
+            return None
+        bar = self.get_daily_bar(symbol, trade_date, market)
+        return bar.close
 
     def is_symbol_suspended(self, symbol: str, trade_date: date, market: str | None = None) -> bool:
         if self._last_bar_key != (symbol, trade_date):
@@ -155,10 +159,9 @@ class FakeMarketDataProvider:
     def get_latest_daily_close_with_date(
         self, symbol: str, trade_date: date, market: str | None = None
     ) -> tuple[Decimal, date] | None:
-        bar = (
-            self._last_bar
-            if self._last_bar_key == (symbol, trade_date)
-            else self.get_daily_bar(symbol, trade_date, market)
-        )
+        key = (symbol, trade_date)
+        if key not in self._bars:
+            return None
+        bar = self._last_bar if self._last_bar_key == key else self.get_daily_bar(symbol, trade_date, market)
         assert bar is not None
         return bar.close, bar.trade_date
