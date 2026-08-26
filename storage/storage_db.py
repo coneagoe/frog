@@ -4383,9 +4383,7 @@ class StorageDb:
                 continue
             columns = self._table_column_names(conn, table_name)
             expected_columns = (*timestamp_columns, *date_columns)
-            account_match = "source.account_id = account.id"
-            if table_name == tb_name_paper_account_snapshots and "point_type" in columns:
-                account_match += " AND source.point_type IS DISTINCT FROM 'initial'"
+            account_match = self._legacy_chronology_account_match(table_name, columns)
             if any(column_name not in columns for column_name in expected_columns):
                 predicates.append(
                     f"""EXISTS (
@@ -4412,6 +4410,16 @@ class StorageDb:
                 )"""
             )
         return predicates
+
+    def _legacy_chronology_account_match(self, table_name: str, columns: set[str]) -> str:
+        if table_name == tb_name_paper_matching_runs:
+            if "account_id" not in columns:
+                return "TRUE"
+            return "(source.account_id = account.id OR source.account_id IS NULL)"
+        account_match = "source.account_id = account.id"
+        if table_name == tb_name_paper_account_snapshots and "point_type" in columns:
+            return f"{account_match} AND source.point_type IS DISTINCT FROM 'initial'"
+        return account_match
 
     def _insert_paper_account_initial_baselines(self, conn) -> None:
         if not inspect(conn).has_table(tb_name_paper_accounts):
