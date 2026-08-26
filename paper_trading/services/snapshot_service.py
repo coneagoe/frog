@@ -199,11 +199,18 @@ class SnapshotService:
                         )(position.symbol, trade_date, market=market)
                         if dated_close is not None:
                             price, source_date = dated_close
-                            if not self._valid_close(price):
+                            normalized_price = self._normalize_close(price)
+                            if normalized_price is None:
                                 raise ValueError("invalid close")
                             valuations.append(
                                 PositionValuation(
-                                    position.symbol, market, trade_date, price, source_date, "stale_suspended", None
+                                    position.symbol,
+                                    market,
+                                    trade_date,
+                                    normalized_price,
+                                    source_date,
+                                    "stale_suspended",
+                                    None,
                                 )
                             )
                             continue
@@ -218,10 +225,11 @@ class SnapshotService:
                     PositionValuation(position.symbol, market, trade_date, None, None, None, "market_data_error")
                 )
             else:
-                if self._valid_close(getattr(bar, "close", None)):
+                normalized_close = self._normalize_close(getattr(bar, "close", None))
+                if normalized_close is not None:
                     valuations.append(
                         PositionValuation(
-                            position.symbol, market, trade_date, Decimal(str(bar.close)), trade_date, "current", None
+                            position.symbol, market, trade_date, normalized_close, trade_date, "current", None
                         )
                     )
                 else:
@@ -231,12 +239,14 @@ class SnapshotService:
         return valuations
 
     @staticmethod
-    def _valid_close(value: Any) -> bool:
+    def _normalize_close(value: Any) -> Decimal | None:
         try:
             close = Decimal(str(value))
         except (ArithmeticError, TypeError, ValueError):
-            return False
-        return close.is_finite() and close > 0
+            return None
+        if not close.is_finite() or close <= 0:
+            return None
+        return close
 
     @staticmethod
     def _normalized_market(market: Any) -> str | None:

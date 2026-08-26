@@ -225,6 +225,79 @@ def test_suspended_position_uses_prior_close_and_marks_snapshot_stale(sqlite_ses
     ]
 
 
+@pytest.mark.parametrize("prior_close", ["10.25", 10.25])
+def test_suspended_position_normalizes_prior_close_to_decimal(sqlite_session, prior_close):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("suspended-normalized", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+
+    class SuspendedProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError("no bar")
+
+        def is_symbol_suspended(self, symbol, trade_date, market=None):
+            return True
+
+        def get_latest_daily_close_with_date(self, symbol, trade_date, market=None):
+            return prior_close, date(2026, 8, 22)
+
+    result = SnapshotService(repo, SuspendedProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 25))
+
+    assert result.status == "complete"
+    assert result.snapshot is not None
+    assert result.snapshot.market_value == Decimal("1025.0000")
+
+
+@pytest.mark.parametrize("prior_close", [None, "not-a-number", Decimal("NaN"), Decimal("Infinity"), 0, -1])
+def test_invalid_suspended_prior_close_creates_deterministic_gap(sqlite_session, prior_close):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("suspended-invalid", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+
+    class SuspendedProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError("no bar")
+
+        def is_symbol_suspended(self, symbol, trade_date, market=None):
+            return True
+
+        def get_latest_daily_close_with_date(self, symbol, trade_date, market=None):
+            return prior_close, date(2026, 8, 22)
+
+    result = SnapshotService(repo, SuspendedProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 25))
+
+    assert result.status == "valuation_gap"
+    assert result.valuation_gap is not None
+    assert result.valuation_gap.details[0]["reason"] == "market_data_error"
+
+
+@pytest.mark.parametrize("method", ["is_symbol_suspended", "get_latest_daily_close_with_date"])
+def test_suspended_prior_close_provider_exceptions_create_deterministic_gap(sqlite_session, method):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("suspended-error", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+
+    class FailingProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError("no bar")
+
+        def is_symbol_suspended(self, symbol, trade_date, market=None):
+            if method == "is_symbol_suspended":
+                raise RuntimeError("suspension lookup failed")
+            return True
+
+        def get_latest_daily_close_with_date(self, symbol, trade_date, market=None):
+            if method == "get_latest_daily_close_with_date":
+                raise RuntimeError("prior close lookup failed")
+            return Decimal("10.25"), date(2026, 8, 22)
+
+    result = SnapshotService(repo, FailingProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 25))
+
+    assert result.status == "valuation_gap"
+    assert result.valuation_gap is not None
+    assert result.valuation_gap.details[0]["reason"] == "market_data_error"
+
+
 def test_unmarked_missing_bar_creates_gap_even_with_prior_close(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("missing-gap", Decimal("100000.00"))
