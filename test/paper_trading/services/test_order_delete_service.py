@@ -178,6 +178,10 @@ def test_delete_filled_order_records_valuation_gap_when_replay_cannot_value_posi
             "reason": "missing_exact_bar",
         }
     ]
+    runs = repo.list_matching_runs()
+    assert len(runs) == 1
+    assert runs[0].status == MatchingRunStatus.COMPLETED_WITH_WARNINGS.value
+    assert runs[0].warning_count == 1
 
 
 def test_rebuild_from_creation_date_preserves_initial_snapshot(session):

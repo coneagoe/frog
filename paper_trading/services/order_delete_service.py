@@ -87,10 +87,12 @@ class OrderDeleteService:
                     warning_count += 1
 
             if filled > 0:
-                matching_service.snapshot_service.generate_snapshot_or_gap(
+                snapshot_outcome = matching_service.snapshot_service.generate_snapshot_or_gap(
                     account_id,
                     trade_date,
                 )
+                if snapshot_outcome.status == "valuation_gap":
+                    warning_count += 1
 
             status = (
                 MatchingRunStatus.FAILED.value

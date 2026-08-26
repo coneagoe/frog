@@ -271,6 +271,43 @@ def test_invalid_suspended_prior_close_creates_deterministic_gap(sqlite_session,
     assert result.valuation_gap.details[0]["reason"] == "market_data_error"
 
 
+@pytest.mark.parametrize(
+    "source_date",
+    [None, "2026-08-22", datetime(2026, 8, 22), date(2026, 8, 26)],
+)
+def test_invalid_suspended_prior_close_source_date_creates_deterministic_gap(sqlite_session, source_date):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("suspended-invalid-source-date", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+
+    class SuspendedProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError("no bar")
+
+        def is_symbol_suspended(self, symbol, trade_date, market=None):
+            return True
+
+        def get_latest_daily_close_with_date(self, symbol, trade_date, market=None):
+            return Decimal("10.25"), source_date
+
+    trade_date = date(2026, 8, 25)
+    result = SnapshotService(repo, SuspendedProvider()).generate_snapshot_or_gap(account.id, trade_date)
+
+    assert result.status == "valuation_gap"
+    assert result.snapshot is None
+    assert result.valuation_gap is not None
+    assert result.valuation_gap.details == [
+        {
+            "symbol": "300996",
+            "market": "a_share",
+            "requested_date": "2026-08-25",
+            "source_date": None,
+            "reason": "invalid_source_date",
+        }
+    ]
+    assert [snapshot.point_type for snapshot in repo.list_snapshots(account.id)] == [SnapshotPointType.INITIAL.value]
+
+
 @pytest.mark.parametrize("method", ["is_symbol_suspended", "get_latest_daily_close_with_date"])
 def test_suspended_prior_close_provider_exceptions_create_deterministic_gap(sqlite_session, method):
     repo = PaperTradingRepository(sqlite_session)

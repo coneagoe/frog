@@ -202,6 +202,19 @@ class SnapshotService:
                             normalized_price = self._normalize_close(price)
                             if normalized_price is None:
                                 raise ValueError("invalid close")
+                            if not self._valid_source_date(source_date, trade_date):
+                                valuations.append(
+                                    PositionValuation(
+                                        position.symbol,
+                                        market,
+                                        trade_date,
+                                        None,
+                                        None,
+                                        None,
+                                        "invalid_source_date",
+                                    )
+                                )
+                                continue
                             valuations.append(
                                 PositionValuation(
                                     position.symbol,
@@ -247,6 +260,10 @@ class SnapshotService:
         if not close.is_finite() or close <= 0:
             return None
         return close
+
+    @staticmethod
+    def _valid_source_date(value: Any, requested_date: date) -> bool:
+        return isinstance(value, date) and not isinstance(value, datetime) and value <= requested_date
 
     @staticmethod
     def _normalized_market(market: Any) -> str | None:
