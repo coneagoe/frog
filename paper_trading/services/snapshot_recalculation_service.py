@@ -44,7 +44,9 @@ class SnapshotRecalculationService:
             for trade_date in dates:
                 try:
                     with session.begin_nested():
-                        outcome = snapshot_service.generate_snapshot_or_gap(account_id, trade_date)
+                        outcome = snapshot_service.generate_snapshot_or_gap(
+                            account_id, trade_date, preserve_account_nav=True
+                        )
                     if outcome.status == "complete":
                         updated_dates.append(trade_date)
                     elif outcome.status == "valuation_gap":

@@ -56,6 +56,9 @@ class SnapshotService:
         account_id: int,
         trade_date: date,
         valuations: list[PositionValuation] | None = None,
+        *,
+        preserve_account_nav: bool = False,
+        event_at: datetime | None = None,
     ) -> PaperAccountSnapshot:
         cash_available = self.repo.get_cash_available(account_id)
         cash_frozen = self.repo.get_cash_frozen(account_id)
@@ -85,7 +88,7 @@ class SnapshotService:
         if share_count is not None and share_count.is_finite() and share_count > 0:
             candidate = _quantize_finite(raw_total / share_count, _NAV)
         net_asset_value, invalid_reason = _validated_trading_nav(share_count, candidate)
-        if net_asset_value is not None and share_count is not None:
+        if net_asset_value is not None and share_count is not None and not preserve_account_nav:
             self.repo.update_account_nav_state(
                 account,
                 share_count=share_count,
@@ -103,7 +106,7 @@ class SnapshotService:
         return self.repo.save_trading_snapshot(
             account_id=account_id,
             trade_date=trade_date,
-            event_at=datetime.now(timezone.utc),
+            event_at=event_at or datetime.now(timezone.utc),
             point_type=SnapshotPointType.TRADING.value,
             quality_status=quality_status,
             invalid_reason=invalid_reason,
@@ -132,7 +135,9 @@ class SnapshotService:
             pending_settlement=pending_settlement,
         )
 
-    def generate_snapshot_or_gap(self, account_id: int, trade_date: date) -> SnapshotOutcome:
+    def generate_snapshot_or_gap(
+        self, account_id: int, trade_date: date, *, preserve_account_nav: bool = False
+    ) -> SnapshotOutcome:
         positions = [
             position for position in self.repo.get_positions(account_id) if int(position.total_quantity or 0) > 0
         ]
@@ -151,7 +156,23 @@ class SnapshotService:
                 delete_snapshot(account_id, trade_date)
             return SnapshotOutcome(status="valuation_gap", valuation_gap=gap)
 
-        snapshot = self.generate_snapshot(account_id, trade_date, valuations)
+        historical_event_at = None
+        if preserve_account_nav:
+            historical_event_at = next(
+                (
+                    snapshot.event_at
+                    for snapshot in self.repo.list_snapshots(account_id)
+                    if snapshot.trade_date == trade_date and snapshot.point_type == SnapshotPointType.TRADING.value
+                ),
+                None,
+            )
+        snapshot = self.generate_snapshot(
+            account_id,
+            trade_date,
+            valuations,
+            preserve_account_nav=preserve_account_nav,
+            event_at=historical_event_at,
+        )
         existing_gap = self.repo.get_valuation_gap(account_id, trade_date)
         resolved_gap = existing_gap
         if existing_gap is not None and not existing_gap.resolved:
@@ -165,32 +186,57 @@ class SnapshotService:
             try:
                 bar = self.market_data.get_daily_bar(position.symbol, trade_date, market=market)
             except KeyError:
-                if (
-                    getattr(self.market_data, "is_symbol_suspended", lambda *_args, **_kwargs: False)(
-                        position.symbol, trade_date, market=market
-                    )
-                    is True
-                ):
-                    dated_close = getattr(
-                        self.market_data, "get_latest_daily_close_with_date", lambda *_args, **_kwargs: None
-                    )(position.symbol, trade_date, market=market)
-                    if dated_close is not None:
-                        price, source_date = dated_close
-                        valuations.append(
-                            PositionValuation(
-                                position.symbol, market, trade_date, price, source_date, "stale_suspended", None
-                            )
+                try:
+                    suspended = (
+                        getattr(self.market_data, "is_symbol_suspended", lambda *_args, **_kwargs: False)(
+                            position.symbol, trade_date, market=market
                         )
-                        continue
-                    error = "missing_prior_close"
-                else:
-                    error = "missing_exact_bar"
+                        is True
+                    )
+                    if suspended:
+                        dated_close = getattr(
+                            self.market_data, "get_latest_daily_close_with_date", lambda *_args, **_kwargs: None
+                        )(position.symbol, trade_date, market=market)
+                        if dated_close is not None:
+                            price, source_date = dated_close
+                            if not self._valid_close(price):
+                                raise ValueError("invalid close")
+                            valuations.append(
+                                PositionValuation(
+                                    position.symbol, market, trade_date, price, source_date, "stale_suspended", None
+                                )
+                            )
+                            continue
+                        error = "missing_prior_close"
+                    else:
+                        error = "missing_exact_bar"
+                except Exception:
+                    error = "market_data_error"
                 valuations.append(PositionValuation(position.symbol, market, trade_date, None, None, None, error))
-            else:
+            except Exception:
                 valuations.append(
-                    PositionValuation(position.symbol, market, trade_date, bar.close, trade_date, "current", None)
+                    PositionValuation(position.symbol, market, trade_date, None, None, None, "market_data_error")
                 )
+            else:
+                if self._valid_close(getattr(bar, "close", None)):
+                    valuations.append(
+                        PositionValuation(
+                            position.symbol, market, trade_date, Decimal(str(bar.close)), trade_date, "current", None
+                        )
+                    )
+                else:
+                    valuations.append(
+                        PositionValuation(position.symbol, market, trade_date, None, None, None, "invalid_close")
+                    )
         return valuations
+
+    @staticmethod
+    def _valid_close(value: Any) -> bool:
+        try:
+            close = Decimal(str(value))
+        except (ArithmeticError, TypeError, ValueError):
+            return False
+        return close.is_finite() and close > 0
 
     @staticmethod
     def _normalized_market(market: Any) -> str | None:
