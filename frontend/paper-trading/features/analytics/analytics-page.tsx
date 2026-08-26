@@ -114,7 +114,7 @@ export function AnalyticsPage() {
         <h2>Overview</h2>
         {analytics?.available === false ? (
           <div className="panel">
-            Performance analytics require account repair before they are available.
+            Historical ordering requires account repair before performance analytics are available.
           </div>
         ) : (
           <AnalyticsSummary analytics={analytics} snapshot={latestSnapshot} />

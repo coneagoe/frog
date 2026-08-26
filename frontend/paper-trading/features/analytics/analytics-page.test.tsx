@@ -253,7 +253,7 @@ describe("AnalyticsPage", () => {
 
     render(<AnalyticsPage />);
 
-    expect(await screen.findByText("Performance analytics require account repair before they are available.")).toBeInTheDocument();
+    expect(await screen.findByText("Historical ordering requires account repair before performance analytics are available.")).toBeInTheDocument();
     expect(screen.queryByText("NAV Return")).not.toBeInTheDocument();
     expect(screen.queryByText("Activity")).not.toBeInTheDocument();
     expect(screen.queryByText("Execution")).not.toBeInTheDocument();
