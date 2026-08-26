@@ -1,5 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from sqlalchemy import create_engine
@@ -560,6 +562,59 @@ def test_stale_valid_snapshot_remains_in_nav_series(tmp_path):
         Decimal("1.100000"),
     ]
     engine.dispose()
+
+
+def test_analytics_orders_same_date_gaps_by_persisted_id():
+    gaps = [
+        SimpleNamespace(
+            id=2,
+            account_id=1,
+            trade_date=date(2026, 8, 25),
+            missing_symbols=["000002.SZ"],
+            details=[{"reason": "second"}],
+            resolved=False,
+        ),
+        SimpleNamespace(
+            id=1,
+            account_id=1,
+            trade_date=date(2026, 8, 25),
+            missing_symbols=["000001.SZ"],
+            details=[{"reason": "first"}],
+            resolved=False,
+        ),
+    ]
+
+    class Query:
+        order_by_args = ()
+
+        def filter(self, *_args):
+            return self
+
+        def order_by(self, *args):
+            self.order_by_args = args
+            return self
+
+        def all(self):
+            return sorted(gaps, key=lambda gap: (gap.trade_date, gap.id))
+
+    query = Query()
+    repo = SimpleNamespace(
+        session=SimpleNamespace(query=lambda *_args: query),
+        get_account=lambda _account_id: SimpleNamespace(
+            initial_cash=Decimal("100000.00"), migration_repair_reason=None
+        ),
+        list_orders=lambda _account_id: [],
+        list_snapshots=lambda _account_id: [],
+        list_round_trips=lambda _account_id: [],
+    )
+
+    payload = AnalyticsService(cast(PaperTradingRepository, repo)).get_account_analytics(1)
+
+    assert [gap.details[0]["reason"] for gap in payload.valuation_gaps] == ["first", "second"]
+    assert [str(ordering) for ordering in query.order_by_args] == [
+        "paper_valuation_gaps.trade_date ASC",
+        "paper_valuation_gaps.id ASC",
+    ]
 
 
 def test_analytics_uses_nav_return_not_total_assets_after_deposit(tmp_path):

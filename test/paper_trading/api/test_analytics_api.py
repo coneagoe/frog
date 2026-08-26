@@ -133,6 +133,40 @@ def test_get_account_analytics_uses_persisted_nav_not_total_assets(monkeypatch, 
     assert payload["risk"]["max_drawdown"]["value"] == "0.000000"
 
 
+def test_get_account_analytics_keeps_stale_valid_snapshot_in_nav(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-stale-valid", Decimal("100000.00"))
+    snapshot = repo.list_snapshots(account.id)[0]
+    snapshot.valuation_quality = "stale_suspended"
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["overview"]["total_return"]["value"] == "0.000000"
+    assert payload["overview"]["net_asset_value"] == "1.000000"
+    assert payload["risk"]["max_drawdown"]["reason"] == "insufficient_data"
+
+
+def test_get_account_analytics_does_not_turn_unresolved_gap_into_nav_or_metrics(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-unresolved-gap", Decimal("100000.00"))
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 25), ["000001.SZ"], [{"reason": "no bar"}])
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["valuation_gaps"][0]["resolved"] is False
+    assert payload["overview"]["total_return"]["value"] == "0.000000"
+    assert payload["overview"]["net_asset_value"] == "1.000000"
+    assert payload["risk"]["max_drawdown"]["reason"] == "insufficient_data"
+    assert payload["risk"]["sharpe"]["value"] is None
+
+
 def test_get_account_analytics_returns_date_ordered_valuation_gaps(monkeypatch, sqlite_session):
     client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
     account = repo.create_account("api-valuation-gaps", Decimal("100000.00"))
