@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_position_valuation_service, get_security_name_provider, get_session
-from paper_trading.domain.enums import Market
+from paper_trading.domain.enums import Market, MigrationRepairReason
 from paper_trading.services.position_valuation_service import PositionValuation
 from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
@@ -814,3 +814,30 @@ def test_update_account_fees_can_mix_a_share_and_hk_fields(monkeypatch, sqlite_s
     assert body["min_commission"] == "3.0000"
     assert body["hk_commission_rate"] == "0.00020000"
     assert body["hk_min_commission"] == "18.0000"
+
+
+def test_account_api_exposes_nullable_migration_repair_reason(monkeypatch, sqlite_session):
+    client, headers, session = _client(monkeypatch, sqlite_session)
+    created = client.post(
+        "/paper/accounts",
+        json={"name": "repair-field", "initial_cash": "100000.00"},
+        headers=headers,
+    )
+
+    assert created.status_code == 200
+    body = created.json()
+    assert body["migration_repair_reason"] is None
+
+    account_id = body["id"]
+    account = PaperTradingRepository(session).get_account(account_id)
+    assert account is not None
+    account.migration_repair_reason = MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
+    session.commit()
+
+    detailed = client.get(f"/paper/accounts/{account_id}", headers=headers)
+    listed = client.get("/paper/accounts", headers=headers)
+
+    assert detailed.status_code == 200
+    assert detailed.json()["migration_repair_reason"] == "legacy_ordering_uncertain"
+    assert listed.status_code == 200
+    assert listed.json()[0]["migration_repair_reason"] == "legacy_ordering_uncertain"

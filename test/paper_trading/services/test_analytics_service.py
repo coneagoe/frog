@@ -5,7 +5,15 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from paper_trading.domain.enums import Market, OrderSide, OrderStatus, SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import (
+    Market,
+    MigrationRepairReason,
+    OrderSide,
+    OrderStatus,
+    SnapshotPointType,
+    SnapshotQualityStatus,
+)
+from paper_trading.schemas.analytics import AnalyticsUnavailableResponse
 from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.storage.models import PaperAccountSnapshot
 from paper_trading.storage.repository import PaperTradingRepository
@@ -751,3 +759,38 @@ def test_nav_series_is_empty_when_first_point_is_not_valid_initial():
 
     assert AnalyticsService._nav_series(invalid_initial) == []
     assert AnalyticsService._nav_series(trading_first) == []
+
+
+def test_analytics_returns_unavailable_before_metric_calculation_when_repair_reason_set(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("repair-analytics", Decimal("100000.00"))
+    account.migration_repair_reason = MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
+    session.commit()
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("metric calculation should not run for repair-marked accounts")
+
+    monkeypatch.setattr(AnalyticsService, "_overview", fail_if_called)
+    monkeypatch.setattr(AnalyticsService, "_activity", fail_if_called)
+    monkeypatch.setattr(AnalyticsService, "_execution", fail_if_called)
+    monkeypatch.setattr(AnalyticsService, "_trade_quality", fail_if_called)
+    monkeypatch.setattr(AnalyticsService, "_risk", fail_if_called)
+    monkeypatch.setattr(PaperTradingRepository, "list_orders", fail_if_called)
+    monkeypatch.setattr(PaperTradingRepository, "list_snapshots", fail_if_called)
+    monkeypatch.setattr(PaperTradingRepository, "list_round_trips", fail_if_called)
+
+    result = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(result, AnalyticsUnavailableResponse)
+    assert result.available is False
+    assert result.reason == MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN
+    engine.dispose()
+
+
+def test_analytics_raises_keyerror_for_unknown_account(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+
+    with pytest.raises(KeyError, match="paper account not found: 999"):
+        AnalyticsService(repo).get_account_analytics(999)
+
+    engine.dispose()

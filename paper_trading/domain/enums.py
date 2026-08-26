@@ -6,6 +6,10 @@ class AccountStatus(StrEnum):
     DISABLED = "disabled"
 
 
+class MigrationRepairReason(StrEnum):
+    LEGACY_ORDERING_UNCERTAIN = "legacy_ordering_uncertain"
+
+
 class OrderSide(StrEnum):
     BUY = "buy"
     SELL = "sell"

@@ -5,7 +5,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from paper_trading.domain.enums import Market
+from paper_trading.domain.enums import Market, MigrationRepairReason
 
 
 class CreateAccountRequest(BaseModel):
@@ -84,6 +84,7 @@ class AccountResponse(BaseModel):
     net_asset_value: Decimal
     cumulative_deposit: Decimal
     cumulative_withdrawal: Decimal
+    migration_repair_reason: MigrationRepairReason | None = None
 
 
 class PositionResponse(BaseModel):

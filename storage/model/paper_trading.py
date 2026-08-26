@@ -29,6 +29,7 @@ from paper_trading.domain.enums import (
     LedgerRebuildStatus,
     Market,
     MatchingRunStatus,
+    MigrationRepairReason,
     OrderSide,
     OrderStatus,
     PendingSettlementSource,
@@ -110,6 +111,9 @@ class PaperAccount(Base):
     hk_afrc_levy_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
     hk_settlement_fee_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
     etf_commission_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    migration_repair_reason: Mapped[str | None] = mapped_column(
+        _value_enum(MigrationRepairReason, "paper_account_migration_repair_reason"), nullable=True
+    )
 
 
 class PaperCashLedger(Base):

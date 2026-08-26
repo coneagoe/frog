@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 
+from paper_trading.domain.enums import MigrationRepairReason
 from paper_trading.storage.enum_migration import (
     PAPER_TRADING_ENUM_ADAPTER,
     PAPER_TRADING_ENUM_GROUPS,
@@ -66,7 +67,7 @@ def _connection(engine: Engine, schema: str) -> Connection:
 
 def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
     statements = (
-        "CREATE TABLE paper_accounts (id integer primary key, status varchar(20) NOT NULL DEFAULT 'active', fee_preset varchar(30) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_accounts (id integer primary key, status varchar(20) NOT NULL DEFAULT 'active', fee_preset varchar(30) NOT NULL DEFAULT 'a_share', migration_repair_reason varchar(40))",
         "CREATE TABLE paper_cash_ledger (id integer primary key, event_type varchar(20) NOT NULL)",
         "CREATE TABLE paper_positions (id integer primary key, account_id integer NOT NULL, symbol varchar(20) NOT NULL, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share', CONSTRAINT uq_paper_positions_account_symbol UNIQUE (account_id, symbol))",
         "CREATE TABLE paper_position_lots (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
@@ -194,6 +195,24 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
     )
 
 
+def _repair_reason_group():
+    return next(
+        group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == "paper_account_migration_repair_reason"
+    )
+
+
+def test_migration_repair_reason_group_declares_nullable_varchar40_column():
+    group = _repair_reason_group()
+    assert group.labels == (MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value,)
+    assert len(group.columns) == 1
+    column = group.columns[0]
+    assert (column.table_name, column.column_name) == ("paper_accounts", "migration_repair_reason")
+    assert column.legacy_type_sql == "VARCHAR(40)"
+    assert column.nullable is True
+    assert column.default_sql is None
+    assert column.indexes == ()
+
+
 def test_adapter_preflight_does_not_convert_matching_status(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -227,6 +246,10 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
         assert _column_type(connection, "paper_account_snapshots", "quality_status") == "paper_snapshot_quality_status"
         assert _index_exists(connection, "uq_paper_account_snapshots_account_initial")
         assert "completed_with_warnings" in _enum_labels(connection, "paper_matching_run_status")
+        assert _enum_labels(connection, "paper_account_migration_repair_reason") == ("legacy_ordering_uncertain",)
+        assert _column_type(connection, "paper_accounts", "migration_repair_reason") == (
+            "paper_account_migration_repair_reason"
+        )
 
         PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=True)
         assert PAPER_TRADING_ENUM_ADAPTER.rollback(connection) is True
@@ -240,6 +263,89 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
         assert _column_type(connection, "paper_account_snapshots", "point_type") == "character varying(20)"
         assert _column_type(connection, "paper_account_snapshots", "quality_status") == "character varying(20)"
         assert _index_exists(connection, "uq_paper_account_snapshots_account_initial")
+        assert _column_type(connection, "paper_accounts", "migration_repair_reason") == "character varying(40)"
+
+
+def test_apply_adds_missing_nullable_migration_repair_reason_column(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("ALTER TABLE paper_accounts DROP COLUMN migration_repair_reason"))
+        connection.execute(text("INSERT INTO paper_accounts (id, status, fee_preset) VALUES (1, 'active', 'a_share')"))
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        assert _column_type(connection, "paper_accounts", "migration_repair_reason") == (
+            "paper_account_migration_repair_reason"
+        )
+        assert _enum_labels(connection, "paper_account_migration_repair_reason") == ("legacy_ordering_uncertain",)
+        assert (
+            connection.execute(text("SELECT migration_repair_reason FROM paper_accounts WHERE id = 1")).scalar_one()
+            is None
+        )
+
+
+def test_apply_converts_legacy_migration_repair_reason_text_and_is_idempotent(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO paper_accounts (id, status, fee_preset, migration_repair_reason) "
+                "VALUES (1, 'active', 'a_share', 'legacy_ordering_uncertain')"
+            )
+        )
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        assert _column_type(connection, "paper_accounts", "migration_repair_reason") == (
+            "paper_account_migration_repair_reason"
+        )
+        assert (
+            connection.execute(
+                text("SELECT migration_repair_reason::text FROM paper_accounts WHERE id = 1")
+            ).scalar_one()
+            == "legacy_ordering_uncertain"
+        )
+        assert migrate_paper_trading_enums(connection).converted is False
+        assert _column_type(connection, "paper_accounts", "migration_repair_reason") == (
+            "paper_account_migration_repair_reason"
+        )
+
+
+def test_unknown_legacy_migration_repair_reason_aborts_without_conversion(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO paper_accounts (id, status, fee_preset, migration_repair_reason) "
+                "VALUES (1, 'active', 'a_share', 'unknown_repair')"
+            )
+        )
+        with pytest.raises(PaperTradingEnumMigrationError, match="paper_account_migration_repair_reason"):
+            migrate_paper_trading_enums(connection)
+        assert _column_type(connection, "paper_accounts", "migration_repair_reason") == "character varying(40)"
+        assert _enum_types(connection) == set()
+
+
+def test_rollback_reverts_migration_repair_reason_to_varchar40_before_dropping_type(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO paper_accounts (id, status, fee_preset, migration_repair_reason) "
+                "VALUES (1, 'active', 'a_share', 'legacy_ordering_uncertain')"
+            )
+        )
+        assert migrate_paper_trading_enums(connection).converted is True
+        assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
+
+        assert _column_type(connection, "paper_accounts", "migration_repair_reason") == "character varying(40)"
+        assert "paper_account_migration_repair_reason" not in _enum_types(connection)
+        assert (
+            connection.execute(text("SELECT migration_repair_reason FROM paper_accounts WHERE id = 1")).scalar_one()
+            == "legacy_ordering_uncertain"
+        )
 
 
 def test_rollback_removes_additive_etf_commission_rate_column(postgres_schema):

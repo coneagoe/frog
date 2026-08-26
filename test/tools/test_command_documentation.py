@@ -11,8 +11,6 @@ FILES_WITHOUT_POETRY = [
     "factor/alphapurify_volatility.py",
     "factor/alphapurify_momentum.py",
     "factor/alphapurify_obos.py",
-    "docs/superpowers/plans/2026-06-16-paper-trading-backend.md",
-    "docs/superpowers/plans/2026-06-16-paper-trading-frontend.md",
 ]
 
 

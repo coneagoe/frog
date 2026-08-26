@@ -403,6 +403,19 @@ _SQLITE_PAPER_SNAPSHOT_SERIES_COLUMNS = {
     "quality_status": "VARCHAR(20) NOT NULL DEFAULT 'valid'",
     "invalid_reason": "TEXT",
 }
+_PAPER_ACCOUNT_REPAIR_REASON_TYPE = "paper_account_migration_repair_reason"
+_PAPER_ACCOUNT_REPAIR_REASON_COLUMN = "migration_repair_reason"
+_SQLITE_PAPER_ACCOUNT_REPAIR_REASON_DDL = "VARCHAR(40)"
+_LEGACY_CHRONOLOGY_SOURCES = (
+    (tb_name_paper_account_snapshots, ("event_at", "created_at"), ("trade_date",)),
+    (tb_name_paper_cash_ledger, ("occurred_at",), ("trade_date",)),
+    (tb_name_paper_trades, ("trade_time",), ("trade_date",)),
+    (tb_name_paper_orders, ("created_at",), ("trade_date",)),
+    (tb_name_paper_position_lots, (), ("buy_trade_date",)),
+    (tb_name_paper_position_round_trips, (), ("open_trade_date", "close_trade_date")),
+    (tb_name_paper_matching_runs, (), ("trade_date",)),
+    (tb_name_paper_trade_validity_checks, (), ("trade_date",)),
+)
 
 
 def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
@@ -3902,15 +3915,15 @@ class StorageDb:
             PaperValuationGap,
         )
 
-        if self.engine.dialect.name != "postgresql":
+        has_paper_orders = inspect(self.engine).has_table(tb_name_paper_orders)
+        if self.engine.dialect.name != "postgresql" and has_paper_orders:
             PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
             PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
             PaperValuationGap.__table__.create(self.engine, checkfirst=True)
             DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
 
-        # Bail out if the paper_orders table does not exist yet --- fresh
-        # installs rely on Base.metadata.create_all in __init__.
-        if not inspect(self.engine).has_table(tb_name_paper_orders):
+        if not has_paper_orders:
+            self._ensure_paper_account_repair_without_orders()
             return
 
         if self.engine.dialect.name == "postgresql":
@@ -4005,7 +4018,8 @@ class StorageDb:
                     text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN validity_checked_at TIMESTAMP WITH TIME ZONE")
                 )
 
-        if inspect(self.engine).has_table(tb_name_paper_accounts):
+        has_paper_accounts = inspect(self.engine).has_table(tb_name_paper_accounts)
+        if has_paper_accounts:
             account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
             account_fee_columns = {
                 "fee_preset": "VARCHAR(30) NOT NULL DEFAULT 'a_share'",
@@ -4057,6 +4071,8 @@ class StorageDb:
                 )
                 with self.engine.begin() as conn:
                     conn.execute(text(f"UPDATE {tb_name_paper_accounts} SET {assignments}"))
+            if self.engine.dialect.name != "postgresql":
+                self._ensure_sqlite_paper_account_repair_metadata()
 
         if inspect(self.engine).has_table(tb_name_paper_cash_ledger):
             cash_ledger_columns = {
@@ -4072,12 +4088,12 @@ class StorageDb:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name_paper_cash_ledger} ADD COLUMN {column_name} {ddl}"))
 
-        if inspect(self.engine).has_table(tb_name_paper_account_snapshots):
-            if self.engine.dialect.name == "postgresql":
-                with self.engine.begin() as conn:
-                    self._ensure_paper_account_snapshot_series(conn)
-            else:
-                self._ensure_sqlite_paper_account_snapshot_series()
+        has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
+        if self.engine.dialect.name == "postgresql" and (has_paper_accounts or has_paper_snapshots):
+            with self.engine.begin() as conn:
+                self._ensure_paper_account_snapshot_series(conn)
+        elif has_paper_snapshots:
+            self._ensure_sqlite_paper_account_snapshot_series()
 
         if inspect(self.engine).has_table(tb_name_paper_ledger_rebuilds):
             rebuild_columns = {
@@ -4126,6 +4142,32 @@ class StorageDb:
                 if "market" not in market_columns:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name} ADD COLUMN market {market_ddl}"))
+
+    def _ensure_paper_account_repair_without_orders(self) -> None:
+        has_paper_accounts = inspect(self.engine).has_table(tb_name_paper_accounts)
+        has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
+        if self.engine.dialect.name == "postgresql" and (has_paper_accounts or has_paper_snapshots):
+            with self.engine.begin() as conn:
+                self._ensure_paper_account_snapshot_series(conn)
+            return
+        if has_paper_accounts:
+            self._ensure_sqlite_paper_account_repair_metadata()
+        if has_paper_snapshots:
+            self._ensure_sqlite_paper_account_snapshot_series()
+
+    def _ensure_sqlite_paper_account_repair_metadata(self) -> None:
+        if not inspect(self.engine).has_table(tb_name_paper_accounts):
+            return
+        account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
+        if _PAPER_ACCOUNT_REPAIR_REASON_COLUMN in account_columns:
+            return
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN "
+                    f"{_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} {_SQLITE_PAPER_ACCOUNT_REPAIR_REASON_DDL}"
+                )
+            )
 
     def _ensure_sqlite_paper_account_snapshot_series(self) -> None:
         snapshot_columns = {
@@ -4184,20 +4226,90 @@ class StorageDb:
             )
 
     def _ensure_paper_account_snapshot_series(self, conn) -> None:
-        from paper_trading.storage.enum_migration import ensure_snapshot_series_enum_types
-
         conn.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:lock_key AS text), 0))"),
             {"lock_key": _PAPER_SNAPSHOT_SERIES_LOCK_KEY},
         )
+        self._ensure_paper_account_repair_metadata(conn)
         if not inspect(conn).has_table(tb_name_paper_account_snapshots):
             return
+        self._ensure_paper_snapshot_series_metadata(conn)
+        self._backfill_paper_snapshot_series_quality(conn)
+        self._classify_legacy_paper_account_chronology(conn)
+        self._insert_paper_account_initial_baselines(conn)
+
+    def _table_column_names(self, conn, table_name: str) -> set[str]:
+        return {column["name"] for column in inspect(conn).get_columns(table_name)}
+
+    def _ensure_paper_account_repair_metadata(self, conn) -> None:
+        from paper_trading.domain.enums import MigrationRepairReason
+
+        if not inspect(conn).has_table(tb_name_paper_accounts):
+            return
+        type_exists = conn.execute(
+            text(
+                """
+                SELECT 1
+                FROM pg_type t
+                JOIN pg_namespace n ON n.oid = t.typnamespace
+                WHERE n.nspname = current_schema()
+                  AND t.typname = :type_name
+                """
+            ),
+            {"type_name": _PAPER_ACCOUNT_REPAIR_REASON_TYPE},
+        ).scalar_one_or_none()
+        if type_exists is None:
+            conn.execute(
+                text(
+                    f"CREATE TYPE {_PAPER_ACCOUNT_REPAIR_REASON_TYPE} AS ENUM "
+                    f"('{MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value}')"
+                )
+            )
+        if _PAPER_ACCOUNT_REPAIR_REASON_COLUMN not in self._table_column_names(conn, tb_name_paper_accounts):
+            conn.execute(
+                text(
+                    f"ALTER TABLE {tb_name_paper_accounts} "
+                    f"ADD COLUMN {_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} {_PAPER_ACCOUNT_REPAIR_REASON_TYPE}"
+                )
+            )
+            return
+        observed_type = conn.execute(
+            text(
+                """
+                SELECT t.typname
+                FROM pg_attribute a
+                JOIN pg_class c ON c.oid = a.attrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                JOIN pg_type t ON t.oid = a.atttypid
+                WHERE n.nspname = current_schema()
+                  AND c.relname = :table_name
+                  AND a.attname = :column_name
+                  AND a.attnum > 0
+                  AND NOT a.attisdropped
+                """
+            ),
+            {"table_name": tb_name_paper_accounts, "column_name": _PAPER_ACCOUNT_REPAIR_REASON_COLUMN},
+        ).scalar_one_or_none()
+        if observed_type == _PAPER_ACCOUNT_REPAIR_REASON_TYPE:
+            return
+        conn.execute(
+            text(
+                f"ALTER TABLE {tb_name_paper_accounts} "
+                f"ALTER COLUMN {_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} "
+                f"TYPE {_PAPER_ACCOUNT_REPAIR_REASON_TYPE} "
+                f"USING {_PAPER_ACCOUNT_REPAIR_REASON_COLUMN}::text::{_PAPER_ACCOUNT_REPAIR_REASON_TYPE}"
+            )
+        )
+
+    def _ensure_paper_snapshot_series_metadata(self, conn) -> None:
+        from paper_trading.storage.enum_migration import ensure_snapshot_series_enum_types
+
         ensure_snapshot_series_enum_types(conn)
-        snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
+        snapshot_columns = self._table_column_names(conn, tb_name_paper_account_snapshots)
         for column_name, ddl in _PAPER_SNAPSHOT_NAV_COLUMNS.items():
             if column_name not in snapshot_columns:
                 conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))
-        snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
+        snapshot_columns = self._table_column_names(conn, tb_name_paper_account_snapshots)
         series_columns = {
             "point_type": "paper_snapshot_point_type",
             "event_at": "TIMESTAMP WITH TIME ZONE",
@@ -4208,6 +4320,7 @@ class StorageDb:
             if column_name not in snapshot_columns:
                 conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))
 
+    def _backfill_paper_snapshot_series_quality(self, conn) -> None:
         conn.execute(
             text(
                 f"""
@@ -4246,7 +4359,6 @@ class StorageDb:
         conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN event_at SET NOT NULL"))
         conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ALTER COLUMN quality_status SET NOT NULL"))
         self._drop_legacy_snapshot_account_date_uniqueness(conn)
-
         conn.execute(
             text(
                 f"CREATE INDEX IF NOT EXISTS ix_paper_account_snapshots_account_event "
@@ -4259,6 +4371,88 @@ class StorageDb:
                 f"ON {tb_name_paper_account_snapshots} (account_id) WHERE point_type = 'initial'"
             )
         )
+
+    def _classify_legacy_paper_account_chronology(self, conn) -> None:
+        from paper_trading.domain.enums import MigrationRepairReason
+
+        if not inspect(conn).has_table(tb_name_paper_accounts):
+            return
+        account_columns = self._table_column_names(conn, tb_name_paper_accounts)
+        if _PAPER_ACCOUNT_REPAIR_REASON_COLUMN not in account_columns:
+            return
+        if "created_at" not in account_columns:
+            predicates = ["TRUE"]
+        else:
+            predicates = ["account.created_at IS NULL", *self._legacy_chronology_predicates(conn)]
+        conn.execute(
+            text(
+                f"""
+                UPDATE {tb_name_paper_accounts} AS account
+                SET {_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} = '{MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value}'
+                WHERE account.{_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} IS NULL
+                  AND ({" OR ".join(predicates)})
+                """
+            )
+        )
+
+    def _legacy_chronology_predicates(self, conn) -> list[str]:
+        predicates: list[str] = []
+        for table_name, timestamp_columns, date_columns in _LEGACY_CHRONOLOGY_SOURCES:
+            if not inspect(conn).has_table(table_name):
+                continue
+            columns = self._table_column_names(conn, table_name)
+            expected_columns = (*timestamp_columns, *date_columns)
+            account_match = self._legacy_chronology_account_match(table_name, columns)
+            if any(column_name not in columns for column_name in expected_columns):
+                predicates.append(
+                    f"""EXISTS (
+                    SELECT 1
+                    FROM {table_name} AS source
+                    WHERE {account_match}
+                )"""
+                )
+                continue
+            row_uncertain = self._legacy_chronology_row_uncertain(timestamp_columns, date_columns)
+            predicates.append(
+                f"""EXISTS (
+                    SELECT 1
+                    FROM {table_name} AS source
+                    WHERE {account_match}
+                      AND ({row_uncertain})
+                )"""
+            )
+        return predicates
+
+    def _legacy_chronology_row_uncertain(
+        self, timestamp_columns: tuple[str, ...], date_columns: tuple[str, ...]
+    ) -> str:
+        date_unproven = " OR ".join(
+            f"(source.{column_name} IS NULL OR source.{column_name} <= CAST(account.created_at AS date))"
+            for column_name in date_columns
+        )
+        if not timestamp_columns:
+            return date_unproven
+        timestamp_early = " OR ".join(f"source.{column_name} < account.created_at" for column_name in timestamp_columns)
+        all_timestamps_null = " AND ".join(f"source.{column_name} IS NULL" for column_name in timestamp_columns)
+        if not date_columns:
+            return f"({timestamp_early}) OR ({all_timestamps_null})"
+        return f"({timestamp_early}) OR (({all_timestamps_null}) AND ({date_unproven}))"
+
+    def _legacy_chronology_account_match(self, table_name: str, columns: set[str]) -> str:
+        if table_name == tb_name_paper_matching_runs:
+            if "account_id" not in columns:
+                return "TRUE"
+            if "scope_key" in columns:
+                return "(source.account_id = account.id OR (source.account_id IS NULL AND source.scope_key = 'all'))"
+            return "(source.account_id = account.id OR source.account_id IS NULL)"
+        account_match = "source.account_id = account.id"
+        if table_name == tb_name_paper_account_snapshots and "point_type" in columns:
+            return f"{account_match} AND source.point_type IS DISTINCT FROM 'initial'"
+        return account_match
+
+    def _insert_paper_account_initial_baselines(self, conn) -> None:
+        if not inspect(conn).has_table(tb_name_paper_accounts):
+            return
         assign_ids = (
             conn.execute(
                 text("SELECT pg_get_serial_sequence(:table_name, 'id')"),
@@ -4306,6 +4500,8 @@ class StorageDb:
                     account.initial_cash
                 FROM {tb_name_paper_accounts} AS account
                 WHERE account.initial_cash > 0
+                  AND account.created_at IS NOT NULL
+                  AND account.{_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} IS NULL
                   AND NOT EXISTS (
                       SELECT 1
                       FROM {tb_name_paper_account_snapshots} AS snapshot

@@ -112,25 +112,35 @@ export function AnalyticsPage() {
       {error ? <ErrorBanner message={error} /> : null}
       <section className="panel">
         <h2>Overview</h2>
-        <AnalyticsSummary analytics={analytics} snapshot={latestSnapshot} />
+        {analytics?.available === false ? (
+          <div className="panel">
+            Historical ordering requires account repair before performance analytics are available.
+          </div>
+        ) : (
+          <AnalyticsSummary analytics={analytics} snapshot={latestSnapshot} />
+        )}
         <AssetChart snapshots={snapshots} />
       </section>
-      <section className="panel">
-        <h2>Activity</h2>
-        <AnalyticsActivitySection analytics={analytics} />
-      </section>
-      <section className="panel">
-        <h2>Execution</h2>
-        <AnalyticsExecutionSection analytics={analytics} />
-      </section>
-      <section className="panel">
-        <h2>Trade Quality</h2>
-        <AnalyticsTradeQualitySection analytics={analytics} />
-      </section>
-      <section className="panel">
-        <h2>Risk &amp; Drawdown</h2>
-        <AnalyticsRiskSection analytics={analytics} />
-      </section>
+      {analytics?.available !== false ? (
+        <>
+          <section className="panel">
+            <h2>Activity</h2>
+            <AnalyticsActivitySection analytics={analytics} />
+          </section>
+          <section className="panel">
+            <h2>Execution</h2>
+            <AnalyticsExecutionSection analytics={analytics} />
+          </section>
+          <section className="panel">
+            <h2>Trade Quality</h2>
+            <AnalyticsTradeQualitySection analytics={analytics} />
+          </section>
+          <section className="panel">
+            <h2>Risk &amp; Drawdown</h2>
+            <AnalyticsRiskSection analytics={analytics} />
+          </section>
+        </>
+      ) : null}
     </section>
   );
 }

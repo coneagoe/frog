@@ -1,6 +1,5 @@
-import { MoneyText } from "@/components/money-text";
 import { formatBackendLabel, formatPercent } from "@/lib/format";
-import type { AnalyticsResponse, MetricValue, Snapshot } from "@/lib/types";
+import type { AvailableAnalyticsResponse, MetricValue, Snapshot } from "@/lib/types";
 
 export function MetricValueText({ metric, percent = false }: { metric: MetricValue | null | undefined; percent?: boolean }) {
   if (!metric || metric.value === null || metric.value === undefined || metric.value === "") {
@@ -10,7 +9,7 @@ export function MetricValueText({ metric, percent = false }: { metric: MetricVal
   return <span>{percent ? formatPercent(metric.value) : metric.value}</span>;
 }
 
-export function AnalyticsSummary({ analytics, snapshot }: { analytics: AnalyticsResponse | null; snapshot: Snapshot | null }) {
+export function AnalyticsSummary({ analytics, snapshot }: { analytics: AvailableAnalyticsResponse | null; snapshot: Snapshot | null }) {
   const overview = analytics?.overview;
   const cards = [
     ["Unit NAV", overview?.net_asset_value ?? snapshot?.net_asset_value ?? "-"],

@@ -34,6 +34,7 @@ function closestSection(element: HTMLElement): HTMLElement {
 }
 
 const analyticsPayload = {
+  available: true as const,
   overview: {
     total_assets: "106000.0000",
     cash_available: "90000.0000",
@@ -220,6 +221,49 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("Unit NAV")).toBeInTheDocument();
     expect(screen.getByText("Share Count")).toBeInTheDocument();
     expect(screen.getByText("1.050000")).toBeInTheDocument();
+  });
+
+  it("shows repair required state while keeping stored snapshot chart visible", async () => {
+    const snapshot: Snapshot = {
+      id: 2,
+      account_id: 1,
+      trade_date: "2026-09-11",
+      point_type: "trading",
+      event_at: "2026-09-11T15:00:00Z",
+      quality_status: "valid",
+      invalid_reason: null,
+      cash_available: "90000.0000",
+      cash_frozen: "0.0000",
+      market_value: "16000.0000",
+      total_assets: "106000.0000",
+      realized_pnl: "6000.0000",
+      unrealized_pnl: "500.0000",
+      net_asset_value: "1.050000",
+      share_count: "1000",
+      cumulative_deposit: "100000.0000",
+      cumulative_withdrawal: "0.0000",
+      net_cash_flow: "100000.0000",
+      pending_settlement: "0.0000",
+      position_count: 1,
+      order_count: 2,
+      trade_count: 2
+    };
+    listSnapshotsMock.mockResolvedValue([snapshot]);
+    getAnalyticsMock.mockResolvedValue({ available: false, reason: "legacy_account_requires_repair" });
+
+    render(<AnalyticsPage />);
+
+    expect(await screen.findByText("Historical ordering requires account repair before performance analytics are available.")).toBeInTheDocument();
+    expect(screen.queryByText("NAV Return")).not.toBeInTheDocument();
+    expect(screen.queryByText("Activity")).not.toBeInTheDocument();
+    expect(screen.queryByText("Execution")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trade Quality")).not.toBeInTheDocument();
+    expect(screen.queryByText("Risk & Drawdown")).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("1");
+    expect(screen.getByRole("heading", { level: 2, name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Overview" }).closest("section")).toContainElement(
+      document.querySelector(".chart-surface")
+    );
   });
 
   it("shows insufficient data reasons for unavailable metrics", async () => {

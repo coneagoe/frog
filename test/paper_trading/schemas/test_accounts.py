@@ -4,13 +4,51 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from paper_trading.domain.enums import Market
+from paper_trading.domain.enums import Market, MigrationRepairReason
 from paper_trading.schemas.accounts import (
+    AccountResponse,
     CreateAccountRequest,
     ImportPositionItem,
     ImportPositionsRequest,
     UpdateAccountFeeRequest,
 )
+
+
+def _account_response_payload(**overrides):
+    payload = {
+        "id": 1,
+        "name": "demo",
+        "initial_cash": Decimal("100000"),
+        "cash_available": Decimal("100000"),
+        "fee_preset": "a_share",
+        "commission_rate": Decimal("0.0003"),
+        "min_commission": Decimal("5"),
+        "stamp_duty_rate": Decimal("0.0005"),
+        "transfer_fee_rate": Decimal("0.00001"),
+        "status": "active",
+        "base_currency": "CNY",
+        "share_count": Decimal("100000"),
+        "net_asset_value": Decimal("1"),
+        "cumulative_deposit": Decimal("0"),
+        "cumulative_withdrawal": Decimal("0"),
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_account_response_serializes_nullable_migration_repair_reason():
+    response = AccountResponse.model_validate(_account_response_payload())
+
+    assert response.migration_repair_reason is None
+    assert response.model_dump()["migration_repair_reason"] is None
+
+    repaired = AccountResponse.model_validate(
+        _account_response_payload(migration_repair_reason=MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN)
+    )
+
+    assert repaired.migration_repair_reason == MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN
+    assert repaired.model_dump()["migration_repair_reason"] == "legacy_ordering_uncertain"
+
 
 # ---------------------------------------------------------------------------
 # UpdateAccountFeeRequest

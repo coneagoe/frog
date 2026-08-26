@@ -15,6 +15,7 @@ from paper_trading.domain.enums import (
     LedgerRebuildStatus,
     Market,
     MatchingRunStatus,
+    MigrationRepairReason,
     OrderSide,
     OrderStatus,
     PendingSettlementSource,
@@ -312,6 +313,11 @@ PAPER_TRADING_ENUM_GROUPS = (
         _labels(SnapshotQualityStatus),
         (_column("paper_account_snapshots", "quality_status", "VARCHAR(20)", "'valid'"),),
     ),
+    PaperTradingEnumGroup(
+        "paper_account_migration_repair_reason",
+        _labels(MigrationRepairReason),
+        (_column("paper_accounts", "migration_repair_reason", "VARCHAR(40)", nullable=True),),
+    ),
 )
 
 _GOVERNED_TABLES = (
@@ -351,6 +357,22 @@ _SNAPSHOT_INITIAL_LEGACY_PREDICATE = re.compile(r"point_type.*=.*'initial'", re.
 
 def _is_addable_snapshot_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
     return group.type_name in _SNAPSHOT_ENUM_TYPES and column.table_name == "paper_account_snapshots"
+
+
+def _is_addable_repair_reason_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
+    return (
+        group.type_name == "paper_account_migration_repair_reason"
+        and column.table_name == "paper_accounts"
+        and column.column_name == "migration_repair_reason"
+    )
+
+
+def _is_addable_missing_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
+    return (
+        (group.type_name == "paper_market" and column.column_name == "market")
+        or _is_addable_snapshot_column(group, column)
+        or _is_addable_repair_reason_column(group, column)
+    )
 
 
 def ensure_snapshot_series_enum_types(connection: Connection) -> None:
@@ -422,6 +444,7 @@ def _adapter_apply(connection: Connection) -> bool:
         )
         _add_market_columns(connection)
         _add_snapshot_columns(connection)
+        _add_repair_reason_column(connection)
         for group in groups:
             _alter_group(connection, group, rollback=False)
         _upgrade_market_qualified_keys(connection)
@@ -433,6 +456,7 @@ def _adapter_apply(connection: Connection) -> bool:
             _create_type(connection, group)
         _add_market_columns(connection)
         _add_snapshot_columns(connection)
+        _add_repair_reason_column(connection)
         for group in groups:
             _alter_group(connection, group, rollback=False)
     _upgrade_market_qualified_keys(connection)
@@ -627,10 +651,7 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
                 continue
             facts = _column_facts(connection, column)
             if facts is None:
-                if not rollback and (
-                    (group.type_name == "paper_market" and column.column_name == "market")
-                    or _is_addable_snapshot_column(group, column)
-                ):
+                if not rollback and _is_addable_missing_column(group, column):
                     continue
                 raise PaperTradingEnumMigrationError(
                     f"{group.type_name}: missing {column.table_name}.{column.column_name}"
@@ -914,6 +935,18 @@ def _add_snapshot_columns(connection: Connection) -> None:
             )
             for _, index_sql in column.indexes:
                 connection.execute(text(index_sql))
+
+
+def _add_repair_reason_column(connection: Connection) -> None:
+    group = next(
+        group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == "paper_account_migration_repair_reason"
+    )
+    for column in group.columns:
+        if not _table_exists(connection, column.table_name) or _column_facts(connection, column) is not None:
+            continue
+        connection.execute(
+            text(f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} {column.legacy_type_sql}")
+        )
 
 
 def _diagnostics_only_market_state(connection: Connection) -> bool:

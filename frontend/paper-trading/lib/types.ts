@@ -96,13 +96,21 @@ export type RiskAnalytics = {
   calmar: MetricValue;
 };
 
-export type AnalyticsResponse = {
+export type AvailableAnalyticsResponse = {
+  available: true;
   overview: OverviewAnalytics;
   activity: ActivityAnalytics | null;
   execution: ExecutionAnalytics;
   trade_quality: TradeQualityAnalytics;
   risk: RiskAnalytics;
 };
+
+export type UnavailableAnalyticsResponse = {
+  available: false;
+  reason: string;
+};
+
+export type AnalyticsResponse = AvailableAnalyticsResponse | UnavailableAnalyticsResponse;
 
 export type Position = {
   symbol: string;

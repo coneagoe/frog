@@ -65,7 +65,7 @@ Open `http://localhost:3000/accounts`. The frontend has separate workspaces for 
 - `Trade`: submit paper limit orders.
 - `Orders`: review historical orders in pages of 25, filter by Asia/Shanghai trade date (today, trailing 7 or 30 days, or a custom inclusive range), cancel cancellable orders, and delete orders. The URL preserves the account, dates, and page; a cancel or delete that empties the current page returns the view to the last valid page.
 - `Trades`: review historical executions in pages of 25, filter by Asia/Shanghai trade date (today, trailing 7 or 30 days, or a custom inclusive range), preserve the account, date range, and page in the URL, and keep the execution history read-only.
-- `Analytics`: review snapshots, total assets, trades, and cash movements.
+- `Analytics`: review snapshots, total assets, trades, and cash movements. Repair-marked legacy accounts keep the stored snapshot chart but show a repair-required state instead of performance panels.
 
 The bearer token is read only by Next.js route handlers. Browser code calls local `/api/paper/*` endpoints and does not receive `PAPER_TRADING_API_TOKEN`.
 
@@ -282,7 +282,7 @@ curl -X POST http://localhost:8000/paper/accounts \
   -d '{"name":"custom-fee","initial_cash":"100000.00","fee_preset":"a_share","commission_rate":"0.00025","min_commission":"5.00","stamp_duty_rate":"0.0005","transfer_fee_rate":"0.00001"}'
 ```
 
-The only built-in preset is `a_share`. Fee values must be non-negative decimals; zero is valid for fee-free test accounts. Account creation requires positive `initial_cash` and writes one `initial` snapshot at NAV `1.000000`. Later trading valuations append additional snapshot points instead of replacing the same `trade_date`.
+The only built-in preset is `a_share`. Fee values must be non-negative decimals; zero is valid for fee-free test accounts. Account creation requires positive `initial_cash` and writes one `initial` snapshot at NAV `1.000000`. New accounts have no `migration_repair_reason`. Later trading valuations append additional snapshot points instead of replacing the same `trade_date`.
 
 ## Update Account Fees
 
@@ -471,11 +471,17 @@ curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1
 curl -H "Authorization: Bearer change-me" http://localhost:8000/paper/accounts/1/cash-ledger
 ```
 
+Account create, list, get, and patch responses include nullable
+`migration_repair_reason`. Normal accounts return `null`. Repair-marked legacy
+accounts return `legacy_ordering_uncertain`.
+
 Snapshot list responses keep repository order (`event_at`, then `id`) and include
 `point_type` (`initial` or `trading`), timezone-aware `event_at`,
 `quality_status` (`valid` or `invalid`), and nullable `invalid_reason`.
 `id` is the stable same-timestamp order key. Invalid points are returned with
 their stored financial fields; `total_assets` is never substituted for NAV.
+Snapshot listing remains available for repair-marked accounts and does not
+invent a baseline point.
 
 Trade responses include the `comment` field:
 
@@ -525,7 +531,19 @@ Snapshots are generated after matching and use close prices for valuation.
 
 `GET /paper/accounts/{account_id}/analytics` returns account-level analytics for the paper trading dashboard.
 
-The response includes:
+The payload is a discriminated union on `available`. A normal account returns
+HTTP 200 with `available: true` and the overview, activity, execution, trade
+quality, and risk fields below. An account whose `migration_repair_reason` is
+set returns HTTP 200 with
+`{"available": false, "reason": "legacy_ordering_uncertain"}` immediately after
+account lookup, before any metric computation. Unknown accounts remain HTTP 404.
+
+The Analytics frontend keeps account selection, loading and error handling, the
+Overview container, and the stored snapshot chart. When `available` is false it
+replaces the performance summary and the Activity, Execution, Trade Quality, and
+Risk panels with: `Historical ordering requires account repair before performance analytics are available.`
+
+The available response includes:
 
 - Activity: nullable paper-order activity summaries. For accounts with orders,
   coverage runs from the earliest order's `trade_date` through the current
@@ -545,6 +563,59 @@ The response includes:
 `total_return` is NAV return from the ordered valid unit-NAV series, and that series is valid only when the first persisted snapshot is an `initial` point with finite positive stored NAV. Later trading points cannot replace a missing or invalid initial baseline. Invalid, missing, non-finite, or non-positive stored NAV is excluded and is never derived from `total_assets` or `initial_cash`. `simple_asset_return` remains a separate scale-sensitive reference from latest total assets versus initial cash and does not feed total return, risk, or chart data. Overview cash and PnL fields still come from the latest persisted snapshot, including when that point's NAV is invalid. Drawdown and risk-adjusted metrics use the same valid NAV series so deposits and withdrawals do not appear as trading gains or losses.
 
 Round-trip metrics use full-position cycles. A cycle opens when an account's symbol quantity moves from zero to positive and closes when that symbol returns to zero. Partial exits update the open cycle but do not count as closed round trips.
+
+### Legacy NAV Baseline And Repair State
+
+The canonical repair reason is `legacy_ordering_uncertain`. It is an account-level
+warning, not a synthetic snapshot. The closed PostgreSQL enum
+`paper_account_migration_repair_reason` has that single label. The column
+`paper_accounts.migration_repair_reason` is nullable, has no default, and stays
+`NULL` for new accounts and for chronology-safe legacy accounts.
+
+PostgreSQL storage startup serializes the snapshot-series upgrade with the
+transaction advisory lock `paper_account_snapshots.nav_series` whenever
+`paper_accounts` or `paper_account_snapshots` exists, including when
+`paper_orders` is absent. Inside that lock it upgrades repair metadata even
+when snapshots and orders are absent. Snapshot DDL, quality backfill,
+chronology classification, and baseline insertion remain snapshot-gated.
+Missing `paper_orders` does not create orders or snapshots. Concurrent
+startups wait on the lock. Reruns are idempotent: they do not overwrite a
+stored repair reason, do not rewrite valid snapshot financial fields, and do
+not insert a second `initial` point.
+
+Baseline eligibility is proof-based. The migration inserts one `initial`
+NAV=`1.000000` point only when `initial_cash` is positive, `created_at` is
+present, `migration_repair_reason` is null, and no `initial` point already
+exists. Chronology is proven only from persisted timestamps and business
+dates, never from IDs or insertion order. The inspected sources are snapshots
+(`event_at`, `created_at`, `trade_date`; migration-inserted `initial` points
+are excluded), cash ledger (`occurred_at`, `trade_date`), trades
+(`trade_time`, `trade_date`), orders (`created_at`, `trade_date`), lots
+(`buy_trade_date`), round trips (`open_trade_date`, `close_trade_date`),
+matching runs (`trade_date`), and trade-validity checks (`trade_date`).
+For snapshots, cash ledger, trades, and orders, an available timestamp at or
+after `created_at` is chronology-safe and takes precedence over the paired
+date. Date fallback is used only when every applicable timestamp on that row
+is null. A timestamp before `created_at` remains uncertain. Date-only tables
+and date fallback still require a date strictly after `created_at::date`; a
+same-calendar-day or earlier date is unprovable. Null timestamps with no
+proving date, missing expected temporal columns on a persisted source row,
+and a null account `created_at` mark the account uncertain. Missing
+tables are skipped. Matching runs with `account_id IS NULL` apply globally
+only when `scope_key = 'all'` if that column exists; older matching-run tables
+without `scope_key` still treat a null-account run as global.
+
+When chronology cannot be proven, the migration sets
+`migration_repair_reason=legacy_ordering_uncertain`, creates no baseline, and
+leaves stored snapshot financial fields unchanged, including invalid NAV
+points. Valid history is never rewritten to invent returns.
+
+SQLite startup adds nullable `VARCHAR(40) migration_repair_reason` whenever
+`paper_accounts` exists and the column is missing, even when snapshots and
+orders are absent. Snapshot series metadata is upgraded only when
+`paper_account_snapshots` exists. SQLite never classifies chronology and never
+inserts an initial baseline. Baseline insertion is a PostgreSQL production
+startup behavior.
 
 ## Closed Position Cleanup
 
@@ -663,14 +734,15 @@ production operator interface for the governed Paper Trading, Monitor, Forecast
 SSF, and Storage schemas. Keep the maintenance record, verified backup, and
 every command's JSON output together.
 
-The governed types are the 16 Paper Trading types:
+The governed types are the 17 Paper Trading types:
 `paper_account_status`, `paper_fee_preset`, `paper_cash_event_type`,
 `paper_order_side`, `paper_order_status`, `paper_trade_validity_status`,
 `paper_market`, `paper_position_source`, `paper_round_trip_status`,
 `paper_trade_validity_granularity`, `paper_pending_settlement_source`,
 `paper_ledger_rebuild_status`, `paper_matching_run_status`,
-`paper_etf_eligibility_status`, `paper_snapshot_point_type`, and
-`paper_snapshot_quality_status`; the four
+`paper_etf_eligibility_status`, `paper_snapshot_point_type`,
+`paper_snapshot_quality_status`, and
+`paper_account_migration_repair_reason`; the four
 Monitor and Forecast SSF types: `monitor_market`, `monitor_frequency`,
 `monitor_reset_mode`, and `forecast_ssf_candidate_state`; and the five Storage
 types: `blackroom_market`, `blackroom_source`,
@@ -700,16 +772,25 @@ restores either missing dependent operational table after converting or
 verifying an otherwise complete governed schema. Normal PostgreSQL storage
 startup intentionally does not create or convert those governed tables; use the
 migration command for that explicit schema change. Startup may create the
-snapshot series enum types and add nullable series columns on an existing
-`paper_account_snapshots` table so it can backfill `event_at`, mark legacy
-rows as `trading`, derive quality from stored NAV, drop the old account/date
-unique constraint or standalone unique index, and insert at most one `initial`
-NAV=1 point for each
-account whose legacy `initial_cash` is positive. It does not convert other
-governed enum columns or rewrite financial snapshot fields. On an existing
-non-PostgreSQL `paper_account_snapshots` table, startup adds the same series
-columns with SQLite-compatible DDL, backfills `event_at` from `created_at`,
-and marks legacy rows as `trading` so ORM listing by `event_at` works.
+snapshot series enum types and the additive
+`paper_account_migration_repair_reason` type and add nullable
+`paper_accounts.migration_repair_reason` whenever `paper_accounts` exists,
+even when snapshots and orders are absent. When `paper_account_snapshots`
+exists it also adds snapshot series columns on existing tables, backfills
+`event_at`, marks legacy rows as `trading`, derives quality from stored NAV,
+drops the old account/date unique constraint or standalone unique index,
+classifies unprovable chronology as `legacy_ordering_uncertain`, and inserts
+at most one `initial` NAV=1 point for each chronology-safe account whose
+legacy `initial_cash` is positive. It does not convert other governed enum
+columns, overwrite a stored repair reason, rewrite financial snapshot fields,
+or create missing `paper_orders` or `paper_account_snapshots`. On SQLite,
+startup adds nullable `VARCHAR(40) migration_repair_reason` whenever
+`paper_accounts` exists, even when snapshots and orders are absent. Snapshot
+series columns use SQLite-compatible DDL only when `paper_account_snapshots`
+exists:
+startup then backfills `event_at` from `created_at` and marks legacy rows as
+`trading` so ORM listing by `event_at` works. SQLite does not insert an
+initial baseline.
 
 Selected-table clean export is unsupported. Selected-table clean import refuses
 to run when an unselected table has a foreign key referencing the selected
@@ -804,6 +885,7 @@ WITH expected(type_name, labels) AS (
     ('paper_etf_eligibility_status', ARRAY['unknown','supported','money_market','disabled']),
     ('paper_snapshot_point_type', ARRAY['initial','trading']),
     ('paper_snapshot_quality_status', ARRAY['valid','invalid']),
+    ('paper_account_migration_repair_reason', ARRAY['legacy_ordering_uncertain']),
     ('monitor_market', ARRAY['A','HK','ETF']),
     ('monitor_frequency', ARRAY['daily','intraday']),
     ('monitor_reset_mode', ARRAY['auto','manual']),
@@ -852,6 +934,7 @@ WITH expected(table_name, column_name, type_name) AS (
     ('paper_etf_eligibility','status','paper_etf_eligibility_status'),
     ('paper_account_snapshots','point_type','paper_snapshot_point_type'),
     ('paper_account_snapshots','quality_status','paper_snapshot_quality_status'),
+    ('paper_accounts','migration_repair_reason','paper_account_migration_repair_reason'),
     ('stock_monitor_targets','market','monitor_market'), ('forecast_ssf_candidates','market','monitor_market'),
     ('stock_monitor_targets','frequency','monitor_frequency'), ('stock_monitor_targets','reset_mode','monitor_reset_mode'),
     ('forecast_ssf_candidates','state','forecast_ssf_candidate_state'), ('blackroom_records','market','blackroom_market'),
@@ -870,7 +953,7 @@ ORDER BY e.table_name, e.column_name;
 SQL
 ```
 
-Expected result: zero rows. This proves all 34 governed columns use their
+Expected result: zero rows. This proves all 35 governed columns use their
 managed enum types.
 
 ```bash
@@ -903,7 +986,8 @@ WITH expected AS (
     ('paper_trade_validity_checks','side', NULL), ('paper_orders','status', NULL),
     ('paper_orders','validity_status', NULL), ('paper_trade_validity_checks','status', NULL),
     ('paper_pending_settlement','source', NULL), ('paper_ledger_rebuilds','status', NULL),
-    ('paper_matching_runs','status', NULL), ('forecast_ssf_candidates','state', NULL)
+    ('paper_matching_runs','status', NULL), ('forecast_ssf_candidates','state', NULL),
+    ('paper_accounts','migration_repair_reason', NULL)
   ) AS v(table_name, column_name, default_expression)
 ), observed AS (
   SELECT c.relname AS table_name, a.attname AS column_name, pg_get_expr(d.adbin, d.adrelid) AS default_expression

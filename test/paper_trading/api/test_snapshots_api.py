@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
-from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import MigrationRepairReason, SnapshotPointType, SnapshotQualityStatus
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -157,4 +157,54 @@ def test_snapshots_api_preserves_repository_order_for_same_day_and_tied_event_at
     assert payload[2]["invalid_reason"] == "missing_nav"
     assert payload[2]["net_asset_value"] is None
     assert payload[2]["total_assets"] == "999999.0000"
+    assert all(_assert_iso8601_offset(item["event_at"]) for item in payload)
+
+
+def test_snapshots_api_keeps_event_at_id_order_for_repair_marked_account(monkeypatch, sqlite_session):
+    client, headers, session = _client(monkeypatch, sqlite_session)
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("repair-snapshots", Decimal("100000.00"))
+    initial = repo.list_snapshots(account.id)[0]
+    tied = datetime(2026, 8, 25, 10, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 8, 25, 15, 0, tzinfo=timezone.utc)
+    initial.event_at = datetime(2026, 8, 25, 1, 0, tzinfo=timezone.utc)
+    initial.trade_date = tied.date()
+    later_point = _seed_trading_point(
+        repo,
+        account.id,
+        event_at=later,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        invalid_reason=None,
+        nav=Decimal("1.200000"),
+        total_assets=Decimal("120000.0000"),
+    )
+    first_tied = _seed_trading_point(
+        repo,
+        account.id,
+        event_at=tied,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        invalid_reason=None,
+        nav=Decimal("1.050000"),
+        total_assets=Decimal("105000.0000"),
+    )
+    second_tied = _seed_trading_point(
+        repo,
+        account.id,
+        event_at=tied,
+        quality_status=SnapshotQualityStatus.INVALID.value,
+        invalid_reason="missing_nav",
+        nav=None,
+        total_assets=Decimal("999999.0000"),
+    )
+    account.migration_repair_reason = MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
+    session.commit()
+
+    expected_ids = [row.id for row in repo.list_snapshots(account.id)]
+    response = client.get(f"/paper/accounts/{account.id}/snapshots", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert expected_ids == [initial.id, first_tied.id, second_tied.id, later_point.id]
+    assert [item["id"] for item in payload] == expected_ids
+    assert first_tied.id < second_tied.id
     assert all(_assert_iso8601_offset(item["event_at"]) for item in payload)
