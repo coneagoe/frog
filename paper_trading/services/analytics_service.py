@@ -9,6 +9,7 @@ from paper_trading.schemas.analytics import (
     ActivityAnalytics,
     ActivitySummary,
     AnalyticsResponse,
+    AnalyticsUnavailableResponse,
     ExecutionAnalytics,
     MetricValue,
     OverviewAnalytics,
@@ -32,10 +33,12 @@ class AnalyticsService:
         self.repo = repo
         self.today_provider = today_provider or (lambda: datetime.now(ZoneInfo("Asia/Shanghai")).date())
 
-    def get_account_analytics(self, account_id: int) -> AnalyticsResponse:
+    def get_account_analytics(self, account_id: int) -> AnalyticsResponse | AnalyticsUnavailableResponse:
         account = self.repo.get_account(account_id)
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
+        if account.migration_repair_reason is not None:
+            return AnalyticsUnavailableResponse(reason=account.migration_repair_reason)
         orders = self.repo.list_orders(account_id)
         snapshots = self.repo.list_snapshots(account_id)
         round_trips = self.repo.list_round_trips(account_id)

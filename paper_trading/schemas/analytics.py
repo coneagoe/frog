@@ -1,7 +1,10 @@
 from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+from paper_trading.domain.enums import MigrationRepairReason
 
 
 class MetricValue(BaseModel):
@@ -87,8 +90,14 @@ class RiskAnalytics(BaseModel):
 
 
 class AnalyticsResponse(BaseModel):
+    available: Literal[True] = True
     overview: OverviewAnalytics
     activity: ActivityAnalytics | None = None
     execution: ExecutionAnalytics
     trade_quality: TradeQualityAnalytics
     risk: RiskAnalytics
+
+
+class AnalyticsUnavailableResponse(BaseModel):
+    available: Literal[False] = False
+    reason: MigrationRepairReason

@@ -7,7 +7,13 @@ from fastapi.testclient import TestClient
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
 from paper_trading.api.routers import analytics as analytics_router
-from paper_trading.domain.enums import OrderSide, OrderStatus, SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import (
+    MigrationRepairReason,
+    OrderSide,
+    OrderStatus,
+    SnapshotPointType,
+    SnapshotQualityStatus,
+)
 from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -154,6 +160,49 @@ def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_asse
     assert payload["overview"]["net_asset_value"] is None
     assert payload["overview"]["total_assets"] == "80000.0000"
     assert payload["overview"]["cash_available"] == "80000.0000"
+
+
+def _analytics_client(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    Base.metadata.create_all(sqlite_session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: sqlite_session
+    return TestClient(app), {"Authorization": "Bearer secret"}, PaperTradingRepository(sqlite_session)
+
+
+def test_get_account_analytics_marks_normal_payload_available(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-available", Decimal("100000.00"))
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert "overview" in payload
+    assert "reason" not in payload
+
+
+def test_get_account_analytics_returns_unavailable_for_repair_marked_account(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-repair-unavailable", Decimal("100000.00"))
+    account.migration_repair_reason = MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "reason": "legacy_ordering_uncertain"}
+
+
+def test_get_account_analytics_unknown_account_returns_404(monkeypatch, sqlite_session):
+    client, headers, _ = _analytics_client(monkeypatch, sqlite_session)
+
+    response = client.get("/paper/accounts/999/analytics", headers=headers)
+
+    assert response.status_code == 404
+    assert "paper account not found: 999" in str(response.json()["detail"])
 
 
 @pytest.mark.parametrize("initial_cash", ["0", "-1"])
