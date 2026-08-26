@@ -10,7 +10,13 @@ from sqlalchemy.schema import CreateTable
 
 # Initialize the storage facade before its paper-trading model re-export.
 import storage  # noqa: F401
-from paper_trading.domain.enums import Market, MatchingRunStatus, SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import (
+    Market,
+    MatchingRunStatus,
+    MigrationRepairReason,
+    SnapshotPointType,
+    SnapshotQualityStatus,
+)
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
     PaperAccount,
@@ -63,6 +69,56 @@ def test_account_has_nullable_etf_commission_rate_column():
     assert Market.ETF == "etf"
     assert column.nullable is True
     assert str(column.type) == "NUMERIC(20, 8)"
+
+
+def test_account_has_nullable_migration_repair_reason_column():
+    column = PaperAccount.__table__.c.migration_repair_reason
+
+    assert MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN == "legacy_ordering_uncertain"
+    assert list(MigrationRepairReason) == [MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN]
+    assert column.nullable is True
+    assert isinstance(column.type, Enum)
+    assert column.type.name == "paper_account_migration_repair_reason"
+    assert column.server_default is None
+
+
+def test_account_migration_repair_reason_round_trips_null_and_label(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        account = PaperAccount(name="repair-null", initial_cash=Decimal("100000.00"))
+        session.add(account)
+        session.flush()
+        assert account.migration_repair_reason is None
+
+        account.migration_repair_reason = MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
+        session.commit()
+        session.expire_all()
+
+        loaded = session.get(PaperAccount, account.id)
+        assert loaded is not None
+        assert loaded.migration_repair_reason == MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
+
+    engine.dispose()
+
+
+def test_account_migration_repair_reason_rejects_unknown_value(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'paper.db'}")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        session.add(
+            PaperAccount(
+                name="repair-unknown",
+                initial_cash=Decimal("100000.00"),
+                migration_repair_reason="unknown_repair",
+            )
+        )
+        with pytest.raises((StatementError, ValueError)):
+            session.flush()
+
+    engine.dispose()
 
 
 def test_paper_order_round_trips_nullable_and_non_nullable_values(tmp_path):
@@ -208,6 +264,7 @@ def test_selected_paper_columns_use_shared_value_enums():
     assert isinstance(PaperAccount.__table__.c.status.type, Enum)
     assert PaperAccount.__table__.c.status.type.name == "paper_account_status"
     assert PaperAccount.__table__.c.fee_preset.type.name == "paper_fee_preset"
+    assert PaperAccount.__table__.c.migration_repair_reason.type.name == "paper_account_migration_repair_reason"
     assert PaperCashLedger.__table__.c.event_type.type.name == "paper_cash_event_type"
     assert PaperOrder.__table__.c.side.type.name == "paper_order_side"
     assert PaperTrade.__table__.c.side.type.name == "paper_order_side"
