@@ -248,6 +248,29 @@ def test_unmarked_missing_bar_creates_gap_even_with_prior_close(sqlite_session):
     assert [snapshot.point_type for snapshot in snapshots] == [SnapshotPointType.INITIAL.value]
 
 
+def test_truthy_non_boolean_suspension_does_not_permit_prior_close(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("truthy-suspension", Decimal("100000.00"))
+    repo.upsert_position(account.id, Market.A_SHARE, "300996", 100, 0, Decimal("900.00"))
+
+    class TruthySuspensionProvider(FakeMarketDataProvider):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise KeyError("no bar")
+
+        def is_symbol_suspended(self, symbol, trade_date, market=None):
+            return "yes"
+
+        def get_latest_daily_close_with_date(self, symbol, trade_date, market=None):
+            pytest.fail("prior close must not be requested without boolean True")
+
+    result = SnapshotService(repo, TruthySuspensionProvider()).generate_snapshot_or_gap(account.id, date(2026, 8, 25))
+
+    assert result.status == "valuation_gap"
+    assert result.snapshot is None
+    assert result.valuation_gap is not None
+    assert result.valuation_gap.details[0]["reason"] == "missing_exact_bar"
+
+
 def test_revised_close_updates_existing_snapshot_in_place(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("revised-close", Decimal("100000.00"))

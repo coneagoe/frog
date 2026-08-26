@@ -163,8 +163,11 @@ class SnapshotService:
             try:
                 bar = self.market_data.get_daily_bar(position.symbol, trade_date, market=market)
             except KeyError:
-                if getattr(self.market_data, "is_symbol_suspended", lambda *_args, **_kwargs: False)(
-                    position.symbol, trade_date, market=market
+                if (
+                    getattr(self.market_data, "is_symbol_suspended", lambda *_args, **_kwargs: False)(
+                        position.symbol, trade_date, market=market
+                    )
+                    is True
                 ):
                     dated_close = getattr(self.market_data, "get_latest_daily_close_with_date", lambda *_args, **_kwargs: None)(
                         position.symbol, trade_date, market=market

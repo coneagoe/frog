@@ -41,3 +41,16 @@ The initial assigned run was also performed before implementation and failed as 
 ## Concerns
 
 - Parent orchestrator owns broader validation; only the explicitly assigned focused suite was run.
+
+## Fix Round 1
+
+- Changed `SnapshotService._resolve_valuations` to accept a suspended-symbol prior-close fallback only when `is_symbol_suspended(...) is True`; truthy non-boolean values now produce a `missing_exact_bar` valuation gap.
+- Added `test_truthy_non_boolean_suspension_does_not_permit_prior_close`, which returns the truthy string `"yes"` and fails if the provider prior-close method is called.
+
+Validation performed:
+
+```bash
+uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_matching_service.py -q
+```
+
+Result: `150 passed in 73.42s`.
