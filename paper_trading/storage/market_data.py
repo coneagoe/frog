@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 
@@ -14,11 +14,12 @@ from common.const import (
     COL_LOW,
     COL_OPEN,
     COL_STOCK_ID,
+    COL_SUSPEND_TYPE,
     COL_UP_LIMIT,
     AdjustType,
     PeriodType,
 )
-from storage.model import tb_name_stk_limit_a_stock
+from storage.model import tb_name_stk_limit_a_stock, tb_name_suspend_d_a_stock
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,12 @@ class MarketDataProvider(Protocol):
     def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar: ...
 
     def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None: ...
+
+    def is_symbol_suspended(self, symbol: str, trade_date: date, market: str | None = None) -> bool: ...
+
+    def get_latest_daily_close_with_date(
+        self, symbol: str, trade_date: date, market: str | None = None
+    ) -> tuple[Decimal, date] | None: ...
 
 
 class TradeCalendar(Protocol):
@@ -73,6 +80,17 @@ class StorageMarketDataProvider:
         return self._get_a_share_daily_bar(stock_id, symbol, trade_date)
 
     def get_latest_daily_close(self, symbol: str, trade_date: date, market: str | None = None) -> Decimal | None:
+        dated = self.get_latest_daily_close_with_date(symbol, trade_date, market)
+        return None if dated is None else dated[0]
+
+    def is_symbol_suspended(self, symbol: str, trade_date: date, market: str | None = None) -> bool:
+        if market in {"hk_connect", "etf"}:
+            return False
+        return self._load_a_share_suspension(symbol, trade_date)
+
+    def get_latest_daily_close_with_date(
+        self, symbol: str, trade_date: date, market: str | None = None
+    ) -> tuple[Decimal, date] | None:
         stock_id = self._to_storage_stock_id(symbol)
         if market == "hk_connect":
             row = self._storage.load_latest_history_data_stock_hk_ggt(stock_id, AdjustType.BFQ, trade_date.isoformat())
@@ -80,12 +98,15 @@ class StorageMarketDataProvider:
             df = self._storage.load_etf_daily(stock_id, end_date=trade_date.isoformat())
             if df.empty:
                 return None
-            return self._decimal_field(df.iloc[-1], COL_CLOSE, symbol, trade_date)
+            row = df.iloc[-1]
         else:
             row = self._storage.load_latest_history_data_stock(stock_id, AdjustType.BFQ, trade_date.isoformat())
         if row is None:
             return None
-        return self._decimal_field(row, COL_CLOSE, symbol, trade_date)
+        source_date = self._storage_date(row)
+        if source_date is None:
+            return None
+        return self._decimal_field(row, COL_CLOSE, symbol, trade_date), source_date
 
     def _get_a_share_daily_bar(self, stock_id: str, symbol: str, trade_date: date) -> DailyBar:
         df = self._storage.load_history_data_stock(
@@ -151,6 +172,29 @@ class StorageMarketDataProvider:
             close=self._decimal_field(row, COL_CLOSE, symbol, trade_date),
         )
 
+    def _load_a_share_suspension(self, symbol: str, trade_date: date) -> bool:
+        """Return True only when suspend_d_a_stock records an explicit S row."""
+        stock_id = self._to_storage_stock_id(symbol)
+        engine = getattr(self._storage, "engine", None)
+        if engine is None:
+            return False
+
+        try:
+            sql = (
+                f'SELECT "{COL_SUSPEND_TYPE}" '
+                f"FROM {tb_name_suspend_d_a_stock} "
+                f'WHERE "{COL_STOCK_ID}" = :stock_id AND "{COL_DATE}" = :trade_date '
+                f'AND "{COL_SUSPEND_TYPE}" = :suspend_type'
+            )
+            df = pd.read_sql(
+                text(sql),
+                engine,
+                params={"stock_id": stock_id, "trade_date": trade_date.isoformat(), "suspend_type": "S"},
+            )
+            return not df.empty
+        except Exception:
+            return False
+
     def _load_limit_prices(self, symbol: str, trade_date: date) -> tuple[Decimal | None, Decimal | None]:
         """Attempt to load limit prices from the stk_limit_a_stock table.
 
@@ -189,6 +233,20 @@ class StorageMarketDataProvider:
             if second.isdigit():
                 return second
         return symbol
+
+    @staticmethod
+    def _storage_date(row) -> date | None:
+        value = row.get(COL_DATE) if hasattr(row, "get") else None
+        if value is None or pd.isna(value):
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        raw = str(value).strip()
+        if not raw:
+            return None
+        return date.fromisoformat(raw[:10])
 
     @staticmethod
     def _decimal_field(row, column: str, symbol: str, trade_date: date) -> Decimal:

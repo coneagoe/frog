@@ -14,6 +14,7 @@ from common.const import (
     COL_OPEN,
     COL_PRE_CLOSE,
     COL_STOCK_ID,
+    COL_SUSPEND_TYPE,
     COL_UP_LIMIT,
     AdjustType,
     PeriodType,
@@ -21,6 +22,7 @@ from common.const import (
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from storage.model.base import Base
 from storage.model.stk_limit_a_stock import StkLimitAStock
+from storage.model.suspend_d_a_stock import SuspendDAStock
 from test.paper_trading.fakes import FakeHistoryStorage, FakeTradeCalendar
 
 
@@ -45,11 +47,11 @@ class _LatestCloseStorage:
 
     def load_latest_history_data_stock(self, stock_id, adjust, end_date):
         self.calls.append(("a_share", stock_id, adjust, end_date))
-        return {COL_CLOSE: 10}
+        return {COL_DATE: end_date, COL_CLOSE: 10}
 
     def load_latest_history_data_stock_hk_ggt(self, stock_id, adjust, end_date):
         self.calls.append(("hk_connect", stock_id, adjust, end_date))
-        return {COL_CLOSE: 405}
+        return {COL_DATE: end_date, COL_CLOSE: 405}
 
 
 def _etf_frame(symbol: str, trade_date: str, close: float) -> pd.DataFrame:
@@ -319,3 +321,116 @@ def test_get_daily_bar_with_a_share_market_uses_a_share_storage():
     assert bar.symbol == "000001.SZ"
     assert len(storage.calls) == 1
     assert len(storage.hk_calls) == 0
+
+
+def test_provider_reports_explicit_a_share_suspension(monkeypatch):
+    provider = StorageMarketDataProvider(FakeHistoryStorage({}), FakeTradeCalendar([]))
+    monkeypatch.setattr(provider, "_load_a_share_suspension", lambda *_: True)
+
+    assert provider.is_symbol_suspended("000001.SZ", date(2026, 8, 25), "a_share") is True
+
+
+def test_provider_returns_prior_close_with_its_date():
+    storage = _LatestCloseStorage()
+    storage.load_latest_history_data_stock = lambda *_args, **_kwargs: {
+        COL_DATE: "2026-08-22",
+        COL_CLOSE: "10.25",
+    }
+    provider = StorageMarketDataProvider(storage, FakeTradeCalendar([]))
+
+    assert provider.get_latest_daily_close_with_date("000001.SZ", date(2026, 8, 25), "a_share") == (
+        Decimal("10.25"),
+        date(2026, 8, 22),
+    )
+
+
+def test_provider_reports_false_when_market_has_no_suspension_source(monkeypatch):
+    provider = StorageMarketDataProvider(FakeHistoryStorage({}), FakeTradeCalendar([]))
+    monkeypatch.setattr(provider, "_load_a_share_suspension", lambda *_: True)
+
+    assert provider.is_symbol_suspended("00700.HK", date(2026, 8, 25), "hk_connect") is False
+    assert provider.is_symbol_suspended("518880", date(2026, 8, 25), "etf") is False
+
+
+def test_provider_does_not_treat_missing_bar_as_suspension():
+    provider = StorageMarketDataProvider(FakeHistoryStorage({}), FakeTradeCalendar([]))
+
+    assert provider.is_symbol_suspended("000001.SZ", date(2026, 8, 25), "a_share") is False
+
+
+def test_provider_loads_explicit_a_share_suspension_from_suspend_table(tmp_path):
+    from sqlalchemy import create_engine
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'suspend.db'}")
+    Base.metadata.create_all(engine, tables=[SuspendDAStock.__table__])
+    with engine.begin() as conn:
+        conn.execute(
+            SuspendDAStock.__table__.insert(),
+            {
+                COL_STOCK_ID: "000001",
+                COL_DATE: date(2026, 8, 25),
+                COL_SUSPEND_TYPE: "S",
+            },
+        )
+
+    storage = FakeStorageWithEngine(engine, {})
+    provider = StorageMarketDataProvider(storage, FakeTradeCalendar([]))
+
+    assert provider.is_symbol_suspended("000001.SZ", date(2026, 8, 25), "a_share") is True
+    assert provider.is_symbol_suspended("000002.SZ", date(2026, 8, 25), "a_share") is False
+    engine.dispose()
+
+
+def test_provider_does_not_treat_resume_row_as_suspension(tmp_path):
+    from sqlalchemy import create_engine
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'resume.db'}")
+    Base.metadata.create_all(engine, tables=[SuspendDAStock.__table__])
+    with engine.begin() as conn:
+        conn.execute(
+            SuspendDAStock.__table__.insert(),
+            {
+                COL_STOCK_ID: "000001",
+                COL_DATE: date(2026, 8, 25),
+                COL_SUSPEND_TYPE: "R",
+            },
+        )
+
+    storage = FakeStorageWithEngine(engine, {})
+    provider = StorageMarketDataProvider(storage, FakeTradeCalendar([]))
+
+    assert provider.is_symbol_suspended("000001.SZ", date(2026, 8, 25), "a_share") is False
+    engine.dispose()
+
+
+def test_provider_returns_none_dated_close_when_storage_has_no_row():
+    class EmptyLatestCloseStorage:
+        def load_latest_history_data_stock(self, stock_id, adjust, end_date):
+            del stock_id, adjust, end_date
+            return None
+
+    provider = StorageMarketDataProvider(EmptyLatestCloseStorage(), FakeTradeCalendar([]))
+
+    assert provider.get_latest_daily_close_with_date("000001.SZ", date(2026, 8, 25), "a_share") is None
+    assert provider.get_latest_daily_close("000001.SZ", date(2026, 8, 25), "a_share") is None
+
+
+def test_provider_returns_hk_and_etf_prior_close_with_date():
+    storage = _LatestCloseStorage()
+    etf_storage = FakeHistoryStorage(
+        {},
+        etf_daily_data={
+            "518880": pd.concat([_etf_frame("518880", "2026-08-08", 8.8), _etf_frame("518880", "2026-08-10", 8.9)])
+        },
+    )
+    provider = StorageMarketDataProvider(storage, FakeTradeCalendar([]))
+    etf_provider = StorageMarketDataProvider(etf_storage, FakeTradeCalendar([]))
+
+    assert provider.get_latest_daily_close_with_date("00700.HK", date(2026, 8, 25), "hk_connect") == (
+        Decimal("405"),
+        date(2026, 8, 25),
+    )
+    assert etf_provider.get_latest_daily_close_with_date("518880", date(2026, 8, 10), "etf") == (
+        Decimal("8.9"),
+        date(2026, 8, 10),
+    )
