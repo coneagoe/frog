@@ -574,12 +574,14 @@ warning, not a synthetic snapshot. The closed PostgreSQL enum
 
 PostgreSQL storage startup serializes the snapshot-series upgrade with the
 transaction advisory lock `paper_account_snapshots.nav_series` whenever
-`paper_accounts` or `paper_account_snapshots` exists. Inside that lock it
-upgrades repair metadata even when snapshots are absent. Snapshot DDL,
-quality backfill, chronology classification, and baseline insertion remain
-snapshot-gated. Concurrent startups wait on the lock. Reruns are idempotent:
-they do not overwrite a stored repair reason, do not rewrite valid snapshot
-financial fields, and do not insert a second `initial` point.
+`paper_accounts` or `paper_account_snapshots` exists, including when
+`paper_orders` is absent. Inside that lock it upgrades repair metadata even
+when snapshots and orders are absent. Snapshot DDL, quality backfill,
+chronology classification, and baseline insertion remain snapshot-gated.
+Missing `paper_orders` does not create orders or snapshots. Concurrent
+startups wait on the lock. Reruns are idempotent: they do not overwrite a
+stored repair reason, do not rewrite valid snapshot financial fields, and do
+not insert a second `initial` point.
 
 Baseline eligibility is proof-based. The migration inserts one `initial`
 NAV=`1.000000` point only when `initial_cash` is positive, `created_at` is
@@ -591,11 +593,14 @@ are excluded), cash ledger (`occurred_at`, `trade_date`), trades
 (`trade_time`, `trade_date`), orders (`created_at`, `trade_date`), lots
 (`buy_trade_date`), round trips (`open_trade_date`, `close_trade_date`),
 matching runs (`trade_date`), and trade-validity checks (`trade_date`).
-A timestamp at or after `created_at` is chronology-safe; a timestamp before
-`created_at` is uncertain. Date-only fields must be strictly after
-`created_at::date`; a same-calendar-day date is unprovable.
-Null temporal values, missing expected temporal columns on a persisted source
-row, and a null account `created_at` mark the account uncertain. Missing
+For snapshots, cash ledger, trades, and orders, an available timestamp at or
+after `created_at` is chronology-safe and takes precedence over the paired
+date. Date fallback is used only when every applicable timestamp on that row
+is null. A timestamp before `created_at` remains uncertain. Date-only tables
+and date fallback still require a date strictly after `created_at::date`; a
+same-calendar-day or earlier date is unprovable. Null timestamps with no
+proving date, missing expected temporal columns on a persisted source row,
+and a null account `created_at` mark the account uncertain. Missing
 tables are skipped. Matching runs with `account_id IS NULL` apply globally
 only when `scope_key = 'all'` if that column exists; older matching-run tables
 without `scope_key` still treat a null-account run as global.
@@ -606,8 +611,8 @@ leaves stored snapshot financial fields unchanged, including invalid NAV
 points. Valid history is never rewritten to invent returns.
 
 SQLite startup adds nullable `VARCHAR(40) migration_repair_reason` whenever
-`paper_accounts` exists and the column is missing, even when snapshots are
-absent. Snapshot series metadata is upgraded only when
+`paper_accounts` exists and the column is missing, even when snapshots and
+orders are absent. Snapshot series metadata is upgraded only when
 `paper_account_snapshots` exists. SQLite never classifies chronology and never
 inserts an initial baseline. Baseline insertion is a PostgreSQL production
 startup behavior.
@@ -770,17 +775,19 @@ migration command for that explicit schema change. Startup may create the
 snapshot series enum types and the additive
 `paper_account_migration_repair_reason` type and add nullable
 `paper_accounts.migration_repair_reason` whenever `paper_accounts` exists,
-even when snapshots are absent. When `paper_account_snapshots` exists it also
-adds snapshot series columns on existing tables, backfills `event_at`, marks
-legacy rows as `trading`, derives quality from stored NAV, drops the old
-account/date unique constraint or standalone unique index, classifies
-unprovable chronology as `legacy_ordering_uncertain`, and inserts at most one
-`initial` NAV=1 point for each chronology-safe account whose legacy
-`initial_cash` is positive. It does not convert other governed enum columns,
-overwrite a stored repair reason, or rewrite financial snapshot fields. On
-SQLite, startup adds nullable `VARCHAR(40) migration_repair_reason` whenever
-`paper_accounts` exists, even when snapshots are absent. Snapshot series
-columns use SQLite-compatible DDL only when `paper_account_snapshots` exists:
+even when snapshots and orders are absent. When `paper_account_snapshots`
+exists it also adds snapshot series columns on existing tables, backfills
+`event_at`, marks legacy rows as `trading`, derives quality from stored NAV,
+drops the old account/date unique constraint or standalone unique index,
+classifies unprovable chronology as `legacy_ordering_uncertain`, and inserts
+at most one `initial` NAV=1 point for each chronology-safe account whose
+legacy `initial_cash` is positive. It does not convert other governed enum
+columns, overwrite a stored repair reason, rewrite financial snapshot fields,
+or create missing `paper_orders` or `paper_account_snapshots`. On SQLite,
+startup adds nullable `VARCHAR(40) migration_repair_reason` whenever
+`paper_accounts` exists, even when snapshots and orders are absent. Snapshot
+series columns use SQLite-compatible DDL only when `paper_account_snapshots`
+exists:
 startup then backfills `event_at` from `created_at` and marks legacy rows as
 `trading` so ORM listing by `event_at` works. SQLite does not insert an
 initial baseline.

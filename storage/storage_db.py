@@ -3915,15 +3915,15 @@ class StorageDb:
             PaperValuationGap,
         )
 
-        if self.engine.dialect.name != "postgresql":
+        has_paper_orders = inspect(self.engine).has_table(tb_name_paper_orders)
+        if self.engine.dialect.name != "postgresql" and has_paper_orders:
             PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
             PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
             PaperValuationGap.__table__.create(self.engine, checkfirst=True)
             DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
 
-        # Bail out if the paper_orders table does not exist yet --- fresh
-        # installs rely on Base.metadata.create_all in __init__.
-        if not inspect(self.engine).has_table(tb_name_paper_orders):
+        if not has_paper_orders:
+            self._ensure_paper_account_repair_without_orders()
             return
 
         if self.engine.dialect.name == "postgresql":
@@ -4142,6 +4142,18 @@ class StorageDb:
                 if "market" not in market_columns:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name} ADD COLUMN market {market_ddl}"))
+
+    def _ensure_paper_account_repair_without_orders(self) -> None:
+        has_paper_accounts = inspect(self.engine).has_table(tb_name_paper_accounts)
+        has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
+        if self.engine.dialect.name == "postgresql" and (has_paper_accounts or has_paper_snapshots):
+            with self.engine.begin() as conn:
+                self._ensure_paper_account_snapshot_series(conn)
+            return
+        if has_paper_accounts:
+            self._ensure_sqlite_paper_account_repair_metadata()
+        if has_paper_snapshots:
+            self._ensure_sqlite_paper_account_snapshot_series()
 
     def _ensure_sqlite_paper_account_repair_metadata(self) -> None:
         if not inspect(self.engine).has_table(tb_name_paper_accounts):
@@ -4400,23 +4412,31 @@ class StorageDb:
                 )"""
                 )
                 continue
-            checks = [
-                f"(source.{column_name} IS NULL OR source.{column_name} < account.created_at)"
-                for column_name in timestamp_columns
-            ]
-            checks.extend(
-                f"(source.{column_name} IS NULL OR source.{column_name} <= CAST(account.created_at AS date))"
-                for column_name in date_columns
-            )
+            row_uncertain = self._legacy_chronology_row_uncertain(timestamp_columns, date_columns)
             predicates.append(
                 f"""EXISTS (
                     SELECT 1
                     FROM {table_name} AS source
                     WHERE {account_match}
-                      AND ({" OR ".join(checks)})
+                      AND ({row_uncertain})
                 )"""
             )
         return predicates
+
+    def _legacy_chronology_row_uncertain(
+        self, timestamp_columns: tuple[str, ...], date_columns: tuple[str, ...]
+    ) -> str:
+        date_unproven = " OR ".join(
+            f"(source.{column_name} IS NULL OR source.{column_name} <= CAST(account.created_at AS date))"
+            for column_name in date_columns
+        )
+        if not timestamp_columns:
+            return date_unproven
+        timestamp_early = " OR ".join(f"source.{column_name} < account.created_at" for column_name in timestamp_columns)
+        all_timestamps_null = " AND ".join(f"source.{column_name} IS NULL" for column_name in timestamp_columns)
+        if not date_columns:
+            return f"({timestamp_early}) OR ({all_timestamps_null})"
+        return f"({timestamp_early}) OR (({all_timestamps_null}) AND ({date_unproven}))"
 
     def _legacy_chronology_account_match(self, table_name: str, columns: set[str]) -> str:
         if table_name == tb_name_paper_matching_runs:
