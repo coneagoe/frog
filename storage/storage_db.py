@@ -402,8 +402,6 @@ _SQLITE_PAPER_SNAPSHOT_SERIES_COLUMNS = {
     "event_at": "DATETIME",
     "quality_status": "VARCHAR(20) NOT NULL DEFAULT 'valid'",
     "invalid_reason": "TEXT",
-    "valuation_quality": "VARCHAR(20)",
-    "valuation_details": "JSON",
 }
 _PAPER_ACCOUNT_REPAIR_REASON_TYPE = "paper_account_migration_repair_reason"
 _PAPER_ACCOUNT_REPAIR_REASON_COLUMN = "migration_repair_reason"
@@ -4226,12 +4224,38 @@ class StorageDb:
                     f"ON {tb_name_paper_account_snapshots} (account_id) WHERE point_type = 'initial'"
                 )
             )
-            conn.execute(
-                text(
-                    f"CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_account_snapshots_account_trading "
-                    f"ON {tb_name_paper_account_snapshots} (account_id, trade_date) WHERE point_type = 'trading'"
-                )
+        with self.engine.begin() as conn:
+            self._ensure_sqlite_snapshot_trading_identity(conn)
+
+    def _ensure_sqlite_snapshot_trading_identity(self, conn) -> None:
+        snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
+        if "point_type" not in snapshot_columns or "trade_date" not in snapshot_columns:
+            return
+        duplicates = conn.execute(
+            text(
+                f"""
+                SELECT account_id, trade_date
+                FROM {tb_name_paper_account_snapshots}
+                WHERE point_type = 'trading'
+                GROUP BY account_id, trade_date
+                HAVING COUNT(*) > 1
+                """
             )
+        ).all()
+        if duplicates:
+            raise RuntimeError("duplicate trading snapshots")
+        for column_name, ddl in (
+            ("valuation_quality", "VARCHAR(20)"),
+            ("valuation_details", "JSON"),
+        ):
+            if column_name not in snapshot_columns:
+                conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))
+        conn.execute(
+            text(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS uq_paper_account_snapshots_account_trading "
+                f"ON {tb_name_paper_account_snapshots} (account_id, trade_date) WHERE point_type = 'trading'"
+            )
+        )
 
     def _ensure_paper_account_snapshot_series(self, conn) -> None:
         conn.execute(

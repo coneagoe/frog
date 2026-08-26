@@ -241,6 +241,8 @@ def _snapshot_by_id(engine: Engine, snapshot_id: int):
 def _financials(row) -> dict[str, object]:
     values: dict[str, object] = {}
     for column in _FINANCIAL_COLUMNS:
+        if column not in row:
+            continue
         value = row[column]
         values[column] = None if value is None else str(value)
     return values
@@ -261,6 +263,13 @@ def _constraint_exists(engine: Engine, constraint_name: str) -> bool:
 
 def _index_exists(engine: Engine, index_name: str) -> bool:
     with engine.connect() as connection:
+        if engine.dialect.name == "sqlite":
+            return bool(
+                connection.execute(
+                    text("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :name"),
+                    {"name": index_name},
+                ).scalar_one_or_none()
+            )
         return bool(connection.execute(text("SELECT to_regclass(:name)"), {"name": index_name}).scalar_one())
 
 
@@ -1252,51 +1261,7 @@ def test_nav_series_migration_ignores_null_account_non_global_matching_run():
 def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'legacy_snapshots.db'}")
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                CREATE TABLE paper_orders (
-                    id INTEGER PRIMARY KEY,
-                    account_id INTEGER NOT NULL
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE TABLE paper_accounts (
-                    id INTEGER PRIMARY KEY,
-                    name VARCHAR(100) NOT NULL UNIQUE,
-                    initial_cash NUMERIC(20, 4) NOT NULL,
-                    share_count NUMERIC(20, 6) NOT NULL DEFAULT 0,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                CREATE TABLE paper_account_snapshots (
-                    id INTEGER PRIMARY KEY,
-                    account_id INTEGER NOT NULL,
-                    trade_date DATE NOT NULL,
-                    cash_available NUMERIC(20, 4) NOT NULL,
-                    cash_frozen NUMERIC(20, 4) NOT NULL,
-                    market_value NUMERIC(20, 4) NOT NULL,
-                    total_assets NUMERIC(20, 4) NOT NULL,
-                    realized_pnl NUMERIC(20, 4) NOT NULL,
-                    unrealized_pnl NUMERIC(20, 4) NOT NULL,
-                    position_count INTEGER NOT NULL,
-                    order_count INTEGER NOT NULL,
-                    trade_count INTEGER NOT NULL,
-                    net_asset_value NUMERIC(20, 6),
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-        )
+        _create_sqlite_legacy_snapshot_schema(connection)
         connection.execute(
             text(
                 """
@@ -1359,6 +1324,148 @@ def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
         rerun_rows = PaperTradingRepository(session).list_snapshots(1)
     assert [row.id for row in rerun_rows] == [2, 1, 3]
     assert _initial_ids(engine, 1) == []
+    assert _index_exists(engine, "uq_paper_account_snapshots_account_trading")
+    with engine.connect() as connection:
+        for row in connection.execute(text("SELECT valuation_quality, valuation_details FROM paper_account_snapshots")):
+            assert row.valuation_quality is None
+            assert row.valuation_details is None
+    engine.dispose()
+
+
+def _create_sqlite_legacy_snapshot_schema(connection: Connection) -> None:
+    connection.execute(
+        text(
+            """
+            CREATE TABLE paper_orders (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER NOT NULL
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE TABLE paper_accounts (
+                id INTEGER PRIMARY KEY,
+                name VARCHAR(100) NOT NULL UNIQUE,
+                initial_cash NUMERIC(20, 4) NOT NULL,
+                share_count NUMERIC(20, 6) NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE TABLE paper_account_snapshots (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                trade_date DATE NOT NULL,
+                cash_available NUMERIC(20, 4) NOT NULL,
+                cash_frozen NUMERIC(20, 4) NOT NULL,
+                market_value NUMERIC(20, 4) NOT NULL,
+                total_assets NUMERIC(20, 4) NOT NULL,
+                realized_pnl NUMERIC(20, 4) NOT NULL,
+                unrealized_pnl NUMERIC(20, 4) NOT NULL,
+                position_count INTEGER NOT NULL,
+                order_count INTEGER NOT NULL,
+                trade_count INTEGER NOT NULL,
+                net_asset_value NUMERIC(20, 6),
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    )
+
+
+def test_sqlite_schema_upgrade_rejects_duplicate_trading_dates(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'duplicate_trading.db'}")
+    with engine.begin() as connection:
+        _create_sqlite_legacy_snapshot_schema(connection)
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+                VALUES (1, 'duplicates', 10000.0000, 10000.000000, '2026-01-01 08:00:00')
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_account_snapshots (
+                    id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                    total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                    trade_count, net_asset_value, created_at
+                ) VALUES
+                    (1, 1, '2026-01-01', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                     '2026-01-01 16:00:00'),
+                    (2, 1, '2026-01-01', 8500, 0, 0, 8500, 0, 0, 0, 0, 0, 1.050000,
+                     '2026-01-01 18:00:00')
+                """
+            )
+        )
+
+    original = {snapshot_id: _financials(_snapshot_by_id(engine, snapshot_id)) for snapshot_id in (1, 2)}
+    with pytest.raises(RuntimeError, match="duplicate trading snapshots"):
+        ensure_paper_trading_schema(engine)
+
+    inspector = inspect(engine)
+    snapshot_columns = {column["name"] for column in inspector.get_columns("paper_account_snapshots")}
+    assert "valuation_quality" not in snapshot_columns
+    assert "valuation_details" not in snapshot_columns
+    assert not _index_exists(engine, "uq_paper_account_snapshots_account_trading")
+    for snapshot_id, financials in original.items():
+        loaded = _financials(_snapshot_by_id(engine, snapshot_id))
+        assert {key: loaded[key] for key in financials} == financials
+    engine.dispose()
+
+
+def test_sqlite_schema_upgrade_adds_valuation_metadata_idempotently(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'sqlite_valuation.db'}")
+    with engine.begin() as connection:
+        _create_sqlite_legacy_snapshot_schema(connection)
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+                VALUES (1, 'unique-dates', 10000.0000, 10000.000000, '2026-01-01 08:00:00')
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_account_snapshots (
+                    id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                    total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                    trade_count, net_asset_value, created_at
+                ) VALUES
+                    (1, 1, '2026-01-01', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.250000,
+                     '2026-01-01 16:00:00'),
+                    (2, 1, '2026-01-02', 8000, 0, 0, 8000, 0, 0, 0, 0, 0, NULL,
+                     '2026-01-02 16:00:00')
+                """
+            )
+        )
+    original = {snapshot_id: _financials(_snapshot_by_id(engine, snapshot_id)) for snapshot_id in (1, 2)}
+
+    ensure_paper_trading_schema(engine)
+    ensure_paper_trading_schema(engine)
+
+    inspector = inspect(engine)
+    snapshot_columns = {column["name"] for column in inspector.get_columns("paper_account_snapshots")}
+    assert {"valuation_quality", "valuation_details"} <= snapshot_columns
+    assert _index_exists(engine, "uq_paper_account_snapshots_account_trading")
+    for snapshot_id, financials in original.items():
+        loaded = _financials(_snapshot_by_id(engine, snapshot_id))
+        assert {key: loaded[key] for key in financials} == financials
+    with engine.connect() as connection:
+        for row in connection.execute(text("SELECT valuation_quality, valuation_details FROM paper_account_snapshots")):
+            assert row.valuation_quality is None
+            assert row.valuation_details is None
     engine.dispose()
 
 

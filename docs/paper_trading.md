@@ -619,9 +619,12 @@ points. Valid history is never rewritten to invent returns.
 SQLite startup adds nullable `VARCHAR(40) migration_repair_reason` whenever
 `paper_accounts` exists and the column is missing, even when snapshots and
 orders are absent. Snapshot series metadata is upgraded only when
-`paper_account_snapshots` exists. SQLite never classifies chronology and never
-inserts an initial baseline. Baseline insertion is a PostgreSQL production
-startup behavior.
+`paper_account_snapshots` exists. After series backfill, SQLite rejects
+duplicate `trading` rows for the same account and `trade_date` rather than
+merging them, then adds nullable `valuation_quality`/`valuation_details` and
+the partial unique index `uq_paper_account_snapshots_account_trading`. SQLite
+never classifies chronology and never inserts an initial baseline. Baseline
+insertion is a PostgreSQL production startup behavior.
 
 ## Closed Position Cleanup
 
