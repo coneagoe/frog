@@ -4018,7 +4018,8 @@ class StorageDb:
                     text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN validity_checked_at TIMESTAMP WITH TIME ZONE")
                 )
 
-        if inspect(self.engine).has_table(tb_name_paper_accounts):
+        has_paper_accounts = inspect(self.engine).has_table(tb_name_paper_accounts)
+        if has_paper_accounts:
             account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
             account_fee_columns = {
                 "fee_preset": "VARCHAR(30) NOT NULL DEFAULT 'a_share'",
@@ -4070,6 +4071,8 @@ class StorageDb:
                 )
                 with self.engine.begin() as conn:
                     conn.execute(text(f"UPDATE {tb_name_paper_accounts} SET {assignments}"))
+            if self.engine.dialect.name != "postgresql":
+                self._ensure_sqlite_paper_account_repair_metadata()
 
         if inspect(self.engine).has_table(tb_name_paper_cash_ledger):
             cash_ledger_columns = {
@@ -4085,12 +4088,12 @@ class StorageDb:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name_paper_cash_ledger} ADD COLUMN {column_name} {ddl}"))
 
-        if inspect(self.engine).has_table(tb_name_paper_account_snapshots):
-            if self.engine.dialect.name == "postgresql":
-                with self.engine.begin() as conn:
-                    self._ensure_paper_account_snapshot_series(conn)
-            else:
-                self._ensure_sqlite_paper_account_snapshot_series()
+        has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
+        if self.engine.dialect.name == "postgresql" and (has_paper_accounts or has_paper_snapshots):
+            with self.engine.begin() as conn:
+                self._ensure_paper_account_snapshot_series(conn)
+        elif has_paper_snapshots:
+            self._ensure_sqlite_paper_account_snapshot_series()
 
         if inspect(self.engine).has_table(tb_name_paper_ledger_rebuilds):
             rebuild_columns = {
@@ -4140,17 +4143,21 @@ class StorageDb:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name} ADD COLUMN market {market_ddl}"))
 
+    def _ensure_sqlite_paper_account_repair_metadata(self) -> None:
+        if not inspect(self.engine).has_table(tb_name_paper_accounts):
+            return
+        account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
+        if _PAPER_ACCOUNT_REPAIR_REASON_COLUMN in account_columns:
+            return
+        with self.engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN "
+                    f"{_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} {_SQLITE_PAPER_ACCOUNT_REPAIR_REASON_DDL}"
+                )
+            )
+
     def _ensure_sqlite_paper_account_snapshot_series(self) -> None:
-        if inspect(self.engine).has_table(tb_name_paper_accounts):
-            account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
-            if _PAPER_ACCOUNT_REPAIR_REASON_COLUMN not in account_columns:
-                with self.engine.begin() as conn:
-                    conn.execute(
-                        text(
-                            f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN "
-                            f"{_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} {_SQLITE_PAPER_ACCOUNT_REPAIR_REASON_DDL}"
-                        )
-                    )
         snapshot_columns = {
             column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_account_snapshots)
         }

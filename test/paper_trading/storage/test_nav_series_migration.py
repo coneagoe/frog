@@ -1212,3 +1212,109 @@ def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
     assert [row.id for row in rerun_rows] == [2, 1, 3]
     assert _initial_ids(engine, 1) == []
     engine.dispose()
+
+
+def _create_accounts_and_orders_without_snapshots(connection: Connection, *, sqlite: bool = False) -> None:
+    timestamp_type = "DATETIME" if sqlite else "timestamptz"
+    connection.execute(
+        text(
+            f"""
+            CREATE TABLE paper_accounts (
+                id integer PRIMARY KEY,
+                name varchar(100) NOT NULL UNIQUE,
+                initial_cash numeric(20, 4) NOT NULL,
+                share_count numeric(20, 6) NOT NULL DEFAULT 0,
+                created_at {timestamp_type} NOT NULL
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            CREATE TABLE paper_orders (
+                id integer PRIMARY KEY,
+                account_id integer NOT NULL,
+                idempotency_key varchar(100)
+            )
+            """
+        )
+    )
+    created_at = "2026-01-01 08:00:00" if sqlite else "2026-01-01 08:00:00+00"
+    connection.execute(
+        text(
+            """
+            INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+            VALUES (1, 'no-snapshots', 10000.0000, 10000.000000, :created_at)
+            """
+        ),
+        {"created_at": created_at},
+    )
+
+
+def _postgres_repair_column(engine: Engine) -> tuple[str | None, bool | None]:
+    with engine.connect() as connection:
+        row = connection.execute(
+            text(
+                """
+                SELECT t.typname, NOT a.attnotnull AS nullable
+                FROM pg_attribute a
+                JOIN pg_class c ON c.oid = a.attrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                JOIN pg_type t ON t.oid = a.atttypid
+                WHERE n.nspname = current_schema()
+                  AND c.relname = 'paper_accounts'
+                  AND a.attname = 'migration_repair_reason'
+                  AND a.attnum > 0
+                  AND NOT a.attisdropped
+                """
+            )
+        ).one_or_none()
+    if row is None:
+        return None, None
+    return str(row.typname), bool(row.nullable)
+
+
+def test_startup_upgrades_repair_metadata_when_snapshots_are_absent():
+    engine, bound, schema = _isolated_postgres_schema()
+    try:
+        with bound.begin() as connection:
+            _create_accounts_and_orders_without_snapshots(connection)
+
+        for _ in range(2):
+            ensure_paper_trading_schema(bound)
+            typname, nullable = _postgres_repair_column(bound)
+            assert typname == "paper_account_migration_repair_reason"
+            assert nullable is True
+            with bound.connect() as connection:
+                assert connection.execute(text("SELECT to_regclass('paper_account_snapshots')")).scalar_one() is None
+                assert (
+                    connection.execute(
+                        text("SELECT migration_repair_reason FROM paper_accounts WHERE id = 1")
+                    ).scalar_one()
+                    is None
+                )
+    finally:
+        _drop_isolated_postgres_schema(engine, bound, schema)
+
+
+def test_sqlite_startup_adds_repair_column_when_snapshots_are_absent(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'no_snapshots.db'}")
+    with engine.begin() as connection:
+        _create_accounts_and_orders_without_snapshots(connection, sqlite=True)
+
+    for _ in range(2):
+        ensure_paper_trading_schema(engine)
+        inspector = inspect(engine)
+        assert inspector.has_table("paper_account_snapshots") is False
+        account_columns = {column["name"]: column for column in inspector.get_columns("paper_accounts")}
+        assert "migration_repair_reason" in account_columns
+        assert account_columns["migration_repair_reason"]["nullable"] is True
+        assert str(account_columns["migration_repair_reason"]["type"]).upper().startswith("VARCHAR")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(text("SELECT migration_repair_reason FROM paper_accounts WHERE id = 1")).scalar_one()
+                is None
+            )
+
+    engine.dispose()
