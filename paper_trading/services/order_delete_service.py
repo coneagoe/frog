@@ -87,7 +87,7 @@ class OrderDeleteService:
                     warning_count += 1
 
             if filled > 0:
-                matching_service.snapshot_service.generate_snapshot(
+                matching_service.snapshot_service.generate_snapshot_or_gap(
                     account_id,
                     trade_date,
                 )

@@ -120,6 +120,66 @@ def test_delete_filled_order_rebuilds_account_from_remaining_orders(session):
     assert repo.get_cash_available(account.id) < Decimal("100000")
 
 
+def test_delete_filled_order_records_valuation_gap_when_replay_cannot_value_position(session):
+    repo = PaperTradingRepository(session)
+    trade_date = date(2026, 7, 18)
+    account = repo.create_account("replay-valuation-gap", Decimal("100000"))
+    deleted = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0000"),
+    )
+    surviving = repo.create_order(
+        account.id,
+        "000002",
+        OrderSide.BUY,
+        100,
+        Decimal("20.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("2005.0000"),
+    )
+    market_data = FakeMarketDataProvider()
+    MatchingService(repo, market_data, SnapshotService(repo, market_data)).run(trade_date, account.id)
+
+    class MissingSurvivingValuation(FakeMarketDataProvider):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            if symbol == "000002":
+                self.calls += 1
+                if self.calls > 1:
+                    raise KeyError(f"No daily bar for {symbol} on {trade_date}")
+            return super().get_daily_bar(symbol, trade_date, market)
+
+    assert OrderDeleteService(repo, MissingSurvivingValuation()).delete_order(deleted.id) is True
+
+    assert [trade.order_id for trade in repo.list_trades(account.id)] == [surviving.id]
+    assert all(
+        snapshot.trade_date != trade_date or snapshot.point_type != SnapshotPointType.TRADING.value
+        for snapshot in repo.list_snapshots(account.id)
+    )
+    gap = repo.get_valuation_gap(account.id, trade_date)
+    assert gap is not None
+    assert gap.missing_symbols == ["000002"]
+    assert gap.details == [
+        {
+            "symbol": "000002",
+            "market": "a_share",
+            "requested_date": "2026-07-18",
+            "source_date": None,
+            "reason": "missing_exact_bar",
+        }
+    ]
+
+
 def test_rebuild_from_creation_date_preserves_initial_snapshot(session):
     repo = PaperTradingRepository(session)
     account = repo.create_account("preserve-initial", Decimal("100000"))
