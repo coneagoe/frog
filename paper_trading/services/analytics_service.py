@@ -150,7 +150,7 @@ class AnalyticsService:
                 )
             )
         for entry in ledger_entries:
-            if entry.note == "initial_cash":
+            if entry.event_type == CashEventType.DEPOSIT.value and entry.trade_date is None:
                 continue
             try:
                 event_type = CashEventType(entry.event_type)

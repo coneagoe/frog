@@ -108,7 +108,7 @@ class CashService:
 
     @staticmethod
     def _occurred_at(value: datetime | None) -> datetime:
-        if value is not None and value.tzinfo is None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
             raise ValueError("occurred_at must include a timezone offset")
         return value or datetime.now(timezone.utc)
 

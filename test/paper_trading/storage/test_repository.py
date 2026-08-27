@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
 from typing import Any, cast
 
@@ -384,6 +384,46 @@ def test_cash_ledger_orders_by_occurred_at_then_id(sqlite_session):
         second.id,
         first.id,
     ]
+
+
+def test_cash_ledger_orders_equal_occurred_at_by_id(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("cash-equal-order", Decimal("100000"))
+    occurred_at = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+
+    first = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("1"), occurred_at=occurred_at)
+    second = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("1"), occurred_at=occurred_at)
+
+    assert [event.id for event in repo.list_cash_ledger(account.id) if event.id in {first.id, second.id}] == [
+        first.id,
+        second.id,
+    ]
+
+
+class _NoOffsetTz(tzinfo):
+    def utcoffset(self, _value):
+        return None
+
+    def dst(self, _value):
+        return None
+
+    def tzname(self, _value):
+        return "no-offset"
+
+
+def test_add_cash_event_rejects_tzinfo_without_offset(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("no-offset-repository", Decimal("100000"))
+
+    with pytest.raises(ValueError, match="offset"):
+        repo.add_cash_event(
+            account.id,
+            CashEventType.DEPOSIT,
+            Decimal("1"),
+            occurred_at=datetime(2026, 7, 20, tzinfo=_NoOffsetTz()),
+        )
 
 
 def test_latest_valid_nav_before_ignores_invalid_snapshots(sqlite_session):

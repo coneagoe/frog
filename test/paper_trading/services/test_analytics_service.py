@@ -913,6 +913,7 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
             amount=Decimal("100"),
             net_asset_value=Decimal("1"),
             share_delta=Decimal("100"),
+            trade_date=None,
             note="initial_cash",
         ),
         SimpleNamespace(
@@ -922,6 +923,7 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
             amount=Decimal("-10"),
             net_asset_value=Decimal("1.1"),
             share_delta=Decimal("-9.090909"),
+            trade_date=date(2026, 8, 2),
             note="manual",
         ),
     ]
@@ -980,6 +982,7 @@ def test_event_series_narrows_cash_event_types_and_excludes_non_cash_events():
             amount=Decimal("10"),
             net_asset_value=Decimal("1"),
             share_delta=Decimal("10"),
+            trade_date=date(2026, 8, 1),
             note=None,
         ),
         SimpleNamespace(
@@ -989,6 +992,7 @@ def test_event_series_narrows_cash_event_types_and_excludes_non_cash_events():
             amount=Decimal("-5"),
             net_asset_value=Decimal("1"),
             share_delta=Decimal("-5"),
+            trade_date=date(2026, 8, 1),
             note=None,
         ),
         SimpleNamespace(
@@ -998,6 +1002,7 @@ def test_event_series_narrows_cash_event_types_and_excludes_non_cash_events():
             amount=Decimal("-2"),
             net_asset_value=None,
             share_delta=None,
+            trade_date=date(2026, 8, 1),
             note=None,
         ),
     ]
@@ -1008,6 +1013,36 @@ def test_event_series_narrows_cash_event_types_and_excludes_non_cash_events():
     )
 
     assert [event.event_type for event in events] == ["deposit", "withdrawal"]
+
+
+def test_event_series_excludes_only_structural_initial_funding():
+    occurred_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    ledger_entries = [
+        SimpleNamespace(
+            id=1,
+            occurred_at=occurred_at,
+            event_type="deposit",
+            amount=Decimal("100000"),
+            net_asset_value=Decimal("1"),
+            share_delta=Decimal("100000"),
+            trade_date=None,
+            note="initial_cash",
+        ),
+        SimpleNamespace(
+            id=2,
+            occurred_at=occurred_at,
+            event_type="deposit",
+            amount=Decimal("1000"),
+            net_asset_value=Decimal("1"),
+            share_delta=Decimal("1000"),
+            trade_date=date(2026, 8, 1),
+            note="initial_cash",
+        ),
+    ]
+
+    events = AnalyticsService._event_series([], cast(list, ledger_entries))
+
+    assert [event.id for event in events] == [2]
 
 
 def test_linked_total_return_uses_valid_valuation_snapshots_only():

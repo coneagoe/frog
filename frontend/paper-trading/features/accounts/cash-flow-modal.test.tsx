@@ -65,7 +65,7 @@ describe("CashFlowModal", () => {
       cash_available: "110000.0000",
       net_asset_value: "1.000000",
       share_count: "110000.000000",
-      ledger: { id: 2, account_id: 1, event_type: "deposit", amount: "10000.0000", note: "add", trade_date: "2026-07-20", net_asset_value: null, share_delta: null }
+      ledger: { id: 2, account_id: 1, event_type: "deposit", amount: "10000.0000", occurred_at: "2026-07-20T10:00:00Z", note: "add", trade_date: "2026-07-20", net_asset_value: null, share_delta: null }
     });
 
     render(<CashFlowModal account={demoAccount} cashAvailable="100000.0000" mode="deposit" open onClose={vi.fn()} onCompleted={vi.fn()} />);
@@ -105,7 +105,7 @@ describe("CashFlowModal", () => {
       cash_available: "110000.0000",
       net_asset_value: "1.000000",
       share_count: "110000.000000",
-      ledger: { id: 2, account_id: 1, event_type: "deposit", amount: "10000.0000", note: "add", trade_date: "2026-07-20", net_asset_value: null, share_delta: null }
+      ledger: { id: 2, account_id: 1, event_type: "deposit", amount: "10000.0000", occurred_at: "2026-07-20T10:00:00Z", note: "add", trade_date: "2026-07-20", net_asset_value: null, share_delta: null }
     };
     depositCashMock.mockResolvedValue(result);
     const onCompleted = vi.fn();

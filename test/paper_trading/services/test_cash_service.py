@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, tzinfo
 from decimal import Decimal
 
 import pytest
@@ -110,3 +110,38 @@ def test_cash_flow_after_valid_snapshot_uses_preceding_snapshot_nav(tmp_path):
 def test_cash_flow_request_rejects_naive_occurred_at():
     with pytest.raises(ValueError, match="offset"):
         CashFlowRequest(amount=Decimal("1"), trade_date=date(2026, 7, 20), occurred_at=datetime(2026, 7, 20))
+
+
+class _NoOffsetTz(tzinfo):
+    def utcoffset(self, _value):
+        return None
+
+    def dst(self, _value):
+        return None
+
+    def tzname(self, _value):
+        return "no-offset"
+
+
+def test_cash_flow_request_rejects_tzinfo_without_offset():
+    with pytest.raises(ValueError, match="offset"):
+        CashFlowRequest(
+            amount=Decimal("1"),
+            trade_date=date(2026, 7, 20),
+            occurred_at=datetime(2026, 7, 20, tzinfo=_NoOffsetTz()),
+        )
+
+
+def test_cash_service_rejects_tzinfo_without_offset(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("no-offset-service", Decimal("100000.00"))
+
+    with pytest.raises(ValueError, match="offset"):
+        CashService(repo).deposit(
+            account.id,
+            Decimal("1"),
+            date(2026, 7, 20),
+            occurred_at=datetime(2026, 7, 20, tzinfo=_NoOffsetTz()),
+        )
+
+    engine.dispose()

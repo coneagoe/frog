@@ -152,6 +152,7 @@ export type CashLedgerEntry = {
   account_id: number;
   event_type: string;
   amount: string;
+  occurred_at: string;
   trade_date: string | null;
   net_asset_value: string | null;
   share_delta: string | null;

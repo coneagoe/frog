@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -747,7 +747,17 @@ def test_deposit_endpoint_returns_cash_flow_response(monkeypatch, sqlite_session
     assert body["ledger"]["share_delta"] == "25000.000000"
     assert body["cash_available"] == "125000.0000"
     assert body["share_count"] == "125000.000000"
-    assert body["ledger"]["occurred_at"].startswith("2026-07-20T10:00:00")
+    ledger_response = client.get(f"/paper/accounts/{account_id}/cash-ledger", headers=headers)
+    assert ledger_response.status_code == 200
+    deposit_entry = next(entry for entry in ledger_response.json() if entry["event_type"] == "deposit" and entry["note"] == "add cash")
+    returned_at = datetime.fromisoformat(deposit_entry["occurred_at"])
+    expected_at = datetime.fromisoformat("2026-07-20T10:00:00+00:00")
+    returned_utc = (
+        returned_at.replace(tzinfo=timezone.utc)
+        if returned_at.tzinfo is None
+        else returned_at.astimezone(timezone.utc)
+    )
+    assert returned_utc == expected_at
 
 
 def test_cash_flow_endpoint_rejects_naive_occurred_at(monkeypatch, sqlite_session):

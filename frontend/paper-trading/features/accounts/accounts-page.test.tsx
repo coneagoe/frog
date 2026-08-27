@@ -804,7 +804,7 @@ describe("AccountsPage", () => {
   });
 
   it("submits a deposit from the account page and refreshes", async () => {
-    const ledgerEntry = { id: 1, account_id: 1, event_type: "deposit", amount: "100000.0000", note: "Initial deposit", trade_date: null, net_asset_value: null, share_delta: null };
+    const ledgerEntry = { id: 1, account_id: 1, event_type: "deposit", amount: "100000.0000", occurred_at: "2026-07-20T10:00:00Z", note: "Initial deposit", trade_date: null, net_asset_value: null, share_delta: null };
 
     listAccountsMock.mockResolvedValue([demoAccount]);
     listPositionsMock.mockResolvedValue([]);

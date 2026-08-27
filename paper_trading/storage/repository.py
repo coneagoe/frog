@@ -474,7 +474,7 @@ class PaperTradingRepository:
         share_delta: Decimal | None = None,
         occurred_at: datetime | None = None,
     ) -> PaperCashLedger:
-        if occurred_at is not None and occurred_at.tzinfo is None:
+        if occurred_at is not None and (occurred_at.tzinfo is None or occurred_at.utcoffset() is None):
             raise ValueError("occurred_at must include a timezone offset")
         event = PaperCashLedger(
             account_id=account_id,
@@ -662,7 +662,7 @@ class PaperTradingRepository:
         )
 
     def latest_valid_nav_before(self, account_id: int, occurred_at: datetime) -> Decimal | None:
-        if occurred_at.tzinfo is None:
+        if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must include a timezone offset")
         snapshots = (
             self.session.query(PaperAccountSnapshot)

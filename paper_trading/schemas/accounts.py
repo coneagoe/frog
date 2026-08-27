@@ -160,7 +160,7 @@ class CashFlowRequest(BaseModel):
     @field_validator("occurred_at")
     @classmethod
     def require_timezone_offset(cls, value: datetime | None) -> datetime | None:
-        if value is not None and value.tzinfo is None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
             raise ValueError("occurred_at must include a timezone offset")
         return value
 
