@@ -7,7 +7,9 @@ from typing import Mapping
 from paper_trading.domain.enums import CorporateActionType
 from paper_trading.domain.errors import (
     InsufficientRightsCashError,
+    InvalidCorporateActionInputError,
     InvalidCorporateActionParametersError,
+    UnknownCorporateActionTypeError,
 )
 from paper_trading.domain.precision import (
     quantize_account_money,
@@ -22,9 +24,9 @@ class CorporateActionInput:
     parameters: Mapping[str, Decimal]
 
     def __post_init__(self) -> None:
-        event_type = CorporateActionType(self.event_type)
+        event_type = _coerce_event_type(self.event_type)
         normalized = {
-            name: require_finite(Decimal(value), name) for name, value in self.parameters.items()
+            name: _finite_input(value, name) for name, value in self.parameters.items()
         }
         object.__setattr__(self, "event_type", event_type)
         object.__setattr__(self, "parameters", MappingProxyType(normalized))
@@ -54,13 +56,24 @@ def _positive_parameter(parameters: Mapping[str, Decimal], name: str) -> Decimal
     return value
 
 
+def _coerce_event_type(event_type: CorporateActionType) -> CorporateActionType:
+    try:
+        return CorporateActionType(event_type)
+    except (TypeError, ValueError) as exc:
+        raise UnknownCorporateActionTypeError(event_type) from exc
+
+
+def _finite_input(value: Decimal, name: str) -> Decimal:
+    try:
+        return require_finite(Decimal(value), name)
+    except (TypeError, ValueError) as exc:
+        raise InvalidCorporateActionInputError(f"{name} must be finite", {"field": name}) from exc
+
+
 def validate_corporate_action_parameters(
     event_type: CorporateActionType, parameters: Mapping[str, Decimal]
 ) -> None:
-    try:
-        action_type = CorporateActionType(event_type)
-    except ValueError as exc:
-        raise InvalidCorporateActionParametersError(f"unknown corporate action type: {event_type}") from exc
+    action_type = _coerce_event_type(event_type)
 
     required = {
         CorporateActionType.DIVIDEND: ("per_share_amount",),
@@ -83,13 +96,14 @@ def calculate_corporate_action_impact(
     cash_available: Decimal,
     parameters: Mapping[str, Decimal],
 ) -> CorporateActionImpact:
-    action_type = CorporateActionType(event_type)
+    action_type = _coerce_event_type(event_type)
     validate_corporate_action_parameters(action_type, parameters)
-    before_quantity = quantize_shares(require_finite(Decimal(eligible_quantity), "eligible quantity"))
-    before_cost = quantize_account_money(require_finite(Decimal(cost_amount), "cost amount"))
-    before_cash = quantize_account_money(require_finite(Decimal(cash_available), "cash available"))
-    if before_quantity < 0 or before_cost < 0 or before_cash < 0:
-        raise ValueError("eligible quantity, cost amount, and cash available must be non-negative")
+    raw_quantity = _non_negative_input(eligible_quantity, "eligible quantity")
+    raw_cost = _non_negative_input(cost_amount, "cost amount")
+    raw_cash = _non_negative_input(cash_available, "cash available")
+    before_quantity = quantize_shares(raw_quantity)
+    before_cost = quantize_account_money(raw_cost)
+    before_cash = quantize_account_money(raw_cash)
 
     cash_delta = Decimal("0")
     quantity_delta = Decimal("0")
@@ -106,7 +120,7 @@ def calculate_corporate_action_impact(
         subscription_price = _positive_parameter(parameters, "subscription_price")
         quantity_delta = before_quantity * subscription_ratio
         cash_delta = -(quantity_delta * subscription_price)
-        required_cash = -cash_delta
+        required_cash = quantize_account_money(-cash_delta)
         if before_cash < required_cash:
             raise InsufficientRightsCashError(before_cash, required_cash)
 
@@ -120,3 +134,10 @@ def calculate_corporate_action_impact(
         before_cash_available=before_cash,
         after_cash_available=quantize_account_money(before_cash + cash_delta),
     )
+
+
+def _non_negative_input(value: Decimal, name: str) -> Decimal:
+    normalized = _finite_input(value, name)
+    if normalized < 0:
+        raise InvalidCorporateActionInputError(f"{name} must be non-negative", {"field": name})
+    return normalized
