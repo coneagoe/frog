@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from statistics import mean, stdev
-from typing import Callable, Literal
+from typing import Callable, Literal, cast
 from zoneinfo import ZoneInfo
 
 from paper_trading.domain.enums import CashEventType, MigrationRepairReason, SnapshotPointType, SnapshotQualityStatus
@@ -150,18 +150,22 @@ class AnalyticsService:
                 )
             )
         for entry in ledger_entries:
-            if entry.note == "initial_cash" or entry.event_type not in {
-                CashEventType.DEPOSIT.value,
-                CashEventType.WITHDRAWAL.value,
-            }:
+            if entry.note == "initial_cash":
                 continue
+            try:
+                event_type = CashEventType(entry.event_type)
+            except ValueError:
+                continue
+            if event_type not in {CashEventType.DEPOSIT, CashEventType.WITHDRAWAL}:
+                continue
+            event_name = cast(Literal["deposit", "withdrawal"], event_type.value)
             events.append(
                 (
                     entry.occurred_at,
                     1,
                     entry.id,
                     CashFlowAnalyticsEvent(
-                        event_type=entry.event_type,
+                        event_type=event_name,
                         id=entry.id,
                         occurred_at=entry.occurred_at,
                         amount=Decimal(entry.amount).quantize(Decimal("0.0001")),
