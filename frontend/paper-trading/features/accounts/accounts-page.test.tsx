@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAccount, deleteAccount, depositCash, importPositions, listAccounts, listPositions, updateAccountFees, withdrawCash } from "@/lib/api-client";
+import { createAccount, createCorporateAction, deleteAccount, depositCash, importPositions, listAccounts, listPositions, updateAccountFees } from "@/lib/api-client";
 import { AccountsPage } from "./accounts-page";
 
 // Return the same URLSearchParams instance across renders for stable references.
@@ -13,6 +13,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api-client", () => ({
   createAccount: vi.fn(),
+  createCorporateAction: vi.fn(),
   deleteAccount: vi.fn(),
   depositCash: vi.fn(),
   importPositions: vi.fn(),
@@ -23,13 +24,13 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 const createAccountMock = vi.mocked(createAccount);
+const createCorporateActionMock = vi.mocked(createCorporateAction);
 const deleteAccountMock = vi.mocked(deleteAccount);
 const depositCashMock = vi.mocked(depositCash);
 const importPositionsMock = vi.mocked(importPositions);
 const listAccountsMock = vi.mocked(listAccounts);
 const listPositionsMock = vi.mocked(listPositions);
 const updateAccountFeesMock = vi.mocked(updateAccountFees);
-const withdrawCashMock = vi.mocked(withdrawCash);
 
 const demoAccount = {
   id: 1,
@@ -831,5 +832,31 @@ describe("AccountsPage", () => {
       expect(listAccountsMock).toHaveBeenCalledTimes(2);
     });
     expect(screen.queryByRole("dialog", { name: "Deposit cash for demo" })).not.toBeInTheDocument();
+  });
+
+  it("applies a corporate action and refreshes accounts and positions before closing", async () => {
+    listAccountsMock.mockResolvedValue([demoAccount]);
+    listPositionsMock.mockResolvedValue([]);
+    createCorporateActionMock.mockResolvedValue({ event: {}, impact: {}, recalculation: {} } as never);
+
+    render(<AccountsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Corporate action" }));
+    const dialog = screen.getByRole("dialog", { name: "Corporate action for demo" });
+    await userEvent.type(within(dialog).getByLabelText("Symbol"), "000001.SZ");
+    await userEvent.clear(within(dialog).getByLabelText("Event time"));
+    await userEvent.type(within(dialog).getByLabelText("Event time"), "2026-08-27T09:30:00+08:00");
+    await userEvent.type(within(dialog).getByLabelText("Idempotency key"), "action-1");
+    await userEvent.type(within(dialog).getByLabelText("Per-share amount"), "1");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Apply action" }));
+
+    expect(createCorporateActionMock).toHaveBeenCalledWith(1, expect.objectContaining({
+      symbol: "000001.SZ",
+      event_type: "dividend",
+      market: "a_share",
+      parameters: { per_share_amount: "1" }
+    }));
+    await waitFor(() => expect(listAccountsMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listPositionsMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog", { name: "Corporate action for demo" })).not.toBeInTheDocument();
   });
 });

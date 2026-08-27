@@ -211,7 +211,7 @@ export type CashLedgerEntry = {
 };
 
 export type OrderSide = "buy" | "sell";
-export type Market = "a_share" | "hk_connect";
+export type Market = "a_share" | "hk_connect" | "etf";
 
 export type Order = {
   id: number;

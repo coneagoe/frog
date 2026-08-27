@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { OrderTable, PositionTable, TradeTable } from "./trading-tables";
+import { CashLedgerTable, OrderTable, PositionTable, TradeTable } from "./trading-tables";
 
 const position = {
   symbol: "000001.SZ",
@@ -203,5 +203,24 @@ describe("shared trading tables", () => {
     rerender(<PositionTable positions={fresh} />);
     expect(screen.getByRole("columnheader", { name: "Symbol" })).not.toHaveAttribute("aria-sort");
     expect(within(screen.getByRole("table")).getAllByRole("row")[1]).toHaveTextContent("C");
+  });
+
+  it("labels corporate-action ledger entries and formats residual money", () => {
+    render(<CashLedgerTable entries={[{
+      id: 1,
+      account_id: 1,
+      event_type: "corporate_action",
+      amount: "1.25",
+      occurred_at: "2026-08-27T09:30:00Z",
+      trade_date: "2026-08-27",
+      net_asset_value: null,
+      share_delta: "2.5",
+      rounding_residual: "0.01",
+      note: null
+    }]} />);
+
+    expect(screen.getByRole("cell", { name: "Corporate action" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Rounding residual" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "¥0.01" })).toBeInTheDocument();
   });
 });

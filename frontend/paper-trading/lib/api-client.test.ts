@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   apiGet,
+  createCorporateAction,
   createAccount,
   depositCash,
   importPositions,
   listOrders,
+  listCorporateActions,
   listTrades,
   updateOrderComment,
   withdrawCash
@@ -206,5 +208,39 @@ describe("cash flow API", () => {
     vi.stubGlobal("fetch", fetchMock);
     await withdrawCash(7, { amount: "5000", trade_date: "2026-07-20" });
     expect(fetchMock).toHaveBeenCalledWith("/api/paper/accounts/7/cash/withdraw", expect.objectContaining({ method: "POST", body: JSON.stringify({ amount: "5000", trade_date: "2026-07-20" }) }));
+  });
+});
+
+describe("corporate action API", () => {
+  it("posts corporate action payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ event: {}, impact: {}, recalculation: {} }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      symbol: "510300.SH",
+      market: "etf" as const,
+      event_type: "rights_issue" as const,
+      event_at: "2026-08-27T09:30:00+08:00",
+      idempotency_key: "rights-1",
+      parameters: { subscription_ratio: "0.1000", subscription_price: "3.25" }
+    };
+
+    await createCorporateAction(7, input);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/accounts/7/corporate-actions",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(input) })
+    );
+  });
+
+  it("encodes defined corporate action filters and omits undefined values", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listCorporateActions(7, { symbol: "A B&", event_type: "reverse_split", start_at: "2026-01-01T00:00:00Z", end_at: undefined });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/paper/accounts/7/corporate-actions?symbol=A+B%26&event_type=reverse_split&start_at=2026-01-01T00%3A00%3A00Z",
+      expect.anything()
+    );
   });
 });

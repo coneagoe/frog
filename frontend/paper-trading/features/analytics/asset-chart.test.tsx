@@ -104,6 +104,24 @@ describe("AssetChart", () => {
         share_delta: "50000"
       },
       {
+        event_type: "withdrawal",
+        id: 5,
+        occurred_at: "2026-09-10T12:00:00Z",
+        amount: "1000",
+        effective_nav: "1",
+        share_delta: "-1000"
+      },
+      {
+        event_type: "corporate_action",
+        id: 6,
+        event_at: "2026-09-10T13:00:00Z",
+        symbol: "000001.SZ",
+        action_type: "dividend",
+        parameters: { per_share_amount: "1" },
+        impact: {} as never,
+        created_at: "2026-09-10T13:00:00Z"
+      },
+      {
         event_type: "snapshot",
         id: 3,
         event_at: "2026-09-10T11:00:00Z",

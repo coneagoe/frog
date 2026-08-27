@@ -154,10 +154,15 @@ export function AnalyticsRiskSection({ analytics }: { analytics: AvailableAnalyt
 
 export function AnalyticsCorporateActionsSection({ analytics }: { analytics: AvailableAnalyticsResponse | null }) {
   const rows = analytics?.event_series.filter((event): event is AnalyticsCorporateActionEvent => event.event_type === "corporate_action") ?? [];
+  const formatImpactValue = (key: string, value: string) => {
+    if (key.includes("quantity")) return formatQuantity(Number(value));
+    if (key.includes("cash") || key.includes("amount") || key.includes("price")) return <MoneyText value={value} />;
+    return formatBackendLabel(value);
+  };
   return <DataTable columns={[
     { key: "date", header: "Event", render: (row) => `${formatDate(row.event_at)} · ${formatBackendLabel(row.action_type)}` },
     { key: "symbol", header: "Symbol", render: (row) => row.symbol },
-    { key: "parameters", header: "Parameters", render: (row) => Object.entries(row.parameters).map(([key, value]) => `${formatBackendLabel(key)} ${value}`).join(", ") },
-    { key: "impact", header: "Impact", render: (row) => `Qty ${row.impact.before_quantity} → ${row.impact.after_quantity}; Cash ${row.impact.before_cash_available} → ${row.impact.after_cash_available}` }
+    { key: "parameters", header: "Parameters", render: (row) => Object.entries(row.parameters).map(([key, value]) => <span key={key}>{formatBackendLabel(key)} {formatImpactValue(key, value)}</span>) },
+    { key: "impact", header: "Impact", render: (row) => <span>Qty {formatQuantity(Number(row.impact.before_quantity))} → {formatQuantity(Number(row.impact.after_quantity))}; Cash <MoneyText value={row.impact.before_cash_available} /> → <MoneyText value={row.impact.after_cash_available} /></span> },
   ]} emptyTitle="No corporate actions yet" getRowKey={(row) => row.id} rows={rows} />;
 }
