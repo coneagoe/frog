@@ -3,19 +3,24 @@
 import { useEffect, useMemo, useRef } from "react";
 import { createChart, LineSeries, type UTCTimestamp } from "lightweight-charts";
 import { EmptyState } from "@/components/empty-state";
-import type { Snapshot } from "@/lib/types";
+import type { AnalyticsEvent, Snapshot } from "@/lib/types";
 
-export function AssetChart({ snapshots }: { snapshots: Snapshot[] }) {
+export function AssetChart({ events }: { events: Array<AnalyticsEvent | Snapshot> }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartData = useMemo(
     () => {
       let previousTime: number | null = null;
-      return snapshots.flatMap((snapshot) => {
-        const nav = Number(snapshot.net_asset_value);
+      return events.flatMap((event) => {
+        if ("event_type" in event && event.event_type !== "snapshot") {
+          return [];
+        }
+        const snapshot = event;
+        const navValue = "event_type" in snapshot ? snapshot.nav : snapshot.net_asset_value;
+        const nav = Number(navValue);
         const timestamp = Math.floor(new Date(snapshot.event_at).getTime() / 1000);
         if (
           snapshot.quality_status !== "valid"
-          || snapshot.net_asset_value === null
+          || navValue === null
           || !Number.isFinite(nav)
           || nav <= 0
           || !Number.isFinite(timestamp)
@@ -27,7 +32,7 @@ export function AssetChart({ snapshots }: { snapshots: Snapshot[] }) {
         return [{ time: time as UTCTimestamp, value: nav }];
       });
     },
-    [snapshots]
+    [events]
   );
 
   useEffect(() => {

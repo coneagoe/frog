@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Snapshot } from "@/lib/types";
+import type { AnalyticsEvent, Snapshot } from "@/lib/types";
 import { AssetChart } from "./asset-chart";
 
 const { addSeriesMock, createChartMock, removeMock, setDataMock } = vi.hoisted(() => ({
@@ -75,7 +75,7 @@ describe("AssetChart", () => {
       net_asset_value: "1.2"
     };
 
-    render(<AssetChart snapshots={[initialPoint, invalidPoint, malformedTimestampPoint, tradingPoint]} />);
+    render(<AssetChart events={[initialPoint, invalidPoint, malformedTimestampPoint, tradingPoint]} />);
 
     expect(setDataMock).toHaveBeenCalledWith([
       { time: toChartTime(initialPoint.event_at), value: 1 },
@@ -83,8 +83,58 @@ describe("AssetChart", () => {
     ]);
   });
 
+  it("plots only valid snapshot NAV events from the analytics event series", () => {
+    const eventSeries = [
+      {
+        event_type: "snapshot",
+        id: 1,
+        event_at: "2026-09-10T09:30:00Z",
+        point_type: "initial",
+        quality_status: "valid",
+        invalid_reason: null,
+        nav: "1",
+        shares: "100000"
+      },
+      {
+        event_type: "deposit",
+        id: 2,
+        occurred_at: "2026-09-10T10:00:00Z",
+        amount: "50000",
+        effective_nav: "1",
+        share_delta: "50000"
+      },
+      {
+        event_type: "snapshot",
+        id: 3,
+        event_at: "2026-09-10T11:00:00Z",
+        point_type: "trading",
+        quality_status: "invalid",
+        invalid_reason: "missing_nav",
+        nav: null,
+        shares: null
+      },
+      {
+        event_type: "snapshot",
+        id: 4,
+        event_at: "2026-09-10T15:00:00Z",
+        point_type: "trading",
+        quality_status: "valid",
+        invalid_reason: null,
+        nav: "1.1",
+        shares: "150000"
+      }
+    ];
+
+    render(<AssetChart events={eventSeries as AnalyticsEvent[]} />);
+
+    expect(setDataMock).toHaveBeenCalledWith([
+      { time: toChartTime("2026-09-10T09:30:00Z"), value: 1 },
+      { time: toChartTime("2026-09-10T15:00:00Z"), value: 1.1 }
+    ]);
+  });
+
   it("renders the existing empty state when no valid NAV points exist", () => {
-    render(<AssetChart snapshots={[{ ...initialPoint, net_asset_value: null, total_assets: "100000" }]} />);
+    render(<AssetChart events={[{ ...initialPoint, net_asset_value: null, total_assets: "100000" }]} />);
 
     expect(screen.getByText("No snapshots yet")).toBeInTheDocument();
     expect(createChartMock).not.toHaveBeenCalled();
@@ -98,7 +148,7 @@ describe("AssetChart", () => {
       net_asset_value: "1.1"
     };
 
-    render(<AssetChart snapshots={[initialPoint, sameSecondPoint]} />);
+    render(<AssetChart events={[initialPoint, sameSecondPoint]} />);
 
     expect(setDataMock).toHaveBeenCalledWith([
       { time: toChartTime(initialPoint.event_at), value: 1 },

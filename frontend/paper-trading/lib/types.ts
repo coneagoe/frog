@@ -96,6 +96,28 @@ export type RiskAnalytics = {
   calmar: MetricValue;
 };
 
+export type SnapshotAnalyticsEvent = {
+  event_type: "snapshot";
+  id: number;
+  event_at: string;
+  point_type: string;
+  quality_status: string;
+  invalid_reason: string | null;
+  nav: string | null;
+  shares: string | null;
+};
+
+export type CashFlowAnalyticsEvent = {
+  event_type: "deposit" | "withdrawal";
+  id: number;
+  occurred_at: string;
+  amount: string;
+  effective_nav: string | null;
+  share_delta: string | null;
+};
+
+export type AnalyticsEvent = SnapshotAnalyticsEvent | CashFlowAnalyticsEvent;
+
 export type AvailableAnalyticsResponse = {
   available: true;
   overview: OverviewAnalytics;
@@ -103,6 +125,7 @@ export type AvailableAnalyticsResponse = {
   execution: ExecutionAnalytics;
   trade_quality: TradeQualityAnalytics;
   risk: RiskAnalytics;
+  event_series: AnalyticsEvent[];
 };
 
 export type UnavailableAnalyticsResponse = {

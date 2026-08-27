@@ -119,7 +119,7 @@ export function AnalyticsPage() {
         ) : (
           <AnalyticsSummary analytics={analytics} snapshot={latestSnapshot} />
         )}
-        <AssetChart snapshots={snapshots} />
+        <AssetChart events={analytics?.available ? analytics.event_series : snapshots} />
       </section>
       {analytics?.available !== false ? (
         <>
