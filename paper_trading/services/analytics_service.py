@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from statistics import mean, stdev
 from typing import Callable, Literal, cast
@@ -105,6 +105,8 @@ class AnalyticsService:
             return []
         values = [first_nav]
         for snapshot in snapshots[1:]:
+            if snapshot.point_type != SnapshotPointType.TRADING.value:
+                continue
             nav = AnalyticsService._snapshot_nav(snapshot)
             if nav is not None:
                 values.append(nav)
@@ -138,12 +140,12 @@ class AnalyticsService:
                 continue
             events.append(
                 (
-                    snapshot.event_at,
+                    AnalyticsService._utc(snapshot.event_at),
                     0,
                     snapshot.id,
                     SnapshotAnalyticsEvent(
                         id=snapshot.id,
-                        event_at=snapshot.event_at,
+                        event_at=AnalyticsService._utc(snapshot.event_at),
                         point_type=snapshot.point_type,
                         quality_status=snapshot.quality_status,
                         invalid_reason=snapshot.invalid_reason,
@@ -168,13 +170,13 @@ class AnalyticsService:
             event_name = cast(Literal["deposit", "withdrawal"], event_type.value)
             events.append(
                 (
-                    entry.occurred_at,
+                    AnalyticsService._utc(entry.occurred_at),
                     1,
                     entry.id,
                     CashFlowAnalyticsEvent(
                         event_type=event_name,
                         id=entry.id,
-                        occurred_at=entry.occurred_at,
+                        occurred_at=AnalyticsService._utc(entry.occurred_at),
                         amount=Decimal(entry.amount).quantize(Decimal("0.0001")),
                         effective_nav=Decimal(entry.net_asset_value).quantize(_QUANTIZE)
                         if entry.net_asset_value is not None
@@ -188,32 +190,39 @@ class AnalyticsService:
         for action in corporate_actions or []:
             events.append(
                 (
-                    action.event_at,
+                    AnalyticsService._utc(action.event_at),
                     2,
                     action.id,
                     CorporateActionAnalyticsEvent(
                         id=action.id,
-                        event_at=action.event_at,
+                        event_at=AnalyticsService._utc(action.event_at),
                         symbol=action.symbol,
                         action_type=action.event_type,
                         parameters=dict(action.parameters),
                         impact={
-                            "cash_delta": Decimal(action.cash_delta),
-                            "quantity_delta": Decimal(action.quantity_delta),
-                            "before_quantity": Decimal(action.before_quantity),
-                            "after_quantity": Decimal(action.after_quantity),
-                            "before_cost_amount": Decimal(action.before_cost_amount),
-                            "after_cost_amount": Decimal(action.after_cost_amount),
-                            "before_cash_available": Decimal(action.before_cash_available),
-                            "after_cash_available": Decimal(action.after_cash_available),
+                            "cash_delta": Decimal(action.cash_delta).quantize(Decimal("0.0001")),
+                            "quantity_delta": Decimal(action.quantity_delta).quantize(Decimal("0.000001")),
+                            "before_quantity": Decimal(action.before_quantity).quantize(Decimal("0.000001")),
+                            "after_quantity": Decimal(action.after_quantity).quantize(Decimal("0.000001")),
+                            "before_cost_amount": Decimal(action.before_cost_amount).quantize(Decimal("0.0001")),
+                            "after_cost_amount": Decimal(action.after_cost_amount).quantize(Decimal("0.0001")),
+                            "before_cash_available": Decimal(action.before_cash_available).quantize(Decimal("0.0001")),
+                            "after_cash_available": Decimal(action.after_cash_available).quantize(Decimal("0.0001")),
                             "affected_start_date": action.affected_start_date,
                             "affected_end_date": action.affected_end_date,
                         },
-                        created_at=action.created_at,
+                        created_at=AnalyticsService._utc(action.created_at),
                     ),
                 )
             )
         return [event for _, _, _, event in sorted(events, key=lambda item: item[:3])]
+
+    @staticmethod
+    def _utc(value: datetime) -> datetime:
+        """Normalize persisted timestamps; legacy naive values are UTC."""
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     def _overview(
         self,

@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from paper_trading.domain.enums import MigrationRepairReason
+from paper_trading.domain.enums import CorporateActionType, MigrationRepairReason
 
 
 class MetricValue(BaseModel):
@@ -121,7 +121,7 @@ class CorporateActionAnalyticsEvent(BaseModel):
     id: int
     event_at: datetime
     symbol: str
-    action_type: str
+    action_type: CorporateActionType
     parameters: dict[str, Any]
     impact: dict[str, Any]
     created_at: datetime

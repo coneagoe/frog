@@ -2,9 +2,9 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
-from paper_trading.domain.enums import CorporateActionType, Market
+from paper_trading.domain.enums import CorporateActionProcessingStatus, CorporateActionType, Market
 from paper_trading.schemas.snapshot_recalculation import SnapshotRecalculationResponse
 
 
@@ -77,7 +77,7 @@ class CorporateActionEventResponse(BaseModel):
     event_at: datetime
     idempotency_key: str
     parameters: dict[str, Any]
-    processing_status: str
+    processing_status: CorporateActionProcessingStatus
     processed_at: datetime | None
     processing_metadata: dict[str, Any] | None
     error_details: str | None
@@ -93,6 +93,20 @@ class CorporateActionEventResponse(BaseModel):
     affected_end_date: date | None
     created_at: datetime
 
+    @field_serializer(
+        "cash_delta",
+        "before_cost_amount",
+        "after_cost_amount",
+        "before_cash_available",
+        "after_cash_available",
+    )
+    def serialize_money(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"))
+
+    @field_serializer("quantity_delta", "before_quantity", "after_quantity")
+    def serialize_quantity(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.000001"))
+
 
 class CorporateActionImpactResponse(BaseModel):
     cash_delta: Decimal
@@ -105,6 +119,20 @@ class CorporateActionImpactResponse(BaseModel):
     after_cash_available: Decimal
     affected_start_date: date | None
     affected_end_date: date | None
+
+    @field_serializer(
+        "cash_delta",
+        "before_cost_amount",
+        "after_cost_amount",
+        "before_cash_available",
+        "after_cash_available",
+    )
+    def serialize_money(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"))
+
+    @field_serializer("quantity_delta", "before_quantity", "after_quantity")
+    def serialize_quantity(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.000001"))
 
 
 class CorporateActionCreateResponse(BaseModel):

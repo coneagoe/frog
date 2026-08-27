@@ -56,8 +56,10 @@ def test_create_corporate_action_returns_event_impact_and_recalculation(monkeypa
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["event"]["event_type"] == action_type
+    assert body["event"]["processing_status"] == "completed"
     assert body["event"]["account_id"] == account.id
     assert Decimal(body["impact"]["before_quantity"]) == Decimal("0")
+    assert len(body["impact"]["cash_delta"].split(".")[1]) == 4
     assert set(body["recalculation"]) == {"account_id", "updated_dates", "unavailable_dates", "failed_dates", "errors"}
 
 
@@ -118,3 +120,68 @@ def test_corporate_action_errors_and_list_filters(monkeypatch, sqlite_session):
     )
     assert response.status_code == 200
     assert [item["event_type"] for item in response.json()] == ["split"]
+
+
+@pytest.mark.parametrize(
+    ("action_type", "parameters"),
+    [
+        ("dividend", {"ratio": "1"}),
+        ("split", {"ratio": "1", "extra": "1"}),
+        ("reverse_split", {"ratio": "1"}),
+        ("bonus_share", {}),
+        ("rights_issue", {"subscription_ratio": "1"}),
+    ],
+)
+def test_each_corporate_action_requires_exact_parameter_contract(monkeypatch, sqlite_session, action_type, parameters):
+    client, headers, repo = _client(monkeypatch, sqlite_session)
+    account = repo.create_account("corporate-parameters", Decimal("100000"))
+    sqlite_session.commit()
+    request = _payload(action_type)
+    request["parameters"] = parameters
+
+    response = client.post(f"/paper/accounts/{account.id}/corporate-actions", json=request, headers=headers)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("ratio", ["1", "1.000000000001", "Infinity", "NaN"])
+def test_reverse_split_requires_finite_ratio_below_one(monkeypatch, sqlite_session, ratio):
+    client, headers, repo = _client(monkeypatch, sqlite_session)
+    account = repo.create_account("corporate-reverse-split", Decimal("100000"))
+    sqlite_session.commit()
+    request = _payload("reverse_split")
+    request["parameters"]["ratio"] = ratio
+
+    response = client.post(f"/paper/accounts/{account.id}/corporate-actions", json=request, headers=headers)
+
+    assert response.status_code == 422
+
+
+def test_corporate_action_rejects_unknown_types_invalid_market_and_long_idempotency_key(monkeypatch, sqlite_session):
+    client, headers, repo = _client(monkeypatch, sqlite_session)
+    account = repo.create_account("corporate-contracts", Decimal("100000"))
+    sqlite_session.commit()
+    for field, value in (("event_type", "unknown"), ("market", "unknown")):
+        request = _payload("dividend")
+        request[field] = value
+        response = client.post(f"/paper/accounts/{account.id}/corporate-actions", json=request, headers=headers)
+        assert response.status_code == 422
+
+    request = _payload("dividend")
+    request["idempotency_key"] = "x" * 101
+    response = client.post(f"/paper/accounts/{account.id}/corporate-actions", json=request, headers=headers)
+    assert response.status_code == 422
+
+
+def test_corporate_action_list_rejects_naive_bound_timestamps(monkeypatch, sqlite_session):
+    client, headers, repo = _client(monkeypatch, sqlite_session)
+    account = repo.create_account("corporate-list-timezone", Decimal("100000"))
+    sqlite_session.commit()
+
+    response = client.get(
+        f"/paper/accounts/{account.id}/corporate-actions",
+        params={"start_at": "2026-08-20T01:30:00"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
