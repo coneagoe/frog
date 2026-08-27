@@ -332,8 +332,8 @@ describe("AnalyticsPage", () => {
         id: 4,
         event_at: "2026-09-10T15:00:00Z",
         symbol: "000001.SZ",
-        action_type: "reverse_split",
-        parameters: { ratio: "0.5" },
+        action_type: "rights_issue",
+        parameters: { price: "12.50", quantity: "100" },
         impact: {
           cash_delta: "-12.50",
           quantity_delta: "-100",
@@ -353,8 +353,8 @@ describe("AnalyticsPage", () => {
     render(<AnalyticsPage />);
 
     const audit = closestSection(await screen.findByRole("heading", { level: 2, name: "Corporate Action Audit" }));
-    expect(within(audit).getByRole("cell", { name: /Reverse Split/ })).toBeInTheDocument();
-    expect(within(audit).getByText("Ratio 0.5")).toBeInTheDocument();
+    expect(within(audit).getByRole("cell", { name: /Rights Issue/ })).toBeInTheDocument();
+    expect(within(audit).getByRole("cell", { name: /Price ¥12\.50\s*, Quantity 100/ })).toBeInTheDocument();
     expect(within(audit).getByText(/Qty 200 → 100/)).toBeInTheDocument();
     expect(within(audit).getByText(/¥100,000.00/)).toBeInTheDocument();
     expect(within(audit).getByText(/¥99,987.50/)).toBeInTheDocument();

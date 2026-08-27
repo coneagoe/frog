@@ -102,3 +102,62 @@ Result: passed with no output.
 - The modal remains open if API processing or account refresh fails, and close happens only after successful refresh completion.
 - The selected-account page continues to use `selectedAccountIdRef` and request ids for refresh/detail race protection.
 - All changes are limited to the Task 6 frontend source/tests plus this requested Task 6 report update; no backend, plan, or specification files were changed.
+
+## Scoped Separator Fix
+
+- Corporate-action parameter entries now render an explicit `, ` separator between spans, keeping multi-parameter rights-issue audit text readable.
+- The existing analytics-page audit assertion now covers a rights issue with price and quantity parameters and requires the comma separator in the rendered Parameters cell.
+
+Exact focused test command:
+
+```text
+npm test -- features/analytics/analytics-page.test.tsx
+```
+
+Exact output:
+
+```text
+npm notice run paper-trading-frontend@0.1.0 test
+npm notice run vitest run --passWithNoTests features/analytics/analytics-page.test.tsx
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html for more details.
+
+ RUN  v2.1.9 /data/frog/.worktrees/issue-87-nav-precision/frontend/paper-trading
+
+ ✓ features/analytics/analytics-page.test.tsx (10 tests) 3778ms
+   ✓ AnalyticsPage > renders the asset chart in Overview instead of Risk & Drawdown 782ms
+   ✓ AnalyticsPage > uses available analytics event series for the asset chart 309ms
+   ✓ AnalyticsPage > renders the analytics dashboard sections 318ms
+   ✓ AnalyticsPage > renders activity coverage and average order summaries 658ms
+   ✓ AnalyticsPage > renders activity headings with the expected levels 371ms
+   ✓ AnalyticsPage > renders the corporate action audit with formatted values and labels 472ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  23:32:55
+   Duration  9.27s (transform 1.09s, setup 415ms, collect 1.79s, tests 3.78s, environment 2.04s, prepare 364ms)
+```
+
+Exact lint command:
+
+```text
+npm run lint
+```
+
+Exact output:
+
+```text
+npm notice run paper-trading-frontend@0.1.0 lint
+npm notice run eslint .
+```
+
+Lint exited successfully with no warnings or errors.
+
+## Scoped Fix Self-Review
+
+- The separator is emitted only before entries after the first, so single-parameter audit rows remain unchanged.
+- The assertion exercises a rights issue with two parameters and checks the rendered cell includes the separator while preserving existing formatted money and quantity assertions.
+- No backend or unrelated files were modified. No further safe simplification was identified for this two-file rendering/test change.
+
+## Scoped Fix Concerns
+
+- Vitest emits the existing Vite CJS API deprecation notice; it does not affect the passing result.

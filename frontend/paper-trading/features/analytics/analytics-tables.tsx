@@ -162,7 +162,7 @@ export function AnalyticsCorporateActionsSection({ analytics }: { analytics: Ava
   return <DataTable columns={[
     { key: "date", header: "Event", render: (row) => `${formatDate(row.event_at)} · ${formatBackendLabel(row.action_type)}` },
     { key: "symbol", header: "Symbol", render: (row) => row.symbol },
-    { key: "parameters", header: "Parameters", render: (row) => Object.entries(row.parameters).map(([key, value]) => <span key={key}>{formatBackendLabel(key)} {formatImpactValue(key, value)}</span>) },
+    { key: "parameters", header: "Parameters", render: (row) => Object.entries(row.parameters).map(([key, value], index) => <span key={key}>{index > 0 ? ", " : null}{formatBackendLabel(key)} {formatImpactValue(key, value)}</span>) },
     { key: "impact", header: "Impact", render: (row) => <span>Qty {formatQuantity(Number(row.impact.before_quantity))} → {formatQuantity(Number(row.impact.after_quantity))}; Cash <MoneyText value={row.impact.before_cash_available} /> → <MoneyText value={row.impact.after_cash_available} /></span> },
   ]} emptyTitle="No corporate actions yet" getRowKey={(row) => row.id} rows={rows} />;
 }
