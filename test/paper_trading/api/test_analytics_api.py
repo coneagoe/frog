@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -145,7 +145,7 @@ def test_get_account_analytics_keeps_stale_valid_snapshot_in_nav(monkeypatch, sq
     assert response.status_code == 200
     payload = response.json()
     assert payload["available"] is True
-    assert payload["overview"]["total_return"]["value"] == "0.000000"
+    assert payload["overview"]["total_return"]["reason"] == "insufficient_data"
     assert payload["overview"]["net_asset_value"] == "1.000000"
     assert payload["risk"]["max_drawdown"]["reason"] == "insufficient_data"
 
@@ -161,7 +161,7 @@ def test_get_account_analytics_does_not_turn_unresolved_gap_into_nav_or_metrics(
     assert response.status_code == 200
     payload = response.json()
     assert payload["valuation_gaps"][0]["resolved"] is False
-    assert payload["overview"]["total_return"]["value"] == "0.000000"
+    assert payload["overview"]["total_return"]["reason"] == "insufficient_data"
     assert payload["overview"]["net_asset_value"] == "1.000000"
     assert payload["risk"]["max_drawdown"]["reason"] == "insufficient_data"
     assert payload["risk"]["sharpe"]["value"] is None
@@ -216,7 +216,7 @@ def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_asse
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["overview"]["total_return"]["value"] == "0.000000"
+    assert payload["overview"]["total_return"]["reason"] == "insufficient_data"
     assert payload["overview"]["simple_asset_return"]["value"] == "-0.200000"
     assert payload["risk"]["max_drawdown"]["reason"] == "insufficient_data"
     assert payload["overview"]["net_asset_value"] is None
@@ -282,3 +282,26 @@ def test_create_account_for_analytics_rejects_non_positive_initial_cash(monkeypa
     )
 
     assert response.status_code == 422
+
+
+def test_get_account_analytics_exposes_typed_event_series(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-event-series", Decimal("100000.00"))
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("25000.0000"),
+        trade_date=date(2026, 8, 20),
+        net_asset_value=Decimal("1.000000"),
+        share_delta=Decimal("25000.000000"),
+        occurred_at=account.created_at.replace(tzinfo=timezone.utc) + timedelta(days=1),
+    )
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    series = response.json()["event_series"]
+    assert [event["event_type"] for event in series] == ["snapshot", "deposit"]
+    assert series[0]["point_type"] == "initial"
+    assert series[1]["effective_nav"] == "1.000000"

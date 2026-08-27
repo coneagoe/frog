@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
@@ -522,7 +522,7 @@ def test_analytics_insufficient_valid_points_keep_established_metric_reasons(tmp
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value == Decimal("0.000000")
+    assert analytics.overview.total_return.reason == "insufficient_data"
     assert analytics.risk.max_drawdown.reason == "insufficient_data"
     assert analytics.risk.current_drawdown.reason == "insufficient_data"
     assert analytics.risk.sharpe.reason == "insufficient_data"
@@ -605,6 +605,7 @@ def test_analytics_orders_same_date_gaps_by_persisted_id():
         ),
         list_orders=lambda _account_id: [],
         list_snapshots=lambda _account_id: [],
+        list_cash_ledger=lambda _account_id: [],
         list_round_trips=lambda _account_id: [],
     )
 
@@ -880,4 +881,100 @@ def test_analytics_raises_keyerror_for_unknown_account(tmp_path):
     with pytest.raises(KeyError, match="paper account not found: 999"):
         AnalyticsService(repo).get_account_analytics(999)
 
+    engine.dispose()
+
+
+def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_ledger():
+    snapshots = [
+        SimpleNamespace(
+            id=2,
+            event_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            point_type="trading",
+            quality_status="valid",
+            invalid_reason=None,
+            net_asset_value=Decimal("1.100000"),
+            share_count=Decimal("110.000000"),
+        ),
+        SimpleNamespace(
+            id=1,
+            event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            point_type="initial",
+            quality_status="valid",
+            invalid_reason=None,
+            net_asset_value=Decimal("1.000000"),
+            share_count=Decimal("100.000000"),
+        ),
+    ]
+    ledger_entries = [
+        SimpleNamespace(
+            id=1,
+            occurred_at=snapshots[1].event_at,
+            event_type="deposit",
+            amount=Decimal("100"),
+            net_asset_value=Decimal("1"),
+            share_delta=Decimal("100"),
+            note="initial_cash",
+        ),
+        SimpleNamespace(
+            id=3,
+            occurred_at=snapshots[0].event_at,
+            event_type="withdrawal",
+            amount=Decimal("-10"),
+            net_asset_value=Decimal("1.1"),
+            share_delta=Decimal("-9.090909"),
+            note="manual",
+        ),
+    ]
+
+    events = AnalyticsService._event_series(snapshots, ledger_entries)
+
+    assert [event.event_type for event in events] == ["snapshot", "snapshot", "withdrawal"]
+    assert events[0].id == 1
+    assert events[1].nav == Decimal("1.100000")
+    assert events[1].shares == Decimal("110.000000")
+    assert events[2].amount == Decimal("-10.0000")
+    assert events[2].effective_nav == Decimal("1.100000")
+    assert events[2].share_delta == Decimal("-9.090909")
+
+
+def test_linked_total_return_uses_valid_valuation_snapshots_only():
+    snapshots = [
+        _nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value),
+        _nav_snapshot(nav=None, quality_status=SnapshotQualityStatus.INVALID.value),
+        _nav_snapshot(nav=Decimal("1.100000")),
+        _nav_snapshot(nav=Decimal("1.210000")),
+    ]
+
+    result = AnalyticsService._linked_total_return(snapshots)
+
+    assert result.value == Decimal("0.210000")
+
+
+def test_linked_total_return_reports_invalid_initial_and_insufficient_data():
+    invalid_initial = [_nav_snapshot(nav=None, point_type=SnapshotPointType.INITIAL.value)]
+    one_point = [_nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value)]
+
+    assert AnalyticsService._linked_total_return(invalid_initial).reason == "invalid_nav"
+    assert AnalyticsService._linked_total_return(one_point).reason == "insufficient_data"
+
+
+def test_risk_is_unchanged_when_cash_flows_are_added(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("cash-flow-risk-demo", Decimal("100000.00"))
+    seed_trading_point(repo, account, nav=Decimal("1.100000"))
+    seed_trading_point(repo, account, nav=Decimal("0.990000"))
+
+    baseline = AnalyticsService(repo).get_account_analytics(account.id).risk
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("25000.0000"),
+        trade_date=date(2026, 8, 20),
+        net_asset_value=Decimal("0.990000"),
+        share_delta=Decimal("25252.525253"),
+        occurred_at=account.created_at.replace(tzinfo=timezone.utc) + timedelta(days=3),
+    )
+    with_cash_flows = AnalyticsService(repo).get_account_analytics(account.id).risk
+
+    assert with_cash_flows.model_dump() == baseline.model_dump()
     engine.dispose()

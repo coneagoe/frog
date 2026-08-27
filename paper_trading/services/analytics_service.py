@@ -4,23 +4,27 @@ from statistics import mean, stdev
 from typing import Callable, Literal
 from zoneinfo import ZoneInfo
 
-from paper_trading.domain.enums import MigrationRepairReason, SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import CashEventType, MigrationRepairReason, SnapshotPointType, SnapshotQualityStatus
 from paper_trading.schemas.analytics import (
     ActivityAnalytics,
     ActivitySummary,
+    AnalyticsEvent,
     AnalyticsResponse,
     AnalyticsUnavailableResponse,
+    CashFlowAnalyticsEvent,
     ExecutionAnalytics,
     MetricValue,
     OverviewAnalytics,
     RejectReasonBucket,
     RiskAnalytics,
     RoundTripResponse,
+    SnapshotAnalyticsEvent,
     TradeQualityAnalytics,
     ValuationGapResponse,
 )
 from paper_trading.storage.models import (
     PaperAccountSnapshot,
+    PaperCashLedger,
     PaperOrder,
     PaperPositionRoundTrip,
     PaperValuationGap,
@@ -43,6 +47,7 @@ class AnalyticsService:
             return AnalyticsUnavailableResponse(reason=MigrationRepairReason(account.migration_repair_reason))
         orders = self.repo.list_orders(account_id)
         snapshots = self.repo.list_snapshots(account_id)
+        ledger_entries = self.repo.list_cash_ledger(account_id)
         round_trips = self.repo.list_round_trips(account_id)
         return AnalyticsResponse(
             overview=self._overview(account.initial_cash, snapshots),
@@ -51,6 +56,7 @@ class AnalyticsService:
             trade_quality=self._trade_quality(round_trips),
             risk=self._risk(snapshots),
             valuation_gaps=self._valuation_gaps(account_id),
+            event_series=self._event_series(snapshots, ledger_entries),
         )
 
     def _valuation_gaps(self, account_id: int) -> list[ValuationGapResponse]:
@@ -99,6 +105,72 @@ class AnalyticsService:
                 values.append(nav)
         return values
 
+    @staticmethod
+    def _linked_total_return(snapshots: list[PaperAccountSnapshot]) -> MetricValue:
+        navs = AnalyticsService._nav_series(snapshots)
+        if not navs:
+            return MetricValue(value=None, reason="invalid_nav")
+        if len(navs) < 2:
+            return MetricValue(value=None, reason="insufficient_data")
+
+        linked_return = Decimal("1")
+        for previous, current in zip(navs, navs[1:]):
+            linked_return *= current / previous
+        return MetricValue(value=(linked_return - Decimal("1")).quantize(_QUANTIZE))
+
+    @staticmethod
+    def _event_series(
+        snapshots: list[PaperAccountSnapshot], ledger_entries: list[PaperCashLedger]
+    ) -> list[AnalyticsEvent]:
+        events: list[tuple[datetime, int, int, AnalyticsEvent]] = []
+        for snapshot in snapshots:
+            events.append(
+                (
+                    snapshot.event_at,
+                    0,
+                    snapshot.id,
+                    SnapshotAnalyticsEvent(
+                        id=snapshot.id,
+                        event_at=snapshot.event_at,
+                        point_type=snapshot.point_type,
+                        quality_status=snapshot.quality_status,
+                        invalid_reason=snapshot.invalid_reason,
+                        nav=Decimal(snapshot.net_asset_value).quantize(_QUANTIZE)
+                        if snapshot.net_asset_value is not None
+                        else None,
+                        shares=Decimal(snapshot.share_count).quantize(_QUANTIZE)
+                        if snapshot.share_count is not None
+                        else None,
+                    ),
+                )
+            )
+        for entry in ledger_entries:
+            if entry.note == "initial_cash" or entry.event_type not in {
+                CashEventType.DEPOSIT.value,
+                CashEventType.WITHDRAWAL.value,
+            }:
+                continue
+            events.append(
+                (
+                    entry.occurred_at,
+                    1,
+                    entry.id,
+                    CashFlowAnalyticsEvent(
+                        event_type=entry.event_type,
+                        id=entry.id,
+                        occurred_at=entry.occurred_at,
+                        amount=Decimal(entry.amount).quantize(Decimal("0.0001")),
+                        effective_nav=Decimal(entry.net_asset_value).quantize(_QUANTIZE)
+                        if entry.net_asset_value is not None
+                        else None,
+                        share_delta=Decimal(entry.share_delta).quantize(_QUANTIZE)
+                        if entry.share_delta is not None
+                        else None,
+                    ),
+                )
+            )
+        return [event for _, _, _, event in sorted(events, key=lambda item: item[:3])]
+
     def _overview(
         self,
         initial_cash: Decimal,
@@ -108,13 +180,7 @@ class AnalyticsService:
             return OverviewAnalytics(total_return=MetricValue(value=None, reason="insufficient_data"))
 
         latest = snapshots[-1]
-        navs = self._nav_series(snapshots)
-        if not navs:
-            total_return = MetricValue(value=None, reason="invalid_nav")
-        else:
-            first_nav = navs[0]
-            latest_nav = navs[-1]
-            total_return = MetricValue(value=((latest_nav - first_nav) / first_nav).quantize(_QUANTIZE))
+        total_return = self._linked_total_return(snapshots)
         simple_asset_return = MetricValue(value=None, reason="invalid_initial_cash")
         if initial_cash and initial_cash > 0:
             simple_asset_return = MetricValue(

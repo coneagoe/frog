@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from paper_trading.domain.enums import MigrationRepairReason
 
@@ -96,6 +96,29 @@ class ValuationGapResponse(BaseModel):
     resolved: bool
 
 
+class SnapshotAnalyticsEvent(BaseModel):
+    event_type: Literal["snapshot"] = "snapshot"
+    id: int
+    event_at: datetime
+    point_type: str
+    quality_status: str
+    invalid_reason: str | None = None
+    nav: Decimal | None = None
+    shares: Decimal | None = None
+
+
+class CashFlowAnalyticsEvent(BaseModel):
+    event_type: Literal["deposit", "withdrawal"]
+    id: int
+    occurred_at: datetime
+    amount: Decimal
+    effective_nav: Decimal | None = None
+    share_delta: Decimal | None = None
+
+
+AnalyticsEvent = Annotated[SnapshotAnalyticsEvent | CashFlowAnalyticsEvent, Field(discriminator="event_type")]
+
+
 class AnalyticsResponse(BaseModel):
     available: Literal[True] = True
     overview: OverviewAnalytics
@@ -104,6 +127,7 @@ class AnalyticsResponse(BaseModel):
     trade_quality: TradeQualityAnalytics
     risk: RiskAnalytics
     valuation_gaps: list[ValuationGapResponse]
+    event_series: list[AnalyticsEvent]
 
 
 class AnalyticsUnavailableResponse(BaseModel):
