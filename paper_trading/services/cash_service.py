@@ -3,11 +3,14 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from paper_trading.domain.enums import AccountStatus, CashEventType
+from paper_trading.domain.precision import (
+    quantize_account_money,
+    quantize_nav,
+    quantize_shares,
+    require_finite,
+)
 from paper_trading.storage.models import PaperAccount, PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
-
-_MONEY = Decimal("0.0001")
-_NAV = Decimal("0.000001")
 
 
 @dataclass(frozen=True)
@@ -33,7 +36,8 @@ class CashService:
         amount = self._positive_money(amount)
         occurred_at = self._occurred_at(occurred_at)
         nav = self._cash_flow_nav(account_id, occurred_at)
-        share_delta = (amount / nav).quantize(_NAV)
+        share_delta = quantize_shares(amount / nav)
+        residual = amount - share_delta * nav
         ledger = self.repo.add_cash_event(
             account_id,
             CashEventType.DEPOSIT,
@@ -41,6 +45,7 @@ class CashService:
             trade_date=trade_date,
             net_asset_value=nav,
             share_delta=share_delta,
+            rounding_residual=residual,
             occurred_at=occurred_at,
             note=note,
         )
@@ -65,10 +70,11 @@ class CashService:
         amount = self._positive_money(amount)
         cash_available = self.repo.get_cash_available(account_id)
         if amount > cash_available:
-            raise ValueError(f"withdrawal amount {amount} exceeds available cash {cash_available}")
+            display_amount = amount.quantize(Decimal("0.0001"))
+            raise ValueError(f"withdrawal amount {display_amount} exceeds available cash {cash_available}")
         occurred_at = self._occurred_at(occurred_at)
         nav = self._cash_flow_nav(account_id, occurred_at)
-        share_delta = -(amount / nav).quantize(_NAV)
+        share_delta = -quantize_shares(amount / nav)
         next_shares = Decimal(account.share_count or 0) + share_delta
         if next_shares < 0:
             raise ValueError("withdrawal would make share count negative")
@@ -79,6 +85,7 @@ class CashService:
             trade_date=trade_date,
             net_asset_value=nav,
             share_delta=share_delta,
+            rounding_residual=-amount - share_delta * nav,
             occurred_at=occurred_at,
             note=note,
         )
@@ -101,7 +108,7 @@ class CashService:
 
     @staticmethod
     def _positive_money(amount: Decimal) -> Decimal:
-        amount = Decimal(amount).quantize(_MONEY)
+        amount = quantize_account_money(require_finite(Decimal(amount), "cash flow amount"))
         if amount <= 0:
             raise ValueError("cash flow amount must be positive")
         return amount
@@ -116,4 +123,4 @@ class CashService:
         nav = self.repo.latest_valid_nav_before(account_id, occurred_at)
         if nav is not None:
             return nav
-        return Decimal("1.000000")
+        return quantize_nav(Decimal("1"))

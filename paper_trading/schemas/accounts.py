@@ -113,6 +113,7 @@ class CashLedgerResponse(BaseModel):
     trade_date: date | None = None
     net_asset_value: Decimal | None = None
     share_delta: Decimal | None = None
+    rounding_residual: Decimal = Decimal("0")
     note: str | None = None
 
 

@@ -37,6 +37,7 @@ class CashEventType(StrEnum):
     RELEASE = "release"
     TRADE = "trade"
     FEE = "fee"
+    CORPORATE_ACTION = "corporate_action"
 
 
 class MatchingRunStatus(StrEnum):

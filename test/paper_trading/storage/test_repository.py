@@ -370,6 +370,16 @@ def test_add_cash_event_persists_nav_share_fields(sqlite_session):
     assert event.share_delta == Decimal("-4000.000000")
 
 
+def test_add_cash_event_defaults_rounding_residual_to_zero(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("cash-event-default-residual", Decimal("100000.00"))
+
+    event = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("1"))
+
+    assert event.rounding_residual == Decimal("0.000000000000")
+
+
 def test_cash_ledger_orders_by_occurred_at_then_id(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

@@ -29,6 +29,12 @@ from paper_trading.domain.enums import (
 )
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label, canonical_stock_id
+from paper_trading.domain.precision import (
+    quantize_account_money,
+    quantize_nav,
+    quantize_shares,
+    require_finite,
+)
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
     ETFEligibility,
@@ -277,8 +283,9 @@ class PaperTradingRepository:
         if cash <= 0:
             raise ValueError("initial_cash must be positive")
         initial_nav = Decimal("1.000000")
-        initial_shares = cash.quantize(Decimal("0.000001"))
-        initial_deposit = cash.quantize(Decimal("0.0001"))
+        cash = require_finite(cash, "initial_cash")
+        initial_shares = quantize_shares(cash)
+        initial_deposit = quantize_account_money(cash)
         account = PaperAccount(
             name=name,
             initial_cash=cash,
@@ -472,6 +479,7 @@ class PaperTradingRepository:
         trade_date: date | None = None,
         net_asset_value: Decimal | None = None,
         share_delta: Decimal | None = None,
+        rounding_residual: Decimal = Decimal("0"),
         occurred_at: datetime | None = None,
     ) -> PaperCashLedger:
         if occurred_at is not None and (occurred_at.tzinfo is None or occurred_at.utcoffset() is None):
@@ -479,12 +487,13 @@ class PaperTradingRepository:
         event = PaperCashLedger(
             account_id=account_id,
             event_type=CashEventType(event_type).value,
-            amount=amount,
+            amount=quantize_account_money(amount),
             order_id=order_id,
             trade_id=trade_id,
             trade_date=trade_date,
-            net_asset_value=net_asset_value,
-            share_delta=share_delta,
+            net_asset_value=None if net_asset_value is None else quantize_nav(net_asset_value),
+            share_delta=None if share_delta is None else quantize_shares(share_delta),
+            rounding_residual=quantize_account_money(rounding_residual),
             occurred_at=occurred_at or datetime.now(timezone.utc),
             note=note,
         )
@@ -501,10 +510,10 @@ class PaperTradingRepository:
         cumulative_deposit: Decimal,
         cumulative_withdrawal: Decimal,
     ) -> PaperAccount:
-        account.share_count = share_count.quantize(Decimal("0.000001"))
-        account.net_asset_value = net_asset_value.quantize(Decimal("0.000001"))
-        account.cumulative_deposit = cumulative_deposit.quantize(Decimal("0.0001"))
-        account.cumulative_withdrawal = cumulative_withdrawal.quantize(Decimal("0.0001"))
+        account.share_count = quantize_shares(share_count)
+        account.net_asset_value = quantize_nav(net_asset_value)
+        account.cumulative_deposit = quantize_account_money(cumulative_deposit)
+        account.cumulative_withdrawal = quantize_account_money(cumulative_withdrawal)
         self.session.flush()
         return account
 
@@ -678,7 +687,7 @@ class PaperTradingRepository:
         for snapshot in snapshots:
             nav = Decimal(snapshot.net_asset_value or 0)
             if nav.is_finite() and nav > 0:
-                return nav.quantize(Decimal("0.000001"))
+                return quantize_nav(nav)
         return None
 
     def list_trades(self, account_id: int) -> list[PaperTrade]:

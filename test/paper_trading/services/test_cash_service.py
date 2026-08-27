@@ -107,6 +107,50 @@ def test_cash_flow_after_valid_snapshot_uses_preceding_snapshot_nav(tmp_path):
     engine.dispose()
 
 
+@pytest.mark.parametrize(
+    ("operation", "amount", "nav"),
+    [
+        ("deposit", Decimal("10.000000000000"), Decimal("3.333333333333")),
+        ("withdraw", Decimal("10.000000000000"), Decimal("3.333333333333")),
+    ],
+)
+def test_cash_flow_records_signed_rounding_residual(tmp_path, operation, amount, nav):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account(f"rounding-{operation}", Decimal("100000.00"))
+    snapshot_at = datetime(2026, 7, 20, 9, tzinfo=timezone.utc)
+    repo.save_trading_snapshot(
+        account_id=account.id,
+        trade_date=snapshot_at.date(),
+        event_at=snapshot_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("100000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("100000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=nav,
+    )
+    service = CashService(repo)
+    result = getattr(service, operation)(
+        account.id,
+        amount,
+        date(2026, 7, 20),
+        occurred_at=datetime(2026, 7, 20, 10, tzinfo=timezone.utc),
+    )
+
+    requested = amount if operation == "deposit" else -amount
+    represented = result.ledger.share_delta * result.ledger.net_asset_value
+    assert result.ledger.share_delta == result.ledger.share_delta.quantize(Decimal("0.000000000001"))
+    assert result.ledger.rounding_residual == requested - represented
+    assert result.ledger.rounding_residual != 0
+    engine.dispose()
+
+
 def test_cash_flow_request_rejects_naive_occurred_at():
     with pytest.raises(ValueError, match="offset"):
         CashFlowRequest(amount=Decimal("1"), trade_date=date(2026, 7, 20), occurred_at=datetime(2026, 7, 20))
