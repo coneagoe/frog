@@ -137,6 +137,19 @@ def test_calculation_rejects_invalid_inputs_and_unknown_event_types():
         calculate_corporate_action_impact("bogus", Decimal("0"), Decimal("0"), Decimal("0"), {})  # type: ignore[arg-type]
 
 
+def test_malformed_numeric_input_raises_typed_error():
+    with pytest.raises(InvalidCorporateActionInputError) as exc_info:
+        calculate_corporate_action_impact(
+            CorporateActionType.DIVIDEND,
+            "not-a-number",  # type: ignore[arg-type]
+            Decimal("0"),
+            Decimal("0"),
+            {"per_share_amount": Decimal("1")},
+        )
+
+    assert exc_info.value.code == "INVALID_CORPORATE_ACTION_INPUT"
+
+
 @pytest.mark.parametrize("value", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
 def test_non_finite_values_are_rejected(value):
     with pytest.raises(InvalidCorporateActionInputError):

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
 from typing import Mapping
 
@@ -48,9 +48,13 @@ class CorporateActionImpact:
 
 def _positive_parameter(parameters: Mapping[str, Decimal], name: str) -> Decimal:
     try:
-        value = require_finite(Decimal(parameters[name]), name)
-    except (KeyError, TypeError, ValueError) as exc:
+        raw_value = parameters[name]
+    except KeyError as exc:
         raise InvalidCorporateActionParametersError(f"{name} must be provided and finite") from exc
+    try:
+        value = require_finite(Decimal(raw_value), name)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise InvalidCorporateActionInputError(f"{name} must be finite", {"field": name}) from exc
     if value <= 0:
         raise InvalidCorporateActionParametersError(f"{name} must be strictly positive", {name: str(value)})
     return value
@@ -66,7 +70,7 @@ def _coerce_event_type(event_type: CorporateActionType) -> CorporateActionType:
 def _finite_input(value: Decimal, name: str) -> Decimal:
     try:
         return require_finite(Decimal(value), name)
-    except (TypeError, ValueError) as exc:
+    except (InvalidOperation, TypeError, ValueError) as exc:
         raise InvalidCorporateActionInputError(f"{name} must be finite", {"field": name}) from exc
 
 
