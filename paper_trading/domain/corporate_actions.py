@@ -25,9 +25,7 @@ class CorporateActionInput:
 
     def __post_init__(self) -> None:
         event_type = _coerce_event_type(self.event_type)
-        normalized = {
-            name: _finite_input(value, name) for name, value in self.parameters.items()
-        }
+        normalized = {name: _finite_input(value, name) for name, value in self.parameters.items()}
         object.__setattr__(self, "event_type", event_type)
         object.__setattr__(self, "parameters", MappingProxyType(normalized))
 
@@ -74,9 +72,7 @@ def _finite_input(value: Decimal, name: str) -> Decimal:
         raise InvalidCorporateActionInputError(f"{name} must be finite", {"field": name}) from exc
 
 
-def validate_corporate_action_parameters(
-    event_type: CorporateActionType, parameters: Mapping[str, Decimal]
-) -> None:
+def validate_corporate_action_parameters(event_type: CorporateActionType, parameters: Mapping[str, Decimal]) -> None:
     action_type = _coerce_event_type(event_type)
 
     required = {
