@@ -295,7 +295,10 @@ class CorporateActionService:
     @classmethod
     def _recalculation_from_event(cls, event: PaperCorporateAction, account_id: int) -> SnapshotRecalculationResult:
         metadata = event.processing_metadata or {}
-        parse_dates = lambda name: [date.fromisoformat(value) for value in metadata.get(name, [])]
+
+        def parse_dates(name: str) -> list[date]:
+            return [date.fromisoformat(value) for value in metadata.get(name, [])]
+
         return SnapshotRecalculationResult(
             account_id,
             parse_dates("updated_dates"),

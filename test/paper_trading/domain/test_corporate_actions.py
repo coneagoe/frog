@@ -156,12 +156,15 @@ def test_non_finite_values_are_rejected(value):
         CorporateActionInput(CorporateActionType.SPLIT, {"ratio": value})
 
 
-@pytest.mark.parametrize("action_type, parameters", [
-    (CorporateActionType.DIVIDEND, {"per_share_amount": Decimal("0")}),
-    (CorporateActionType.SPLIT, {"ratio": Decimal("-1")}),
-    (CorporateActionType.BONUS_SHARE, {"bonus_ratio": Decimal("0")}),
-    (CorporateActionType.RIGHTS_ISSUE, {"subscription_ratio": Decimal("0"), "subscription_price": Decimal("1")}),
-])
+@pytest.mark.parametrize(
+    "action_type, parameters",
+    [
+        (CorporateActionType.DIVIDEND, {"per_share_amount": Decimal("0")}),
+        (CorporateActionType.SPLIT, {"ratio": Decimal("-1")}),
+        (CorporateActionType.BONUS_SHARE, {"bonus_ratio": Decimal("0")}),
+        (CorporateActionType.RIGHTS_ISSUE, {"subscription_ratio": Decimal("0"), "subscription_price": Decimal("1")}),
+    ],
+)
 def test_zero_or_negative_parameters_are_rejected(action_type, parameters):
     with pytest.raises(InvalidCorporateActionParametersError):
         validate_corporate_action_parameters(action_type, parameters)
@@ -190,8 +193,16 @@ def test_impact_contains_all_fields_and_is_immutable():
         CorporateActionType.DIVIDEND, Decimal("2"), Decimal("10"), Decimal("3"), {"per_share_amount": Decimal("1")}
     )
     assert {
-        "cash_delta", "quantity_delta", "before_quantity", "after_quantity", "before_cost_amount",
-        "after_cost_amount", "before_cash_available", "after_cash_available", "affected_start_date", "affected_end_date",
+        "cash_delta",
+        "quantity_delta",
+        "before_quantity",
+        "after_quantity",
+        "before_cost_amount",
+        "after_cost_amount",
+        "before_cash_available",
+        "after_cash_available",
+        "affected_start_date",
+        "affected_end_date",
     } == set(impact.__dataclass_fields__)
     assert impact.affected_start_date is None
     assert impact.affected_end_date is None
