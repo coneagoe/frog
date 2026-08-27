@@ -472,7 +472,10 @@ class PaperTradingRepository:
         trade_date: date | None = None,
         net_asset_value: Decimal | None = None,
         share_delta: Decimal | None = None,
+        occurred_at: datetime | None = None,
     ) -> PaperCashLedger:
+        if occurred_at is not None and occurred_at.tzinfo is None:
+            raise ValueError("occurred_at must include a timezone offset")
         event = PaperCashLedger(
             account_id=account_id,
             event_type=CashEventType(event_type).value,
@@ -482,6 +485,7 @@ class PaperTradingRepository:
             trade_date=trade_date,
             net_asset_value=net_asset_value,
             share_delta=share_delta,
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             note=note,
         )
         self.session.add(event)
@@ -653,9 +657,29 @@ class PaperTradingRepository:
         return list(
             self.session.query(PaperCashLedger)
             .filter(PaperCashLedger.account_id == account_id)
-            .order_by(PaperCashLedger.id.asc())
+            .order_by(PaperCashLedger.occurred_at.asc(), PaperCashLedger.id.asc())
             .all()
         )
+
+    def latest_valid_nav_before(self, account_id: int, occurred_at: datetime) -> Decimal | None:
+        if occurred_at.tzinfo is None:
+            raise ValueError("occurred_at must include a timezone offset")
+        snapshots = (
+            self.session.query(PaperAccountSnapshot)
+            .filter(
+                PaperAccountSnapshot.account_id == account_id,
+                PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
+                PaperAccountSnapshot.quality_status == SnapshotQualityStatus.VALID.value,
+                PaperAccountSnapshot.event_at <= occurred_at,
+            )
+            .order_by(PaperAccountSnapshot.event_at.desc(), PaperAccountSnapshot.id.desc())
+            .all()
+        )
+        for snapshot in snapshots:
+            nav = Decimal(snapshot.net_asset_value or 0)
+            if nav.is_finite() and nav > 0:
+                return nav.quantize(Decimal("0.000001"))
+        return None
 
     def list_trades(self, account_id: int) -> list[PaperTrade]:
         return list(

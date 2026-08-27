@@ -370,6 +370,43 @@ def test_add_cash_event_persists_nav_share_fields(sqlite_session):
     assert event.share_delta == Decimal("-4000.000000")
 
 
+def test_cash_ledger_orders_by_occurred_at_then_id(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("cash-order", Decimal("100000"))
+    later = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+    earlier = datetime(2026, 7, 20, 9, tzinfo=timezone.utc)
+
+    first = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("1"), occurred_at=later)
+    second = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("1"), occurred_at=earlier)
+
+    assert [event.id for event in repo.list_cash_ledger(account.id) if event.id in {first.id, second.id}] == [
+        second.id,
+        first.id,
+    ]
+
+
+def test_latest_valid_nav_before_ignores_invalid_snapshots(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("nav-lookup", Decimal("100000"))
+    event_at = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+    values = _trading_snapshot_values(account.id, event_at.date(), event_at)
+
+    repo.save_snapshot(**{**values, "net_asset_value": Decimal("1.250000")})
+    later_event = event_at + timedelta(days=1)
+    repo.save_snapshot(
+        **{
+            **values,
+            "trade_date": later_event.date(),
+            "event_at": later_event,
+            "net_asset_value": Decimal("0"),
+        }
+    )
+
+    assert repo.latest_valid_nav_before(account.id, later_event + timedelta(minutes=2)) == Decimal("1.250000")
+
+
 def test_create_account_deposits_initial_cash(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'repo.db'}")
     Base.metadata.create_all(engine)

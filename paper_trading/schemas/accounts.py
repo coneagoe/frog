@@ -109,6 +109,7 @@ class CashLedgerResponse(BaseModel):
     account_id: int
     event_type: str
     amount: Decimal
+    occurred_at: datetime
     trade_date: date | None = None
     net_asset_value: Decimal | None = None
     share_delta: Decimal | None = None
@@ -153,7 +154,15 @@ class ImportPositionsResponse(BaseModel):
 class CashFlowRequest(BaseModel):
     amount: Decimal = Field(gt=0)
     trade_date: date
+    occurred_at: datetime | None = None
     note: str | None = None
+
+    @field_validator("occurred_at")
+    @classmethod
+    def require_timezone_offset(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("occurred_at must include a timezone offset")
+        return value
 
 
 class CashFlowResponse(BaseModel):

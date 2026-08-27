@@ -200,7 +200,7 @@ def _cash_flow_response(result) -> CashFlowResponse:
 def deposit_cash(account_id: int, request: CashFlowRequest, session: Session = Depends(get_session)):
     service = CashService(PaperTradingRepository(session))
     try:
-        result = service.deposit(account_id, request.amount, request.trade_date, request.note)
+        result = service.deposit(account_id, request.amount, request.trade_date, request.note, request.occurred_at)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
@@ -213,7 +213,7 @@ def deposit_cash(account_id: int, request: CashFlowRequest, session: Session = D
 def withdraw_cash(account_id: int, request: CashFlowRequest, session: Session = Depends(get_session)):
     service = CashService(PaperTradingRepository(session))
     try:
-        result = service.withdraw(account_id, request.amount, request.trade_date, request.note)
+        result = service.withdraw(account_id, request.amount, request.trade_date, request.note, request.occurred_at)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:

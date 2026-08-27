@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from paper_trading.domain.enums import AccountStatus, CashEventType
@@ -21,10 +21,18 @@ class CashService:
     def __init__(self, repo: PaperTradingRepository):
         self.repo = repo
 
-    def deposit(self, account_id: int, amount: Decimal, trade_date: date, note: str | None = None) -> CashFlowResult:
+    def deposit(
+        self,
+        account_id: int,
+        amount: Decimal,
+        trade_date: date,
+        note: str | None = None,
+        occurred_at: datetime | None = None,
+    ) -> CashFlowResult:
         account = self._active_account(account_id)
         amount = self._positive_money(amount)
-        nav = self._current_nav(account)
+        occurred_at = self._occurred_at(occurred_at)
+        nav = self._cash_flow_nav(account_id, occurred_at)
         share_delta = (amount / nav).quantize(_NAV)
         ledger = self.repo.add_cash_event(
             account_id,
@@ -33,6 +41,7 @@ class CashService:
             trade_date=trade_date,
             net_asset_value=nav,
             share_delta=share_delta,
+            occurred_at=occurred_at,
             note=note,
         )
         self.repo.update_account_nav_state(
@@ -44,13 +53,21 @@ class CashService:
         )
         return CashFlowResult(account=account, ledger=ledger, cash_available=self.repo.get_cash_available(account_id))
 
-    def withdraw(self, account_id: int, amount: Decimal, trade_date: date, note: str | None = None) -> CashFlowResult:
+    def withdraw(
+        self,
+        account_id: int,
+        amount: Decimal,
+        trade_date: date,
+        note: str | None = None,
+        occurred_at: datetime | None = None,
+    ) -> CashFlowResult:
         account = self._active_account(account_id)
         amount = self._positive_money(amount)
         cash_available = self.repo.get_cash_available(account_id)
         if amount > cash_available:
             raise ValueError(f"withdrawal amount {amount} exceeds available cash {cash_available}")
-        nav = self._current_nav(account)
+        occurred_at = self._occurred_at(occurred_at)
+        nav = self._cash_flow_nav(account_id, occurred_at)
         share_delta = -(amount / nav).quantize(_NAV)
         next_shares = Decimal(account.share_count or 0) + share_delta
         if next_shares < 0:
@@ -62,6 +79,7 @@ class CashService:
             trade_date=trade_date,
             net_asset_value=nav,
             share_delta=share_delta,
+            occurred_at=occurred_at,
             note=note,
         )
         self.repo.update_account_nav_state(
@@ -89,8 +107,13 @@ class CashService:
         return amount
 
     @staticmethod
-    def _current_nav(account: PaperAccount) -> Decimal:
-        nav = Decimal(account.net_asset_value or 0).quantize(_NAV)
-        if nav <= 0:
-            raise ValueError("account NAV must be positive")
-        return nav
+    def _occurred_at(value: datetime | None) -> datetime:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("occurred_at must include a timezone offset")
+        return value or datetime.now(timezone.utc)
+
+    def _cash_flow_nav(self, account_id: int, occurred_at: datetime) -> Decimal:
+        nav = self.repo.latest_valid_nav_before(account_id, occurred_at)
+        if nav is not None:
+            return nav
+        return Decimal("1.000000")

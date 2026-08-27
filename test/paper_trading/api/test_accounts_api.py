@@ -732,7 +732,12 @@ def test_deposit_endpoint_returns_cash_flow_response(monkeypatch, sqlite_session
 
     response = client.post(
         f"/paper/accounts/{account_id}/cash/deposit",
-        json={"amount": "25000.00", "trade_date": "2026-07-20", "note": "add cash"},
+        json={
+            "amount": "25000.00",
+            "trade_date": "2026-07-20",
+            "occurred_at": "2026-07-20T10:00:00+00:00",
+            "note": "add cash",
+        },
         headers=headers,
     )
 
@@ -742,6 +747,20 @@ def test_deposit_endpoint_returns_cash_flow_response(monkeypatch, sqlite_session
     assert body["ledger"]["share_delta"] == "25000.000000"
     assert body["cash_available"] == "125000.0000"
     assert body["share_count"] == "125000.000000"
+    assert body["ledger"]["occurred_at"].startswith("2026-07-20T10:00:00")
+
+
+def test_cash_flow_endpoint_rejects_naive_occurred_at(monkeypatch, sqlite_session):
+    client, headers, _ = _client(monkeypatch, sqlite_session)
+    account_id = _create_account(client, headers)
+
+    response = client.post(
+        f"/paper/accounts/{account_id}/cash/deposit",
+        json={"amount": "1", "trade_date": "2026-07-20", "occurred_at": "2026-07-20T10:00:00"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
 
 
 def test_withdraw_endpoint_rejects_excess_cash(monkeypatch, sqlite_session):
