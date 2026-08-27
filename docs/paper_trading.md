@@ -358,7 +358,9 @@ uv run tools/paper_trading_cli.py account deposit --account-id 1 --amount 10000 
 uv run tools/paper_trading_cli.py account withdraw --account-id 1 --amount 5000 --trade-date 2026-07-20 --note "withdraw cash"
 ```
 
-The matching and snapshot flow treats cash flows as pre-market effective on their `trade_date`. A cash flow changes account scale and share count but does not by itself change unit NAV.
+The matching and snapshot flow treats cash flows as pre-market effective on their `trade_date`. A cash flow changes account scale and share count but does not by itself change unit NAV. API callers may optionally send `occurred_at` as an offset-qualified timestamp such as `2026-07-20T09:30:00+08:00`; a timestamp without a timezone offset is rejected. When it is omitted, the server records the current UTC instant. Ledger history is ordered deterministically by `(occurred_at, ledger_id)`, where `ledger_id` resolves equal timestamps.
+
+Every new account starts with an `initial` snapshot at unit NAV `1.000000`. A deposit or withdrawal uses the latest valid trading NAV at or before its occurrence time; when no such valuation exists, it uses that initial NAV baseline. The persisted effective NAV and share delta make the cash-flow calculation auditable.
 
 ## Create Limit Order
 
@@ -563,7 +565,9 @@ The available response includes:
 - Trade quality: full-position round-trip win rate, payoff ratio, profit factor, average win/loss, consecutive wins/losses, and holding days.
 - Risk: total return, max drawdown, current drawdown, and optional Sharpe, Sortino, and Calmar metrics.
 
-`total_return` is NAV return from the ordered valid unit-NAV series, and that series is valid only when the first persisted snapshot is an `initial` point with finite positive stored NAV. Later trading points cannot replace a missing or invalid initial baseline. Invalid, missing, non-finite, or non-positive stored NAV is excluded and is never derived from `total_assets` or `initial_cash`. `simple_asset_return` remains a separate scale-sensitive reference from latest total assets versus initial cash and does not feed total return, risk, or chart data. Overview cash and PnL fields still come from the latest persisted snapshot, including when that point's NAV is invalid. Drawdown and risk-adjusted metrics use the same valid NAV series so deposits and withdrawals do not appear as trading gains or losses.
+`total_return` is the linked time-weighted return (TWR) from the ordered valid unit-NAV series: each consecutive valid NAV ratio is linked, so deposits and withdrawals change capital scale and shares without appearing as investment gains or losses. The series is valid only when the first persisted snapshot is an `initial` point with finite positive stored NAV, normally the `1.000000` account-creation baseline. Later trading points cannot replace a missing or invalid initial baseline. Invalid, missing, non-finite, or non-positive stored NAV is excluded and is never derived from `total_assets` or `initial_cash`; there is no total-assets-to-NAV fallback. `simple_asset_return` remains a separate scale-sensitive reference from latest total assets versus initial cash and does not feed total return, risk, or chart data. Overview cash and PnL fields still come from the latest persisted snapshot, including when that point's NAV is invalid. Drawdown and risk-adjusted metrics use the same valid NAV series so deposits and withdrawals do not appear as trading gains or losses.
+
+`event_series` is the analytics cash-flow audit trail. It interleaves eligible snapshots and manual `deposit`/`withdrawal` ledger events in occurrence-time order, with a snapshot preceding a cash flow at the same timestamp and the record ID resolving otherwise equal events. Initial funding is excluded because the initial snapshot supplies the baseline. Each cash-flow event includes its ledger ID, `occurred_at`, signed amount, effective NAV, and share delta so consumers can reconcile return calculations with the cash ledger.
 
 Round-trip metrics use full-position cycles. A cycle opens when an account's symbol quantity moves from zero to positive and closes when that symbol returns to zero. Partial exits update the open cycle but do not count as closed round trips.
 
