@@ -619,6 +619,15 @@ class PaperTradingRepository:
             .one_or_none()
         )
 
+    def lock_corporate_action_by_idempotency_key(self, account_id: int, key: str) -> PaperCorporateAction | None:
+        query = self.session.query(PaperCorporateAction).filter(
+            PaperCorporateAction.account_id == account_id,
+            PaperCorporateAction.idempotency_key == key,
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.one_or_none()
+
     def create_corporate_action(self, **values: Any) -> PaperCorporateAction:
         if "event_type" in values:
             values["event_type"] = CorporateActionType(values["event_type"]).value
@@ -1193,6 +1202,16 @@ class PaperTradingRepository:
         if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
             query = query.with_for_update()
         return query.one_or_none()
+
+    def lock_lots(self, account_id: int, market: str | Market, symbol: str) -> list[PaperPositionLot]:
+        query = self.session.query(PaperPositionLot).filter(
+            PaperPositionLot.account_id == account_id,
+            PaperPositionLot.market == Market(market).value,
+            PaperPositionLot.symbol == symbol,
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return list(query.order_by(PaperPositionLot.buy_trade_date.asc(), PaperPositionLot.id.asc()).all())
 
     def delete_position(self, position: PaperPosition) -> None:
         self.session.delete(position)

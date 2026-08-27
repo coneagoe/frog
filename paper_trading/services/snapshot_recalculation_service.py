@@ -24,13 +24,16 @@ class SnapshotRecalculationService:
         self.session_factory = session_factory
         self.market_data = market_data
 
-    def recalculate(self, account_id: int, start_date: date, end_date: date) -> SnapshotRecalculationResult:
+    def recalculate(
+        self, account_id: int, start_date: date, end_date: date, session: Session | None = None
+    ) -> SnapshotRecalculationResult:
         if start_date > end_date:
             raise ValueError("start_date must be on or before end_date")
 
-        session = self.session_factory()
+        owns_session = session is None
+        current_session = session or self.session_factory()
         try:
-            repo = PaperTradingRepository(session)
+            repo = PaperTradingRepository(current_session)
             if repo.get_account(account_id) is None:
                 raise KeyError(f"paper account not found: {account_id}")
 
@@ -43,7 +46,7 @@ class SnapshotRecalculationService:
 
             for trade_date in dates:
                 try:
-                    with session.begin_nested():
+                    with current_session.begin_nested():
                         outcome = snapshot_service.generate_snapshot_or_gap(
                             account_id, trade_date, preserve_account_nav=True
                         )
@@ -57,10 +60,12 @@ class SnapshotRecalculationService:
                     failed_dates.append(trade_date)
                     errors.append(f"{trade_date.isoformat()}: {exc}")
 
-            session.commit()
+            if owns_session:
+                current_session.commit()
             return SnapshotRecalculationResult(account_id, updated_dates, unavailable_dates, failed_dates, errors)
         finally:
-            session.close()
+            if owns_session:
+                current_session.close()
 
     @staticmethod
     def _dates_with_valuation_state(
