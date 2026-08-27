@@ -624,6 +624,23 @@ class PaperTradingRepository:
             values["event_type"] = CorporateActionType(values["event_type"]).value
         if "market" in values:
             values["market"] = Market(values["market"]).value
+        if "parameters" in values:
+            values["parameters"] = {
+                name: str(require_finite(Decimal(value), f"parameters.{name}"))
+                for name, value in values["parameters"].items()
+            }
+        for field_name in (
+            "cash_delta",
+            "before_cost_amount",
+            "after_cost_amount",
+            "before_cash_available",
+            "after_cash_available",
+        ):
+            if field_name in values and values[field_name] is not None:
+                values[field_name] = quantize_account_money(values[field_name])
+        for field_name in ("quantity_delta", "before_quantity", "after_quantity"):
+            if field_name in values and values[field_name] is not None:
+                values[field_name] = quantize_shares(values[field_name])
         event_at = values.get("event_at")
         if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
             raise ValueError("event_at must include a timezone offset")

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import textwrap
 from datetime import date, datetime, timedelta, timezone
 from enum import StrEnum
@@ -416,6 +417,16 @@ _PAPER_ACCOUNT_ACCOUNTING_COLUMNS = (
     "cumulative_withdrawal",
     "realized_pnl",
 )
+_NUMERIC_TYPE_RE = re.compile(r"numeric\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)", re.IGNORECASE)
+
+
+def _numeric_precision_scale(type_sql: str) -> tuple[int, int]:
+    match = _NUMERIC_TYPE_RE.fullmatch(type_sql.strip())
+    if match is None:
+        raise ValueError(f"unsupported numeric type: {type_sql}")
+    return int(match.group(1)), int(match.group(2))
+
+
 _PAPER_SNAPSHOT_ACCOUNTING_COLUMNS = (
     "cash_available",
     "cash_frozen",
@@ -3956,6 +3967,12 @@ class StorageDb:
             PaperValuationGap.__table__.create(self.engine, checkfirst=True)
             DailyBarDiagnostic.__table__.create(self.engine, checkfirst=True)
 
+        if self.engine.dialect.name == "postgresql" and has_paper_accounts:
+            self._widen_postgresql_numeric_columns(
+                tb_name_paper_accounts,
+                {column_name: "NUMERIC(30, 12)" for column_name in _PAPER_ACCOUNT_ACCOUNTING_COLUMNS},
+            )
+
         if not has_paper_orders:
             self._ensure_paper_account_repair_without_orders()
             return
@@ -4106,12 +4123,6 @@ class StorageDb:
                     conn.execute(text(f"UPDATE {tb_name_paper_accounts} SET {assignments}"))
             if self.engine.dialect.name != "postgresql":
                 self._ensure_sqlite_paper_account_repair_metadata()
-            else:
-                self._widen_postgresql_numeric_columns(
-                    tb_name_paper_accounts,
-                    {column_name: "NUMERIC(30, 12)" for column_name in _PAPER_ACCOUNT_ACCOUNTING_COLUMNS},
-                )
-
         has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
         if self.engine.dialect.name == "postgresql" and (has_paper_accounts or has_paper_snapshots):
             with self.engine.begin() as conn:
@@ -4303,9 +4314,7 @@ class StorageDb:
     def _ensure_paper_cash_ledger_columns(self) -> None:
         if not inspect(self.engine).has_table(tb_name_paper_cash_ledger):
             return
-        cash_ledger_columns = {
-            column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_cash_ledger)
-        }
+        cash_ledger_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_cash_ledger)}
         cash_ledger_nav_columns = {
             "trade_date": "DATE",
             "net_asset_value": "NUMERIC(30, 12)",
@@ -4335,8 +4344,23 @@ class StorageDb:
         try:
             if not inspect(connection).has_table(table_name):
                 return
-            columns = {column["name"] for column in inspect(connection).get_columns(table_name)}
-            existing = [column_name for column_name in column_types if column_name in columns]
+            existing: list[str] = []
+            for column in inspect(connection).get_columns(table_name):
+                column_name = column["name"]
+                target = column_types.get(column_name)
+                if target is None:
+                    continue
+                precision = getattr(column["type"], "precision", None)
+                scale = getattr(column["type"], "scale", None)
+                target_precision, target_scale = _numeric_precision_scale(target)
+                if precision is None or scale is None:
+                    continue
+                if (
+                    precision <= target_precision
+                    and scale <= target_scale
+                    and (precision < target_precision or scale < target_scale)
+                ):
+                    existing.append(column_name)
             if not existing:
                 return
             connection.execute(

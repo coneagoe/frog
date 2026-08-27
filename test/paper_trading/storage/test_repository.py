@@ -504,6 +504,61 @@ def test_delete_account_removes_corporate_actions(sqlite_session):
     assert repo.list_corporate_actions(account.id) == []
 
 
+def test_corporate_action_persistence_applies_shared_precision(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-actions-precision", Decimal("10000"))
+
+    action = repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        idempotency_key="precision-1",
+        parameters={"per_share_amount": Decimal("1.1234567890129")},
+        cash_delta=Decimal("1.1234567890129"),
+        quantity_delta=Decimal("2.1234567890129"),
+        before_quantity=Decimal("3.1234567890129"),
+        after_quantity=Decimal("5.2469135780258"),
+        before_cost_amount=Decimal("10.1234567890129"),
+        after_cost_amount=Decimal("10.1234567890129"),
+        before_cash_available=Decimal("100.1234567890129"),
+        after_cash_available=Decimal("101.2469135780258"),
+    )
+
+    assert action.parameters == {"per_share_amount": "1.1234567890129"}
+    assert action.cash_delta == Decimal("1.123456789013")
+    assert action.quantity_delta == Decimal("2.123456789013")
+    assert action.before_quantity == Decimal("3.123456789013")
+
+
+@pytest.mark.parametrize("field", ["parameters", "cash_delta", "before_quantity", "after_cash_available"])
+def test_corporate_action_persistence_rejects_non_finite_values(sqlite_session, field):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account(f"corporate-actions-finite-{field}", Decimal("10000"))
+    values: dict[str, Any] = {
+        "account_id": account.id,
+        "symbol": "000001",
+        "event_type": CorporateActionType.DIVIDEND,
+        "event_at": datetime(2026, 8, 27, tzinfo=timezone.utc),
+        "idempotency_key": f"finite-{field}",
+        "parameters": {"per_share_amount": Decimal("1")},
+        "cash_delta": Decimal("0"),
+        "quantity_delta": Decimal("0"),
+        "before_quantity": Decimal("1"),
+        "after_quantity": Decimal("1"),
+        "before_cost_amount": Decimal("1"),
+        "after_cost_amount": Decimal("1"),
+        "before_cash_available": Decimal("1"),
+        "after_cash_available": Decimal("1"),
+    }
+    values[field] = {"per_share_amount": Decimal("NaN")} if field == "parameters" else Decimal("Infinity")
+
+    with pytest.raises(ValueError, match="finite"):
+        repo.create_corporate_action(**values)
+
+
 class _NoOffsetTz(tzinfo):
     def utcoffset(self, _value):
         return None

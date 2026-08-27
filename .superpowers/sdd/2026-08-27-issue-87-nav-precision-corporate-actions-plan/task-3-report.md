@@ -59,6 +59,55 @@ The named migration test file was not present in the worktree, and the PostgreSQ
 - Account deletion removes corporate-action rows before deleting the account.
 - Position locking uses `FOR UPDATE` on PostgreSQL and remains a normal deterministic lookup on SQLite.
 - No service, API, frontend, documentation, plan, or specification files were modified.
+
+## Independent Review Fixes: Important Findings
+
+### Complete Fixes
+
+- Moved PostgreSQL account accounting-column widening before the `paper_orders` existence gate. Legacy databases containing accounts but no `paper_orders` now receive the account precision upgrade and account/snapshot repair path instead of returning early.
+- Made PostgreSQL numeric widening monotonic. Startup now reads each existing SQLAlchemy numeric column's precision and scale and alters only types narrower than the requested target. It never narrows a higher-precision or higher-scale column and skips already exact targets, avoiding unnecessary value rewrites. SQLite continues to use its existing additive startup `ALTER TABLE ... ADD COLUMN` behavior.
+- Expanded `test/paper_trading/storage/test_corporate_action_migration.py` with SQLite corporate-action index and unique-identity assertions, plus PostgreSQL catalog assertions for numeric precision/scale, residual `NUMERIC(30,24)`, indexes, legacy row preservation, repeatability, and higher-precision schema preservation. PostgreSQL tests continue to skip clearly when `TEST_POSTGRESQL_URL` is unavailable.
+- Applied the shared Task 1 finite validation and precision contract at `PaperTradingRepository.create_corporate_action`: JSON parameters must be finite, money summaries/deltas use account-money quantization, and quantity summaries/deltas use share quantization. The domain contract is unchanged.
+- Added repository regression coverage for corporate-action finite rejection and quantized persistence.
+
+### Verification
+
+`uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_corporate_action_migration.py -q`
+
+```text
+........................................................................ [ 75%]
+......................ss                                                 [100%]
+94 passed, 2 skipped in 71.14s (0:01:11)
+```
+
+`uv run ruff format storage/storage_db.py paper_trading/storage/repository.py test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_corporate_action_migration.py && uv run ruff check storage/storage_db.py paper_trading/storage/repository.py test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_corporate_action_migration.py`
+
+```text
+4 files left unchanged
+All checks passed!
+```
+
+`git diff --check`
+
+```text
+(no output)
+```
+
+`tools/run_tests.sh test/paper_trading/storage/test_corporate_action_migration.py -v`
+
+```text
+bash: warning: setlocale: LC_ALL: cannot change locale (en_US.UTF-8)
+time="2026-08-27T20:18:49+08:00" level=warning msg="No services to build"
+Network issue-87-nav-precision_default Creating
+Network issue-87-nav-precision_default Error Error response from daemon: all predefined address pools have been fully subnetted
+failed to create network issue-87-nav-precision_default: Error response from daemon: all predefined address pools have been fully subnetted
+```
+
+Result: PostgreSQL integration remains blocked before pytest starts because Docker cannot allocate the Compose network. The two skipped focused tests are the PostgreSQL cases because `TEST_POSTGRESQL_URL` is unavailable outside the runner.
+
+### Simplify Review
+
+The required simplify review was considered for the touched migration and persistence paths. No further safe simplification was identified without reducing coverage or changing the requested behavior.
 - No further safe simplification was identified without changing the scoped persistence or migration behavior.
 
 ## Concerns
