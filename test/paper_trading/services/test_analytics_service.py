@@ -17,7 +17,7 @@ from paper_trading.domain.enums import (
 )
 from paper_trading.schemas.analytics import AnalyticsUnavailableResponse
 from paper_trading.services.analytics_service import AnalyticsService
-from paper_trading.storage.models import PaperAccountSnapshot
+from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -926,7 +926,10 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
         ),
     ]
 
-    events = AnalyticsService._event_series(snapshots, ledger_entries)
+    events = AnalyticsService._event_series(
+        cast(list[PaperAccountSnapshot], snapshots),
+        cast(list[PaperCashLedger], ledger_entries),
+    )
 
     assert [event.event_type for event in events] == ["snapshot", "snapshot", "withdrawal"]
     assert events[0].id == 1
@@ -959,7 +962,10 @@ def test_event_series_excludes_unsupported_snapshot_point_type():
         ),
     ]
 
-    events = AnalyticsService._event_series(snapshots, [])
+    events = AnalyticsService._event_series(
+        cast(list[PaperAccountSnapshot], snapshots),
+        cast(list[PaperCashLedger], []),
+    )
 
     assert [event.id for event in events] == [1]
 
@@ -996,7 +1002,10 @@ def test_event_series_narrows_cash_event_types_and_excludes_non_cash_events():
         ),
     ]
 
-    events = AnalyticsService._event_series([], ledger_entries)
+    events = AnalyticsService._event_series(
+        cast(list[PaperAccountSnapshot], []),
+        cast(list[PaperCashLedger], ledger_entries),
+    )
 
     assert [event.event_type for event in events] == ["deposit", "withdrawal"]
 
