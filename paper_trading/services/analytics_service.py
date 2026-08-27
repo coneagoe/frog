@@ -4,7 +4,13 @@ from statistics import mean, stdev
 from typing import Callable, Literal, cast
 from zoneinfo import ZoneInfo
 
-from paper_trading.domain.enums import CashEventType, MigrationRepairReason, SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import (
+    CashEventType,
+    CorporateActionType,
+    MigrationRepairReason,
+    SnapshotPointType,
+    SnapshotQualityStatus,
+)
 from paper_trading.schemas.analytics import (
     ActivityAnalytics,
     ActivitySummary,
@@ -197,7 +203,7 @@ class AnalyticsService:
                         id=action.id,
                         event_at=AnalyticsService._utc(action.event_at),
                         symbol=action.symbol,
-                        action_type=action.event_type,
+                        action_type=CorporateActionType(action.event_type),
                         parameters=dict(action.parameters),
                         impact={
                             "cash_delta": Decimal(action.cash_delta).quantize(Decimal("0.0001")),

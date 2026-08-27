@@ -401,8 +401,12 @@ def test_add_cash_event_derives_residual_from_persisted_values(sqlite_session):
     sqlite_session.flush()
     loaded = next(ledger for ledger in repo.list_cash_ledger(account_id) if ledger.id == event.id)
 
+    assert loaded.share_delta is not None
+    assert loaded.net_asset_value is not None
+    assert event.share_delta is not None
+    assert event.net_asset_value is not None
     assert loaded.rounding_residual == loaded.amount - loaded.share_delta * loaded.net_asset_value
-    assert loaded.rounding_residual == event.amount - event.share_delta * event.net_asset_value
+    assert event.rounding_residual == event.amount - event.share_delta * event.net_asset_value
 
 
 def test_cash_ledger_orders_by_occurred_at_then_id(sqlite_session):

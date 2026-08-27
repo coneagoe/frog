@@ -18,7 +18,7 @@ from paper_trading.domain.enums import (
 )
 from paper_trading.schemas.analytics import AnalyticsUnavailableResponse
 from paper_trading.services.analytics_service import AnalyticsService
-from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger
+from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger, PaperCorporateAction
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -1132,7 +1132,7 @@ def test_event_series_orders_corporate_action_by_utc_priority_and_serializes_imp
         created_at=datetime(2026, 8, 1, 1, 0),
     )
 
-    events = AnalyticsService._event_series([], [], [action])
+    events = AnalyticsService._event_series([], [], [cast(PaperCorporateAction, action)])
 
     assert events[0].event_at == datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
     assert events[0].impact["cash_delta"] == Decimal("1.1235")
