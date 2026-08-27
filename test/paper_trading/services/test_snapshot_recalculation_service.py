@@ -98,11 +98,10 @@ def test_recalculation_classifies_unavailable_and_failed_dates():
             "_dates_with_valuation_state",
             return_value=[date(2026, 8, 25), date(2026, 8, 26)],
         ):
-            result = service.recalculate(1, date(2026, 8, 25), date(2026, 8, 26))
+            with pytest.raises(RuntimeError, match="2026-08-26: market data failed"):
+                service.recalculate(1, date(2026, 8, 25), date(2026, 8, 26))
 
-    assert result.unavailable_dates == [date(2026, 8, 25)]
-    assert result.failed_dates == [date(2026, 8, 26)]
-    assert result.errors == ["2026-08-26: market data failed"]
+    session.rollback.assert_called_once()
 
 
 def test_historical_recalculation_preserves_live_nav_and_event_order(tmp_path):

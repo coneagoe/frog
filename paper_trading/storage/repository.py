@@ -65,6 +65,13 @@ from storage.model.etf_basic import ETFBasic
 _BARE_ETF_SYMBOL = re.compile(r"^\d{6}$")
 
 
+def _whole_quantity(value: int | Decimal, field_name: str) -> int:
+    quantity = Decimal(value)
+    if not quantity.is_finite() or quantity != quantity.to_integral_value():
+        raise ValueError(f"{field_name} must be a finite whole quantity")
+    return int(quantity)
+
+
 def _require_bare_etf_symbol(symbol: str) -> str:
     if not _BARE_ETF_SYMBOL.fullmatch(symbol):
         raise ValueError("ETF symbol must be a bare six-digit value")
@@ -929,8 +936,8 @@ class PaperTradingRepository:
         account_id: int,
         market: str | Market,
         symbol: str,
-        total_quantity: int,
-        frozen_quantity: int,
+        total_quantity: int | Decimal,
+        frozen_quantity: int | Decimal,
         cost_amount: Decimal,
         realized_pnl: Decimal = Decimal("0"),
         source: str = "trade",
@@ -941,8 +948,8 @@ class PaperTradingRepository:
         if position is None:
             position = PaperPosition(account_id=account_id, market=market, symbol=symbol, source=source)
             self.session.add(position)
-        position.total_quantity = total_quantity
-        position.frozen_quantity = frozen_quantity
+        position.total_quantity = _whole_quantity(total_quantity, "total_quantity")
+        position.frozen_quantity = _whole_quantity(frozen_quantity, "frozen_quantity")
         position.cost_amount = cost_amount
         position.realized_pnl = realized_pnl
         self.session.flush()
@@ -954,8 +961,8 @@ class PaperTradingRepository:
         market: str | Market,
         symbol: str,
         buy_trade_date: date,
-        original_quantity: int,
-        remaining_quantity: int,
+        original_quantity: int | Decimal,
+        remaining_quantity: int | Decimal,
         cost_price: Decimal,
         source: str = "trade",
     ) -> PaperPositionLot:
@@ -964,8 +971,8 @@ class PaperTradingRepository:
             account_id=account_id,
             symbol=symbol,
             buy_trade_date=buy_trade_date,
-            original_quantity=original_quantity,
-            remaining_quantity=remaining_quantity,
+            original_quantity=_whole_quantity(original_quantity, "original_quantity"),
+            remaining_quantity=_whole_quantity(remaining_quantity, "remaining_quantity"),
             cost_price=cost_price,
             source=PositionSource(source).value,
             market=market,

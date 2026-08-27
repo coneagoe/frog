@@ -26,6 +26,7 @@ def test_dividend_is_audited_and_credits_cash(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-dividend", Decimal("10000"))
     repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"))
 
     result = _service(sqlite_session).apply(
         account.id,
@@ -71,7 +72,12 @@ def test_non_dividend_actions_keep_position_and_lot_consistent(
     assert position is not None
     assert position.total_quantity == expected_quantity
     assert repo.get_lots(account.id, Market.A_SHARE, "000001")[0].remaining_quantity == expected_quantity
-    assert result.impact.after_cost_amount == Decimal("1000.000000000000")
+    expected_cost = (
+        Decimal("1040.000000000000") if event_type is CorporateActionType.RIGHTS_ISSUE else Decimal("1000.000000000000")
+    )
+    assert result.impact.after_cost_amount == expected_cost
+    if event_type is CorporateActionType.RIGHTS_ISSUE:
+        assert account.net_asset_value == Decimal("1.000000")
     assert [row.event_type for row in repo.list_cash_ledger(account.id)].count(
         CashEventType.CORPORATE_ACTION.value
     ) == (1 if event_type is CorporateActionType.RIGHTS_ISSUE else 0)
@@ -115,6 +121,8 @@ def test_idempotent_replay_returns_original_and_conflict_is_rejected(sqlite_sess
 def test_recalculation_failure_rolls_back_all_accounting_writes(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-rollback", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"))
     initial_cash = repo.get_cash_available(account.id)
     sqlite_session.commit()
 

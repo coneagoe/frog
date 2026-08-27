@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timezone
 from typing import Callable
 
 from sqlalchemy.orm import Session
@@ -43,6 +43,11 @@ class SnapshotRecalculationService:
             failed_dates: list[date] = []
             errors: list[str] = []
             snapshot_service = SnapshotService(repo, self.market_data)
+            existing_event_at = {
+                snapshot.trade_date: self._utc(snapshot.event_at)
+                for snapshot in repo.list_snapshots(account_id)
+                if snapshot.point_type == "trading" and snapshot.trade_date in dates
+            }
 
             for trade_date in dates:
                 try:
@@ -51,6 +56,11 @@ class SnapshotRecalculationService:
                             account_id, trade_date, preserve_account_nav=True
                         )
                     if outcome.status == "complete":
+                        if outcome.snapshot is not None:
+                            outcome.snapshot.event_at = existing_event_at.get(
+                                trade_date,
+                                datetime.combine(trade_date, time.min, tzinfo=timezone.utc),
+                            )
                         updated_dates.append(trade_date)
                     elif outcome.status == "valuation_gap":
                         unavailable_dates.append(trade_date)
@@ -60,9 +70,19 @@ class SnapshotRecalculationService:
                     failed_dates.append(trade_date)
                     errors.append(f"{trade_date.isoformat()}: {exc}")
 
+            if failed_dates:
+                raise RuntimeError(
+                    "snapshot recalculation failed for "
+                    + ", ".join(day.isoformat() for day in failed_dates)
+                    + (f": {'; '.join(errors)}" if errors else "")
+                )
             if owns_session:
                 current_session.commit()
             return SnapshotRecalculationResult(account_id, updated_dates, unavailable_dates, failed_dates, errors)
+        except BaseException:
+            if owns_session:
+                current_session.rollback()
+            raise
         finally:
             if owns_session:
                 current_session.close()
@@ -92,4 +112,12 @@ class SnapshotRecalculationService:
             )
             .all()
         }
-        return sorted(snapshot_dates | gap_dates)
+        # The bounded start date is the corporate-action event date. Include it
+        # even when no prior snapshot or gap exists for that date.
+        return sorted(snapshot_dates | gap_dates | {start_date})
+
+    @staticmethod
+    def _utc(value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
