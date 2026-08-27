@@ -151,6 +151,49 @@ def test_cash_flow_records_signed_rounding_residual(tmp_path, operation, amount,
     engine.dispose()
 
 
+@pytest.mark.parametrize("operation", ["deposit", "withdraw"])
+def test_cash_flow_reconciles_persisted_residual_beyond_twelve_decimals(tmp_path, operation):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account(f"precise-{operation}", Decimal("100000.00"))
+    snapshot_at = datetime(2026, 7, 20, 9, tzinfo=timezone.utc)
+    nav = Decimal("3.333333333334")
+    amount = Decimal("10.000000000000")
+    repo.save_trading_snapshot(
+        account_id=account.id,
+        trade_date=snapshot_at.date(),
+        event_at=snapshot_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("100000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("100000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=nav,
+    )
+
+    result = getattr(CashService(repo), operation)(
+        account.id,
+        amount,
+        date(2026, 7, 20),
+        occurred_at=datetime(2026, 7, 20, 10, tzinfo=timezone.utc),
+    )
+    account_id = account.id
+    ledger_id = result.ledger.id
+    session.commit()
+    session.expunge_all()
+    ledger = next(event for event in repo.list_cash_ledger(account_id) if event.id == ledger_id)
+    requested = amount if operation == "deposit" else -amount
+
+    assert ledger.rounding_residual == requested - ledger.share_delta * ledger.net_asset_value
+    assert abs(ledger.rounding_residual) > Decimal("0.000000000001")
+    engine.dispose()
+
+
 def test_cash_flow_request_rejects_naive_occurred_at():
     with pytest.raises(ValueError, match="offset"):
         CashFlowRequest(amount=Decimal("1"), trade_date=date(2026, 7, 20), occurred_at=datetime(2026, 7, 20))

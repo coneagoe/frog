@@ -380,6 +380,30 @@ def test_add_cash_event_defaults_rounding_residual_to_zero(sqlite_session):
     assert event.rounding_residual == Decimal("0.000000000000")
 
 
+def test_add_cash_event_derives_residual_from_persisted_values(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("cash-event-derived-residual", Decimal("100000.00"))
+    amount = Decimal("10.000000000001")
+    nav = Decimal("1.234567890123")
+    shares = Decimal("8.100000000001")
+
+    event = repo.add_cash_event(
+        account.id,
+        CashEventType.DEPOSIT,
+        amount,
+        net_asset_value=nav,
+        share_delta=shares,
+        rounding_residual=Decimal("999"),
+    )
+    account_id = account.id
+    sqlite_session.flush()
+    loaded = next(ledger for ledger in repo.list_cash_ledger(account_id) if ledger.id == event.id)
+
+    assert loaded.rounding_residual == loaded.amount - loaded.share_delta * loaded.net_asset_value
+    assert loaded.rounding_residual == event.amount - event.share_delta * event.net_asset_value
+
+
 def test_cash_ledger_orders_by_occurred_at_then_id(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

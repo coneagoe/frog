@@ -37,7 +37,6 @@ class CashService:
         occurred_at = self._occurred_at(occurred_at)
         nav = self._cash_flow_nav(account_id, occurred_at)
         share_delta = quantize_shares(amount / nav)
-        residual = amount - share_delta * nav
         ledger = self.repo.add_cash_event(
             account_id,
             CashEventType.DEPOSIT,
@@ -45,7 +44,6 @@ class CashService:
             trade_date=trade_date,
             net_asset_value=nav,
             share_delta=share_delta,
-            rounding_residual=residual,
             occurred_at=occurred_at,
             note=note,
         )
@@ -85,7 +83,6 @@ class CashService:
             trade_date=trade_date,
             net_asset_value=nav,
             share_delta=share_delta,
-            rounding_residual=-amount - share_delta * nav,
             occurred_at=occurred_at,
             note=note,
         )

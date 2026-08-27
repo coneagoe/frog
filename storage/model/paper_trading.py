@@ -131,7 +131,7 @@ class PaperCashLedger(Base):
     trade_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     net_asset_value: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
     share_delta: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
-    rounding_residual: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    rounding_residual: Mapped[Decimal] = mapped_column(Numeric(30, 24), nullable=False, server_default=text("0"))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 

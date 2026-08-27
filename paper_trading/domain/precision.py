@@ -3,6 +3,7 @@ from decimal import ROUND_HALF_UP, Decimal
 MONEY_QUANTUM = Decimal("0.000000000001")
 NAV_QUANTUM = Decimal("0.000000000001")
 SHARES_QUANTUM = Decimal("0.000000000001")
+RESIDUAL_QUANTUM = Decimal("0.000000000000000000000001")
 ROUNDING_MODE = ROUND_HALF_UP
 
 
@@ -23,3 +24,7 @@ def quantize_nav(value: Decimal) -> Decimal:
 
 def quantize_shares(value: Decimal) -> Decimal:
     return require_finite(value, "shares").quantize(SHARES_QUANTUM, rounding=ROUNDING_MODE)
+
+
+def quantize_rounding_residual(value: Decimal) -> Decimal:
+    return require_finite(value, "rounding residual").quantize(RESIDUAL_QUANTUM, rounding=ROUNDING_MODE)

@@ -32,6 +32,7 @@ from paper_trading.domain.market_data_diagnostics import canonical_adjust_label,
 from paper_trading.domain.precision import (
     quantize_account_money,
     quantize_nav,
+    quantize_rounding_residual,
     quantize_shares,
     require_finite,
 )
@@ -484,16 +485,24 @@ class PaperTradingRepository:
     ) -> PaperCashLedger:
         if occurred_at is not None and (occurred_at.tzinfo is None or occurred_at.utcoffset() is None):
             raise ValueError("occurred_at must include a timezone offset")
+        persisted_amount = quantize_account_money(amount)
+        persisted_nav = None if net_asset_value is None else quantize_nav(net_asset_value)
+        persisted_shares = None if share_delta is None else quantize_shares(share_delta)
+        persisted_residual = (
+            quantize_rounding_residual(persisted_amount - persisted_shares * persisted_nav)
+            if persisted_nav is not None and persisted_shares is not None
+            else quantize_rounding_residual(rounding_residual)
+        )
         event = PaperCashLedger(
             account_id=account_id,
             event_type=CashEventType(event_type).value,
-            amount=quantize_account_money(amount),
+            amount=persisted_amount,
             order_id=order_id,
             trade_id=trade_id,
             trade_date=trade_date,
-            net_asset_value=None if net_asset_value is None else quantize_nav(net_asset_value),
-            share_delta=None if share_delta is None else quantize_shares(share_delta),
-            rounding_residual=quantize_account_money(rounding_residual),
+            net_asset_value=persisted_nav,
+            share_delta=persisted_shares,
+            rounding_residual=persisted_residual,
             occurred_at=occurred_at or datetime.now(timezone.utc),
             note=note,
         )
