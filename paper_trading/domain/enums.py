@@ -40,6 +40,14 @@ class CashEventType(StrEnum):
     CORPORATE_ACTION = "corporate_action"
 
 
+class CorporateActionType(StrEnum):
+    DIVIDEND = "dividend"
+    SPLIT = "split"
+    REVERSE_SPLIT = "reverse_split"
+    BONUS_SHARE = "bonus_share"
+    RIGHTS_ISSUE = "rights_issue"
+
+
 class MatchingRunStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
