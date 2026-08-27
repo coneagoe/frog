@@ -964,6 +964,43 @@ def test_event_series_excludes_unsupported_snapshot_point_type():
     assert [event.id for event in events] == [1]
 
 
+def test_event_series_narrows_cash_event_types_and_excludes_non_cash_events():
+    occurred_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    ledger_entries = [
+        SimpleNamespace(
+            id=1,
+            occurred_at=occurred_at,
+            event_type="deposit",
+            amount=Decimal("10"),
+            net_asset_value=Decimal("1"),
+            share_delta=Decimal("10"),
+            note=None,
+        ),
+        SimpleNamespace(
+            id=2,
+            occurred_at=occurred_at,
+            event_type="withdrawal",
+            amount=Decimal("-5"),
+            net_asset_value=Decimal("1"),
+            share_delta=Decimal("-5"),
+            note=None,
+        ),
+        SimpleNamespace(
+            id=3,
+            occurred_at=occurred_at,
+            event_type="trade",
+            amount=Decimal("-2"),
+            net_asset_value=None,
+            share_delta=None,
+            note=None,
+        ),
+    ]
+
+    events = AnalyticsService._event_series([], ledger_entries)
+
+    assert [event.event_type for event in events] == ["deposit", "withdrawal"]
+
+
 def test_linked_total_return_uses_valid_valuation_snapshots_only():
     snapshots = [
         _nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value),
