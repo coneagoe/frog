@@ -532,6 +532,145 @@ valuation does not change persisted realized PnL or snapshot/NAV calculations.
 
 Snapshots are generated after matching and use close prices for valuation.
 
+## Corporate Actions
+
+Corporate actions are account-scoped administrative events. They are submitted
+through `POST /paper/accounts/{account_id}/corporate-actions` and listed through
+`GET /paper/accounts/{account_id}/corporate-actions`. Both endpoints require the
+same bearer token as the other paper-trading endpoints. The create request and
+response models are the public names
+`CorporateActionCreateRequest`, `CorporateActionCreateResponse`,
+`CorporateActionEventResponse`, and `CorporateActionImpactResponse` from
+`paper_trading/schemas/corporate_actions.py`. The recalculation member uses
+`SnapshotRecalculationResponse`.
+
+Create example:
+
+```bash
+curl -X POST http://localhost:8000/paper/accounts/1/corporate-actions \
+  -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"000001","market":"a_share","event_type":"dividend","event_at":"2026-07-20T08:00:00+08:00","idempotency_key":"000001-dividend-20260720","parameters":{"per_share_amount":"0.25"}}'
+```
+
+The request fields are `symbol`, `market` (default `a_share`), `event_type`,
+`event_at`, `idempotency_key`, and `parameters`. `symbol` and
+`idempotency_key` are trimmed non-blank strings; their maximum lengths are 20
+and 100. `event_at` must contain a timezone offset and is normalized to UTC
+before comparison and persistence. The event date is `event_at`'s UTC calendar
+date. It is the affected business-date anchor, while `event_at` itself is the
+ordering timestamp. The list query supports optional `symbol`, `event_type`,
+`start_at`, and `end_at`; timestamp bounds also require timezone offsets.
+
+The response contains `event`, `impact`, and `recalculation`. An event has
+`id`, `account_id`, `market`, `symbol`, `event_type`, `event_at`,
+`idempotency_key`, `parameters`, `processing_status`, `processed_at`,
+`processing_metadata`, `error_details`, the before/after cash, quantity, and
+cost fields, `affected_start_date`, `affected_end_date`, and `created_at`.
+The impact repeats the cash, quantity, cost, and affected-date fields. The
+recalculation response has `account_id`, `updated_dates`,
+`unavailable_dates`, `failed_dates`, and `errors`. Event/list money is
+represented in serialized/display values at 4 decimal places and quantities at
+6 decimal places; this is serialization only and does not reduce internal
+precision.
+
+The five supported event types have exact parameter contracts and effects:
+
+- `dividend`: requires positive finite `per_share_amount`. Cash increases by
+  `eligible_quantity * per_share_amount`; quantity and cost do not change. If
+  the account has shares, the dividend also increases unit NAV by the cash
+  delta divided by share count. With no holdings, the impact is zero and no
+  dividend cash is created.
+- `split`: requires positive finite `ratio`. Quantity becomes
+  `before_quantity * ratio`; cost is preserved in aggregate and lot cost is
+  repriced to preserve NAV continuity.
+- `reverse_split`: requires positive finite `ratio` below 1. Quantity becomes
+  `before_quantity * ratio`; the same aggregate-cost and lot repricing rules
+  apply. Fractional resulting holdings are rejected because paper holdings are
+  integer quantities.
+- `bonus_share`: requires positive finite `bonus_ratio`. The quantity delta is
+  `before_quantity * bonus_ratio`; no cash is exchanged and aggregate cost is
+  unchanged, preserving NAV continuity.
+- `rights_issue`: requires positive finite `subscription_ratio` and
+  `subscription_price`. New quantity is
+  `before_quantity * subscription_ratio`, available cash decreases by the new
+  quantity times subscription price, and the subscription cost is added to
+  aggregate cost. The account must have enough available cash, and fractional
+  resulting holdings are rejected.
+
+Corporate-action cash is an internal `corporate_action` cash-ledger event. It
+is not an external deposit or withdrawal and therefore is not treated as an
+external TWR cash flow. Deposits and withdrawals change account scale and
+share count and are excluded from investment return; corporate-action cash
+remains part of the portfolio event and its resulting NAV/account state.
+When the eligible quantity is zero, every action has zero quantity/cash impact
+except that the event remains auditable; a no-holding event does not invent a
+position, alter NAV, or create cash.
+
+Account, cash-ledger, snapshot, and corporate-action amount and quantity fields
+use `Numeric(30, 12)` internal/storage precision where specified by the
+corporate-action schema. Legacy position, position-lot cost, and price columns
+retain their existing precision where applicable. Domain and storage
+quantization uses `ROUND_HALF_UP` where the implementation applies that
+rounding rule; public Decimal response serialization/display quantization
+follows the actual serializer behavior and is not implied to use
+`ROUND_HALF_UP`. Cash-flow rounding is auditable through `rounding_residual`,
+stored at `Numeric(30, 24)`, with the invariant:
+
+```text
+rounding_residual = amount - share_delta * net_asset_value
+```
+
+Public Decimal response serialization/display values use the documented
+serializer precision of 4 decimal places for money and 6 decimal places for
+quantities. Consumers must use stored/internal values for reconciliation, not
+the shorter serialized/display values.
+
+Events are listed and audit records are ordered deterministically by
+`(event_at, id)`. Newly submitted actions apply to the account's current state;
+the implementation does not provide full historical corporate-action event
+replay or apply existing actions historically in `(event_at, id)` order. The
+account plus `idempotency_key` is unique. Reusing the same key with the same
+account, market, symbol, event type, UTC-normalized `event_at`, and canonical
+parameters returns the original event/impact/recalculation without applying
+the action again. Reusing the key for any different request returns HTTP 409
+with `IDEMPOTENCY_KEY_CONFLICT`; validation failures return HTTP 422 and an
+unknown account returns HTTP 404.
+
+Creating an event updates the affected account/position state and invokes
+bounded snapshot recalculation from the UTC event date through the latest
+affected trading snapshot or valuation-gap date. The response identifies
+`updated_dates`, `unavailable_dates`, and `failed_dates`. A missing daily price
+does not discard the corporate action: the date is recorded as a valuation gap
+and can be recalculated later. A stale suspended price may produce a valid
+snapshot with `valuation_quality="stale_suspended"` and details; an invalid or
+unavailable valuation is not replaced with `total_assets`. The explicit
+snapshot recalculation endpoint can retry a bounded date range after market
+data is repaired while preserving the initial baseline, source orders, and
+cash ledger.
+
+Provider synchronization is out of scope for this API. Corporate-action
+creation does not fetch or reconcile provider corporate-action records, and no
+provider-sync DAG is added or implied. Existing daily-history provider DAGs
+and their matching constraints remain unchanged; they do not submit these
+events automatically. Operators or an upstream integration must provide the
+validated request explicitly.
+
+### Corporate-Action Migration
+
+The corporate-action table is additive. Migration preserves existing account,
+snapshot, order, trade, and cash-ledger data and does not synthesize historical
+corporate actions from provider data. Existing snapshot financial fields are
+not rewritten to manufacture returns. Chronology that cannot be proven keeps
+the account marked `legacy_ordering_uncertain`; such an account retains its
+stored snapshot chart but analytics remain unavailable until repaired. The
+production PostgreSQL snapshot-series migration inserts at most one valid
+initial point at NAV `1.000000` only when positive `initial_cash`, a non-null
+`created_at`, no existing initial point, and provable chronology are present.
+SQLite startup does not insert that baseline. Migration cannot recover missing
+provider events, infer uncertain historical ordering, or repair missing/stale
+market prices; those are documented data-quality limitations.
+
 ### Analytics
 
 `GET /paper/accounts/{account_id}/analytics` returns account-level analytics for the paper trading dashboard.
