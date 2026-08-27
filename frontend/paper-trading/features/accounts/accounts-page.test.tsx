@@ -254,7 +254,7 @@ describe("AccountsPage", () => {
     expect(listAccountsMock).toHaveBeenCalledTimes(1);
   });
 
-  it("clears detail panels when the last account is deleted", async () => {
+  it("does not render stale detail panels after the last account is deleted", async () => {
     listAccountsMock
       .mockResolvedValueOnce([demoAccount])
       .mockResolvedValueOnce([]);
@@ -271,9 +271,12 @@ describe("AccountsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Delete demo" }));
     await waitFor(() => expect(listAccountsMock).toHaveBeenCalledTimes(2));
 
-    // Detail panels should disappear
-    expect(screen.queryByText("Positions")).not.toBeInTheDocument();
-    expect(screen.queryByText("Cash Ledger")).not.toBeInTheDocument();
+    // The detail workspace must be gated by the refreshed account object, not
+    // the stale selected account ID during the render between state updates.
+    await waitFor(() => {
+      expect(screen.queryByText("Positions")).not.toBeInTheDocument();
+      expect(screen.queryByText("Cash Ledger")).not.toBeInTheDocument();
+    });
     expect(screen.getByText("No paper accounts yet")).toBeInTheDocument();
   });
 

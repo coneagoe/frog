@@ -217,7 +217,7 @@ export function AccountsPage() {
           {error ? <ErrorBanner message={error} /> : <AccountList accounts={accounts} selectedAccountId={selectedAccountId} onSelect={onSelect} onDelete={onDelete} />}
         </section>
       </div>
-      {selectedAccountId ? (
+      {selectedAccount ? (
         <div className="grid">
           <div className="panel__header">
             <h2>{selectedAccount?.name ?? `Account #${selectedAccountId}`}</h2>

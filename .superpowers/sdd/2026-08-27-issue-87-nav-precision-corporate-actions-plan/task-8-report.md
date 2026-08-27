@@ -68,3 +68,102 @@ are already minimal and behavior-preserving.
 ## Scope
 
 The plan and unrelated documentation were not modified.
+
+## Final Navigation Precision Fix
+
+- Changed the AccountsPage detail workspace condition from `selectedAccountId`
+  to the derived `selectedAccount` object. A stale ID can survive one render
+  after the account list refreshes to empty; the current account object cannot.
+- Strengthened the last-account deletion regression name and assertion to cover
+  the stale-detail render path while retaining the existing valid re-selection
+  and corporate-action refresh coverage.
+- No backend, docs, plan, or unrelated files were modified. This report is the
+  only documentation file updated.
+
+## Final Validation
+
+Exact focused AccountsPage command:
+
+```text
+npm test -- features/accounts/accounts-page.test.tsx
+```
+
+Exact output:
+
+```text
+npm notice run paper-trading-frontend@0.1.0 test
+npm notice run vitest run --passWithNoTests features/accounts/accounts-page.test.tsx
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+
+ RUN  v2.1.9 /data/frog/.worktrees/issue-87-nav-precision/frontend/paper-trading
+
+ ✓ features/accounts/accounts-page.test.tsx (42 tests) 11335ms
+
+ Test Files  1 passed (1)
+      Tests  42 passed (42)
+   Start at  00:29:47
+   Duration  13.60s (transform 657ms, setup 126ms, collect 887ms, tests 11.34s, environment 677ms, prepare 115ms)
+```
+
+Exact Task 6 focused frontend command:
+
+```text
+npm run test -- lib/api-client.test.ts features/accounts/corporate-action-modal.test.tsx features/accounts/accounts-page.test.tsx features/trading/trading-tables.test.tsx features/analytics/asset-chart.test.tsx features/analytics/analytics-page.test.tsx
+```
+
+Exact output:
+
+```text
+npm notice run paper-trading-frontend@0.1.0 test
+npm notice run vitest run --passWithNoTests lib/api-client.test.ts features/accounts/corporate-action-modal.test.tsx features/accounts/accounts-page.test.tsx features/trading/trading-tables.test.tsx features/analytics/asset-chart.test.tsx features/analytics/analytics-page.test.tsx
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+
+ RUN  v2.1.9 /data/frog/.worktrees/issue-87-nav-precision/frontend/paper-trading
+
+ ✓ features/accounts/accounts-page.test.tsx (42 tests) 19350ms
+ ✓ features/analytics/analytics-page.test.tsx (10 tests) 2137ms
+ ✓ features/trading/trading-tables.test.tsx (26 tests) 3140ms
+ ✓ lib/api-client.test.ts (19 tests) 124ms
+ ✓ features/accounts/corporate-action-modal.test.tsx (10 tests) 8657ms
+ ✓ features/analytics/asset-chart.test.tsx (4 tests) 171ms
+
+ Test Files  6 passed (6)
+      Tests  111 passed (111)
+   Start at  00:30:32
+   Duration  53.28s (transform 2.10s, setup 1.57s, collect 4.22s, tests 33.58s, environment 8.51s, prepare 1.43s)
+```
+
+Exact lint command:
+
+```text
+npm run lint
+```
+
+Exact output:
+
+```text
+npm notice run paper-trading-frontend@0.1.0 lint
+npm notice run eslint .
+```
+
+Lint exited successfully with no warnings or errors.
+
+Exact diff check:
+
+```text
+git diff --check
+```
+
+Result: exited successfully with no output.
+
+## Final Self-Review
+
+- The live-object gate removes the transient deleted-account workspace without
+  changing selection repair, manual account selection, URL selection, or
+  corporate-action completion refresh behavior.
+- The regression test covers the last-account refresh result and asserts both
+  stale detail headings are absent.
+- Targeted simplification review found no further safe simplification: the
+  derived `selectedAccount` directly expresses the required invariant.
+- No remaining blockers for this frontend fix. Vitest emits the existing Vite
+  CJS API deprecation notice only.
