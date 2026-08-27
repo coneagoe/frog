@@ -937,6 +937,33 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
     assert events[2].share_delta == Decimal("-9.090909")
 
 
+def test_event_series_excludes_unsupported_snapshot_point_type():
+    snapshots = [
+        SimpleNamespace(
+            id=1,
+            event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            point_type=SnapshotPointType.INITIAL.value,
+            quality_status="valid",
+            invalid_reason=None,
+            net_asset_value=Decimal("1.000000"),
+            share_count=Decimal("100.000000"),
+        ),
+        SimpleNamespace(
+            id=2,
+            event_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            point_type="unsupported",
+            quality_status="valid",
+            invalid_reason=None,
+            net_asset_value=Decimal("9.000000"),
+            share_count=Decimal("900.000000"),
+        ),
+    ]
+
+    events = AnalyticsService._event_series(snapshots, [])
+
+    assert [event.id for event in events] == [1]
+
+
 def test_linked_total_return_uses_valid_valuation_snapshots_only():
     snapshots = [
         _nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value),

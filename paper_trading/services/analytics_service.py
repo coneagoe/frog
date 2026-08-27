@@ -124,6 +124,11 @@ class AnalyticsService:
     ) -> list[AnalyticsEvent]:
         events: list[tuple[datetime, int, int, AnalyticsEvent]] = []
         for snapshot in snapshots:
+            if snapshot.point_type not in {
+                SnapshotPointType.INITIAL.value,
+                SnapshotPointType.TRADING.value,
+            }:
+                continue
             events.append(
                 (
                     snapshot.event_at,
