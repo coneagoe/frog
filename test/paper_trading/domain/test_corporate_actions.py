@@ -175,6 +175,21 @@ def test_reverse_split_requires_factor_below_one():
         validate_corporate_action_parameters(CorporateActionType.REVERSE_SPLIT, {"ratio": Decimal("1")})
 
 
+@pytest.mark.parametrize(
+    ("action_type", "parameters"),
+    [
+        (CorporateActionType.DIVIDEND, {"per_share_amount": Decimal("1"), "ratio": Decimal("2")}),
+        (
+            CorporateActionType.RIGHTS_ISSUE,
+            {"subscription_ratio": Decimal("1"), "subscription_price": Decimal("2"), "extra": Decimal("1")},
+        ),
+    ],
+)
+def test_extra_parameters_are_rejected(action_type, parameters):
+    with pytest.raises(InvalidCorporateActionParametersError, match="unexpected"):
+        validate_corporate_action_parameters(action_type, parameters)
+
+
 @pytest.mark.parametrize("ratio", [Decimal("0"), Decimal("-0.5"), Decimal("1")])
 def test_reverse_split_rejects_zero_negative_or_non_reducing_ratios(ratio):
     with pytest.raises(InvalidCorporateActionParametersError):

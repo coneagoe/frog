@@ -82,6 +82,12 @@ def validate_corporate_action_parameters(event_type: CorporateActionType, parame
         CorporateActionType.BONUS_SHARE: ("bonus_ratio",),
         CorporateActionType.RIGHTS_ISSUE: ("subscription_ratio", "subscription_price"),
     }[action_type]
+    unexpected = set(parameters) - set(required)
+    if unexpected:
+        names = ", ".join(sorted(unexpected))
+        raise InvalidCorporateActionParametersError(
+            f"unexpected parameter(s): {names}", {name: "unexpected" for name in sorted(unexpected)}
+        )
     values = {name: _positive_parameter(parameters, name) for name in required}
     if action_type is CorporateActionType.REVERSE_SPLIT and values["ratio"] >= 1:
         raise InvalidCorporateActionParametersError(

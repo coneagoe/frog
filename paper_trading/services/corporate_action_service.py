@@ -6,7 +6,11 @@ from typing import Callable, Mapping, Protocol
 
 from sqlalchemy.orm import Session
 
-from paper_trading.domain.corporate_actions import CorporateActionImpact, calculate_corporate_action_impact
+from paper_trading.domain.corporate_actions import (
+    CorporateActionImpact,
+    calculate_corporate_action_impact,
+    validate_corporate_action_parameters,
+)
 from paper_trading.domain.enums import AccountStatus, CashEventType, CorporateActionType, Market
 from paper_trading.domain.errors import CorporateActionError
 from paper_trading.domain.precision import quantize_account_money, quantize_nav, quantize_shares, require_finite
@@ -72,6 +76,7 @@ class CorporateActionService:
         if not symbol or not idempotency_key or not idempotency_key.strip():
             raise ValueError("symbol and idempotency_key are required")
         canonical_parameters = self._canonical_parameters(parameters)
+        validate_corporate_action_parameters(action_type, canonical_parameters)
         persisted_parameters = {name: format(value, "f") for name, value in canonical_parameters.items()}
         account = self.repo.lock_account(account_id)
         existing = self.repo.lock_corporate_action_by_idempotency_key(account_id, idempotency_key)
@@ -87,7 +92,7 @@ class CorporateActionService:
         lots = self.repo.lock_lots(account_id, resolved_market, symbol)
         quantity = Decimal(position.total_quantity if position is not None else 0)
         cost = Decimal(position.cost_amount if position is not None else 0)
-        cash = self.repo.get_cash_available(account_id)
+        cash = self.repo.get_cash_available_internal(account_id)
         self._validate_holding(position, lots, resolved_market, symbol, quantity, cost, cash)
         impact = calculate_corporate_action_impact(action_type, quantity, cost, cash, canonical_parameters)
         if action_type is CorporateActionType.RIGHTS_ISSUE:

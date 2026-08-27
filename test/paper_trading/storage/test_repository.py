@@ -485,6 +485,30 @@ def test_corporate_actions_persist_filter_and_order(sqlite_session):
     assert first.after_quantity == Decimal("200.000000000000")
 
 
+def test_corporate_action_filters_normalize_offset_bounds_to_utc(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-utc-bounds", Decimal("10000"))
+    event = repo.create_corporate_action(
+        account_id=account.id,
+        market=Market.A_SHARE,
+        symbol="000001",
+        event_type=CorporateActionType.SPLIT,
+        event_at=datetime(2026, 8, 27, 1, tzinfo=timezone.utc),
+        idempotency_key="utc-bounds",
+        parameters={"ratio": Decimal("2")},
+        before_quantity=Decimal("1"),
+        after_quantity=Decimal("2"),
+        before_cost_amount=Decimal("1"),
+        after_cost_amount=Decimal("1"),
+        before_cash_available=Decimal("1"),
+        after_cash_available=Decimal("1"),
+    )
+    offset = timezone(timedelta(hours=8))
+    assert repo.list_corporate_actions(account.id, start_at=datetime(2026, 8, 27, 9, tzinfo=offset)) == [event]
+    assert repo.list_corporate_actions(account.id, end_at=datetime(2026, 8, 27, 9, tzinfo=offset)) == [event]
+
+
 def test_delete_account_removes_corporate_actions(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

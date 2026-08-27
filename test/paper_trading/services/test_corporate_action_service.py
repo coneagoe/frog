@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from paper_trading.domain.enums import CashEventType, CorporateActionType, Market
-from paper_trading.domain.errors import InsufficientRightsCashError
+from paper_trading.domain.errors import InsufficientRightsCashError, InvalidCorporateActionParametersError
 from paper_trading.services.corporate_action_service import (
     CorporateActionIdempotencyConflict,
     CorporateActionService,
@@ -222,6 +222,52 @@ def test_insufficient_rights_cash_rejects_without_any_persisted_change(sqlite_se
     assert repo.get_cash_available(account.id) == Decimal("10.0000")
     assert repo.list_corporate_actions(account.id) == []
     assert len(repo.list_cash_ledger(account.id)) == 1
+
+
+def test_rights_issue_uses_internal_cash_precision_for_eligibility(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-precise-cash", Decimal("10.00004"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 1, 0, Decimal("1"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 1, 1, Decimal("1"))
+
+    result = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.RIGHTS_ISSUE,
+        datetime(2026, 8, 27, tzinfo=timezone.utc),
+        "precise-cash",
+        {"subscription_ratio": Decimal("1"), "subscription_price": Decimal("10.00004")},
+    )
+
+    assert repo.get_cash_available(account.id) == Decimal("0.0000")
+    assert repo.get_cash_available_internal(account.id) == Decimal("0.000000000000")
+    assert result.impact.before_cash_available == Decimal("10.000040000000")
+
+
+def test_service_rejects_extra_parameters_before_idempotency_resolution(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-extra-parameters", Decimal("10000"))
+    service = _service(sqlite_session)
+    event_at = datetime(2026, 8, 27, tzinfo=timezone.utc)
+    service.apply(
+        account.id,
+        "000001",
+        CorporateActionType.DIVIDEND,
+        event_at,
+        "same",
+        {"per_share_amount": Decimal("1")},
+    )
+
+    with pytest.raises(InvalidCorporateActionParametersError, match="unexpected"):
+        service.apply(
+            account.id,
+            "000001",
+            CorporateActionType.DIVIDEND,
+            event_at,
+            "same",
+            {"per_share_amount": Decimal("1"), "ratio": Decimal("2")},
+        )
+    assert len(repo.list_corporate_actions(account.id)) == 1
 
 
 def test_invalid_holding_rejects_before_writes(sqlite_session):

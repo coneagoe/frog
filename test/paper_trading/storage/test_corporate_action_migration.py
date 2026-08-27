@@ -39,8 +39,29 @@ def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_pat
                 "amount NUMERIC(20, 4) NOT NULL)"
             )
         )
+        connection.execute(
+            text(
+                "CREATE TABLE paper_positions ("
+                "id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, symbol VARCHAR(20) NOT NULL, "
+                "total_quantity INTEGER NOT NULL DEFAULT 0, frozen_quantity INTEGER NOT NULL DEFAULT 0, "
+                "cost_amount NUMERIC(20, 4) NOT NULL DEFAULT 0, realized_pnl NUMERIC(20, 4) NOT NULL DEFAULT 0)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE paper_position_lots ("
+                "id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, symbol VARCHAR(20) NOT NULL, "
+                "buy_trade_date DATE NOT NULL, original_quantity INTEGER NOT NULL, "
+                "remaining_quantity INTEGER NOT NULL, "
+                "cost_price NUMERIC(20, 4) NOT NULL)"
+            )
+        )
         connection.execute(text("INSERT INTO paper_accounts VALUES (1, 'legacy', 10000, 10000, 1.25, 10000, 0, 12.5)"))
         connection.execute(text("INSERT INTO paper_cash_ledger VALUES (1, 1, 'deposit', 10000)"))
+        connection.execute(text("INSERT INTO paper_positions VALUES (1, 1, '000001', 100, 0, 123.4567, 1.2345)"))
+        connection.execute(
+            text("INSERT INTO paper_position_lots VALUES (1, 1, '000001', '2026-08-27', 100, 100, 1.2345)")
+        )
 
     storage = _storage(engine)
     storage.ensure_paper_trading_schema()
@@ -84,6 +105,20 @@ def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_pat
     assert account["net_asset_value"] == 1.25
     assert ledger["amount"] == 10000
     assert ledger["rounding_residual"] == 0
+    position_columns = {column["name"]: column["type"] for column in inspect(engine).get_columns("paper_positions")}
+    lot_columns = {column["name"]: column["type"] for column in inspect(engine).get_columns("paper_position_lots")}
+    assert (position_columns["cost_amount"].precision, position_columns["cost_amount"].scale) == (30, 12)
+    assert (position_columns["realized_pnl"].precision, position_columns["realized_pnl"].scale) == (30, 12)
+    assert (lot_columns["cost_price"].precision, lot_columns["cost_price"].scale) == (30, 12)
+    assert engine.connect().execute(
+        text("SELECT cost_amount, realized_pnl FROM paper_positions WHERE id = 1")
+    ).one() == (
+        123.4567,
+        1.2345,
+    )
+    assert (
+        engine.connect().execute(text("SELECT cost_price FROM paper_position_lots WHERE id = 1")).scalar_one() == 1.2345
+    )
     engine.dispose()
 
 

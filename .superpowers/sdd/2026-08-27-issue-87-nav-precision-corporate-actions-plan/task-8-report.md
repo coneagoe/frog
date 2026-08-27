@@ -167,3 +167,96 @@ Result: exited successfully with no output.
   derived `selectedAccount` directly expresses the required invariant.
 - No remaining blockers for this frontend fix. Vitest emits the existing Vite
   CJS API deprecation notice only.
+
+## Final-Review Fix Wave
+
+This fix wave addresses the remaining code-addressable issue #87 findings:
+
+- Widened position, lot, order, trade, validity, and round-trip accounting
+  fields to `Numeric(30, 12)` in the ORM. PostgreSQL startup upgrades widen
+  these fields monotonically, and SQLite startup upgrades rebuild only tables
+  whose target columns are below the contract while preserving values and
+  indexes. Existing schemas with higher precision are not narrowed.
+- Added `PaperTradingRepository.get_cash_available_internal()`, which returns
+  the quantized 12-decimal ledger total. Corporate-action eligibility and
+  accounting use this path; the existing `get_cash_available()` display/API
+  path remains four-decimal.
+- Normalized SQLite repository `start_at` and `end_at` corporate-action
+  filters to UTC before comparison and rejected naive bounds.
+- Enforced exact action-specific parameter sets in the domain validator and
+  invoked that validation in `CorporateActionService` before idempotency
+  lookup, preserving canonical replay behavior for valid requests.
+- Updated the precision documentation to include position and lot cost values
+  in the 12-decimal scope without changing display precision.
+
+## Fix-Wave Tests Added
+
+- Direct domain tests for unexpected corporate-action parameters.
+- Direct service tests for sub-display cash precision and validation ordering
+  relative to idempotency lookup.
+- SQLite repository test for non-UTC offset bounds against UTC-persisted rows.
+- SQLite migration test for position and lot precision widening and value
+  preservation.
+
+## Fix-Wave Validation
+
+Command:
+
+```text
+uv run pytest test/paper_trading/domain/test_corporate_actions.py test/paper_trading/services/test_corporate_action_service.py test/paper_trading/storage/test_corporate_action_migration.py test/paper_trading/storage/test_repository.py -q
+```
+
+Exact result:
+
+```text
+140 passed, 2 skipped in 75.15s (0:01:15)
+```
+
+The two skipped tests are PostgreSQL-only tests skipped because
+`TEST_POSTGRESQL_URL` is unavailable in this environment.
+
+Command:
+
+```text
+uv run ruff format --check storage/model/paper_trading.py paper_trading/storage/repository.py paper_trading/services/corporate_action_service.py paper_trading/domain/corporate_actions.py storage/storage_db.py test/paper_trading/domain/test_corporate_actions.py test/paper_trading/services/test_corporate_action_service.py test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_corporate_action_migration.py && uv run ruff check storage/model/paper_trading.py paper_trading/storage/repository.py paper_trading/services/corporate_action_service.py paper_trading/domain/corporate_actions.py storage/storage_db.py test/paper_trading/domain/test_corporate_actions.py test/paper_trading/services/test_corporate_action_service.py test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_corporate_action_migration.py
+```
+
+Exact result:
+
+```text
+9 files already formatted
+All checks passed!
+```
+
+Command:
+
+```text
+git diff --check
+```
+
+Result: passed with no output.
+
+Command:
+
+```text
+git status --short && git diff --stat
+```
+
+Result: ten issue-owned implementation, test, and documentation files are
+modified; the approved plan and unrelated subsystems are unchanged.
+
+## Simplify Self-Review
+
+The required `simplify` skill was checked for under
+`.agents/skills/**/simplify/**` and is not installed in this worktree, so it
+could not be invoked. Manual self-review found no additional safe
+behavior-preserving simplification: the internal cash accessor deliberately
+separates accounting precision from display precision, the SQLite migration
+is isolated behind monotonic target checks, and exact parameter validation is
+shared by domain and service paths.
+
+## Remaining Blockers
+
+PostgreSQL integration migration coverage was not runnable because the
+required `TEST_POSTGRESQL_URL` is unavailable. No other blocker was observed
+in the scoped fix-wave validation.

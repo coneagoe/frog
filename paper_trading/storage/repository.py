@@ -539,12 +539,15 @@ class PaperTradingRepository:
         return account
 
     def get_cash_available(self, account_id: int) -> Decimal:
+        return self.get_cash_available_internal(account_id).quantize(Decimal("0.0001"))
+
+    def get_cash_available_internal(self, account_id: int) -> Decimal:
         total = (
             self.session.query(func.coalesce(func.sum(PaperCashLedger.amount), 0))
             .filter(PaperCashLedger.account_id == account_id)
             .scalar()
         )
-        return Decimal(total).quantize(Decimal("0.0001"))
+        return quantize_account_money(Decimal(total))
 
     def get_cash_available_as_of(self, account_id: int, as_of: date) -> Decimal:
         total = (
@@ -681,10 +684,16 @@ class PaperTradingRepository:
         if event_type is not None:
             query = query.filter(PaperCorporateAction.event_type == CorporateActionType(event_type).value)
         if start_at is not None:
-            query = query.filter(PaperCorporateAction.event_at >= start_at)
+            query = query.filter(PaperCorporateAction.event_at >= self._normalize_datetime_filter(start_at))
         if end_at is not None:
-            query = query.filter(PaperCorporateAction.event_at <= end_at)
+            query = query.filter(PaperCorporateAction.event_at <= self._normalize_datetime_filter(end_at))
         return list(query.order_by(PaperCorporateAction.event_at.asc(), PaperCorporateAction.id.asc()).all())
+
+    @staticmethod
+    def _normalize_datetime_filter(value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("corporate-action time filters must include a timezone offset")
+        return value.astimezone(timezone.utc)
 
     def get_order(self, order_id: int) -> PaperOrder:
         order = self.session.get(PaperOrder, order_id)

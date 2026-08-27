@@ -607,8 +607,8 @@ except that the event remains auditable; a no-holding event does not invent a
 position, alter NAV, or create cash.
 
 All financial calculations use Decimal values with `Numeric(30, 12)` internal
-precision for account, ledger, snapshot, and corporate-action amounts and
-quantities. Quantization uses `ROUND_HALF_UP`. Cash-flow rounding is auditable
+precision for account, ledger, snapshot, corporate-action, position cost, and
+lot cost values. Quantization uses `ROUND_HALF_UP`. Cash-flow rounding is auditable
 through `rounding_residual`, stored at `Numeric(30, 24)`, with the invariant:
 
 ```text

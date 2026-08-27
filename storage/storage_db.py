@@ -12,7 +12,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
-from sqlalchemy import bindparam, create_engine, func, inspect, text
+from sqlalchemy import MetaData, Numeric, Table, bindparam, create_engine, func, inspect, text
 from sqlalchemy.dialects.postgresql import Insert as PostgreSQLInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
@@ -417,6 +417,20 @@ _PAPER_ACCOUNT_ACCOUNTING_COLUMNS = (
     "cumulative_withdrawal",
     "realized_pnl",
 )
+_PAPER_SQLITE_PRECISION_COLUMNS = {
+    tb_name_paper_positions: ("cost_amount", "realized_pnl"),
+    tb_name_paper_position_lots: ("cost_price",),
+    tb_name_paper_orders: ("limit_price", "frozen_cash"),
+    tb_name_paper_trade_validity_checks: (
+        "input_price",
+        "daily_low",
+        "daily_high",
+        "limit_up_price",
+        "limit_down_price",
+    ),
+    tb_name_paper_trades: ("price", "amount", "fees"),
+    tb_name_paper_position_round_trips: ("entry_amount", "exit_amount", "fees", "realized_pnl", "return_pct"),
+}
 _NUMERIC_TYPE_RE = re.compile(r"numeric\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)", re.IGNORECASE)
 
 
@@ -3961,6 +3975,8 @@ class StorageDb:
         if self.engine.dialect.name != "postgresql" and has_paper_accounts:
             PaperCorporateAction.__table__.create(self.engine, checkfirst=True)
         self._ensure_paper_cash_ledger_columns()
+        if self.engine.dialect.name == "sqlite":
+            self._widen_sqlite_numeric_columns()
         if self.engine.dialect.name != "postgresql" and has_paper_orders:
             PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
             PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
@@ -3972,6 +3988,11 @@ class StorageDb:
                 tb_name_paper_accounts,
                 {column_name: "NUMERIC(30, 12)" for column_name in _PAPER_ACCOUNT_ACCOUNTING_COLUMNS},
             )
+            for table_name, column_names in _PAPER_SQLITE_PRECISION_COLUMNS.items():
+                self._widen_postgresql_numeric_columns(
+                    table_name,
+                    {column_name: "NUMERIC(30, 12)" for column_name in column_names},
+                )
 
         if not has_paper_orders:
             self._ensure_paper_account_repair_without_orders()
@@ -4335,6 +4356,44 @@ class StorageDb:
                     "rounding_residual": "NUMERIC(30, 24)",
                 },
             )
+
+    def _widen_sqlite_numeric_columns(self) -> None:
+        for table_name, column_names in _PAPER_SQLITE_PRECISION_COLUMNS.items():
+            if not inspect(self.engine).has_table(table_name):
+                continue
+            columns = {column["name"]: column for column in inspect(self.engine).get_columns(table_name)}
+            targets = [
+                name
+                for name in column_names
+                if name in columns
+                and getattr(columns[name]["type"], "scale", None) is not None
+                and getattr(columns[name]["type"], "scale", 0) < 12
+            ]
+            if targets:
+                self._rebuild_sqlite_numeric_table(table_name, targets)
+
+    def _rebuild_sqlite_numeric_table(self, table_name: str, target_columns: list[str]) -> None:
+        metadata = MetaData()
+        table = Table(table_name, metadata, autoload_with=self.engine)
+        indexes = [index for index in inspect(self.engine).get_indexes(table_name) if index["name"]]
+        for column_name in target_columns:
+            table.c[column_name].type = Numeric(30, 12)
+        temp_name = f"{table_name}__precision_upgrade"
+        table.name = temp_name
+        for index in list(table.indexes):
+            table.indexes.remove(index)
+        with self.engine.begin() as conn:
+            conn.execute(text(f"DROP TABLE IF EXISTS {temp_name}"))
+            table.create(conn)
+            column_names = ", ".join(column.name for column in table.columns)
+            conn.execute(text(f"INSERT INTO {temp_name} ({column_names}) SELECT {column_names} FROM {table_name}"))
+            conn.execute(text(f"DROP TABLE {table_name}"))
+            conn.execute(text(f"ALTER TABLE {temp_name} RENAME TO {table_name}"))
+            for index in indexes:
+                if index["column_names"]:
+                    unique = "UNIQUE " if index["unique"] else ""
+                    cols = ", ".join(index["column_names"])
+                    conn.execute(text(f"CREATE {unique}INDEX {index['name']} ON {table_name} ({cols})"))
 
     def _widen_postgresql_numeric_columns(self, table_name: str, column_types: dict[str, str], conn=None) -> None:
         if self.engine.dialect.name != "postgresql":
