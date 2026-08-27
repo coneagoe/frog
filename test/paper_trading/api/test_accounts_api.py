@@ -749,13 +749,13 @@ def test_deposit_endpoint_returns_cash_flow_response(monkeypatch, sqlite_session
     assert body["share_count"] == "125000.000000"
     ledger_response = client.get(f"/paper/accounts/{account_id}/cash-ledger", headers=headers)
     assert ledger_response.status_code == 200
-    deposit_entry = next(entry for entry in ledger_response.json() if entry["event_type"] == "deposit" and entry["note"] == "add cash")
+    deposit_entry = next(
+        entry for entry in ledger_response.json() if entry["event_type"] == "deposit" and entry["note"] == "add cash"
+    )
     returned_at = datetime.fromisoformat(deposit_entry["occurred_at"])
     expected_at = datetime.fromisoformat("2026-07-20T10:00:00+00:00")
     returned_utc = (
-        returned_at.replace(tzinfo=timezone.utc)
-        if returned_at.tzinfo is None
-        else returned_at.astimezone(timezone.utc)
+        returned_at.replace(tzinfo=timezone.utc) if returned_at.tzinfo is None else returned_at.astimezone(timezone.utc)
     )
     assert returned_utc == expected_at
 
