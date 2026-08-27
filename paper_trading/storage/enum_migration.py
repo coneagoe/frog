@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
+    CorporateActionType,
     ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
@@ -34,6 +35,7 @@ from storage.model import (
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
+    PaperCorporateAction,
     PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
@@ -48,6 +50,7 @@ from storage.model.paper_trading import (
     ETF_ELIGIBILITY_SYMBOL_CHECK_NAME,
     ETF_ELIGIBILITY_SYMBOL_CHECK_SQL,
     PaperPendingSettlement,
+    tb_name_paper_corporate_actions,
     tb_name_paper_etf_eligibility,
 )
 
@@ -137,6 +140,20 @@ PAPER_TRADING_ENUM_GROUPS = (
     ),
     PaperTradingEnumGroup(
         "paper_cash_event_type", _labels(CashEventType), (_column("paper_cash_ledger", "event_type", "VARCHAR(20)"),)
+    ),
+    PaperTradingEnumGroup(
+        "paper_corporate_action_type",
+        _labels(CorporateActionType),
+        (
+            _column(
+                tb_name_paper_corporate_actions,
+                "event_type",
+                "VARCHAR(30)",
+                indexes=(
+                    _index("ix_paper_corporate_actions_event_type", tb_name_paper_corporate_actions, "event_type"),
+                ),
+            ),
+        ),
     ),
     PaperTradingEnumGroup(
         "paper_order_side",
@@ -230,6 +247,13 @@ PAPER_TRADING_ENUM_GROUPS = (
                 "VARCHAR(20)",
                 "'a_share'",
                 indexes=(_index("ix_daily_bar_diagnostics_market", "daily_bar_diagnostics", "market"),),
+            ),
+            _column(
+                tb_name_paper_corporate_actions,
+                "market",
+                "VARCHAR(20)",
+                "'a_share'",
+                indexes=(_index("ix_paper_corporate_actions_market", tb_name_paper_corporate_actions, "market"),),
             ),
         ),
     ),
@@ -334,6 +358,7 @@ PAPER_TRADING_ENUM_GROUPS = (
 _GOVERNED_TABLES = (
     PaperAccount.__table__,
     PaperCashLedger.__table__,
+    PaperCorporateAction.__table__,
     PaperPosition.__table__,
     PaperPositionLot.__table__,
     PaperOrder.__table__,

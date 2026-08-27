@@ -24,6 +24,7 @@ from sqlalchemy.sql import func
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
+    CorporateActionType,
     ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
@@ -48,6 +49,7 @@ from .orm_compat import Mapped, mapped_column
 
 tb_name_paper_accounts = "paper_accounts"
 tb_name_paper_cash_ledger = "paper_cash_ledger"
+tb_name_paper_corporate_actions = "paper_corporate_actions"
 tb_name_paper_positions = "paper_positions"
 tb_name_paper_position_lots = "paper_position_lots"
 tb_name_paper_orders = "paper_orders"
@@ -134,6 +136,49 @@ class PaperCashLedger(Base):
     rounding_residual: Mapped[Decimal] = mapped_column(Numeric(30, 24), nullable=False, server_default=text("0"))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PaperCorporateAction(Base):
+    __tablename__ = tb_name_paper_corporate_actions
+    __table_args__ = (
+        Index(
+            "uq_paper_corporate_actions_account_idempotency",
+            "account_id",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index("ix_paper_corporate_actions_account_event", "account_id", "event_at", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True
+    )
+    market: Mapped[str] = mapped_column(
+        _value_enum(Market, "paper_market"), nullable=False, server_default="a_share", index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(
+        _value_enum(CorporateActionType, "paper_corporate_action_type"), nullable=False, index=True
+    )
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    processing_status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="completed")
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error_details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cash_delta: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    quantity_delta: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    before_quantity: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    after_quantity: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    before_cost_amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    after_cost_amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    before_cash_available: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    after_cash_available: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    affected_start_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    affected_end_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class PaperPosition(Base):

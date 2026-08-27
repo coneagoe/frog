@@ -148,6 +148,7 @@ from .model import (
     tb_name_paper_account_snapshots,
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
+    tb_name_paper_corporate_actions,
     tb_name_paper_etf_eligibility,
     tb_name_paper_ledger_rebuilds,
     tb_name_paper_matching_runs,
@@ -365,6 +366,7 @@ _metadata_initialized_pids: Set[int] = set()
 _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
+    tb_name_paper_corporate_actions,
     tb_name_paper_positions,
     tb_name_paper_position_lots,
     tb_name_paper_orders,
@@ -3910,12 +3912,21 @@ class StorageDb:
         """
         from .model.paper_trading import (  # noqa: F401
             DailyBarDiagnostic,
+            PaperCorporateAction,
             PaperLedgerRebuild,
             PaperTradeValidityCheck,
             PaperValuationGap,
         )
 
         has_paper_orders = inspect(self.engine).has_table(tb_name_paper_orders)
+        has_paper_accounts = inspect(self.engine).has_table(tb_name_paper_accounts)
+        if self.engine.dialect.name == "postgresql":
+            from paper_trading.storage.enum_migration import migrate_paper_trading_enums
+
+            with self.engine.begin() as conn:
+                migrate_paper_trading_enums(conn)
+        if self.engine.dialect.name != "postgresql" and has_paper_accounts:
+            PaperCorporateAction.__table__.create(self.engine, checkfirst=True)
         if self.engine.dialect.name != "postgresql" and has_paper_orders:
             PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
             PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
@@ -4018,7 +4029,6 @@ class StorageDb:
                     text(f"ALTER TABLE {tb_name_paper_orders} ADD COLUMN validity_checked_at TIMESTAMP WITH TIME ZONE")
                 )
 
-        has_paper_accounts = inspect(self.engine).has_table(tb_name_paper_accounts)
         if has_paper_accounts:
             account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
             account_fee_columns = {
@@ -4080,13 +4090,25 @@ class StorageDb:
             }
             cash_ledger_nav_columns = {
                 "trade_date": "DATE",
-                "net_asset_value": "NUMERIC(20, 6)",
-                "share_delta": "NUMERIC(20, 6)",
+                "net_asset_value": "NUMERIC(30, 12)",
+                "share_delta": "NUMERIC(30, 12)",
+                "rounding_residual": "NUMERIC(30, 24) NOT NULL DEFAULT 0",
             }
             for column_name, ddl in cash_ledger_nav_columns.items():
                 if column_name not in cash_ledger_columns:
                     with self.engine.begin() as conn:
                         conn.execute(text(f"ALTER TABLE {tb_name_paper_cash_ledger} ADD COLUMN {column_name} {ddl}"))
+            if self.engine.dialect.name == "postgresql":
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {tb_name_paper_cash_ledger} "
+                            "ALTER COLUMN amount TYPE NUMERIC(30, 12), "
+                            "ALTER COLUMN net_asset_value TYPE NUMERIC(30, 12), "
+                            "ALTER COLUMN share_delta TYPE NUMERIC(30, 12), "
+                            "ALTER COLUMN rounding_residual TYPE NUMERIC(30, 24)"
+                        )
+                    )
 
         has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
         if self.engine.dialect.name == "postgresql" and (has_paper_accounts or has_paper_snapshots):

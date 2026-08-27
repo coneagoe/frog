@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from paper_trading.domain.enums import (
     REPLAY_REJECTION_MARKER,
     CashEventType,
+    CorporateActionType,
     ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
@@ -42,6 +43,7 @@ from paper_trading.storage.models import (
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
+    PaperCorporateAction,
     PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
@@ -442,6 +444,9 @@ class PaperTradingRepository:
         self.session.query(PaperCashLedger).filter(PaperCashLedger.account_id == account_id).delete(
             synchronize_session=False
         )
+        self.session.query(PaperCorporateAction).filter(PaperCorporateAction.account_id == account_id).delete(
+            synchronize_session=False
+        )
         self.session.query(PaperPositionRoundTrip).filter(PaperPositionRoundTrip.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -606,6 +611,47 @@ class PaperTradingRepository:
             .filter(PaperOrder.account_id == account_id, PaperOrder.idempotency_key == idempotency_key)
             .one_or_none()
         )
+
+    def get_corporate_action_by_idempotency_key(self, account_id: int, key: str) -> PaperCorporateAction | None:
+        return (
+            self.session.query(PaperCorporateAction)
+            .filter(PaperCorporateAction.account_id == account_id, PaperCorporateAction.idempotency_key == key)
+            .one_or_none()
+        )
+
+    def create_corporate_action(self, **values: Any) -> PaperCorporateAction:
+        if "event_type" in values:
+            values["event_type"] = CorporateActionType(values["event_type"]).value
+        if "market" in values:
+            values["market"] = Market(values["market"]).value
+        event_at = values.get("event_at")
+        if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
+            raise ValueError("event_at must include a timezone offset")
+        if event_at is not None:
+            values["event_at"] = event_at.astimezone(timezone.utc)
+        action = PaperCorporateAction(**values)
+        self.session.add(action)
+        self.session.flush()
+        return action
+
+    def list_corporate_actions(
+        self,
+        account_id: int,
+        symbol: str | None = None,
+        event_type: str | CorporateActionType | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[PaperCorporateAction]:
+        query = self.session.query(PaperCorporateAction).filter(PaperCorporateAction.account_id == account_id)
+        if symbol is not None:
+            query = query.filter(PaperCorporateAction.symbol == symbol)
+        if event_type is not None:
+            query = query.filter(PaperCorporateAction.event_type == CorporateActionType(event_type).value)
+        if start_at is not None:
+            query = query.filter(PaperCorporateAction.event_at >= start_at)
+        if end_at is not None:
+            query = query.filter(PaperCorporateAction.event_at <= end_at)
+        return list(query.order_by(PaperCorporateAction.event_at.asc(), PaperCorporateAction.id.asc()).all())
 
     def get_order(self, order_id: int) -> PaperOrder:
         order = self.session.get(PaperOrder, order_id)
@@ -1120,6 +1166,16 @@ class PaperTradingRepository:
             )
             .one_or_none()
         )
+
+    def lock_position(self, account_id: int, market: str | Market, symbol: str) -> PaperPosition | None:
+        query = self.session.query(PaperPosition).filter(
+            PaperPosition.account_id == account_id,
+            PaperPosition.market == Market(market).value,
+            PaperPosition.symbol == symbol,
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.one_or_none()
 
     def delete_position(self, position: PaperPosition) -> None:
         self.session.delete(position)
