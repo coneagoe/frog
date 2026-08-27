@@ -116,7 +116,57 @@ export type CashFlowAnalyticsEvent = {
   share_delta: string | null;
 };
 
-export type AnalyticsEvent = SnapshotAnalyticsEvent | CashFlowAnalyticsEvent;
+export type CorporateActionImpact = {
+  cash_delta: string;
+  quantity_delta: string;
+  before_quantity: string;
+  after_quantity: string;
+  before_cost_amount: string;
+  after_cost_amount: string;
+  before_cash_available: string;
+  after_cash_available: string;
+  affected_start_date: string | null;
+  affected_end_date: string | null;
+};
+
+export type CorporateActionEvent = {
+  event_type: CorporateActionType;
+  id: number;
+  account_id: number;
+  market: Market;
+  symbol: string;
+  event_at: string;
+  idempotency_key: string;
+  parameters: Record<string, string>;
+  processing_status: string;
+  processed_at: string | null;
+  processing_metadata: Record<string, unknown> | null;
+  error_details: string | null;
+  cash_delta: string;
+  quantity_delta: string;
+  before_quantity: string;
+  after_quantity: string;
+  before_cost_amount: string;
+  after_cost_amount: string;
+  before_cash_available: string;
+  after_cash_available: string;
+  affected_start_date: string | null;
+  affected_end_date: string | null;
+  created_at: string;
+};
+
+export type AnalyticsCorporateActionEvent = {
+  event_type: "corporate_action";
+  id: number;
+  event_at: string;
+  symbol: string;
+  action_type: CorporateActionType;
+  parameters: Record<string, string>;
+  impact: CorporateActionImpact;
+  created_at: string;
+};
+
+export type AnalyticsEvent = SnapshotAnalyticsEvent | CashFlowAnalyticsEvent | AnalyticsCorporateActionEvent;
 
 export type AvailableAnalyticsResponse = {
   available: true;
@@ -157,6 +207,7 @@ export type CashLedgerEntry = {
   net_asset_value: string | null;
   share_delta: string | null;
   note: string | null;
+  rounding_residual?: string | null;
 };
 
 export type OrderSide = "buy" | "sell";
@@ -315,3 +366,29 @@ export type ImportPositionsResult = {
 
 export type CashFlowInput = { amount: string; trade_date: string; note?: string };
 export type CashFlowResult = { account_id: number; cash_available: string; net_asset_value: string; share_count: string; ledger: CashLedgerEntry };
+
+export type CorporateActionType = "dividend" | "split" | "reverse_split" | "bonus_share" | "rights_issue";
+export type CorporateActionParameters =
+  | { per_share_amount: string }
+  | { ratio: string }
+  | { bonus_ratio: string }
+  | { subscription_ratio: string; subscription_price: string };
+export type CorporateActionInput = {
+  symbol: string;
+  market?: Market;
+  event_type: CorporateActionType;
+  event_at: string;
+  idempotency_key: string;
+  parameters: CorporateActionParameters;
+};
+export type CorporateActionResult = {
+  event: CorporateActionEvent;
+  impact: CorporateActionImpact;
+  recalculation: { account_id: number; updated_dates: string[]; unavailable_dates: string[]; failed_dates: string[]; errors: string[] };
+};
+export type ListCorporateActionsParams = {
+  symbol?: string;
+  event_type?: CorporateActionType;
+  start_at?: string;
+  end_at?: string;
+};

@@ -8,6 +8,7 @@ import type { Account, ImportPositionsResult, Position } from "@/lib/types";
 import { PositionTable } from "../trading/trading-tables";
 import { AccountList } from "./account-list";
 import { CashFlowModal } from "./cash-flow-modal";
+import { CorporateActionModal } from "./corporate-action-modal";
 import { CreateAccountForm } from "./create-account-form";
 import { EditAccountFeesModal } from "./edit-account-fees-modal";
 import { ImportPositionsModal } from "./import-positions-modal";
@@ -25,6 +26,7 @@ export function AccountsPage() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importSuccess, setImportSuccess] = useState<ImportPositionsResult | null>(null);
   const [cashFlowMode, setCashFlowMode] = useState<"deposit" | "withdraw" | null>(null);
+  const [corporateActionOpen, setCorporateActionOpen] = useState(false);
   const requestIdRef = useRef(0);
   const lastUrlParamRef = useRef<string | null>(null);
   const selectedAccountIdRef = useRef(selectedAccountId);
@@ -165,6 +167,11 @@ export function AccountsPage() {
     }
   }
 
+  async function handleCorporateActionComplete() {
+    await refreshAccounts();
+    if (selectedAccountIdRef.current) await loadAccountDetails(selectedAccountIdRef.current, true);
+  }
+
   // Close fee editor if the selected account changes or is no longer valid
   useEffect(() => {
     if (feeEditorOpen && (accounts.length === 0 || !accounts.find((a) => a.id === feeEditorAccount?.id) || feeEditorAccount?.id !== selectedAccountId)) {
@@ -242,6 +249,7 @@ export function AccountsPage() {
                 <button className="button button--secondary" onClick={() => setCashFlowMode("withdraw")} type="button">
                   Withdraw
                 </button>
+                <button className="button" onClick={() => setCorporateActionOpen(true)} type="button">Corporate action</button>
               </div>
             ) : null}
           </div>
@@ -290,6 +298,7 @@ export function AccountsPage() {
           }
         }}
       />
+      <CorporateActionModal account={selectedAccount} open={corporateActionOpen} onClose={() => setCorporateActionOpen(false)} onCompleted={handleCorporateActionComplete} />
     </section>
   );
 }

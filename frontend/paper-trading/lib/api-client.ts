@@ -5,12 +5,16 @@ import type {
   CashFlowInput,
   CashFlowResult,
   CashLedgerEntry,
+  CorporateActionEvent,
+  CorporateActionInput,
+  CorporateActionResult,
   CreateAccountInput,
   CreateMatchingRunInput,
   CreateOrderInput,
   ImportPositionsInput,
   ImportPositionsResult,
   ListOrdersParams,
+  ListCorporateActionsParams,
   ListTradesParams,
   MatchingRun,
   Order,
@@ -136,4 +140,24 @@ export function depositCash(accountId: number, input: CashFlowInput): Promise<Ca
 
 export function withdrawCash(accountId: number, input: CashFlowInput): Promise<CashFlowResult> {
   return apiRequest<CashFlowResult>(`/accounts/${accountId}/cash/withdraw`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function createCorporateAction(accountId: number, input: CorporateActionInput): Promise<CorporateActionResult> {
+  return apiRequest<CorporateActionResult>(`/accounts/${accountId}/corporate-actions`, {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
+}
+
+export function listCorporateActions(accountId: number, params?: ListCorporateActionsParams): Promise<CorporateActionEvent[]> {
+  const query = new URLSearchParams();
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) query.set(key, value);
+    }
+  }
+  const queryString = query.toString();
+  return apiGet<CorporateActionEvent[]>(
+    `/accounts/${accountId}/corporate-actions${queryString ? `?${queryString}` : ""}`
+  );
 }

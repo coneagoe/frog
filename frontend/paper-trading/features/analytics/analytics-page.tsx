@@ -9,6 +9,7 @@ import { AnalyticsSummary } from "./analytics-summary";
 import { AssetChart } from "./asset-chart";
 import {
   AnalyticsActivitySection,
+  AnalyticsCorporateActionsSection,
   AnalyticsExecutionSection,
   AnalyticsRiskSection,
   AnalyticsTradeQualitySection
@@ -138,6 +139,10 @@ export function AnalyticsPage() {
           <section className="panel">
             <h2>Risk &amp; Drawdown</h2>
             <AnalyticsRiskSection analytics={analytics} />
+          </section>
+          <section className="panel">
+            <h2>Corporate Action Audit</h2>
+            <AnalyticsCorporateActionsSection analytics={analytics} />
           </section>
         </>
       ) : null}
