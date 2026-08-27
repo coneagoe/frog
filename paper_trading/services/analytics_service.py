@@ -12,6 +12,7 @@ from paper_trading.schemas.analytics import (
     AnalyticsResponse,
     AnalyticsUnavailableResponse,
     CashFlowAnalyticsEvent,
+    CorporateActionAnalyticsEvent,
     ExecutionAnalytics,
     MetricValue,
     OverviewAnalytics,
@@ -25,6 +26,7 @@ from paper_trading.schemas.analytics import (
 from paper_trading.storage.models import (
     PaperAccountSnapshot,
     PaperCashLedger,
+    PaperCorporateAction,
     PaperOrder,
     PaperPositionRoundTrip,
     PaperValuationGap,
@@ -48,6 +50,9 @@ class AnalyticsService:
         orders = self.repo.list_orders(account_id)
         snapshots = self.repo.list_snapshots(account_id)
         ledger_entries = self.repo.list_cash_ledger(account_id)
+        corporate_actions = (
+            self.repo.list_corporate_actions(account_id) if hasattr(self.repo, "list_corporate_actions") else []
+        )
         round_trips = self.repo.list_round_trips(account_id)
         return AnalyticsResponse(
             overview=self._overview(account.initial_cash, snapshots),
@@ -56,7 +61,7 @@ class AnalyticsService:
             trade_quality=self._trade_quality(round_trips),
             risk=self._risk(snapshots),
             valuation_gaps=self._valuation_gaps(account_id),
-            event_series=self._event_series(snapshots, ledger_entries),
+            event_series=self._event_series(snapshots, ledger_entries, corporate_actions),
         )
 
     def _valuation_gaps(self, account_id: int) -> list[ValuationGapResponse]:
@@ -120,7 +125,9 @@ class AnalyticsService:
 
     @staticmethod
     def _event_series(
-        snapshots: list[PaperAccountSnapshot], ledger_entries: list[PaperCashLedger]
+        snapshots: list[PaperAccountSnapshot],
+        ledger_entries: list[PaperCashLedger],
+        corporate_actions: list[PaperCorporateAction] | None = None,
     ) -> list[AnalyticsEvent]:
         events: list[tuple[datetime, int, int, AnalyticsEvent]] = []
         for snapshot in snapshots:
@@ -175,6 +182,34 @@ class AnalyticsService:
                         share_delta=Decimal(entry.share_delta).quantize(_QUANTIZE)
                         if entry.share_delta is not None
                         else None,
+                    ),
+                )
+            )
+        for action in corporate_actions or []:
+            events.append(
+                (
+                    action.event_at,
+                    2,
+                    action.id,
+                    CorporateActionAnalyticsEvent(
+                        id=action.id,
+                        event_at=action.event_at,
+                        symbol=action.symbol,
+                        action_type=action.event_type,
+                        parameters=dict(action.parameters),
+                        impact={
+                            "cash_delta": Decimal(action.cash_delta),
+                            "quantity_delta": Decimal(action.quantity_delta),
+                            "before_quantity": Decimal(action.before_quantity),
+                            "after_quantity": Decimal(action.after_quantity),
+                            "before_cost_amount": Decimal(action.before_cost_amount),
+                            "after_cost_amount": Decimal(action.after_cost_amount),
+                            "before_cash_available": Decimal(action.before_cash_available),
+                            "after_cash_available": Decimal(action.after_cash_available),
+                            "affected_start_date": action.affected_start_date,
+                            "affected_end_date": action.affected_end_date,
+                        },
+                        created_at=action.created_at,
                     ),
                 )
             )

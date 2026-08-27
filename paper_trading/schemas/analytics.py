@@ -116,7 +116,21 @@ class CashFlowAnalyticsEvent(BaseModel):
     share_delta: Decimal | None = None
 
 
-AnalyticsEvent = Annotated[SnapshotAnalyticsEvent | CashFlowAnalyticsEvent, Field(discriminator="event_type")]
+class CorporateActionAnalyticsEvent(BaseModel):
+    event_type: Literal["corporate_action"] = "corporate_action"
+    id: int
+    event_at: datetime
+    symbol: str
+    action_type: str
+    parameters: dict[str, Any]
+    impact: dict[str, Any]
+    created_at: datetime
+
+
+AnalyticsEvent = Annotated[
+    SnapshotAnalyticsEvent | CashFlowAnalyticsEvent | CorporateActionAnalyticsEvent,
+    Field(discriminator="event_type"),
+]
 
 
 class AnalyticsResponse(BaseModel):
