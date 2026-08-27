@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.domain.enums import (
     CashEventType,
+    CorporateActionType,
     ETFEligibilityStatus,
     LedgerRebuildStatus,
     Market,
@@ -433,6 +434,74 @@ def test_cash_ledger_orders_equal_occurred_at_by_id(sqlite_session):
         first.id,
         second.id,
     ]
+
+
+def test_corporate_actions_persist_filter_and_order(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-actions", Decimal("10000"))
+    event_at = datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc)
+    first = repo.create_corporate_action(
+        account_id=account.id,
+        market=Market.A_SHARE,
+        symbol="000001",
+        event_type=CorporateActionType.SPLIT,
+        event_at=event_at,
+        idempotency_key="split-1",
+        parameters={"ratio": "2"},
+        before_quantity=Decimal("100"),
+        after_quantity=Decimal("200"),
+        before_cost_amount=Decimal("1000"),
+        after_cost_amount=Decimal("1000"),
+        before_cash_available=Decimal("9000"),
+        after_cash_available=Decimal("9000"),
+    )
+    second = repo.create_corporate_action(
+        account_id=account.id,
+        market=Market.A_SHARE,
+        symbol="000002",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="dividend-1",
+        parameters={"amount": "50"},
+        cash_delta=Decimal("50"),
+        before_quantity=Decimal("100"),
+        after_quantity=Decimal("100"),
+        before_cost_amount=Decimal("1000"),
+        after_cost_amount=Decimal("1000"),
+        before_cash_available=Decimal("9000"),
+        after_cash_available=Decimal("9050"),
+    )
+
+    assert repo.get_corporate_action_by_idempotency_key(account.id, "split-1") is first
+    assert [item.id for item in repo.list_corporate_actions(account.id)] == [first.id, second.id]
+    assert repo.list_corporate_actions(account.id, symbol="000002") == [second]
+    assert repo.list_corporate_actions(account.id, event_type=CorporateActionType.SPLIT) == [first]
+    assert first.parameters == {"ratio": "2"}
+    assert first.after_quantity == Decimal("200.000000000000")
+
+
+def test_delete_account_removes_corporate_actions(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-actions-delete", Decimal("10000"))
+    repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.BONUS_SHARE,
+        event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        idempotency_key="bonus-1",
+        parameters={},
+        before_quantity=Decimal("1"),
+        after_quantity=Decimal("2"),
+        before_cost_amount=Decimal("1"),
+        after_cost_amount=Decimal("1"),
+        before_cash_available=Decimal("1"),
+        after_cash_available=Decimal("1"),
+    )
+
+    assert repo.delete_account(account.id) is True
+    assert repo.list_corporate_actions(account.id) == []
 
 
 class _NoOffsetTz(tzinfo):

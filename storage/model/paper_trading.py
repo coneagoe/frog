@@ -24,6 +24,7 @@ from sqlalchemy.sql import func
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
+    CorporateActionProcessingStatus,
     CorporateActionType,
     ETFEligibilityStatus,
     FeePreset,
@@ -164,7 +165,12 @@ class PaperCorporateAction(Base):
     event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    processing_status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="completed")
+    processing_status: Mapped[str] = mapped_column(
+        _value_enum(CorporateActionProcessingStatus, "paper_corporate_action_processing_status"),
+        nullable=False,
+        server_default="completed",
+        index=True,
+    )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error_details: Mapped[str | None] = mapped_column(Text, nullable=True)

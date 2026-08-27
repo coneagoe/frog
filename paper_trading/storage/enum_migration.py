@@ -10,6 +10,7 @@ from sqlalchemy.engine import Connection
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
+    CorporateActionProcessingStatus,
     CorporateActionType,
     ETFEligibilityStatus,
     FeePreset,
@@ -151,6 +152,25 @@ PAPER_TRADING_ENUM_GROUPS = (
                 "VARCHAR(30)",
                 indexes=(
                     _index("ix_paper_corporate_actions_event_type", tb_name_paper_corporate_actions, "event_type"),
+                ),
+            ),
+        ),
+    ),
+    PaperTradingEnumGroup(
+        "paper_corporate_action_processing_status",
+        _labels(CorporateActionProcessingStatus),
+        (
+            _column(
+                tb_name_paper_corporate_actions,
+                "processing_status",
+                "VARCHAR(30)",
+                "'completed'",
+                indexes=(
+                    _index(
+                        "ix_paper_corporate_actions_processing_status",
+                        tb_name_paper_corporate_actions,
+                        "processing_status",
+                    ),
                 ),
             ),
         ),
@@ -382,6 +402,7 @@ _OPERATIONAL_TABLES = (
     PaperValuationGap.__table__,
     ETFEligibility.__table__,
 )
+_ADDITIVE_GOVERNED_TABLES = frozenset({tb_name_paper_corporate_actions})
 _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_status", re.IGNORECASE)
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)
 _SNAPSHOT_ENUM_TYPES = frozenset({"paper_snapshot_point_type", "paper_snapshot_quality_status"})
@@ -481,9 +502,15 @@ def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     required_tables = (
         {column.table_name for group in groups for column in group.columns}
         - operational_tables
+        - _ADDITIVE_GOVERNED_TABLES
         - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
     )
-    required_missing = missing_tables - operational_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
+    required_missing = (
+        missing_tables
+        - operational_tables
+        - _ADDITIVE_GOVERNED_TABLES
+        - {table.name for table in _OPTIONAL_GOVERNED_TABLES}
+    )
     if required_missing and required_missing != required_tables:
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
     if rollback:

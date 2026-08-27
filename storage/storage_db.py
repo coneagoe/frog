@@ -408,6 +408,28 @@ _SQLITE_PAPER_SNAPSHOT_SERIES_COLUMNS = {
 _PAPER_ACCOUNT_REPAIR_REASON_TYPE = "paper_account_migration_repair_reason"
 _PAPER_ACCOUNT_REPAIR_REASON_COLUMN = "migration_repair_reason"
 _SQLITE_PAPER_ACCOUNT_REPAIR_REASON_DDL = "VARCHAR(40)"
+_PAPER_ACCOUNT_ACCOUNTING_COLUMNS = (
+    "initial_cash",
+    "share_count",
+    "net_asset_value",
+    "cumulative_deposit",
+    "cumulative_withdrawal",
+    "realized_pnl",
+)
+_PAPER_SNAPSHOT_ACCOUNTING_COLUMNS = (
+    "cash_available",
+    "cash_frozen",
+    "market_value",
+    "total_assets",
+    "realized_pnl",
+    "unrealized_pnl",
+    "net_asset_value",
+    "share_count",
+    "cumulative_deposit",
+    "cumulative_withdrawal",
+    "net_cash_flow",
+    "pending_settlement",
+)
 _LEGACY_CHRONOLOGY_SOURCES = (
     (tb_name_paper_account_snapshots, ("event_at", "created_at"), ("trade_date",)),
     (tb_name_paper_cash_ledger, ("occurred_at",), ("trade_date",)),
@@ -3927,6 +3949,7 @@ class StorageDb:
                 migrate_paper_trading_enums(conn)
         if self.engine.dialect.name != "postgresql" and has_paper_accounts:
             PaperCorporateAction.__table__.create(self.engine, checkfirst=True)
+        self._ensure_paper_cash_ledger_columns()
         if self.engine.dialect.name != "postgresql" and has_paper_orders:
             PaperTradeValidityCheck.__table__.create(self.engine, checkfirst=True)
             PaperLedgerRebuild.__table__.create(self.engine, checkfirst=True)
@@ -4083,32 +4106,11 @@ class StorageDb:
                     conn.execute(text(f"UPDATE {tb_name_paper_accounts} SET {assignments}"))
             if self.engine.dialect.name != "postgresql":
                 self._ensure_sqlite_paper_account_repair_metadata()
-
-        if inspect(self.engine).has_table(tb_name_paper_cash_ledger):
-            cash_ledger_columns = {
-                column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_cash_ledger)
-            }
-            cash_ledger_nav_columns = {
-                "trade_date": "DATE",
-                "net_asset_value": "NUMERIC(30, 12)",
-                "share_delta": "NUMERIC(30, 12)",
-                "rounding_residual": "NUMERIC(30, 24) NOT NULL DEFAULT 0",
-            }
-            for column_name, ddl in cash_ledger_nav_columns.items():
-                if column_name not in cash_ledger_columns:
-                    with self.engine.begin() as conn:
-                        conn.execute(text(f"ALTER TABLE {tb_name_paper_cash_ledger} ADD COLUMN {column_name} {ddl}"))
-            if self.engine.dialect.name == "postgresql":
-                with self.engine.begin() as conn:
-                    conn.execute(
-                        text(
-                            f"ALTER TABLE {tb_name_paper_cash_ledger} "
-                            "ALTER COLUMN amount TYPE NUMERIC(30, 12), "
-                            "ALTER COLUMN net_asset_value TYPE NUMERIC(30, 12), "
-                            "ALTER COLUMN share_delta TYPE NUMERIC(30, 12), "
-                            "ALTER COLUMN rounding_residual TYPE NUMERIC(30, 24)"
-                        )
-                    )
+            else:
+                self._widen_postgresql_numeric_columns(
+                    tb_name_paper_accounts,
+                    {column_name: "NUMERIC(30, 12)" for column_name in _PAPER_ACCOUNT_ACCOUNTING_COLUMNS},
+                )
 
         has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
         if self.engine.dialect.name == "postgresql" and (has_paper_accounts or has_paper_snapshots):
@@ -4298,6 +4300,58 @@ class StorageDb:
     def _table_column_names(self, conn, table_name: str) -> set[str]:
         return {column["name"] for column in inspect(conn).get_columns(table_name)}
 
+    def _ensure_paper_cash_ledger_columns(self) -> None:
+        if not inspect(self.engine).has_table(tb_name_paper_cash_ledger):
+            return
+        cash_ledger_columns = {
+            column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_cash_ledger)
+        }
+        cash_ledger_nav_columns = {
+            "trade_date": "DATE",
+            "net_asset_value": "NUMERIC(30, 12)",
+            "share_delta": "NUMERIC(30, 12)",
+            "rounding_residual": "NUMERIC(30, 24) NOT NULL DEFAULT 0",
+        }
+        for column_name, ddl in cash_ledger_nav_columns.items():
+            if column_name not in cash_ledger_columns:
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {tb_name_paper_cash_ledger} ADD COLUMN {column_name} {ddl}"))
+        if self.engine.dialect.name == "postgresql":
+            self._widen_postgresql_numeric_columns(
+                tb_name_paper_cash_ledger,
+                {
+                    "amount": "NUMERIC(30, 12)",
+                    "net_asset_value": "NUMERIC(30, 12)",
+                    "share_delta": "NUMERIC(30, 12)",
+                    "rounding_residual": "NUMERIC(30, 24)",
+                },
+            )
+
+    def _widen_postgresql_numeric_columns(self, table_name: str, column_types: dict[str, str], conn=None) -> None:
+        if self.engine.dialect.name != "postgresql":
+            return
+        connection = conn or self.engine.connect()
+        owns_connection = conn is None
+        try:
+            if not inspect(connection).has_table(table_name):
+                return
+            columns = {column["name"] for column in inspect(connection).get_columns(table_name)}
+            existing = [column_name for column_name in column_types if column_name in columns]
+            if not existing:
+                return
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table_name} "
+                    + ", ".join(
+                        f"ALTER COLUMN {column_name} TYPE {column_types[column_name]}" for column_name in existing
+                    )
+                )
+            )
+        finally:
+            if owns_connection:
+                connection.commit()
+                connection.close()
+
     def _ensure_paper_account_repair_metadata(self, conn) -> None:
         from paper_trading.domain.enums import MigrationRepairReason
 
@@ -4363,6 +4417,11 @@ class StorageDb:
 
         ensure_snapshot_series_enum_types(conn)
         snapshot_columns = self._table_column_names(conn, tb_name_paper_account_snapshots)
+        self._widen_postgresql_numeric_columns(
+            tb_name_paper_account_snapshots,
+            {column_name: "NUMERIC(30, 12)" for column_name in _PAPER_SNAPSHOT_ACCOUNTING_COLUMNS},
+            conn=conn,
+        )
         for column_name, ddl in _PAPER_SNAPSHOT_NAV_COLUMNS.items():
             if column_name not in snapshot_columns:
                 conn.execute(text(f"ALTER TABLE {tb_name_paper_account_snapshots} ADD COLUMN {column_name} {ddl}"))

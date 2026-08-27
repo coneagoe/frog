@@ -48,6 +48,12 @@ class CorporateActionType(StrEnum):
     RIGHTS_ISSUE = "rights_issue"
 
 
+class CorporateActionProcessingStatus(StrEnum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class MatchingRunStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"

@@ -64,3 +64,42 @@ The named migration test file was not present in the worktree, and the PostgreSQ
 ## Concerns
 
 - PostgreSQL migration integration could not be executed in this environment because Docker could not allocate a network. The named migration test file was also absent from the worktree, so PostgreSQL legacy-preservation and second-run semantic-idempotence evidence remains unverified here.
+
+## Independent Review Fixes
+
+- Changed governed PostgreSQL preflight so the additive `paper_corporate_actions` table is allowed to be absent on an existing database; the migration creates its table, enum types, columns, and indexes after account dependencies are available, while still rejecting partially missing required legacy tables.
+- Added the governed `CorporateActionProcessingStatus` enum (`pending`, `completed`, `failed`) and registered its PostgreSQL/export association, including the processing-status index.
+- Added additive PostgreSQL widening for all persisted accounting columns on accounts, cash ledger, and account snapshots. Existing values are altered in place without backfills; `rounding_residual` retains `NUMERIC(30, 24)` and its new-column SQLite default remains zero. SQLite keeps the existing additive `ALTER TABLE ... ADD COLUMN` startup behavior and now runs cash-ledger upgrades before the no-orders early return.
+- Added repository coverage for corporate-action persistence, JSON parameters and summaries, deterministic ordering, symbol/event filters, idempotency lookup, and account-deletion cleanup.
+- Added `test/paper_trading/storage/test_corporate_action_migration.py` covering reduced SQLite startup, repeatability, legacy value preservation, and PostgreSQL additive migration/repeatability/enum-label assertions when `TEST_POSTGRESQL_URL` is available.
+
+## Fix Verification
+
+`uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_corporate_action_migration.py -q`
+
+```text
+89 passed, 1 skipped in 61.98s (0:01:01)
+```
+
+The skipped test is the PostgreSQL integration test because `TEST_POSTGRESQL_URL` is unavailable outside the Docker runner.
+
+`uv run ruff check storage/model/paper_trading.py paper_trading/domain/enums.py paper_trading/storage/models.py paper_trading/storage/repository.py paper_trading/storage/enum_migration.py storage/storage_db.py test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_corporate_action_migration.py`
+
+```text
+All checks passed!
+```
+
+`git diff --check` and `bash -n tools/db_common.sh` passed with no output/errors.
+
+`tools/run_tests.sh test/paper_trading/storage/test_corporate_action_migration.py -v` remains blocked before pytest starts:
+
+```text
+Network issue-87-nav-precision_default Creating
+Network issue-87-nav-precision_default Error Error response from daemon: all predefined address pools have been fully subnetted
+failed to create network issue-87-nav-precision_default: Error response from daemon: all predefined address pools have been fully subnetted
+```
+
+## Final Concerns
+
+- PostgreSQL catalog-level widening, legacy preservation, rollback, and second-run semantic idempotence remain unexecuted in this environment because Docker cannot create its network. The corresponding PostgreSQL assertions are present in the new migration test for the parent controller’s scoped re-review environment.
+- No service, API, frontend, documentation, plan, or specification files were modified.
