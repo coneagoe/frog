@@ -553,7 +553,7 @@ class PaperTradingRepository:
             amount_query = self.session.query(sa_cast(PaperCashLedger.amount, String))
         amounts = amount_query.filter(PaperCashLedger.account_id == account_id).all()
         if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
-            values = (Decimal(str(round(float(amount), 12))) for (amount,) in amounts)
+            values = (Decimal(str(amount)) for (amount,) in amounts)
         else:
             values = (Decimal(str(amount)) for (amount,) in amounts)
         return quantize_account_money(sum((quantize_account_money(value) for value in values), Decimal("0")))
@@ -825,33 +825,12 @@ class PaperTradingRepository:
         return list(trades), total
 
     def list_snapshots(self, account_id: int) -> list[PaperAccountSnapshot]:
-        snapshots = list(
+        return list(
             self.session.query(PaperAccountSnapshot)
             .filter(PaperAccountSnapshot.account_id == account_id)
             .order_by(PaperAccountSnapshot.event_at.asc(), PaperAccountSnapshot.id.asc())
             .all()
         )
-        for snapshot in snapshots:
-            for field in (
-                "cash_available",
-                "cash_frozen",
-                "market_value",
-                "total_assets",
-                "realized_pnl",
-                "unrealized_pnl",
-                "cumulative_deposit",
-                "cumulative_withdrawal",
-                "net_cash_flow",
-                "pending_settlement",
-            ):
-                value = getattr(snapshot, field)
-                if value is not None:
-                    setattr(snapshot, field, Decimal(str(value)).quantize(Decimal("0.0001")))
-            for field in ("net_asset_value", "share_count"):
-                value = getattr(snapshot, field)
-                if value is not None:
-                    setattr(snapshot, field, Decimal(str(value)).quantize(Decimal("0.000001")))
-        return snapshots
 
     def upsert_valuation_gap(
         self,

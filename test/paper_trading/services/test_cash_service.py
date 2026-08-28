@@ -70,6 +70,20 @@ def test_withdraw_authorizes_against_internal_cash_not_display_rounding(tmp_path
     engine.dispose()
 
 
+def test_withdraw_preserves_large_twelve_decimal_cash_eligibility(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    cash = Decimal("999999999999.125000000000")
+    account = repo.create_account("large-precision-withdrawal", cash)
+
+    assert repo.get_cash_available_internal(account.id) == cash
+    result = CashService(repo).withdraw(account.id, cash, date(2026, 7, 20), None)
+
+    assert result.ledger.amount == -cash
+    assert result.cash_available == Decimal("0.0000")
+    assert repo.get_cash_available_internal(account.id) == Decimal("0.000000000000")
+    engine.dispose()
+
+
 def test_cash_flow_before_valuation_uses_initial_nav(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))

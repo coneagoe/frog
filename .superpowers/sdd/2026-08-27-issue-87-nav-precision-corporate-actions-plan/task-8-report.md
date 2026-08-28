@@ -547,3 +547,45 @@ Result: passed with no output.
 - Remaining blocker: PostgreSQL migration execution could not be rerun in this
   environment because `TEST_POSTGRESQL_URL` is unavailable; prior report entries
   document the earlier five-test PostgreSQL pass.
+
+## Important Final-Review Fixes
+
+- `list_snapshots()` now returns attached ORM entities without mutating their
+  persisted precision. Snapshot display rounding remains in `SnapshotResponse`.
+- SQLite internal cash aggregation now converts NUMERIC text directly to
+  `Decimal`, avoiding the lossy float round-trip.
+- Added regressions for high-precision snapshot reload/commit preservation and
+  large-value, 12-decimal withdrawal and rights-issue cash eligibility.
+
+### Validation and Self-Review
+
+```text
+uv run pytest test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_corporate_action_service.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/storage/test_repository.py -q
+```
+
+Result: `167 passed in 135.77s` before the final boundary-fixture correction;
+the three new regressions then passed with:
+
+```text
+uv run pytest test/paper_trading/services/test_cash_service.py::test_withdraw_preserves_large_twelve_decimal_cash_eligibility test/paper_trading/services/test_corporate_action_service.py::test_rights_issue_preserves_large_twelve_decimal_cash_eligibility test/paper_trading/storage/test_repository.py::test_list_snapshots_does_not_round_loaded_entities_before_commit -q
+```
+
+Result: `3 passed in 3.19s`.
+
+```text
+uv run ruff format --check paper_trading/storage/repository.py paper_trading/schemas/snapshots.py test/paper_trading/storage/test_repository.py test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_corporate_action_service.py
+uv run ruff check paper_trading/storage/repository.py paper_trading/schemas/snapshots.py test/paper_trading/storage/test_repository.py test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_corporate_action_service.py
+uv run mypy paper_trading/storage/repository.py paper_trading/schemas/snapshots.py paper_trading/services/cash_service.py paper_trading/services/corporate_action_service.py test/paper_trading/storage/test_repository.py test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_corporate_action_service.py
+uv run pre-commit run --files paper_trading/storage/repository.py paper_trading/schemas/snapshots.py test/paper_trading/storage/test_repository.py test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_corporate_action_service.py
+git diff --check
+```
+
+Result: Ruff formatting/checks, mypy, pre-commit, and diff check all passed.
+Mypy emitted only the existing unused-override configuration note.
+
+The repository does not provide the requested `simplify` skill. Manual
+simplification review found no safe change: the repository must return
+unmodified attached entities, while response serialization is the narrow public
+display boundary. Direct `Decimal(str(amount))` is the smallest safe SQLite
+conversion. The whole-share integer position and lot contract is unchanged.
+No remaining blockers were observed for these two fixes.

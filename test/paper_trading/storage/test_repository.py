@@ -188,6 +188,33 @@ def test_create_account_persists_initial_snapshot(sqlite_session) -> None:
     assert snapshot.net_asset_value == Decimal("1.000000")
 
 
+def test_list_snapshots_does_not_round_loaded_entities_before_commit(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("snapshot-precision", Decimal("100000"))
+    precise = Decimal("123.456789012345")
+    snapshot = repo.save_snapshot(
+        **{
+            **_trading_snapshot_values(account.id, date(2026, 8, 25), datetime(2026, 8, 25, tzinfo=timezone.utc)),
+            "cash_available": precise,
+            "total_assets": precise,
+            "net_asset_value": Decimal("1.123456789012"),
+            "share_count": precise,
+        }
+    )
+
+    listed = next(row for row in repo.list_snapshots(account.id) if row.id == snapshot.id)
+    assert listed.cash_available == precise
+    assert listed.net_asset_value == Decimal("1.123456789012")
+    sqlite_session.commit()
+    sqlite_session.expire_all()
+
+    reloaded = sqlite_session.get(type(snapshot), snapshot.id)
+    assert reloaded is not None
+    assert reloaded.cash_available == precise
+    assert reloaded.net_asset_value == Decimal("1.123456789012")
+
+
 def test_list_snapshots_orders_same_day_initial_before_trading(sqlite_session) -> None:
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

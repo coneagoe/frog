@@ -244,6 +244,27 @@ def test_rights_issue_uses_internal_cash_precision_for_eligibility(sqlite_sessio
     assert result.impact.before_cash_available == Decimal("10.000040000000")
 
 
+def test_rights_issue_preserves_large_twelve_decimal_cash_eligibility(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    cash = Decimal("999999999999.125000000000")
+    account = repo.create_account("corporate-action-large-cash", cash)
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 1, 0, Decimal("1"))
+    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 1, 1, Decimal("1"))
+
+    assert repo.get_cash_available_internal(account.id) == cash
+    result = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.RIGHTS_ISSUE,
+        datetime(2026, 8, 27, tzinfo=timezone.utc),
+        "large-precise-cash",
+        {"subscription_ratio": Decimal("1"), "subscription_price": cash},
+    )
+
+    assert result.impact.before_cash_available == cash
+    assert repo.get_cash_available_internal(account.id) == Decimal("0.000000000000")
+
+
 def test_service_rejects_extra_parameters_before_idempotency_resolution(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-extra-parameters", Decimal("10000"))
