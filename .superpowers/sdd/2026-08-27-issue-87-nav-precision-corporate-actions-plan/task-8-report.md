@@ -663,6 +663,47 @@ The required simplification review found no further safe behavior-preserving
 simplification. PostgreSQL integration was not rerun in this environment when
 `TEST_POSTGRESQL_URL` was unavailable.
 
+## NAV Migration Fixture Fix
+
+- Added governed legacy `paper_accounts.status` and `paper_accounts.fee_preset`
+  VARCHAR columns with accepted defaults to the NAV migration fixtures.
+- Changed `_financials()` to compare non-null financial values as `Decimal`
+  objects while retaining explicit `None` handling, so scale-only changes from
+  precision widening do not hide value-preservation regressions.
+- Production migrations and `_preflight()` were not changed.
+
+### Validation
+
+```text
+tools/run_tests.sh test/paper_trading/storage/test_nav_series_migration.py -v
+```
+
+Result: `9 passed, 13 failed, 1 error`. Remaining failures stop in governed
+enum preflight on other reduced legacy-schema omissions before the affected NAV
+migration assertions execute.
+
+```text
+uv run pytest test/paper_trading/storage/test_enum_migration.py test/paper_trading/storage/test_corporate_action_migration.py -q
+```
+
+Result: `4 passed, 36 skipped`.
+
+```text
+uv run ruff format --check test/paper_trading/storage/test_nav_series_migration.py
+uv run ruff check test/paper_trading/storage/test_nav_series_migration.py
+git diff --check
+```
+
+Result: all passed.
+
+### Self-Review
+
+- The changes are test-only and preserve strict production migration governance.
+- Decimal comparison retains `None` semantics and leaves explicit precision and
+  catalog assertions unchanged.
+- The required simplification review found no safe behavior-preserving
+  simplification.
+
 ## Remaining Important Finding: Pending Settlement SQLite Retrieval
 
 - Added a repository-local textual Decimal accessor for single numeric values

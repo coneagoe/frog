@@ -79,6 +79,8 @@ def _create_legacy_schema(
             CREATE TABLE paper_accounts (
                 id integer PRIMARY KEY,
                 name varchar(100) NOT NULL UNIQUE,
+                status varchar(20) NOT NULL DEFAULT 'active',
+                fee_preset varchar(30) NOT NULL DEFAULT 'a_share',
                 initial_cash numeric(20, 4) NOT NULL,
                 share_count numeric(20, 6) NOT NULL DEFAULT 0,
                 net_asset_value numeric(20, 6) NOT NULL DEFAULT 1,
@@ -244,7 +246,7 @@ def _financials(row) -> dict[str, object]:
         if column not in row:
             continue
         value = row[column]
-        values[column] = None if value is None else str(value)
+        values[column] = None if value is None else Decimal(str(value))
     return values
 
 
@@ -1508,6 +1510,8 @@ def _create_accounts_without_orders_or_snapshots(connection: Connection, *, sqli
             CREATE TABLE paper_accounts (
                 id integer PRIMARY KEY,
                 name varchar(100) NOT NULL UNIQUE,
+                status varchar(20) NOT NULL DEFAULT 'active',
+                fee_preset varchar(30) NOT NULL DEFAULT 'a_share',
                 initial_cash numeric(20, 4) NOT NULL,
                 share_count numeric(20, 6) NOT NULL DEFAULT 0,
                 created_at {timestamp_type} NOT NULL
