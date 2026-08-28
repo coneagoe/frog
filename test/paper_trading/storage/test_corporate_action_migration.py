@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
+from paper_trading.domain.enums import CashEventType, CorporateActionProcessingStatus, CorporateActionType
 from paper_trading.storage.enum_migration import _GOVERNED_TABLES, migrate_paper_trading_enums
 from storage.model import Base
 from storage.storage_db import StorageDb
@@ -29,6 +30,21 @@ def _create_paper_trading_tables(connection: Connection) -> None:
     for enum_type in enum_types:
         enum_type.create(connection, checkfirst=True)
     Base.metadata.create_all(connection, tables=tables)
+
+
+def _postgres_enum_labels(connection: Connection, type_name: str) -> list[str]:
+    return (
+        connection.execute(
+            text(
+                "SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
+                "WHERE t.typname = :type_name AND t.typnamespace = current_schema()::regnamespace "
+                "ORDER BY e.enumsortorder"
+            ),
+            {"type_name": type_name},
+        )
+        .scalars()
+        .all()
+    )
 
 
 def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_path):
@@ -329,15 +345,25 @@ def test_postgresql_additive_corporate_action_migration_is_repeatable():
                     "AND table_name = 'paper_corporate_actions' ORDER BY column_name"
                 )
             ).all()
-            labels = (
+            enum_labels = {
+                type_name: _postgres_enum_labels(connection, type_name)
+                for type_name in (
+                    "paper_corporate_action_type",
+                    "paper_corporate_action_processing_status",
+                    "paper_cash_event_type",
+                )
+            }
+            defaults = dict(
                 connection.execute(
                     text(
-                        "SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
-                        "WHERE t.typname = 'paper_corporate_action_processing_status' ORDER BY e.enumsortorder"
+                        "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) "
+                        "FROM pg_attrdef d JOIN pg_attribute a "
+                        "ON a.attrelid = d.adrelid AND a.attnum = d.adnum "
+                        "JOIN pg_class c ON c.oid = d.adrelid "
+                        "WHERE c.relname = 'paper_corporate_actions' "
+                        "AND c.relnamespace = current_schema()::regnamespace"
                     )
-                )
-                .scalars()
-                .all()
+                ).all()
             )
             indexes = {
                 row[0]
@@ -357,7 +383,21 @@ def test_postgresql_additive_corporate_action_migration_is_repeatable():
             } <= indexes
 
         assert first == second
-        assert labels == ["pending", "completed", "failed"]
+        assert enum_labels == {
+            "paper_corporate_action_type": [member.value for member in CorporateActionType],
+            "paper_corporate_action_processing_status": [member.value for member in CorporateActionProcessingStatus],
+            "paper_cash_event_type": [member.value for member in CashEventType],
+        }
+        assert {
+            name: defaults[name]
+            for name in ("market", "processing_status", "cash_delta", "quantity_delta", "created_at")
+        } == {
+            "market": "'a_share'::paper_market",
+            "processing_status": "'completed'::paper_corporate_action_processing_status",
+            "cash_delta": "0",
+            "quantity_delta": "0",
+            "created_at": "now()",
+        }
     finally:
         with engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
@@ -387,6 +427,20 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
                 )
             )
             connection.execute(
+                text(
+                    "INSERT INTO paper_positions "
+                    "(account_id, symbol, total_quantity, frozen_quantity, cost_amount, realized_pnl) "
+                    "VALUES (1, '000001', 100, 20, 123.4567, 1.2345)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO paper_position_lots "
+                    "(account_id, symbol, buy_trade_date, original_quantity, remaining_quantity, cost_price) "
+                    "VALUES (1, '000001', '2026-08-27', 100, 80, 1.2345)"
+                )
+            )
+            connection.execute(
                 text("INSERT INTO paper_cash_ledger (account_id, event_type, amount) VALUES (1, 'deposit', 123.4567)")
             )
             connection.execute(
@@ -408,7 +462,10 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
                     "FROM information_schema.columns WHERE table_schema = current_schema() "
                     "AND ((table_name = 'paper_accounts' AND column_name IN ('initial_cash', 'share_count')) "
                     "OR (table_name = 'paper_cash_ledger' AND column_name IN ('amount', 'rounding_residual')) "
-                    "OR (table_name = 'paper_account_snapshots' AND column_name = 'net_asset_value'))"
+                    "OR (table_name = 'paper_account_snapshots' AND column_name = 'net_asset_value') "
+                    "OR (table_name = 'paper_positions' AND column_name IN ('total_quantity', 'frozen_quantity')) "
+                    "OR (table_name = 'paper_position_lots' AND column_name IN "
+                    "('original_quantity', 'remaining_quantity')))"
                 )
             ).all()
             observed = {(row[0], row[1]): (row[2], row[3]) for row in types}
@@ -417,6 +474,10 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             assert observed[("paper_cash_ledger", "amount")] == (40, 12)
             assert observed[("paper_cash_ledger", "rounding_residual")] == (30, 24)
             assert observed[("paper_account_snapshots", "net_asset_value")] == (30, 12)
+            assert observed[("paper_positions", "total_quantity")] == (32, 0)
+            assert observed[("paper_positions", "frozen_quantity")] == (32, 0)
+            assert observed[("paper_position_lots", "original_quantity")] == (32, 0)
+            assert observed[("paper_position_lots", "remaining_quantity")] == (32, 0)
             assert connection.execute(
                 text("SELECT initial_cash, share_count FROM paper_accounts WHERE id = 1")
             ).one() == (
@@ -426,6 +487,15 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             assert connection.execute(
                 text("SELECT amount FROM paper_cash_ledger WHERE id = 1")
             ).scalar_one() == Decimal("123.4567")
+            assert connection.execute(
+                text("SELECT total_quantity, frozen_quantity FROM paper_positions WHERE id = 1")
+            ).one() == (100, 20)
+            assert connection.execute(
+                text("SELECT original_quantity, remaining_quantity FROM paper_position_lots WHERE id = 1")
+            ).one() == (100, 80)
+            assert connection.execute(
+                text("SELECT net_asset_value, share_count FROM paper_account_snapshots WHERE account_id = 1")
+            ).one() == (Decimal("1.234567"), Decimal("9.000000000000"))
 
         _storage(scoped).ensure_paper_trading_schema()
     finally:

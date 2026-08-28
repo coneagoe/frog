@@ -367,11 +367,65 @@ SQLite transaction semantics.
 
 The two PostgreSQL migration tests initially failed during `Base.metadata.create_all()`
 because a fresh isolated schema did not contain unrelated `blackroom_market` and
-`blackroom_source` enums. The fixture creates only the paper-trading governed tables
-tables required by these tests (`paper_accounts`, `paper_cash_ledger`,
-`paper_account_snapshots`, and `paper_corporate_actions`), leaving the issue-87
+`blackroom_source` enums. The fixture creates the complete paper-trading governed
+dependency set required by these tests while excluding unrelated global metadata.
+It then removes the corporate-action table and its types, leaving the issue-87
 migration responsible for its corporate-action enum/table setup. It explicitly
 uses `NUMERIC(40, 4)` to verify scale expansion without precision narrowing.
+
+## Independent Review Fixes
+
+The PostgreSQL migration tests now assert every label in the governed
+`paper_corporate_action_type`, `paper_corporate_action_processing_status`, and
+extended `paper_cash_event_type` enums. They also assert the corporate-action
+`market`, `processing_status`, `cash_delta`, `quantity_delta`, and `created_at`
+defaults. The widening fixture seeds integer-backed position and lot quantities
+and verifies both their `INTEGER` declarations and legacy values remain
+unchanged. It also verifies the legacy snapshot values remain unchanged after
+numeric widening.
+
+### Validation
+
+```text
+TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5433/quant uv run pytest test/paper_trading/storage/test_corporate_action_migration.py -v
+```
+
+Exact result: `5 passed in 15.28s`.
+
+```text
+uv run ruff format --check test/paper_trading/storage/test_corporate_action_migration.py
+```
+
+Exact result: `1 file already formatted`.
+
+```text
+uv run ruff check test/paper_trading/storage/test_corporate_action_migration.py
+```
+
+Exact result: `All checks passed!`.
+
+```text
+git diff --check
+```
+
+Exact result: passed with no output.
+
+### Self-Review
+
+- The fixture uses `_GOVERNED_TABLES` in full, so it creates the complete
+  paper-trading dependency set required by migration preflight; unrelated
+  metadata is excluded without claiming the fixture contains four tables.
+- Enum assertions derive expected labels from the domain enums and query the
+  PostgreSQL catalog, covering additions and ordering as well as presence.
+- Default assertions cover the corporate-action defaults relevant to the
+  migration contract while intentionally ignoring the unrelated identity
+  sequence default on `id`.
+- Integer position and lot quantity declarations and seeded values are checked
+  after startup widening, alongside the pre-existing snapshot value checks.
+- No production code, plan/spec, API/frontend, or unrelated tests were changed.
+- A targeted simplification review found no safe behavior-preserving
+  simplification; the helper and catalog assertions are scoped to the review
+  findings.
 
 ### Validation
 
