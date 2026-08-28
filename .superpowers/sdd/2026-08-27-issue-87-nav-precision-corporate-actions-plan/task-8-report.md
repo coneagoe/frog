@@ -260,3 +260,51 @@ shared by domain and service paths.
 PostgreSQL integration migration coverage was not runnable because the
 required `TEST_POSTGRESQL_URL` is unavailable. No other blocker was observed
 in the scoped fix-wave validation.
+
+## SQLite Migration Safety Follow-up
+
+Implemented the remaining issue #87 SQLite migration blockers while preserving
+the approved integer-backed position and lot quantity model. SQLite numeric
+upgrades now compare both precision and scale, rebuild only when either target
+capability increases, and preserve larger existing dimensions in the rebuilt
+declaration. For example, `NUMERIC(40, 4)` becomes `NUMERIC(40, 12)` and
+`NUMERIC(40, 18)` remains unchanged.
+
+The rebuild uses a raw SQLite connection so `PRAGMA foreign_keys` is disabled
+before the transaction begins and restored afterward. It retains complete
+explicit index SQL, including partial unique indexes, retains foreign-key
+definitions through the reflected table, copies rows, and runs
+`PRAGMA foreign_key_check` after migration. Regression coverage uses enabled
+foreign keys and existing `orders -> trades` / `orders -> validity checks` /
+`trades -> round trips` dependencies, verifies rows, keys, indexes, numeric
+declarations, and repeatability.
+
+`docs/paper_trading.md` now distinguishes whole-share integer position/lot
+quantities from 12-decimal account, ledger, snapshot, and corporate-action
+audit precision. It also states that non-integral corporate-action results are
+rejected before writes.
+
+Validation performed:
+
+```text
+uv run pytest test/paper_trading/storage/test_corporate_action_migration.py test/paper_trading/services/test_corporate_action_service.py -q
+```
+
+Result: `17 passed, 2 skipped`. The skipped tests require
+`TEST_POSTGRESQL_URL`.
+
+```text
+uv run ruff format --check storage/storage_db.py test/paper_trading/storage/test_corporate_action_migration.py
+uv run ruff check storage/storage_db.py test/paper_trading/storage/test_corporate_action_migration.py
+git diff --check
+```
+
+Result: passed. The broader focused storage command also ran 162 tests
+successfully and skipped three PostgreSQL-only cases; one pre-existing
+PostgreSQL fallback test failed because its local fallback database has an
+incomplete enum-governed legacy schema (`paper_accounts.status` is absent).
+
+No repository `simplify` skill is installed in this worktree. A targeted manual
+simplification review found no safe simplification: the raw-connection boundary
+is necessary because SQLite ignores foreign-key pragma changes inside an active
+transaction.

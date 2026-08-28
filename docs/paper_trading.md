@@ -582,20 +582,22 @@ The five supported event types have exact parameter contracts and effects:
   dividend cash is created.
 - `split`: requires positive finite `ratio`. Quantity becomes
   `before_quantity * ratio`; cost is preserved in aggregate and lot cost is
-  repriced to preserve NAV continuity.
+  repriced to preserve NAV continuity. Non-integral results are rejected
+  before any writes.
 - `reverse_split`: requires positive finite `ratio` below 1. Quantity becomes
   `before_quantity * ratio`; the same aggregate-cost and lot repricing rules
-  apply. Fractional resulting holdings are rejected because paper holdings are
-  integer quantities.
+  apply. Non-integral results are rejected before any writes because paper
+  holdings are integer quantities.
 - `bonus_share`: requires positive finite `bonus_ratio`. The quantity delta is
   `before_quantity * bonus_ratio`; no cash is exchanged and aggregate cost is
-  unchanged, preserving NAV continuity.
+  unchanged, preserving NAV continuity. Non-integral results are rejected
+  before any writes.
 - `rights_issue`: requires positive finite `subscription_ratio` and
   `subscription_price`. New quantity is
   `before_quantity * subscription_ratio`, available cash decreases by the new
   quantity times subscription price, and the subscription cost is added to
-  aggregate cost. The account must have enough available cash, and fractional
-  resulting holdings are rejected.
+  aggregate cost. The account must have enough available cash, and non-integral
+  resulting holdings are rejected before any writes.
 
 Corporate-action cash is an internal `corporate_action` cash-ledger event. It
 is not an external deposit or withdrawal and therefore is not treated as an
@@ -606,10 +608,12 @@ When the eligible quantity is zero, every action has zero quantity/cash impact
 except that the event remains auditable; a no-holding event does not invent a
 position, alter NAV, or create cash.
 
-All financial calculations use Decimal values with `Numeric(30, 12)` internal
-precision for account, ledger, snapshot, corporate-action, position cost, and
-lot cost values. Quantization uses `ROUND_HALF_UP`. Cash-flow rounding is auditable
-through `rounding_residual`, stored at `Numeric(30, 24)`, with the invariant:
+Position and lot quantities remain whole-share integers. This is distinct from
+the 12-decimal Decimal precision used for account, ledger, snapshot,
+corporate-action audit, position cost, and lot cost values. All financial
+calculations use `Numeric(30, 12)` internal precision, and quantization uses
+`ROUND_HALF_UP`. Cash-flow rounding is auditable through `rounding_residual`,
+stored at `Numeric(30, 24)`, with the invariant:
 
 ```text
 rounding_residual = amount - share_delta * net_asset_value

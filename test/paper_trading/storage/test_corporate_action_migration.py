@@ -4,7 +4,7 @@ import os
 import uuid
 
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
@@ -119,6 +119,104 @@ def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_pat
     assert (
         engine.connect().execute(text("SELECT cost_price FROM paper_position_lots WHERE id = 1")).scalar_one() == 1.2345
     )
+    engine.dispose()
+
+
+def test_sqlite_precision_upgrade_is_monotonic_and_preserves_dependent_foreign_keys(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'precision_upgrade.db'}")
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(dbapi_connection, _connection_record):
+        dbapi_connection.execute("PRAGMA foreign_keys = ON")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE paper_orders ("
+                "id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, status VARCHAR(20) NOT NULL, "
+                "limit_price NUMERIC(40, 4) NOT NULL, frozen_cash NUMERIC(40, 18) NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX uq_paper_orders_active_account ON paper_orders (account_id) "
+                "WHERE status = 'active'"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE paper_trades ("
+                "id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, account_id INTEGER NOT NULL, "
+                "price NUMERIC(40, 18) NOT NULL, amount NUMERIC(20, 4) NOT NULL, fees NUMERIC(20, 4) NOT NULL, "
+                "FOREIGN KEY (order_id) REFERENCES paper_orders (id))"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE paper_trade_validity_checks ("
+                "id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, input_price NUMERIC(20, 4) NOT NULL, "
+                "daily_low NUMERIC(20, 4), daily_high NUMERIC(20, 4), limit_up_price NUMERIC(20, 4), "
+                "limit_down_price NUMERIC(20, 4), FOREIGN KEY (order_id) REFERENCES paper_orders (id))"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE paper_position_round_trips ("
+                "id INTEGER PRIMARY KEY, open_trade_id INTEGER NOT NULL, close_trade_id INTEGER, "
+                "entry_amount NUMERIC(20, 4) NOT NULL, exit_amount NUMERIC(20, 4) NOT NULL, "
+                "fees NUMERIC(20, 4) NOT NULL, realized_pnl NUMERIC(20, 4) NOT NULL, return_pct NUMERIC(20, 18), "
+                "FOREIGN KEY (open_trade_id) REFERENCES paper_trades (id), "
+                "FOREIGN KEY (close_trade_id) REFERENCES paper_trades (id))"
+            )
+        )
+        connection.execute(text("INSERT INTO paper_orders VALUES (1, 7, 'active', 123.4567, 0.123456789012345678)"))
+        connection.execute(text("INSERT INTO paper_trades VALUES (1, 1, 7, 12.123456789012345678, 12.5, 0.5)"))
+        connection.execute(text("INSERT INTO paper_trade_validity_checks VALUES (1, 1, 12.5, 12, 13, 14, 11)"))
+        connection.execute(text("INSERT INTO paper_position_round_trips VALUES (1, 1, NULL, 12.5, 0, 0.5, 0, 1.5)"))
+
+    storage = _storage(engine)
+    storage._widen_sqlite_numeric_columns()
+    with engine.connect() as connection:
+        columns = {
+            table_name: {column["name"]: column["type"] for column in inspect(connection).get_columns(table_name)}
+            for table_name in (
+                "paper_orders",
+                "paper_trades",
+                "paper_trade_validity_checks",
+                "paper_position_round_trips",
+            )
+        }
+        assert (columns["paper_orders"]["limit_price"].precision, columns["paper_orders"]["limit_price"].scale) == (
+            40,
+            12,
+        )
+        assert (columns["paper_orders"]["frozen_cash"].precision, columns["paper_orders"]["frozen_cash"].scale) == (
+            40,
+            18,
+        )
+        assert (columns["paper_trades"]["price"].precision, columns["paper_trades"]["price"].scale) == (40, 18)
+        assert (
+            columns["paper_position_round_trips"]["return_pct"].precision,
+            columns["paper_position_round_trips"]["return_pct"].scale,
+        ) == (30, 18)
+        assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
+        assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+        assert connection.execute(text("SELECT limit_price, frozen_cash FROM paper_orders")).one() == (
+            123.4567,
+            0.12345678901234568,
+        )
+        assert connection.execute(text("SELECT COUNT(*) FROM paper_trades")).scalar_one() == 1
+        assert connection.execute(text("SELECT COUNT(*) FROM paper_trade_validity_checks")).scalar_one() == 1
+        assert connection.execute(text("SELECT COUNT(*) FROM paper_position_round_trips")).scalar_one() == 1
+        index_sql = connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'uq_paper_orders_active_account'")
+        ).scalar_one()
+        assert "WHERE status = 'active'" in index_sql
+
+    storage._widen_sqlite_numeric_columns()
+    with engine.connect() as connection:
+        assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
+        assert connection.execute(text("SELECT COUNT(*) FROM paper_position_round_trips")).scalar_one() == 1
     engine.dispose()
 
 

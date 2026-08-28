@@ -19,6 +19,7 @@ from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.schema import CreateTable
 
 from common.const import (
     COL_ACT_ENT_TYPE,
@@ -4366,34 +4367,81 @@ class StorageDb:
                 name
                 for name in column_names
                 if name in columns
-                and getattr(columns[name]["type"], "scale", None) is not None
-                and getattr(columns[name]["type"], "scale", 0) < 12
+                and self._sqlite_numeric_target_exceeds_existing(columns[name]["type"], Numeric(30, 12))
             ]
             if targets:
                 self._rebuild_sqlite_numeric_table(table_name, targets)
 
+    @staticmethod
+    def _sqlite_numeric_target_exceeds_existing(existing_type: Any, target_type: Numeric) -> bool:
+        """Return whether either target numeric dimension needs more capacity."""
+        precision = getattr(existing_type, "precision", None)
+        scale = getattr(existing_type, "scale", None)
+        return (
+            precision is not None
+            and scale is not None
+            and (precision < target_type.precision or scale < target_type.scale)
+        )
+
     def _rebuild_sqlite_numeric_table(self, table_name: str, target_columns: list[str]) -> None:
         metadata = MetaData()
         table = Table(table_name, metadata, autoload_with=self.engine)
-        indexes = [index for index in inspect(self.engine).get_indexes(table_name) if index["name"]]
+        index_sql = self._sqlite_index_sql(table_name)
         for column_name in target_columns:
-            table.c[column_name].type = Numeric(30, 12)
+            existing_type = table.c[column_name].type
+            table.c[column_name].type = Numeric(
+                max(existing_type.precision or 0, 30),
+                max(existing_type.scale or 0, 12),
+            )
         temp_name = f"{table_name}__precision_upgrade"
         table.name = temp_name
         for index in list(table.indexes):
             table.indexes.remove(index)
-        with self.engine.begin() as conn:
-            conn.execute(text(f"DROP TABLE IF EXISTS {temp_name}"))
-            table.create(conn)
-            column_names = ", ".join(column.name for column in table.columns)
-            conn.execute(text(f"INSERT INTO {temp_name} ({column_names}) SELECT {column_names} FROM {table_name}"))
-            conn.execute(text(f"DROP TABLE {table_name}"))
-            conn.execute(text(f"ALTER TABLE {temp_name} RENAME TO {table_name}"))
-            for index in indexes:
-                if index["column_names"]:
-                    unique = "UNIQUE " if index["unique"] else ""
-                    cols = ", ".join(index["column_names"])
-                    conn.execute(text(f"CREATE {unique}INDEX {index['name']} ON {table_name} ({cols})"))
+
+        # SQLite only applies this pragma outside a transaction. A raw connection
+        # also keeps this entire rebuild on the connection whose FK setting changes.
+        raw_connection = self.engine.raw_connection()
+        cursor = raw_connection.cursor()
+        foreign_keys_enabled = cursor.execute("PRAGMA foreign_keys").fetchone()[0]
+        try:
+            raw_connection.rollback()
+            cursor.execute("PRAGMA foreign_keys = OFF")
+            cursor.execute("BEGIN")
+            quote = self.engine.dialect.identifier_preparer.quote
+            quoted_table = quote(table_name)
+            quoted_temp = quote(temp_name)
+            column_names = ", ".join(quote(column.name) for column in table.columns)
+            cursor.execute(f"DROP TABLE IF EXISTS {quoted_temp}")
+            cursor.execute(str(CreateTable(table).compile(dialect=self.engine.dialect)))
+            cursor.execute(f"INSERT INTO {quoted_temp} ({column_names}) SELECT {column_names} FROM {quoted_table}")
+            cursor.execute(f"DROP TABLE {quoted_table}")
+            cursor.execute(f"ALTER TABLE {quoted_temp} RENAME TO {quoted_table}")
+            for sql in index_sql:
+                cursor.execute(sql)
+            raw_connection.commit()
+            cursor.execute(f"PRAGMA foreign_keys = {foreign_keys_enabled}")
+            violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise IntegrityError("PRAGMA foreign_key_check", None, violations)
+        except Exception:
+            raw_connection.rollback()
+            raise
+        finally:
+            cursor.execute(f"PRAGMA foreign_keys = {foreign_keys_enabled}")
+            cursor.close()
+            raw_connection.close()
+
+    def _sqlite_index_sql(self, table_name: str) -> list[str]:
+        with self.engine.connect() as conn:
+            return list(
+                conn.execute(
+                    text(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'index' AND tbl_name = :table_name AND sql IS NOT NULL"
+                    ),
+                    {"table_name": table_name},
+                ).scalars()
+            )
 
     def _widen_postgresql_numeric_columns(self, table_name: str, column_types: dict[str, str], conn=None) -> None:
         if self.engine.dialect.name != "postgresql":
