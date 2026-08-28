@@ -5,7 +5,6 @@ import re
 import threading
 import uuid
 from decimal import Decimal
-from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
@@ -15,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_GROUPS
 from paper_trading.storage.repository import PaperTradingRepository
+from storage.model import Base
 from storage.storage_db import _PAPER_SNAPSHOT_SERIES_LOCK_KEY, StorageDb
 
 _FINANCIAL_COLUMNS = (
@@ -216,6 +216,24 @@ def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
     with engine.begin() as connection:
         inspector = inspect(connection)
         tables = set(inspector.get_table_names())
+        governed_tables = {column.table_name for group in PAPER_TRADING_ENUM_GROUPS for column in group.columns}
+        operational_tables = {"paper_account_snapshots", "paper_valuation_gaps", "paper_etf_eligibility"}
+        optional_tables = {"daily_bar_diagnostics", "paper_corporate_actions"}
+        missing_tables = governed_tables - tables - operational_tables - optional_tables
+
+        for group in PAPER_TRADING_ENUM_GROUPS:
+            labels = ", ".join(f"'{label}'" for label in group.labels)
+            connection.execute(
+                text(
+                    f"DO $$ BEGIN CREATE TYPE {group.type_name} AS ENUM ({labels}); "
+                    "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+                )
+            )
+        missing_metadata_tables = [table for table in Base.metadata.sorted_tables if table.name in missing_tables]
+        if missing_metadata_tables:
+            Base.metadata.create_all(connection, tables=missing_metadata_tables, checkfirst=True)
+            tables = set(inspect(connection).get_table_names())
+
         for group in PAPER_TRADING_ENUM_GROUPS:
             if group.type_name in {
                 "paper_market",
@@ -228,7 +246,7 @@ def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
             for column in group.columns:
                 if column.table_name not in tables:
                     continue
-                columns = {item["name"] for item in inspector.get_columns(column.table_name)}
+                columns = {item["name"] for item in inspect(connection).get_columns(column.table_name)}
                 if column.column_name in columns:
                     continue
 
@@ -272,15 +290,12 @@ def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
 
 
 def ensure_paper_trading_schema(engine: Engine) -> None:
-    _prepare_reduced_legacy_enum_columns(engine)
-    governed_tables = {column.table_name for group in PAPER_TRADING_ENUM_GROUPS for column in group.columns}
     existing_tables = set(inspect(engine).get_table_names())
-    has_reduced_governed_schema = bool(governed_tables & existing_tables) and bool(governed_tables - existing_tables)
-    if engine.dialect.name == "postgresql" and has_reduced_governed_schema:
-        with patch("paper_trading.storage.enum_migration.migrate_paper_trading_enums", return_value=None):
-            _storage(engine).ensure_paper_trading_schema()
-    else:
-        _storage(engine).ensure_paper_trading_schema()
+    if engine.dialect.name == "postgresql" and "paper_account_snapshots" not in existing_tables:
+        _storage(engine)._ensure_paper_account_repair_without_orders()
+        return
+    _prepare_reduced_legacy_enum_columns(engine)
+    _storage(engine).ensure_paper_trading_schema()
 
 
 def fetch_snapshots(engine: Engine, account_id: int):

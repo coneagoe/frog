@@ -663,6 +663,95 @@ The required simplification review found no further safe behavior-preserving
 simplification. PostgreSQL integration was not rerun in this environment when
 `TEST_POSTGRESQL_URL` was unavailable.
 
+## Task 8 Final Important Test-Quality Fix
+
+Replaced the reduced NAV fixture's production migration bypass with test-only
+fixture preparation. The helper now derives governed tables and columns from
+`PAPER_TRADING_ENUM_GROUPS`, creates only missing non-operational governed
+legacy tables needed to satisfy the real migration preflight, and adds or
+validates only legacy VARCHAR columns, accepted defaults/nullability, and
+governed indexes. Snapshot-series addable columns remain omitted from the
+legacy fixtures, so `StorageDb.ensure_paper_trading_schema()` and the real enum
+migration continue to exercise their production additions and validation.
+
+The accounts-only PostgreSQL cases intentionally continue to use the existing
+startup repair path because no snapshot-series migration is applicable when
+the snapshot table is absent. No production migration code, governance, API,
+frontend, plan, or specification was changed. `_financials()` continues to
+compare preserved non-null values as `Decimal`, including normalized NaN.
+
+### Exact validation results
+
+```text
+TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5433/quant uv run pytest test/paper_trading/storage/test_nav_series_migration.py -v
+```
+
+Result: `23 passed in 123.54s (0:02:03)`.
+
+```text
+TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5433/quant uv run pytest test/paper_trading/storage/test_enum_migration.py test/paper_trading/storage/test_corporate_action_migration.py -q
+```
+
+Result: `40 passed in 241.77s (0:04:01)`.
+
+```text
+uv run ruff format --check test/paper_trading/storage/test_nav_series_migration.py
+uv run ruff check test/paper_trading/storage/test_nav_series_migration.py
+```
+
+Result: `1 file already formatted`; `All checks passed!`.
+
+```text
+uv run mypy test/paper_trading/storage/test_nav_series_migration.py
+```
+
+Result: `Success: no issues found in 1 source file` (with the existing unused
+mypy override configuration note).
+
+```text
+uv run pre-commit run --files test/paper_trading/storage/test_nav_series_migration.py
+```
+
+Result: all hooks passed: trailing whitespace, end-of-file, mixed line ending,
+Ruff format, Ruff, and mypy.
+
+```text
+git diff --check
+```
+
+Result: passed with no output.
+
+### Final self-review and blockers
+
+- The removed `patch(...migrate_paper_trading_enums...)` bypass is no longer
+  present; the wrapper invokes the real `StorageDb.ensure_paper_trading_schema()`.
+- Preparation is limited to `PAPER_TRADING_ENUM_GROUPS`; governed labels,
+  defaults, nullability, and indexes are not silently replaced by a mocked
+  migration. Existing fixture values remain intact.
+- Snapshot-series addable columns remain intentionally absent before startup,
+  preserving NAV chronology, repair, duplicate-date, and Decimal financial
+  value coverage.
+- The dedicated enum tests continue to exercise malformed labels/defaults,
+  incompatible columns, missing governance dependencies, and rollback
+  failures against the real migration implementation.
+- Simplify review: no safe behavior-preserving simplification was identified;
+  the dialect guard, governed-table derivation, and explicit operational-table
+  exclusions are required to keep the reduced fixture focused without weakening
+  production governance.
+- No blockers remain for the requested focused validation.
+
+### Final rerun correction
+
+The final exact NAV command rerun after the last import cleanup produced:
+
+```text
+23 passed in 127.70s (0:02:07)
+```
+
+The governed enum/corporate-action result remained `40 passed in 241.77s
+(0:04:01)`, and the final Ruff, touched-file mypy, pre-commit, and diff checks
+all passed.
+
 ## Task 8 NAV Legacy Fixture Compatibility
 
 Implemented a test-only compatibility helper in
