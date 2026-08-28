@@ -220,8 +220,16 @@ def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
         operational_tables = {"paper_account_snapshots", "paper_valuation_gaps", "paper_etf_eligibility"}
         optional_tables = {"daily_bar_diagnostics", "paper_corporate_actions"}
         missing_tables = governed_tables - tables - operational_tables - optional_tables
+        missing_metadata_tables = [table for table in Base.metadata.sorted_tables if table.name in missing_tables]
+        required_enum_types = {
+            group.type_name
+            for group in PAPER_TRADING_ENUM_GROUPS
+            if any(column.table_name in missing_tables for column in group.columns)
+        }
 
         for group in PAPER_TRADING_ENUM_GROUPS:
+            if group.type_name not in required_enum_types:
+                continue
             labels = ", ".join(f"'{label}'" for label in group.labels)
             connection.execute(
                 text(
@@ -229,7 +237,6 @@ def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
                     "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
                 )
             )
-        missing_metadata_tables = [table for table in Base.metadata.sorted_tables if table.name in missing_tables]
         if missing_metadata_tables:
             Base.metadata.create_all(connection, tables=missing_metadata_tables, checkfirst=True)
             tables = set(inspect(connection).get_table_names())
