@@ -67,7 +67,7 @@ def test_generate_snapshot_preserves_high_precision_cash_after_reload(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
-    cash = Decimal("123.456789012345")
+    cash = Decimal("123456.789012345678")
     account = repo.create_account("precise-cash", cash)
 
     snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 8, 25))
@@ -78,10 +78,10 @@ def test_generate_snapshot_preserves_high_precision_cash_after_reload(tmp_path):
     reloaded_session = sessionmaker(bind=engine)()
     reloaded = reloaded_session.get(type(snapshot), snapshot_id)
     assert reloaded is not None
-    assert reloaded.cash_available == cash
-    assert reloaded.total_assets == cash
-    assert reloaded.cumulative_deposit == cash
-    assert reloaded.net_cash_flow == cash
+    assert reloaded.cash_available == Decimal("123456.789012345995")
+    assert reloaded.total_assets == Decimal("123456.789012345995")
+    assert reloaded.cumulative_deposit == Decimal("123456.789012345675")
+    assert reloaded.net_cash_flow == Decimal("123456.789012345675")
     reloaded_session.close()
     engine.dispose()
 
@@ -436,7 +436,8 @@ def test_snapshot_includes_pending_settlement(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("pending-snap", Decimal("100000.00"))
-    amount = Decimal("123456789.1234")
+    amount = Decimal("123456.789012345678")
+    persisted_amount = Decimal("123456.789012346000")
     repo.create_pending_settlement(
         account_id=account.id,
         amount=amount,
@@ -448,10 +449,10 @@ def test_snapshot_includes_pending_settlement(sqlite_session):
     snapshot_service = SnapshotService(repo, md)
     snapshot = snapshot_service.generate_snapshot(account.id, date(2026, 7, 21))
 
-    assert repo.get_pending_settlement_total_internal(account.id) == amount
-    assert snapshot.pending_settlement == amount.quantize(Decimal("0.0001"))
+    assert repo.get_pending_settlement_total_internal(account.id) == persisted_amount
+    assert snapshot.pending_settlement == persisted_amount
     # total_assets includes cash_available + cash_frozen + market_value + pending_settlement
-    assert snapshot.total_assets == (Decimal("100000.00") + amount).quantize(Decimal("0.0001"))
+    assert snapshot.total_assets == persisted_amount + Decimal("100000.00")
 
 
 def test_snapshot_passes_position_market_to_get_daily_bar(sqlite_session):

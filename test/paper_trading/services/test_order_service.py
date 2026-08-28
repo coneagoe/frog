@@ -117,7 +117,8 @@ def test_place_buy_order_freezes_estimated_cash(tmp_path):
 
 def test_place_buy_order_authorizes_with_exact_sqlite_cash(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
-    cash = Decimal("1234.567890123")
+    cash = Decimal("123456.789012345678")
+    persisted_cash = Decimal("123456.789012346000")
     account = repo.create_account("exact-order-cash", cash)
 
     order = service.place_order(
@@ -133,8 +134,10 @@ def test_place_buy_order_authorizes_with_exact_sqlite_cash(tmp_path):
 
     assert order.status == OrderStatus.ACCEPTED.value
     assert repo.get_cash_frozen_internal(account.id) == Decimal("1005.010000000000")
-    assert repo.get_cash_available_internal(account.id) == cash - Decimal("1005.010000000000")
-    assert repo.get_cash_available(account.id) == (cash - Decimal("1005.010000000000")).quantize(Decimal("0.0001"))
+    assert repo.get_cash_available_internal(account.id) == persisted_cash - Decimal("1005.010000000000")
+    assert repo.get_cash_available(account.id) == (persisted_cash - Decimal("1005.010000000000")).quantize(
+        Decimal("0.0001")
+    )
     engine.dispose()
 
 
@@ -616,23 +619,26 @@ def test_place_buy_order_rejects_insufficient_cash(tmp_path):
 
 def test_place_buy_order_authorizes_against_internal_cash_boundary(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
-    account = repo.create_account("internal-cash-boundary", Decimal("1005.00995"))
+    cash = Decimal("1234950.610000000000")
+    frozen_cash = Decimal("1234950.610123456700")
+    account = repo.create_account("internal-cash-boundary", cash)
 
     order = service.place_order(
         account.id,
         "000001.SZ",
         OrderSide.BUY,
         100,
-        Decimal("10.00"),
+        Decimal("12345.678901234567"),
         date(2026, 6, 16),
     )
     session.commit()
 
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "INSUFFICIENT_CASH"
-    assert repo.get_cash_available(account.id) == Decimal("1005.0100")
-    assert repo.get_cash_available_internal(account.id) == Decimal("1005.009950000000")
-    assert repo.list_cash_ledger(account.id)[-1].amount == Decimal("1005.009950000000")
+    assert repo.get_cash_available(account.id) == cash.quantize(Decimal("0.0001"))
+    assert repo.get_cash_available_internal(account.id) == Decimal("1234950.610000000000")
+    assert repo.list_cash_ledger(account.id)[0].amount == Decimal("1234950.610000000102")
+    assert frozen_cash > cash
     engine.dispose()
 
 

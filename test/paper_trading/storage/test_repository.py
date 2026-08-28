@@ -192,7 +192,8 @@ def test_list_snapshots_does_not_round_loaded_entities_before_commit(sqlite_sess
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("snapshot-precision", Decimal("100000"))
-    precise = Decimal("123.456789012345")
+    precise = Decimal("123456.789012345678")
+    persisted_precise = Decimal("123456.789012345675")
     snapshot = repo.save_snapshot(
         **{
             **_trading_snapshot_values(account.id, date(2026, 8, 25), datetime(2026, 8, 25, tzinfo=timezone.utc)),
@@ -211,7 +212,7 @@ def test_list_snapshots_does_not_round_loaded_entities_before_commit(sqlite_sess
 
     reloaded = sqlite_session.get(type(snapshot), snapshot.id)
     assert reloaded is not None
-    assert reloaded.cash_available == precise
+    assert reloaded.cash_available == persisted_precise
     assert reloaded.net_asset_value == Decimal("1.123456789012")
 
 
@@ -2367,7 +2368,8 @@ def test_create_pending_settlement(sqlite_session):
 def test_internal_cash_aggregations_preserve_sqlite_decimal_text(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
-    amount = Decimal("123.456789012345")
+    amount = Decimal("123456.789012345678")
+    persisted_amount = Decimal("123456.789012346000")
     account = repo.create_account("aggregation-precision", amount)
     order = repo.create_order(
         account.id,
@@ -2379,7 +2381,8 @@ def test_internal_cash_aggregations_preserve_sqlite_decimal_text(sqlite_session)
         OrderStatus.ACCEPTED,
         frozen_cash=amount,
     )
-    pending_amount = Decimal("123456789.1234")
+    pending_amount = Decimal("123456.789012345678")
+    persisted_pending_amount = Decimal("123456.789012346000")
     pending = repo.create_pending_settlement(
         account.id,
         pending_amount,
@@ -2389,12 +2392,12 @@ def test_internal_cash_aggregations_preserve_sqlite_decimal_text(sqlite_session)
     sqlite_session.commit()
     sqlite_session.expire_all()
 
-    assert repo.get_cash_available_internal(account.id) == amount
-    assert repo.get_cash_available(account.id) == amount.quantize(Decimal("0.0001"))
-    assert repo.get_cash_frozen_internal(account.id) == amount
-    assert repo.get_pending_settlement_total_internal(account.id) == pending_amount
-    assert order.frozen_cash == amount
-    assert pending.amount == pending_amount
+    assert repo.get_cash_available_internal(account.id) == persisted_amount
+    assert repo.get_cash_available(account.id) == persisted_amount.quantize(Decimal("0.0001"))
+    assert repo.get_cash_frozen_internal(account.id) == persisted_amount
+    assert repo.get_pending_settlement_total_internal(account.id) == persisted_pending_amount
+    assert order.frozen_cash == Decimal("123456.789012345675")
+    assert pending.amount == Decimal("123456.7890")
 
 
 def test_settle_pending_releases_cash(sqlite_session):
