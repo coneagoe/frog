@@ -4424,9 +4424,10 @@ class StorageDb:
         for column_name in target_columns:
             existing_type = table.c[column_name].type
             target_type = self._sqlite_numeric_target(table_name, column_name)
+            existing_numeric = cast(Numeric, existing_type)
             table.c[column_name].type = Numeric(
-                max(existing_type.precision or 0, target_type.precision),
-                max(existing_type.scale or 0, target_type.scale),
+                max(existing_numeric.precision or 0, target_type.precision or 0),
+                max(existing_numeric.scale or 0, target_type.scale or 0),
             )
         temp_name = f"{table_name}__precision_upgrade"
         table.name = temp_name

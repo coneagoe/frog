@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import uuid
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from sqlalchemy import Enum as SqlAlchemyEnum
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import Numeric, create_engine, event, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
@@ -33,7 +34,8 @@ def _create_paper_trading_tables(connection: Connection) -> None:
 
 
 def _postgres_enum_labels(connection: Connection, type_name: str) -> list[str]:
-    return (
+    return cast(
+        list[str],
         connection.execute(
             text(
                 "SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid "
@@ -43,7 +45,7 @@ def _postgres_enum_labels(connection: Connection, type_name: str) -> list[str]:
             {"type_name": type_name},
         )
         .scalars()
-        .all()
+        .all(),
     )
 
 
@@ -135,9 +137,12 @@ def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_pat
     assert ledger["rounding_residual"] == 0
     position_columns = {column["name"]: column["type"] for column in inspect(engine).get_columns("paper_positions")}
     lot_columns = {column["name"]: column["type"] for column in inspect(engine).get_columns("paper_position_lots")}
-    assert (position_columns["cost_amount"].precision, position_columns["cost_amount"].scale) == (30, 12)
-    assert (position_columns["realized_pnl"].precision, position_columns["realized_pnl"].scale) == (30, 12)
-    assert (lot_columns["cost_price"].precision, lot_columns["cost_price"].scale) == (30, 12)
+    cost_amount = cast(Numeric, position_columns["cost_amount"])
+    realized_pnl = cast(Numeric, position_columns["realized_pnl"])
+    cost_price = cast(Numeric, lot_columns["cost_price"])
+    assert (cost_amount.precision, cost_amount.scale) == (30, 12)
+    assert (realized_pnl.precision, realized_pnl.scale) == (30, 12)
+    assert (cost_price.precision, cost_price.scale) == (30, 12)
     assert engine.connect().execute(
         text("SELECT cost_amount, realized_pnl FROM paper_positions WHERE id = 1")
     ).one() == (
@@ -214,19 +219,20 @@ def test_sqlite_precision_upgrade_is_monotonic_and_preserves_dependent_foreign_k
                 "paper_position_round_trips",
             )
         }
-        assert (columns["paper_orders"]["limit_price"].precision, columns["paper_orders"]["limit_price"].scale) == (
+        limit_price = cast(Numeric, columns["paper_orders"]["limit_price"])
+        frozen_cash = cast(Numeric, columns["paper_orders"]["frozen_cash"])
+        trade_price = cast(Numeric, columns["paper_trades"]["price"])
+        return_pct = cast(Numeric, columns["paper_position_round_trips"]["return_pct"])
+        assert (limit_price.precision, limit_price.scale) == (
             40,
             12,
         )
-        assert (columns["paper_orders"]["frozen_cash"].precision, columns["paper_orders"]["frozen_cash"].scale) == (
+        assert (frozen_cash.precision, frozen_cash.scale) == (
             40,
             18,
         )
-        assert (columns["paper_trades"]["price"].precision, columns["paper_trades"]["price"].scale) == (40, 18)
-        assert (
-            columns["paper_position_round_trips"]["return_pct"].precision,
-            columns["paper_position_round_trips"]["return_pct"].scale,
-        ) == (30, 18)
+        assert (trade_price.precision, trade_price.scale) == (40, 18)
+        assert (return_pct.precision, return_pct.scale) == (30, 18)
         assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
         assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
         assert connection.execute(text("SELECT limit_price, frozen_cash FROM paper_orders")).one() == (
@@ -292,7 +298,7 @@ def test_sqlite_precision_upgrade_rolls_back_when_foreign_key_check_fails(tmp_pa
         _storage(engine)._widen_sqlite_numeric_columns()
 
     with engine.connect() as connection:
-        order_type = inspect(connection).get_columns("paper_orders")[3]["type"]
+        order_type = cast(Numeric, inspect(connection).get_columns("paper_orders")[3]["type"])
         assert (order_type.precision, order_type.scale) == (20, 4)
         assert connection.execute(text("SELECT * FROM paper_orders")).one() == (1, 7, "active", 123.4567)
         assert connection.execute(text("SELECT * FROM paper_trades")).one() == (1, 999, 7, 12.5)
@@ -353,8 +359,9 @@ def test_postgresql_additive_corporate_action_migration_is_repeatable():
                     "paper_cash_event_type",
                 )
             }
-            defaults = dict(
-                connection.execute(
+            defaults: dict[str, str] = {
+                cast(str, row[0]): cast(str, row[1])
+                for row in connection.execute(
                     text(
                         "SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) "
                         "FROM pg_attrdef d JOIN pg_attribute a "
@@ -364,7 +371,7 @@ def test_postgresql_additive_corporate_action_migration_is_repeatable():
                         "AND c.relnamespace = current_schema()::regnamespace"
                     )
                 ).all()
-            )
+            }
             indexes = {
                 row[0]
                 for row in connection.execute(
