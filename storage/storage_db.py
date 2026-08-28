@@ -419,6 +419,18 @@ _PAPER_ACCOUNT_ACCOUNTING_COLUMNS = (
     "realized_pnl",
 )
 _PAPER_SQLITE_PRECISION_COLUMNS = {
+    tb_name_paper_accounts: _PAPER_ACCOUNT_ACCOUNTING_COLUMNS,
+    tb_name_paper_cash_ledger: ("amount", "net_asset_value", "share_delta", "rounding_residual"),
+    tb_name_paper_corporate_actions: (
+        "cash_delta",
+        "quantity_delta",
+        "before_quantity",
+        "after_quantity",
+        "before_cost_amount",
+        "after_cost_amount",
+        "before_cash_available",
+        "after_cash_available",
+    ),
     tb_name_paper_positions: ("cost_amount", "realized_pnl"),
     tb_name_paper_position_lots: ("cost_price",),
     tb_name_paper_orders: ("limit_price", "frozen_cash"),
@@ -431,6 +443,20 @@ _PAPER_SQLITE_PRECISION_COLUMNS = {
     ),
     tb_name_paper_trades: ("price", "amount", "fees"),
     tb_name_paper_position_round_trips: ("entry_amount", "exit_amount", "fees", "realized_pnl", "return_pct"),
+    tb_name_paper_account_snapshots: (
+        "cash_available",
+        "cash_frozen",
+        "market_value",
+        "total_assets",
+        "realized_pnl",
+        "unrealized_pnl",
+        "net_asset_value",
+        "share_count",
+        "cumulative_deposit",
+        "cumulative_withdrawal",
+        "net_cash_flow",
+        "pending_settlement",
+    ),
 }
 _NUMERIC_TYPE_RE = re.compile(r"numeric\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)", re.IGNORECASE)
 
@@ -4367,7 +4393,9 @@ class StorageDb:
                 name
                 for name in column_names
                 if name in columns
-                and self._sqlite_numeric_target_exceeds_existing(columns[name]["type"], Numeric(30, 12))
+                and self._sqlite_numeric_target_exceeds_existing(
+                    columns[name]["type"], self._sqlite_numeric_target(table_name, name)
+                )
             ]
             if targets:
                 self._rebuild_sqlite_numeric_table(table_name, targets)
@@ -4383,15 +4411,22 @@ class StorageDb:
             and (precision < target_type.precision or scale < target_type.scale)
         )
 
+    @staticmethod
+    def _sqlite_numeric_target(table_name: str, column_name: str) -> Numeric:
+        if table_name == tb_name_paper_cash_ledger and column_name == "rounding_residual":
+            return Numeric(30, 24)
+        return Numeric(30, 12)
+
     def _rebuild_sqlite_numeric_table(self, table_name: str, target_columns: list[str]) -> None:
         metadata = MetaData()
         table = Table(table_name, metadata, autoload_with=self.engine)
         index_sql = self._sqlite_index_sql(table_name)
         for column_name in target_columns:
             existing_type = table.c[column_name].type
+            target_type = self._sqlite_numeric_target(table_name, column_name)
             table.c[column_name].type = Numeric(
-                max(existing_type.precision or 0, 30),
-                max(existing_type.scale or 0, 12),
+                max(existing_type.precision or 0, target_type.precision),
+                max(existing_type.scale or 0, target_type.scale),
             )
         temp_name = f"{table_name}__precision_upgrade"
         table.name = temp_name

@@ -279,6 +279,11 @@ foreign keys and existing `orders -> trades` / `orders -> validity checks` /
 `trades -> round trips` dependencies, verifies rows, keys, indexes, numeric
 declarations, and repeatability.
 
+SQLite startup applies the same monotonic policy to account, cash-ledger,
+snapshot, and corporate-action audit values in addition to position, order,
+trade, validity, and round-trip accounting fields. `rounding_residual` retains
+its distinct `NUMERIC(30, 24)` target.
+
 `docs/paper_trading.md` now distinguishes whole-share integer position/lot
 quantities from 12-decimal account, ledger, snapshot, and corporate-action
 audit precision. It also states that non-integral corporate-action results are
