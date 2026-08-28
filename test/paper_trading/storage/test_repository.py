@@ -2364,6 +2364,39 @@ def test_create_pending_settlement(sqlite_session):
     assert pending.settled is False
 
 
+def test_internal_cash_aggregations_preserve_sqlite_decimal_text(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    amount = Decimal("123.456789012345")
+    account = repo.create_account("aggregation-precision", amount)
+    order = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 8, 28),
+        OrderStatus.ACCEPTED,
+        frozen_cash=amount,
+    )
+    pending_amount = Decimal("123456789.1234")
+    pending = repo.create_pending_settlement(
+        account.id,
+        pending_amount,
+        date(2026, 8, 29),
+        trade_id=1,
+    )
+    sqlite_session.commit()
+    sqlite_session.expire_all()
+
+    assert repo.get_cash_available_internal(account.id) == amount
+    assert repo.get_cash_available(account.id) == amount.quantize(Decimal("0.0001"))
+    assert repo.get_cash_frozen_internal(account.id) == amount
+    assert repo.get_pending_settlement_total_internal(account.id) == pending_amount
+    assert order.frozen_cash == amount
+    assert pending.amount == pending_amount
+
+
 def test_settle_pending_releases_cash(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

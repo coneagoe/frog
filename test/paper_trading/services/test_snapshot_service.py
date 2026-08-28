@@ -67,7 +67,7 @@ def test_generate_snapshot_preserves_high_precision_cash_after_reload(tmp_path):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
     repo = PaperTradingRepository(session)
-    cash = Decimal("999999999999.125000000000")
+    cash = Decimal("123.456789012345")
     account = repo.create_account("precise-cash", cash)
 
     snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 8, 25))
@@ -436,9 +436,10 @@ def test_snapshot_includes_pending_settlement(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("pending-snap", Decimal("100000.00"))
+    amount = Decimal("123456789.1234")
     repo.create_pending_settlement(
         account_id=account.id,
-        amount=Decimal("50000.00"),
+        amount=amount,
         expected_settle_date=date(2026, 7, 23),
         trade_id=1,
         source="hk_sell",
@@ -447,9 +448,10 @@ def test_snapshot_includes_pending_settlement(sqlite_session):
     snapshot_service = SnapshotService(repo, md)
     snapshot = snapshot_service.generate_snapshot(account.id, date(2026, 7, 21))
 
-    assert snapshot.pending_settlement == Decimal("50000.0000")
+    assert repo.get_pending_settlement_total_internal(account.id) == amount
+    assert snapshot.pending_settlement == amount.quantize(Decimal("0.0001"))
     # total_assets includes cash_available + cash_frozen + market_value + pending_settlement
-    assert snapshot.total_assets == Decimal("150000.0000")  # 100000 + 50000
+    assert snapshot.total_assets == (Decimal("100000.00") + amount).quantize(Decimal("0.0001"))
 
 
 def test_snapshot_passes_position_market_to_get_daily_bar(sqlite_session):

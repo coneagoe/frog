@@ -552,10 +552,7 @@ class PaperTradingRepository:
         if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
             amount_query = self.session.query(sa_cast(PaperCashLedger.amount, String))
         amounts = amount_query.filter(PaperCashLedger.account_id == account_id).all()
-        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
-            values = (Decimal(str(round(float(amount), 12))) for (amount,) in amounts)
-        else:
-            values = (Decimal(str(amount)) for (amount,) in amounts)
+        values = (Decimal(str(amount)) for (amount,) in amounts)
         return quantize_account_money(sum((quantize_account_money(value) for value in values), Decimal("0")))
 
     def get_cash_available_as_of(self, account_id: int, as_of: date) -> Decimal:
@@ -582,12 +579,7 @@ class PaperTradingRepository:
                 PaperOrder.account_id == account_id,
                 PaperOrder.status == OrderStatus.ACCEPTED.value,
             )
-        values = (
-            Decimal(str(round(float(row[0]), 12)))
-            if self.session.bind is not None and self.session.bind.dialect.name == "sqlite"
-            else Decimal(str(row[0]))
-            for row in query.all()
-        )
+        values = (Decimal(str(row[0])) for row in query.all())
         return quantize_account_money(sum(values, Decimal("0")))
 
     @staticmethod
@@ -1828,12 +1820,7 @@ class PaperTradingRepository:
                 PaperPendingSettlement.account_id == account_id,
                 PaperPendingSettlement.settled.is_(False),
             )
-        values = (
-            Decimal(str(round(float(row[0]), 12)))
-            if self.session.bind is not None and self.session.bind.dialect.name == "sqlite"
-            else Decimal(str(row[0]))
-            for row in query.all()
-        )
+        values = (Decimal(str(row[0])) for row in query.all())
         return quantize_account_money(sum(values, Decimal("0")))
 
     def list_order_trade_dates(self, account_id: int) -> list[date]:

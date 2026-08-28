@@ -115,6 +115,29 @@ def test_place_buy_order_freezes_estimated_cash(tmp_path):
     engine.dispose()
 
 
+def test_place_buy_order_authorizes_with_exact_sqlite_cash(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    cash = Decimal("1234.567890123")
+    account = repo.create_account("exact-order-cash", cash)
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    session.commit()
+    session.expire_all()
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert repo.get_cash_frozen_internal(account.id) == Decimal("1005.010000000000")
+    assert repo.get_cash_available_internal(account.id) == cash - Decimal("1005.010000000000")
+    assert repo.get_cash_available(account.id) == (cash - Decimal("1005.010000000000")).quantize(Decimal("0.0001"))
+    engine.dispose()
+
+
 def test_place_order_rejects_invalid_lot_size(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
