@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import os
 import uuid
+from decimal import Decimal
 
 import pytest
+from sqlalchemy import Enum as SqlAlchemyEnum
 from sqlalchemy import create_engine, event, inspect, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
 
-from paper_trading.storage.enum_migration import migrate_paper_trading_enums
+from paper_trading.storage.enum_migration import _GOVERNED_TABLES, migrate_paper_trading_enums
 from storage.model import Base
 from storage.storage_db import StorageDb
 
@@ -17,6 +19,16 @@ def _storage(engine: Engine) -> StorageDb:
     storage = StorageDb.__new__(StorageDb)
     storage.engine = engine
     return storage
+
+
+def _create_paper_trading_tables(connection: Connection) -> None:
+    tables = list(_GOVERNED_TABLES)
+    enum_types = {
+        column.type for table in tables for column in table.columns if isinstance(column.type, SqlAlchemyEnum)
+    }
+    for enum_type in enum_types:
+        enum_type.create(connection, checkfirst=True)
+    Base.metadata.create_all(connection, tables=tables)
 
 
 def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_path):
@@ -293,7 +305,7 @@ def test_postgresql_additive_corporate_action_migration_is_repeatable():
     scoped = create_engine(engine.url, connect_args={"options": f"-csearch_path={schema}"})
     try:
         with scoped.begin() as connection:
-            Base.metadata.create_all(connection)
+            _create_paper_trading_tables(connection)
             connection.execute(text("DROP TABLE paper_corporate_actions"))
             connection.execute(text("DROP TYPE paper_corporate_action_type"))
             connection.execute(text("DROP TYPE paper_corporate_action_processing_status"))
@@ -361,10 +373,10 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
     scoped = create_engine(engine.url, connect_args={"options": f"-csearch_path={schema}"})
     try:
         with scoped.begin() as connection:
-            Base.metadata.create_all(connection)
+            _create_paper_trading_tables(connection)
             connection.execute(text("ALTER TABLE paper_accounts ALTER COLUMN initial_cash TYPE NUMERIC(20, 4)"))
             connection.execute(text("ALTER TABLE paper_accounts ALTER COLUMN share_count TYPE NUMERIC(40, 20)"))
-            connection.execute(text("ALTER TABLE paper_cash_ledger ALTER COLUMN amount TYPE NUMERIC(20, 4)"))
+            connection.execute(text("ALTER TABLE paper_cash_ledger ALTER COLUMN amount TYPE NUMERIC(40, 4)"))
             connection.execute(
                 text("ALTER TABLE paper_account_snapshots ALTER COLUMN net_asset_value TYPE NUMERIC(20, 6)")
             )
@@ -380,9 +392,11 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             connection.execute(
                 text(
                     "INSERT INTO paper_account_snapshots "
-                    "(account_id, trade_date, event_at, total_assets, net_asset_value, share_count, "
-                    "cumulative_deposit, cumulative_withdrawal, net_cash_flow) "
-                    "VALUES (1, '2026-08-27', '2026-08-27 09:00:00+00', 123, 1.234567, 9, 123, 0, 123)"
+                    "(account_id, trade_date, event_at, cash_available, cash_frozen, market_value, total_assets, "
+                    "realized_pnl, unrealized_pnl, position_count, order_count, trade_count, net_asset_value, "
+                    "share_count, cumulative_deposit, cumulative_withdrawal, net_cash_flow) "
+                    "VALUES (1, '2026-08-27', '2026-08-27 09:00:00+00', 123, 0, 0, 123, 0, 0, 0, 0, 0, "
+                    "1.234567, 9, 123, 0, 123)"
                 )
             )
 
@@ -406,12 +420,12 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             assert connection.execute(
                 text("SELECT initial_cash, share_count FROM paper_accounts WHERE id = 1")
             ).one() == (
-                123.4567,
-                9.87654321,
+                Decimal("123.4567"),
+                Decimal("9.87654321"),
             )
-            assert (
-                connection.execute(text("SELECT amount FROM paper_cash_ledger WHERE id = 1")).scalar_one() == 123.4567
-            )
+            assert connection.execute(
+                text("SELECT amount FROM paper_cash_ledger WHERE id = 1")
+            ).scalar_one() == Decimal("123.4567")
 
         _storage(scoped).ensure_paper_trading_schema()
     finally:

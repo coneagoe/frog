@@ -362,3 +362,39 @@ entry exists under `.agents/skills/**/simplify/**`), so it could not be invoked.
 Manual review found no safe behavior-preserving simplification: the explicit
 post-transaction rollback before restoring `PRAGMA foreign_keys` is required by
 SQLite transaction semantics.
+
+## PostgreSQL Fixture Follow-up
+
+The two PostgreSQL migration tests initially failed during `Base.metadata.create_all()`
+because a fresh isolated schema did not contain unrelated `blackroom_market` and
+`blackroom_source` enums. The fixture creates only the paper-trading governed tables
+tables required by these tests (`paper_accounts`, `paper_cash_ledger`,
+`paper_account_snapshots`, and `paper_corporate_actions`), leaving the issue-87
+migration responsible for its corporate-action enum/table setup. It explicitly
+uses `NUMERIC(40, 4)` to verify scale expansion without precision narrowing.
+
+### Validation
+
+```text
+TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5433/quant uv run pytest test/paper_trading/storage/test_corporate_action_migration.py -v
+```
+
+Result: `5 passed in 14.27s`.
+
+```text
+uv run ruff format --check test/paper_trading/storage/test_corporate_action_migration.py && uv run ruff check test/paper_trading/storage/test_corporate_action_migration.py && git diff --check
+```
+
+Result: all checks passed.
+
+### Self-Review
+
+- The helper excludes unrelated metadata and does not alter production behavior.
+- The migration preflight still receives its complete governed table set, while
+  unrelated global metadata is excluded.
+- Existing assertions continue to cover corporate-action enum labels/table creation,
+  indexes/defaults, repeatability, legacy preservation, and monotonic numeric
+  widening (`NUMERIC(40, 4)` to scale 12 and unchanged `NUMERIC(40, 20)`).
+- Whole-share integer position and lot quantities remain unchanged.
+- No further safe simplification was identified; the explicit table list is the
+  smallest clear fixture boundary for the tested legacy schema.
