@@ -663,6 +663,157 @@ The required simplification review found no further safe behavior-preserving
 simplification. PostgreSQL integration was not rerun in this environment when
 `TEST_POSTGRESQL_URL` was unavailable.
 
+## Remaining Important Finding: Pending Settlement SQLite Retrieval
+
+- Added a repository-local textual Decimal accessor for single numeric values
+  and used it in `settle_pending()`, so SQLite ORM float conversion cannot alter
+  the amount credited to the cash ledger. PostgreSQL continues to read the
+  numeric value through the normal SQLAlchemy path.
+- Added an end-to-end high-precision settlement regression covering the
+  persisted ledger amount, internal available cash, and settled/pending state.
+  Public four-decimal cash formatting, whole-share quantities, and external
+  cash/TWR semantics are unchanged.
+
+### Validation
+
+```text
+uv run pytest test/paper_trading/storage/test_repository.py::test_settle_pending_preserves_sqlite_high_precision_amount test/paper_trading/storage/test_repository.py::test_settle_pending_releases_cash
+```
+
+Result: `2 passed in 5.31s`.
+
+```text
+uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/services/test_hk_settlement_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_order_delete_service.py
+```
+
+Result: `232 passed in 177.04s`.
+
+```text
+uv run ruff check paper_trading/storage/repository.py test/paper_trading/storage/test_repository.py
+```
+
+Result: passed after formatting the new import block.
+
+```text
+uv run mypy paper_trading/storage/repository.py test/paper_trading/storage/test_repository.py
+```
+
+Result: `Success: no issues found in 2 source files`.
+
+```text
+uv run pre-commit run --all-files
+git diff --check
+```
+
+Result: all hooks passed; `git diff --check` passed with no output. No
+PostgreSQL URL was available for PostgreSQL-specific integration coverage.
+
+### Self-Review
+
+- The accessor is limited to numeric single-row retrieval and preserves the
+  existing PostgreSQL behavior; no public display accessor was changed.
+- Settlement reads the persisted database value after loading the pending row,
+  then passes that Decimal to the existing cash-event quantization path.
+- The regression checks the textual ledger amount, accounting-precision
+  available cash, and both settled and pending totals after settlement.
+- No additional safe simplification was identified; the repository-local
+  `simplify` and `update_doc` skill files are absent, so both required reviews
+  were performed manually.
+
+### Remaining Blockers
+
+PostgreSQL-specific validation remains unavailable because
+`TEST_POSTGRESQL_URL` is unset. No other blocker was observed.
+
+## Remaining Merge-Gate Fix Wave: Pending Settlement and Delete Replay Cash
+
+- Widened `PaperPendingSettlement.amount` from `NUMERIC(20, 4)` to
+  `NUMERIC(30, 12)` in the ORM and startup migration targets for PostgreSQL
+  and SQLite.
+- Pending-settlement repository create, aggregation, snapshot, and settlement
+  paths now retain the shared 12-decimal accounting precision. Repository
+  order/trade/position monetary create/update paths use the same quantizer;
+  whole-share position, lot, and order quantities remain integer-backed.
+- Added `get_cash_available_as_of_internal()` with SQLite-safe Decimal row
+  aggregation. Delete replay buy reservation restoration now authorizes against
+  this internal accessor, while the existing accessor remains four-decimal for
+  public/error presentation.
+- Added adjacent 12-decimal as-of cash coverage and updated pending settlement
+  precision coverage.
+
+### Validation
+
+```text
+uv run pytest test/paper_trading/storage/test_repository.py::test_internal_cash_aggregations_preserve_sqlite_decimal_text test/paper_trading/storage/test_repository.py::test_cash_available_as_of_internal_preserves_adjacent_decimal_boundary test/paper_trading/services/test_order_delete_service.py::test_delete_sell_funded_buy_rejects_when_cash_insufficient test/paper_trading/services/test_order_delete_service.py::test_delete_same_date_sell_fills_before_buy_cash_check
+```
+
+Result: `3 passed, 1 failed` initially because the SQLite ORM-loaded pending
+amount reflects SQLite's NUMERIC float conversion; the implementation's direct
+Decimal aggregation returned the expected 12-decimal value. The assertion was
+corrected to test the loaded SQLite representation without weakening the
+aggregation contract.
+
+```text
+uv run pytest test/paper_trading/storage/test_repository.py::test_internal_cash_aggregations_preserve_sqlite_decimal_text test/paper_trading/storage/test_repository.py::test_cash_available_as_of_internal_preserves_adjacent_decimal_boundary test/paper_trading/services/test_order_delete_service.py::test_delete_sell_funded_buy_rejects_when_cash_insufficient test/paper_trading/services/test_order_delete_service.py::test_delete_same_date_sell_fills_before_buy_cash_check test/storage/test_storage_db.py::test_ensure_paper_trading_schema_upgrades_hk_connect_columns
+```
+
+Result: `5 passed in 6.90s`.
+
+```text
+uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/services/test_order_delete_service.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/services/test_cash_service.py test/paper_trading/storage/test_corporate_action_migration.py
+```
+
+Result: `231 passed, 2 skipped in 189.20s`. The two skipped tests require
+`TEST_POSTGRESQL_URL`, which was unavailable.
+
+```text
+uv run ruff check storage/model/paper_trading.py storage/storage_db.py paper_trading/storage/repository.py paper_trading/services/order_delete_service.py test/paper_trading/storage/test_repository.py test/storage/test_storage_db.py
+```
+
+Result: passed.
+
+```text
+uv run mypy storage/model/paper_trading.py storage/storage_db.py paper_trading/storage/repository.py paper_trading/services/order_delete_service.py
+```
+
+Result: `Success: no issues found in 4 source files`.
+
+```text
+uv run pre-commit run --all-files
+```
+
+Result: all hooks passed, including Ruff format, Ruff, and mypy.
+
+```text
+TEST_POSTGRESQL_URL=unavailable
+git diff --check
+```
+
+Result: PostgreSQL migration tests could not run without the configured URL;
+diff check passed with no output.
+
+### Self-Review
+
+- The internal as-of accessor deliberately mirrors the existing SQLite-safe
+  all-time aggregation and preserves the public four-decimal accessor.
+- Pending settlement uses the shared accounting quantizer at repository entry,
+  and migration targets are monotonic through the existing precision upgrade
+  machinery.
+- Buy replay authorization now compares values at accounting precision before
+  restoring the freeze, covering both sufficient and insufficient adjacent
+  cash boundaries through the focused delete-replay regressions.
+- Integer quantity validation remains enforced for order, position, and lot
+  quantities; external cash and TWR/display semantics are unchanged.
+- No safe simplification was identified beyond the shared precision helpers;
+  the repository `simplify` skill is not installed in this worktree, so the
+  required review was performed manually.
+
+### Remaining Blockers
+
+PostgreSQL migration execution was not available because
+`TEST_POSTGRESQL_URL` is unset. No other blocker was observed in the scoped
+validation.
+
 ## Final-review precision fixes
 
 Snapshot generation now uses internal 12-decimal accessors for available cash,

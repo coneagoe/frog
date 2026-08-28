@@ -3,7 +3,8 @@ from decimal import Decimal
 from typing import Any, cast
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import String, create_engine
+from sqlalchemy import cast as sa_cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -19,7 +20,12 @@ from paper_trading.domain.enums import (
     SnapshotPointType,
     SnapshotQualityStatus,
 )
-from paper_trading.storage.models import PaperPendingSettlement, PaperTradeValidityCheck, PaperValuationGap
+from paper_trading.storage.models import (
+    PaperCashLedger,
+    PaperPendingSettlement,
+    PaperTradeValidityCheck,
+    PaperValuationGap,
+)
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.domain_enums import (
     DailyBarDiagnosticAdjust,
@@ -2430,3 +2436,27 @@ def test_settle_pending_releases_cash(sqlite_session):
     )
     repo.settle_pending(pending.id)
     assert pending.settled is True
+
+
+def test_settle_pending_preserves_sqlite_high_precision_amount(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("settle-precision", Decimal("0.01"))
+    logical_amount = Decimal("123456.789012346000")
+    pending = repo.create_pending_settlement(
+        account_id=account.id,
+        amount=logical_amount,
+        expected_settle_date=date(2026, 8, 29),
+        trade_id=1,
+        source="hk_sell",
+    )
+    sqlite_session.commit()
+    sqlite_session.expire_all()
+
+    repo.settle_pending(pending.id)
+    ledger_amount = repo.session.query(sa_cast(PaperCashLedger.amount, String)).filter_by(trade_id=1).scalar()
+
+    assert Decimal(str(ledger_amount)) == logical_amount
+    assert repo.get_cash_available_internal(account.id) == Decimal("0.01") + logical_amount
+    assert pending.settled is True
+    assert repo.get_pending_settlement_total_internal(account.id) == Decimal("0")

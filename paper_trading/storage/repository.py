@@ -94,6 +94,14 @@ class PaperTradingRepository:
     def __init__(self, session: Session):
         self.session = session
 
+    def _get_decimal_value(self, column: Any, *criteria: Any) -> Decimal | None:
+        """Read a numeric column without SQLite's ORM float conversion."""
+        query: Any = self.session.query(column).filter(*criteria)
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            query = self.session.query(sa_cast(column, String)).filter(*criteria)
+        value = query.scalar()
+        return None if value is None else Decimal(str(value))
+
     def list_etf_eligibility(self, status: str | None = None) -> list[ETFEligibility]:
         query = self.session.query(ETFEligibility)
         if status is not None:
@@ -1839,10 +1847,12 @@ class PaperTradingRepository:
             return pending
         pending.settled = True
         # Add cash to ledger as trade event
+        amount = self._get_decimal_value(PaperPendingSettlement.amount, PaperPendingSettlement.id == pending_id)
+        assert amount is not None
         self.add_cash_event(
             pending.account_id,
             CashEventType.TRADE,
-            pending.amount,
+            amount,
             trade_id=pending.trade_id,
             note="hk_sell_settlement",
         )
