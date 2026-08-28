@@ -589,3 +589,62 @@ unmodified attached entities, while response serialization is the narrow public
 display boundary. Direct `Decimal(str(amount))` is the smallest safe SQLite
 conversion. The whole-share integer position and lot contract is unchanged.
 No remaining blockers were observed for these two fixes.
+
+## Nullable Snapshot Money Serialization Fix
+
+`SnapshotResponse.serialize_money()` now preserves `None` for nullable legacy
+snapshot money values and quantizes only non-null `Decimal` values to four
+decimal places. NAV and share serialization remains at six decimal places.
+
+The snapshot API regression covers both an initial snapshot and a legacy
+trading snapshot with nullable `cumulative_deposit`,
+`cumulative_withdrawal`, and `net_cash_flow`. It also verifies the existing
+four-decimal money and six-decimal NAV response formatting.
+
+### Validation
+
+```text
+uv run pytest test/paper_trading/api/test_snapshots_api.py test/paper_trading/services/test_cash_service.py::test_withdraw_preserves_large_twelve_decimal_cash_eligibility test/paper_trading/services/test_corporate_action_service.py::test_rights_issue_preserves_large_twelve_decimal_cash_eligibility test/paper_trading/storage/test_repository.py::test_list_snapshots_does_not_round_loaded_entities_before_commit -q
+```
+
+Result: `8 passed, 1 warning in 10.43s`. The warning is the existing Starlette
+`TestClient` deprecation warning for `httpx`.
+
+```text
+uv run ruff format --check paper_trading/schemas/snapshots.py test/paper_trading/api/test_snapshots_api.py && uv run ruff check paper_trading/schemas/snapshots.py test/paper_trading/api/test_snapshots_api.py
+```
+
+Result: `2 files already formatted` and `All checks passed!`.
+
+```text
+uv run mypy paper_trading/schemas/snapshots.py test/paper_trading/api/test_snapshots_api.py
+```
+
+Result: `Success: no issues found in 2 source files`. Mypy emitted the existing
+unused-override configuration note.
+
+```text
+uv run pre-commit run --files paper_trading/schemas/snapshots.py test/paper_trading/api/test_snapshots_api.py
+```
+
+Result: all hooks passed, including trailing-whitespace, end-of-file,
+mixed-line-ending, Ruff format, Ruff, and mypy checks.
+
+```text
+git diff --check
+```
+
+Result: passed with no output.
+
+### Self-Review
+
+- The money serializer now has the same null-preserving behavior as the
+  existing nullable NAV/share serializer, while retaining the four-decimal
+  public money contract for non-null values.
+- API coverage uses persisted nullable fields for both ordinary initial and
+  legacy trading snapshots, exercising the response-model serialization path.
+- The high-precision repository snapshot, withdrawal eligibility, and
+  corporate-action eligibility regressions remain passing.
+- No safe simplification beyond the conditional expression was identified; the
+  serializer must distinguish nullable from required monetary fields.
+- No remaining blockers were observed.
