@@ -443,6 +443,7 @@ _PAPER_SQLITE_PRECISION_COLUMNS = {
     ),
     tb_name_paper_trades: ("price", "amount", "fees"),
     tb_name_paper_position_round_trips: ("entry_amount", "exit_amount", "fees", "realized_pnl", "return_pct"),
+    tb_name_paper_pending_settlement: ("amount",),
     tb_name_paper_account_snapshots: (
         "cash_available",
         "cash_frozen",

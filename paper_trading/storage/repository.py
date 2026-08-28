@@ -294,7 +294,7 @@ class PaperTradingRepository:
         if cash <= 0:
             raise ValueError("initial_cash must be positive")
         initial_nav = Decimal("1.000000")
-        cash = require_finite(cash, "initial_cash")
+        cash = quantize_account_money(require_finite(cash, "initial_cash"))
         initial_shares = quantize_shares(cash)
         initial_deposit = quantize_account_money(cash)
         account = PaperAccount(
@@ -566,6 +566,25 @@ class PaperTradingRepository:
         )
         return Decimal(str(total)).quantize(Decimal("0.0001"))
 
+    def get_cash_available_as_of_internal(self, account_id: int, as_of: date) -> Decimal:
+        """Return accounting-precision cash available through ``as_of``.
+
+        SQLite stores SQLAlchemy numerics as floating point values when they
+        are aggregated directly.  Read the values as text there and sum
+        Decimal values in Python, just as the all-time internal accessor does.
+        """
+        query: Any = self.session.query(PaperCashLedger.amount).filter(
+            PaperCashLedger.account_id == account_id,
+            or_(PaperCashLedger.trade_date.is_(None), PaperCashLedger.trade_date <= as_of),
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            query = self.session.query(sa_cast(PaperCashLedger.amount, String)).filter(
+                PaperCashLedger.account_id == account_id,
+                or_(PaperCashLedger.trade_date.is_(None), PaperCashLedger.trade_date <= as_of),
+            )
+        values = (Decimal(str(amount)) for (amount,) in query.all())
+        return quantize_account_money(sum((quantize_account_money(value) for value in values), Decimal("0")))
+
     def get_cash_frozen(self, account_id: int) -> Decimal:
         return self.get_cash_frozen_internal(account_id).quantize(Decimal("0.0001"))
 
@@ -610,12 +629,12 @@ class PaperTradingRepository:
             account_id=account_id,
             symbol=symbol,
             side=side.value,
-            quantity=quantity,
-            limit_price=limit_price,
+            quantity=_whole_quantity(quantity, "quantity"),
+            limit_price=quantize_account_money(limit_price),
             trade_date=trade_date,
             status=status.value,
-            frozen_cash=frozen_cash,
-            frozen_quantity=frozen_quantity,
+            frozen_cash=quantize_account_money(frozen_cash),
+            frozen_quantity=_whole_quantity(frozen_quantity, "frozen_quantity"),
             idempotency_key=normalized_idempotency_key,
             rejection_code=rejection_code,
             rejection_reason=rejection_reason,
@@ -970,8 +989,8 @@ class PaperTradingRepository:
             self.session.add(position)
         position.total_quantity = _whole_quantity(total_quantity, "total_quantity")
         position.frozen_quantity = _whole_quantity(frozen_quantity, "frozen_quantity")
-        position.cost_amount = cost_amount
-        position.realized_pnl = realized_pnl
+        position.cost_amount = quantize_account_money(cost_amount)
+        position.realized_pnl = quantize_account_money(realized_pnl)
         self.session.flush()
         return position
 
@@ -993,7 +1012,7 @@ class PaperTradingRepository:
             buy_trade_date=buy_trade_date,
             original_quantity=_whole_quantity(original_quantity, "original_quantity"),
             remaining_quantity=_whole_quantity(remaining_quantity, "remaining_quantity"),
-            cost_price=cost_price,
+            cost_price=quantize_account_money(cost_price),
             source=PositionSource(source).value,
             market=market,
         )
@@ -1030,6 +1049,7 @@ class PaperTradingRepository:
         return snapshot
 
     def save_snapshot(self, **values: Any) -> PaperAccountSnapshot:
+        self._quantize_snapshot_values(values)
         snapshot = PaperAccountSnapshot(**values)
         self.session.add(snapshot)
         self.session.flush()
@@ -1037,6 +1057,7 @@ class PaperTradingRepository:
 
     def save_trading_snapshot(self, **values: Any) -> PaperAccountSnapshot:
         """Create or update the single trading snapshot for an account date."""
+        self._quantize_snapshot_values(values)
         account_id = values["account_id"]
         trade_date = values["trade_date"]
         snapshot = (
@@ -1058,6 +1079,27 @@ class PaperTradingRepository:
         for field, value in values.items():
             setattr(snapshot, field, value)
         return snapshot
+
+    @staticmethod
+    def _quantize_snapshot_values(values: dict[str, Any]) -> None:
+        for field_name in (
+            "cash_available",
+            "cash_frozen",
+            "market_value",
+            "total_assets",
+            "realized_pnl",
+            "unrealized_pnl",
+            "cumulative_deposit",
+            "cumulative_withdrawal",
+            "net_cash_flow",
+            "pending_settlement",
+        ):
+            if field_name in values and values[field_name] is not None:
+                values[field_name] = quantize_account_money(values[field_name])
+        if values.get("net_asset_value") is not None:
+            values["net_asset_value"] = quantize_nav(values["net_asset_value"])
+        if values.get("share_count") is not None:
+            values["share_count"] = quantize_shares(values["share_count"])
 
     def delete_trading_snapshot(self, account_id: int, trade_date: date) -> None:
         (
@@ -1187,10 +1229,10 @@ class PaperTradingRepository:
             account_id=account_id,
             symbol=symbol,
             side=side.value,
-            quantity=quantity,
-            price=price,
-            amount=amount,
-            fees=fees,
+            quantity=_whole_quantity(quantity, "quantity"),
+            price=quantize_account_money(price),
+            amount=quantize_account_money(amount),
+            fees=quantize_account_money(fees),
             trade_date=trade_date,
             comment=self._normalize_comment(comment),
             market=Market(market or Market.A_SHARE).value,
@@ -1768,7 +1810,7 @@ class PaperTradingRepository:
     ) -> PaperPendingSettlement:
         pending = PaperPendingSettlement(
             account_id=account_id,
-            amount=amount,
+            amount=quantize_account_money(amount),
             expected_settle_date=expected_settle_date,
             trade_id=trade_id,
             source=PendingSettlementSource(source).value,

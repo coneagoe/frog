@@ -481,7 +481,7 @@ class PaperPendingSettlement(Base):
     account_id: Mapped[int] = mapped_column(
         Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True
     )
-    amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
     expected_settle_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source: Mapped[str] = mapped_column(

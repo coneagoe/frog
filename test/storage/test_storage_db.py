@@ -438,6 +438,10 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
     with Session(storage.engine) as session:
         assert session.query(PaperAccount).order_by(PaperAccount.id).one().hk_commission_rate is None
 
+    pending_columns = inspect(storage.engine).get_columns(tb_name_paper_pending_settlement)
+    amount = next(column["type"] for column in pending_columns if column["name"] == "amount")
+    assert (amount.precision, amount.scale) == (30, 12)
+
 
 def test_existing_account_schema_adds_etf_commission_rate(storage, paper_trading_schema_upgrade):
     storage.ensure_paper_trading_schema()

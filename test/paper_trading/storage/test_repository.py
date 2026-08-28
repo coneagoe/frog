@@ -2397,7 +2397,24 @@ def test_internal_cash_aggregations_preserve_sqlite_decimal_text(sqlite_session)
     assert repo.get_cash_frozen_internal(account.id) == persisted_amount
     assert repo.get_pending_settlement_total_internal(account.id) == persisted_pending_amount
     assert order.frozen_cash == Decimal("123456.789012345675")
-    assert pending.amount == Decimal("123456.7890")
+    assert repo.session.query(PaperPendingSettlement.amount).filter_by(id=pending.id).scalar() == Decimal(
+        "123456.789012345675"
+    )
+
+
+def test_cash_available_as_of_internal_preserves_adjacent_decimal_boundary(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("as-of-precision", Decimal("100.000000000001"))
+    repo.add_cash_event(
+        account.id,
+        CashEventType.TRADE,
+        Decimal("0.000000000001"),
+        trade_date=date(2026, 8, 28),
+    )
+
+    assert repo.get_cash_available_as_of_internal(account.id, date(2026, 8, 27)) == Decimal("100.000000000001")
+    assert repo.get_cash_available_as_of_internal(account.id, date(2026, 8, 28)) == Decimal("100.000000000002")
 
 
 def test_settle_pending_releases_cash(sqlite_session):
