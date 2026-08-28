@@ -240,7 +240,6 @@ def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
         if missing_metadata_tables:
             Base.metadata.create_all(connection, tables=missing_metadata_tables, checkfirst=True)
             tables = set(inspect(connection).get_table_names())
-
         for group in PAPER_TRADING_ENUM_GROUPS:
             if group.type_name in {
                 "paper_market",
@@ -687,6 +686,7 @@ def test_nav_series_migration_waits_on_transaction_advisory_lock(postgres_legacy
 
 def test_nav_series_migration_serializes_concurrent_startup(postgres_legacy_db):
     engine, schema = postgres_legacy_db
+    _prepare_reduced_legacy_enum_columns(engine)
     errors: list[BaseException] = []
     workers_engines = [_schema_engine(engine.url, schema) for _ in range(2)]
 
@@ -1241,6 +1241,7 @@ def test_nav_series_migration_marks_omitted_historical_trading_tables():
         original = {snapshot_id: _financials(_snapshot_by_id(bound, snapshot_id)) for snapshot_id in range(1, 5)}
 
         db = _storage(bound)
+        _prepare_reduced_legacy_enum_columns(bound)
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 
@@ -1281,6 +1282,7 @@ def test_nav_series_migration_marks_global_pre_creation_matching_run():
         original = _financials(_snapshot_by_id(bound, 1))
 
         db = _storage(bound)
+        _prepare_reduced_legacy_enum_columns(bound)
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 
@@ -1324,6 +1326,7 @@ def test_nav_series_migration_ignores_null_account_non_global_matching_run():
         original = _financials(_snapshot_by_id(bound, 1))
 
         db = _storage(bound)
+        _prepare_reduced_legacy_enum_columns(bound)
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 
@@ -1350,6 +1353,7 @@ def test_nav_series_migration_ignores_null_account_non_global_matching_run():
         original = _financials(_snapshot_by_id(bound, 1))
 
         db = _storage(bound)
+        _prepare_reduced_legacy_enum_columns(bound)
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 

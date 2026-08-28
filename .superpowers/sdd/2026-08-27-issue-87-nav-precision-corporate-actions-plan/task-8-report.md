@@ -261,6 +261,67 @@ PostgreSQL integration migration coverage was not runnable because the
 required `TEST_POSTGRESQL_URL` is unavailable. No other blocker was observed
 in the scoped fix-wave validation.
 
+## Task 8 Navigation Migration Fixture Fix
+
+Updated the reduced PostgreSQL migration fixtures so strict production enum
+preflight sees the governed legacy account, order, and supporting tables,
+columns, enum types, and indexes it requires. NAV-owned snapshot metadata and
+snapshot enum columns remain omitted in the fixtures that exercise their
+migration. Direct calls to the snapshot-series migration helper now prepare
+the same narrowly scoped reduced legacy state, including concurrent startup
+coverage. The unrelated full-suite reduced storage fixture was also updated
+with the governed account and order columns/tables needed by the strict
+preflight; production migration code was not changed.
+
+## Task 8 Validation
+
+```text
+TEST_DB_HOST_PORT=5434 tools/run_tests.sh test/paper_trading/storage/test_nav_series_migration.py -v
+```
+
+Result: `23 passed in 143.21s (0:02:23)`.
+
+```text
+TEST_DB_HOST_PORT=5434 tools/run_tests.sh test/paper_trading/storage/test_enum_migration.py test/paper_trading/storage/test_corporate_action_migration.py -q
+```
+
+Result: `40 passed in 249.01s (0:04:09)` on retry. The first attempt hit a
+transient PostgreSQL `database system is starting up` error while the isolated
+test database was restarting.
+
+```text
+TEST_DB_HOST_PORT=5434 tools/run_tests.sh
+```
+
+Result: `2153 passed, 9 skipped, 6 warnings in 1601.14s (0:26:41)` across all
+2162 collected tests. The warnings are existing Starlette/AnyIO deprecations
+and one SQLAlchemy identity-map warning.
+
+```text
+TEST_DB_HOST_PORT=5434 tools/run_tests.sh test/storage/test_storage_db.py::test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adapter -q
+```
+
+Result: `1 passed in 12.75s`.
+
+```text
+uv run ruff format --check test/paper_trading/storage/test_nav_series_migration.py test/storage/test_storage_db.py
+uv run ruff check test/paper_trading/storage/test_nav_series_migration.py test/storage/test_storage_db.py
+uv run mypy test/paper_trading/storage/test_nav_series_migration.py test/storage/test_storage_db.py
+uv run pre-commit run --files test/paper_trading/storage/test_nav_series_migration.py test/storage/test_storage_db.py
+git diff --check
+```
+
+Result: all passed. Ruff reported both files already formatted; touched-file
+mypy and all pre-commit hooks passed; `git diff --check` produced no output.
+
+## Task 8 Self-Review
+
+The required simplify skill is not installed in this worktree, so it could
+not be invoked. Manual review found no further safe simplification: the NAV
+fixture helper remains limited to governed legacy prerequisites, skips
+NAV-owned addable snapshot state, and is called before every direct series
+migration path. Production enum preflight and NAV assertions remain unchanged.
+
 ## SQLite Migration Safety Follow-up
 
 Implemented the remaining issue #87 SQLite migration blockers while preserving

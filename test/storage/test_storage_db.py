@@ -4060,7 +4060,11 @@ def test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adap
                     """
                     CREATE TABLE paper_accounts (
                         id INTEGER PRIMARY KEY,
-                        initial_cash NUMERIC(20, 4) NOT NULL DEFAULT 0
+                        status VARCHAR(20) NOT NULL DEFAULT 'active',
+                        fee_preset VARCHAR(30) NOT NULL DEFAULT 'a_share',
+                        initial_cash NUMERIC(20, 4) NOT NULL DEFAULT 0,
+                        share_count NUMERIC(20, 6) NOT NULL DEFAULT 0,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
                     """
                 )
@@ -4071,6 +4075,9 @@ def test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adap
                     CREATE TABLE paper_orders (
                         id INTEGER PRIMARY KEY,
                         account_id INTEGER NOT NULL,
+                        side VARCHAR(10) NOT NULL,
+                        status VARCHAR(30) NOT NULL,
+                        validity_status VARCHAR(20),
                         idempotency_key VARCHAR(100)
                     )
                     """
@@ -4078,6 +4085,31 @@ def test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adap
             )
             conn.execute(
                 text("ALTER TABLE paper_orders ADD CONSTRAINT uq_task3_legacy_idempotency UNIQUE (idempotency_key)")
+            )
+            conn.execute(text("CREATE INDEX ix_paper_orders_status ON paper_orders (status)"))
+            conn.execute(text("CREATE INDEX ix_paper_orders_validity_status ON paper_orders (validity_status)"))
+            from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_GROUPS
+
+            for group in PAPER_TRADING_ENUM_GROUPS:
+                labels = ", ".join(f"'{label}'" for label in group.labels)
+                conn.execute(
+                    text(
+                        f"DO $$ BEGIN CREATE TYPE {group.type_name} AS ENUM ({labels}); "
+                        "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+                    )
+                )
+            operational_tables = {"paper_account_snapshots", "paper_valuation_gaps", "paper_etf_eligibility"}
+            optional_tables = {"daily_bar_diagnostics", "paper_corporate_actions"}
+            required_table_names = {
+                column.table_name
+                for group in PAPER_TRADING_ENUM_GROUPS
+                for column in group.columns
+                if column.table_name not in operational_tables | optional_tables
+            }
+            Base.metadata.create_all(
+                conn,
+                tables=[table for table in Base.metadata.sorted_tables if table.name in required_table_names],
+                checkfirst=True,
             )
 
         db = StorageDb.__new__(StorageDb)
