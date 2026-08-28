@@ -1585,6 +1585,45 @@ def test_clear_account_rebuild_state_from_restores_pre_start_lots_and_realized_p
     assert position.cost_amount == Decimal("600.0000")
 
 
+def test_clear_account_rebuild_state_preserves_12_decimal_cost_and_pnl(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("precision-rebuild", Decimal("100000"))
+    trade_date = date(2026, 6, 16)
+    repo.create_position_lot(
+        account.id,
+        Market.A_SHARE,
+        "000001.SZ",
+        trade_date,
+        3,
+        3,
+        Decimal("1.234567891234"),
+        source="imported",
+    )
+    order = repo.create_order(
+        account.id, "000001.SZ", OrderSide.SELL, 1, Decimal("1.345678912345"), trade_date, OrderStatus.FILLED
+    )
+    repo.create_trade(
+        order.id,
+        account.id,
+        "000001.SZ",
+        OrderSide.SELL,
+        1,
+        Decimal("1.345678912345"),
+        Decimal("1.345678912345"),
+        Decimal("0.000023456789"),
+        trade_date,
+    )
+
+    repo.clear_account_rebuild_state_from(account.id, date(2026, 6, 17))
+
+    rebuilt_account = repo.get_account(account.id)
+    positions = repo.get_positions(account.id)
+    assert rebuilt_account is not None
+    assert rebuilt_account.realized_pnl == Decimal("0.111087564322")
+    assert positions[0].cost_amount == Decimal("2.469135782468")
+
+
 def test_clear_account_rebuild_state_preserves_initial_cash(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

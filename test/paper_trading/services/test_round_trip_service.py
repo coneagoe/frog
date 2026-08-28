@@ -222,3 +222,44 @@ def test_rebuild_account_keeps_same_symbol_market_cycles_separate(tmp_path):
         ("hk_connect", "closed", Decimal("200.0000")),
     ]
     engine.dispose()
+
+
+def test_round_trip_precision_survives_record_and_rebuild(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("precision-round-trip", Decimal("100000"))
+    values = [
+        (
+            OrderSide.BUY,
+            Decimal("1.234567891234"),
+            Decimal("3.703703673702"),
+            Decimal("0.000012345678"),
+            date(2026, 6, 16),
+        ),
+        (
+            OrderSide.SELL,
+            Decimal("1.345678912345"),
+            Decimal("4.037036737035"),
+            Decimal("0.000023456789"),
+            date(2026, 6, 20),
+        ),
+    ]
+    trades = []
+    for side, price, amount, fees, trade_date in values:
+        order = repo.create_order(account.id, "000001.SZ", side, 3, price, trade_date, OrderStatus.FILLED)
+        trades.append(repo.create_trade(order.id, account.id, "000001.SZ", side, 3, price, amount, fees, trade_date))
+
+    service = RoundTripService(repo)
+    service.record_fill(trades[0], post_position_quantity=3)
+    service.record_fill(trades[1], post_position_quantity=0)
+    cycle = repo.list_round_trips(account.id)[0]
+    assert cycle.entry_amount == Decimal("3.703703673702")
+    assert cycle.exit_amount == Decimal("4.037036737035")
+    assert cycle.fees == Decimal("0.000035802467")
+    assert cycle.realized_pnl == Decimal("0.333297260866")
+    assert cycle.return_pct == Decimal("0.089990261163")
+
+    rebuilt = service.rebuild_account(account.id)
+    assert rebuilt[0].entry_amount == Decimal("3.703703673702")
+    assert rebuilt[0].realized_pnl == Decimal("0.333297260866")
+    session.commit()
+    engine.dispose()

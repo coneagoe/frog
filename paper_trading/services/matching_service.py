@@ -19,6 +19,7 @@ from paper_trading.domain.hk_connect_fees import (
     calculate_hk_connect_fees,
     hk_fee_config_from_account,
 )
+from paper_trading.domain.precision import quantize_account_money
 from paper_trading.domain.rules import ensure_price_in_daily_range
 from paper_trading.services.round_trip_service import RoundTripService
 from paper_trading.services.snapshot_service import SnapshotService
@@ -208,20 +209,16 @@ class MatchingService:
         account = self.repo.get_account(order.account_id)
         if account is None:
             raise ValueError(f"paper account not found: {order.account_id}")
-        amount = (Decimal(quantity) * price).quantize(Decimal("0.0001"))
+        amount = quantize_account_money(Decimal(quantity) * price)
 
         # Market-aware fee calculation
         if order.market == "hk_connect":
             fee_config = hk_fee_config_from_account(account)
-            fees = calculate_hk_connect_fees(side, amount, fee_config).total.quantize(Decimal("0.0001"))
+            fees = quantize_account_money(calculate_hk_connect_fees(side, amount, fee_config).total)
         elif order.market == "etf":
-            fees = calculate_etf_fees(side, amount, etf_fee_config_from_account(account)).total.quantize(
-                Decimal("0.0001")
-            )
+            fees = quantize_account_money(calculate_etf_fees(side, amount, etf_fee_config_from_account(account)).total)
         else:
-            fees = calculate_a_share_fees(side, amount, fee_config_from_account(account)).total.quantize(
-                Decimal("0.0001")
-            )
+            fees = quantize_account_money(calculate_a_share_fees(side, amount, fee_config_from_account(account)).total)
 
         trade = self.repo.create_trade(
             order.id,
@@ -290,7 +287,7 @@ class MatchingService:
             order.symbol,
             total_quantity=current_quantity + int(order.quantity),
             frozen_quantity=(0 if position is None else int(position.frozen_quantity or 0)),
-            cost_amount=(current_cost + actual_cost).quantize(Decimal("0.0001")),
+            cost_amount=quantize_account_money(current_cost + actual_cost),
         )
         self.repo.create_position_lot(
             order.account_id,
@@ -324,13 +321,13 @@ class MatchingService:
                 break
             used = min(int(lot.remaining_quantity or 0), remaining)
             lot.remaining_quantity = int(lot.remaining_quantity or 0) - used
-            cost_reduction += (Decimal(used) * Decimal(lot.cost_price)).quantize(Decimal("0.0001"))
+            cost_reduction += Decimal(used) * Decimal(lot.cost_price)
             remaining -= used
         position.total_quantity = int(position.total_quantity or 0) - quantity_to_sell
         position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
-        position.cost_amount = (Decimal(position.cost_amount or 0) - cost_reduction).quantize(Decimal("0.0001"))
-        realized_pnl = (amount - fees - cost_reduction).quantize(Decimal("0.0001"))
-        position.realized_pnl = (Decimal(position.realized_pnl or 0) + realized_pnl).quantize(Decimal("0.0001"))
+        position.cost_amount = quantize_account_money(Decimal(position.cost_amount or 0) - cost_reduction)
+        realized_pnl = quantize_account_money(amount - fees - cost_reduction)
+        position.realized_pnl = quantize_account_money(Decimal(position.realized_pnl or 0) + realized_pnl)
         account = self.repo.get_account(order.account_id)
         if account is None:
             raise ValueError(f"paper account not found: {order.account_id}")

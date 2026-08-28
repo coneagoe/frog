@@ -394,12 +394,12 @@ _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
 }
 _PAPER_SNAPSHOT_SERIES_LOCK_KEY = "paper_account_snapshots.nav_series"
 _PAPER_SNAPSHOT_NAV_COLUMNS = {
-    "net_asset_value": "NUMERIC(20, 6)",
-    "share_count": "NUMERIC(20, 6)",
-    "cumulative_deposit": "NUMERIC(20, 4)",
-    "cumulative_withdrawal": "NUMERIC(20, 4)",
-    "net_cash_flow": "NUMERIC(20, 4)",
-    "pending_settlement": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
+    "net_asset_value": "NUMERIC(30, 12)",
+    "share_count": "NUMERIC(30, 12)",
+    "cumulative_deposit": "NUMERIC(30, 12)",
+    "cumulative_withdrawal": "NUMERIC(30, 12)",
+    "net_cash_flow": "NUMERIC(30, 12)",
+    "pending_settlement": "NUMERIC(30, 12) NOT NULL DEFAULT 0",
 }
 _SQLITE_PAPER_SNAPSHOT_SERIES_COLUMNS = {
     "point_type": "VARCHAR(20) NOT NULL DEFAULT 'trading'",
@@ -4143,11 +4143,11 @@ class StorageDb:
                         conn.execute(text(f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN {column_name} {ddl}"))
             account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
             account_nav_columns = {
-                "share_count": "NUMERIC(20, 6) NOT NULL DEFAULT 0",
-                "net_asset_value": "NUMERIC(20, 6) NOT NULL DEFAULT 1",
-                "cumulative_deposit": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
-                "cumulative_withdrawal": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
-                "realized_pnl": "NUMERIC(20, 4) NOT NULL DEFAULT 0",
+                "share_count": "NUMERIC(30, 12) NOT NULL DEFAULT 0",
+                "net_asset_value": "NUMERIC(30, 12) NOT NULL DEFAULT 1",
+                "cumulative_deposit": "NUMERIC(30, 12) NOT NULL DEFAULT 0",
+                "cumulative_withdrawal": "NUMERIC(30, 12) NOT NULL DEFAULT 0",
+                "realized_pnl": "NUMERIC(30, 12) NOT NULL DEFAULT 0",
             }
             missing_account_nav_columns = [
                 column_name for column_name in account_nav_columns if column_name not in account_columns

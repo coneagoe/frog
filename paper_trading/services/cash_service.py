@@ -66,10 +66,11 @@ class CashService:
     ) -> CashFlowResult:
         account = self._active_account(account_id)
         amount = self._positive_money(amount)
-        cash_available = self.repo.get_cash_available(account_id)
+        cash_available = self.repo.get_cash_available_internal(account_id)
         if amount > cash_available:
             display_amount = amount.quantize(Decimal("0.0001"))
-            raise ValueError(f"withdrawal amount {display_amount} exceeds available cash {cash_available}")
+            display_cash_available = cash_available.quantize(Decimal("0.0001"))
+            raise ValueError(f"withdrawal amount {display_amount} exceeds available cash {display_cash_available}")
         occurred_at = self._occurred_at(occurred_at)
         nav = self._cash_flow_nav(account_id, occurred_at)
         share_delta = -quantize_shares(amount / nav)

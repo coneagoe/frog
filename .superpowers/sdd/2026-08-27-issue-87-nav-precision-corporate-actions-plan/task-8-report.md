@@ -452,3 +452,98 @@ Result: all checks passed.
 - Whole-share integer position and lot quantities remain unchanged.
 - No further safe simplification was identified; the explicit table list is the
   smallest clear fixture boundary for the tested legacy schema.
+
+## Final Review Fix Wave: Runtime Accounting Precision
+
+This fix wave addresses the remaining issue #87 final-review findings:
+
+- Matching amount, fee, position cost, cost reduction, realized PnL, and account
+  realized PnL calculations now use the shared 12-decimal accounting precision.
+- Round-trip entry, exit, fees, realized PnL, return percentage, and rebuild
+  calculations now retain the 12-decimal accounting contract.
+- Repository position rebuild and replay paths now retain 12-decimal cost and
+  realized PnL values. Public cash and snapshot accessors retain their existing
+  display formatting, including four-decimal monetary output.
+- `CashService.withdraw()` authorizes against `get_cash_available_internal()`;
+  its error message and returned API value retain display formatting.
+- Missing account and snapshot accounting columns are declared as
+  `NUMERIC(30, 12)` from creation, while existing-column widening remains
+  monotonic. Whole-share integer position and lot quantities were unchanged.
+
+## Final Review Regression Tests
+
+Added coverage for high-precision buy/sell matching, direct and rebuilt
+round-trips, repository lot-derived cost/PnL rebuilds, and withdrawal amounts
+that cross a four-decimal display boundary.
+
+## Final Review Validation
+
+Focused command:
+
+```text
+uv run pytest test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_round_trip_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_corporate_action_migration.py -q
+```
+
+Exact result: `161 passed, 2 skipped in 144.86s (0:02:24)`.
+The two skipped cases are PostgreSQL-only migration tests because
+`TEST_POSTGRESQL_URL` is unavailable. The run emitted one existing SQLAlchemy
+identity-map warning from round-trip rebuild coverage.
+
+PostgreSQL command:
+
+```text
+TEST_POSTGRESQL_URL unavailable; uv run pytest test/paper_trading/storage/test_corporate_action_migration.py -v skipped
+```
+
+Result: skipped because no PostgreSQL test URL was configured.
+
+Ruff command:
+
+```text
+uv run ruff format --check paper_trading/services/matching_service.py paper_trading/services/round_trip_service.py paper_trading/services/cash_service.py paper_trading/storage/repository.py storage/storage_db.py test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_round_trip_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/storage/test_repository.py && uv run ruff check paper_trading/services/matching_service.py paper_trading/services/round_trip_service.py paper_trading/services/cash_service.py paper_trading/storage/repository.py storage/storage_db.py test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_round_trip_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/storage/test_repository.py
+```
+
+Exact result: `9 files already formatted` and `All checks passed!`.
+
+Touched-file mypy command:
+
+```text
+uv run mypy paper_trading/services/matching_service.py paper_trading/services/round_trip_service.py paper_trading/services/cash_service.py paper_trading/storage/repository.py storage/storage_db.py
+```
+
+Exact result: passed with no issues in 5 source files.
+
+Pre-commit command:
+
+```text
+uv run pre-commit run --files paper_trading/services/matching_service.py paper_trading/services/round_trip_service.py paper_trading/services/cash_service.py paper_trading/storage/repository.py storage/storage_db.py test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_round_trip_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/storage/test_repository.py
+```
+
+Exact result: all hooks passed, including Ruff format, Ruff, and mypy.
+
+Diff command:
+
+```text
+git diff --check
+```
+
+Result: passed with no output.
+
+## Final Review Self-Review
+
+- Internal monetary calculations now quantize only through the shared
+  12-decimal contract; four-decimal rounding remains at public display
+  boundaries.
+- Matching, round-trip, repository rebuild, and withdrawal regressions use
+  values whose significant digits exceed the former four-decimal limit.
+- Startup migration additions use the approved target type from the first DDL,
+  and existing-column widening still takes the maximum existing and target
+  precision/scale dimensions.
+- Position and lot quantity fields remain integer-backed and whole-share based.
+- No safe simplification was identified beyond the shared precision helpers and
+  the explicit public/internal cash boundary. The repository `simplify` skill is
+  not installed in this worktree, so the required simplification review was
+  performed manually.
+- Remaining blocker: PostgreSQL migration execution could not be rerun in this
+  environment because `TEST_POSTGRESQL_URL` is unavailable; prior report entries
+  document the earlier five-test PostgreSQL pass.

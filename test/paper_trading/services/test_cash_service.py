@@ -59,6 +59,17 @@ def test_withdraw_rejects_more_than_available_cash(tmp_path):
     engine.dispose()
 
 
+def test_withdraw_authorizes_against_internal_cash_not_display_rounding(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("precision-boundary", Decimal("1.23456"))
+
+    with pytest.raises(ValueError, match="withdrawal amount 1.2346 exceeds available cash 1.2346"):
+        CashService(repo).withdraw(account.id, Decimal("1.23458"), date(2026, 7, 20), None)
+
+    assert len(repo.list_cash_ledger(account.id)) == 1
+    engine.dispose()
+
+
 def test_cash_flow_before_valuation_uses_initial_nav(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
