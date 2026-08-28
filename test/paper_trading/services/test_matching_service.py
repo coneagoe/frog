@@ -291,12 +291,12 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         buy_snapshot.trade_count,
     ) == (
         buy_date,
-        Decimal("99684.9685"),
-        Decimal("0.0000"),
-        Decimal("315.0000"),
-        Decimal("99999.9685"),
-        Decimal("0.0000"),
-        Decimal("-0.0315"),
+        Decimal("99684.968500000003"),
+        Decimal("0.000000000000"),
+        Decimal("315.000000000000"),
+        Decimal("99999.968500000003"),
+        Decimal("0.000000000000"),
+        Decimal("-0.031500000000"),
         1,
         1,
         1,
@@ -376,8 +376,8 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         for snapshot in snapshots
         if snapshot.point_type == SnapshotPointType.TRADING.value
     ] == [
-        (buy_date, Decimal("99684.9685"), Decimal("315.0000"), Decimal("99999.9685")),
-        (sell_date, Decimal("100009.9360"), Decimal("0.0000"), Decimal("100009.9360")),
+        (buy_date, Decimal("99684.968500000003"), Decimal("315.000000000000"), Decimal("99999.968500000003")),
+        (sell_date, Decimal("100009.936000000002"), Decimal("0.000000000000"), Decimal("100009.936000000002")),
     ]
     sell_snapshot = snapshots[2]
     assert (

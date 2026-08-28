@@ -62,6 +62,30 @@ def test_generate_snapshot_values_positions_at_close(tmp_path):
     engine.dispose()
 
 
+def test_generate_snapshot_preserves_high_precision_cash_after_reload(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_precision.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    cash = Decimal("999999999999.125000000000")
+    account = repo.create_account("precise-cash", cash)
+
+    snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 8, 25))
+    session.commit()
+    snapshot_id = snapshot.id
+    session.close()
+
+    reloaded_session = sessionmaker(bind=engine)()
+    reloaded = reloaded_session.get(type(snapshot), snapshot_id)
+    assert reloaded is not None
+    assert reloaded.cash_available == cash
+    assert reloaded.total_assets == cash
+    assert reloaded.cumulative_deposit == cash
+    assert reloaded.net_cash_flow == cash
+    reloaded_session.close()
+    engine.dispose()
+
+
 def test_snapshot_values_etf_position_from_etf_daily_bar(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_etf.db'}")
     Base.metadata.create_all(engine)
@@ -684,13 +708,13 @@ def _fake_snapshot_repo(account: SimpleNamespace, *, cash_available: Decimal = D
     class Repository:
         updated = False
 
-        def get_cash_available(self, account_id):
+        def get_cash_available_internal(self, account_id):
             return cash_available
 
-        def get_cash_frozen(self, account_id):
+        def get_cash_frozen_internal(self, account_id):
             return Decimal("0")
 
-        def get_pending_settlement_total(self, account_id):
+        def get_pending_settlement_total_internal(self, account_id):
             return Decimal("0")
 
         def get_positions(self, account_id):

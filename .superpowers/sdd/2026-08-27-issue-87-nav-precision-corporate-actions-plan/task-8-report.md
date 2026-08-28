@@ -648,3 +648,31 @@ Result: passed with no output.
 - No safe simplification beyond the conditional expression was identified; the
   serializer must distinguish nullable from required monetary fields.
 - No remaining blockers were observed.
+
+## Final-review precision fixes
+
+Snapshot generation now uses internal 12-decimal accessors for available cash,
+frozen cash, and pending settlement, and persists snapshot accounting fields
+through the shared accounting quantizer instead of display-scale rounding.
+Normal buy-order reservation likewise authorizes against internal cash and
+persists `frozen_cash` at 12 decimals. Added SQLite snapshot reload and
+ordinary order-placement boundary regressions. Whole-share integer quantities
+and external cash/TWR semantics remain unchanged.
+
+The required simplification review found no further safe behavior-preserving
+simplification. PostgreSQL integration was not rerun in this environment when
+`TEST_POSTGRESQL_URL` was unavailable.
+
+## Final-review precision fixes
+
+Snapshot generation now uses internal 12-decimal accessors for available cash,
+frozen cash, and pending settlement, and persists snapshot accounting fields
+through the shared accounting quantizer instead of display-scale rounding.
+Normal buy-order reservation likewise authorizes against internal cash and
+persists `frozen_cash` at 12 decimals. Added SQLite snapshot reload and
+ordinary order-placement boundary regressions. Whole-share integer quantities
+and external cash/TWR semantics remain unchanged.
+
+The required simplification review found no further safe behavior-preserving
+simplification. PostgreSQL integration was not rerun in this environment when
+`TEST_POSTGRESQL_URL` was unavailable.

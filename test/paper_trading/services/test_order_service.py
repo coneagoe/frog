@@ -591,6 +591,28 @@ def test_place_buy_order_rejects_insufficient_cash(tmp_path):
     engine.dispose()
 
 
+def test_place_buy_order_authorizes_against_internal_cash_boundary(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("internal-cash-boundary", Decimal("1005.00995"))
+
+    order = service.place_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert order.status == OrderStatus.REJECTED.value
+    assert order.rejection_code == "INSUFFICIENT_CASH"
+    assert repo.get_cash_available(account.id) == Decimal("1005.0100")
+    assert repo.get_cash_available_internal(account.id) == Decimal("1005.009950000000")
+    assert repo.list_cash_ledger(account.id)[-1].amount == Decimal("1005.009950000000")
+    engine.dispose()
+
+
 def test_place_sell_order_freezes_sellable_position(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))

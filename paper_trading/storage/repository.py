@@ -553,7 +553,7 @@ class PaperTradingRepository:
             amount_query = self.session.query(sa_cast(PaperCashLedger.amount, String))
         amounts = amount_query.filter(PaperCashLedger.account_id == account_id).all()
         if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
-            values = (Decimal(str(amount)) for (amount,) in amounts)
+            values = (Decimal(str(round(float(amount), 12))) for (amount,) in amounts)
         else:
             values = (Decimal(str(amount)) for (amount,) in amounts)
         return quantize_account_money(sum((quantize_account_money(value) for value in values), Decimal("0")))
@@ -570,15 +570,25 @@ class PaperTradingRepository:
         return Decimal(str(total)).quantize(Decimal("0.0001"))
 
     def get_cash_frozen(self, account_id: int) -> Decimal:
-        total = (
-            self.session.query(func.coalesce(func.sum(PaperOrder.frozen_cash), 0))
-            .filter(
+        return self.get_cash_frozen_internal(account_id).quantize(Decimal("0.0001"))
+
+    def get_cash_frozen_internal(self, account_id: int) -> Decimal:
+        query: Any = self.session.query(PaperOrder.frozen_cash).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.status == OrderStatus.ACCEPTED.value,
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            query = self.session.query(sa_cast(PaperOrder.frozen_cash, String)).filter(
                 PaperOrder.account_id == account_id,
                 PaperOrder.status == OrderStatus.ACCEPTED.value,
             )
-            .scalar()
+        values = (
+            Decimal(str(round(float(row[0]), 12)))
+            if self.session.bind is not None and self.session.bind.dialect.name == "sqlite"
+            else Decimal(str(row[0]))
+            for row in query.all()
         )
-        return Decimal(str(total)).quantize(Decimal("0.0001"))
+        return quantize_account_money(sum(values, Decimal("0")))
 
     @staticmethod
     def _normalize_comment(comment: str | None) -> str | None:
@@ -1806,15 +1816,25 @@ class PaperTradingRepository:
         return pending
 
     def get_pending_settlement_total(self, account_id: int) -> Decimal:
-        total = (
-            self.session.query(func.coalesce(func.sum(PaperPendingSettlement.amount), 0))
-            .filter(
+        return self.get_pending_settlement_total_internal(account_id).quantize(Decimal("0.0001"))
+
+    def get_pending_settlement_total_internal(self, account_id: int) -> Decimal:
+        query: Any = self.session.query(PaperPendingSettlement.amount).filter(
+            PaperPendingSettlement.account_id == account_id,
+            PaperPendingSettlement.settled.is_(False),
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            query = self.session.query(sa_cast(PaperPendingSettlement.amount, String)).filter(
                 PaperPendingSettlement.account_id == account_id,
                 PaperPendingSettlement.settled.is_(False),
             )
-            .scalar()
+        values = (
+            Decimal(str(round(float(row[0]), 12)))
+            if self.session.bind is not None and self.session.bind.dialect.name == "sqlite"
+            else Decimal(str(row[0]))
+            for row in query.all()
         )
-        return Decimal(str(total)).quantize(Decimal("0.0001"))
+        return quantize_account_money(sum(values, Decimal("0")))
 
     def list_order_trade_dates(self, account_id: int) -> list[date]:
         rows = (
