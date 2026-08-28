@@ -313,3 +313,52 @@ No repository `simplify` skill is installed in this worktree. A targeted manual
 simplification review found no safe simplification: the raw-connection boundary
 is necessary because SQLite ignores foreign-key pragma changes inside an active
 transaction.
+
+## Final Migration Integrity Follow-up
+
+SQLite numeric-table rebuilds now run `PRAGMA foreign_key_check` before their
+transaction commits. A violation raises `IntegrityError`, rolls back the table
+replacement, and leaves the original table declaration, rows, dependent foreign
+keys, and partial unique index intact. The original `PRAGMA foreign_keys`
+setting is restored only after the successful commit or failed rollback ends the
+transaction, which respects SQLite's rule that changing this pragma inside a
+transaction is ineffective.
+
+The rollback regression creates the existing dependent `paper_trades ->
+paper_orders` topology with an intentionally invalid legacy child row. It
+asserts that the rebuild fails on `foreign_key_check`, the original
+`NUMERIC(20, 4)` declaration and values remain, the partial unique index
+remains, the known violation remains visible, and enabled foreign-key enforcement
+is restored.
+
+PostgreSQL widening compares precision and scale independently and builds each
+replacement declaration from the maximum of the existing and target dimensions.
+Thus an existing `NUMERIC(40, 4)` widens to `NUMERIC(40, 12)`, while
+`NUMERIC(40, 20)` is unchanged. Multi-column changes use PostgreSQL's valid
+comma-separated `ALTER COLUMN ... TYPE ...` clauses.
+
+### Validation
+
+```text
+uv run pytest test/paper_trading/storage/test_corporate_action_migration.py test/paper_trading/storage/test_repository.py -q
+```
+
+Result: `97 passed, 2 skipped in 66.68s`. The skipped tests are the two
+PostgreSQL migration tests, skipped because `TEST_POSTGRESQL_URL` is unavailable
+in this environment; no Docker-backed PostgreSQL test URL was supplied.
+
+```text
+uv run ruff format --check storage/storage_db.py test/paper_trading/storage/test_corporate_action_migration.py
+uv run ruff check storage/storage_db.py test/paper_trading/storage/test_corporate_action_migration.py
+git diff --check
+```
+
+Result: all passed.
+
+### Simplify Review
+
+The requested `simplify` skill is not installed in this worktree (no matching
+entry exists under `.agents/skills/**/simplify/**`), so it could not be invoked.
+Manual review found no safe behavior-preserving simplification: the explicit
+post-transaction rollback before restoring `PRAGMA foreign_keys` is required by
+SQLite transaction semantics.

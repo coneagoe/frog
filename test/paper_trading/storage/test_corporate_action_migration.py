@@ -220,6 +220,63 @@ def test_sqlite_precision_upgrade_is_monotonic_and_preserves_dependent_foreign_k
     engine.dispose()
 
 
+def test_sqlite_precision_upgrade_rolls_back_when_foreign_key_check_fails(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'precision_upgrade_fk_failure.db'}")
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(dbapi_connection, _connection_record):
+        dbapi_connection.execute("PRAGMA foreign_keys = ON")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE paper_orders ("
+                "id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, status VARCHAR(20) NOT NULL, "
+                "limit_price NUMERIC(20, 4) NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX uq_paper_orders_active_account ON paper_orders (account_id) "
+                "WHERE status = 'active'"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE paper_trades ("
+                "id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, account_id INTEGER NOT NULL, "
+                "price NUMERIC(20, 4) NOT NULL, FOREIGN KEY (order_id) REFERENCES paper_orders (id))"
+            )
+        )
+        connection.execute(text("INSERT INTO paper_orders VALUES (1, 7, 'active', 123.4567)"))
+
+    raw_connection = engine.raw_connection()
+    try:
+        raw_connection.rollback()
+        raw_connection.execute("PRAGMA foreign_keys = OFF")
+        raw_connection.execute("INSERT INTO paper_trades VALUES (1, 999, 7, 12.5)")
+        raw_connection.commit()
+        raw_connection.execute("PRAGMA foreign_keys = ON")
+    finally:
+        raw_connection.close()
+
+    with pytest.raises(IntegrityError, match="foreign_key_check"):
+        _storage(engine)._widen_sqlite_numeric_columns()
+
+    with engine.connect() as connection:
+        order_type = inspect(connection).get_columns("paper_orders")[3]["type"]
+        assert (order_type.precision, order_type.scale) == (20, 4)
+        assert connection.execute(text("SELECT * FROM paper_orders")).one() == (1, 7, "active", 123.4567)
+        assert connection.execute(text("SELECT * FROM paper_trades")).one() == (1, 999, 7, 12.5)
+        assert connection.execute(text("PRAGMA foreign_key_check")).all() == [("paper_trades", 1, "paper_orders", 0)]
+        assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
+        assert connection.execute(
+            text("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'uq_paper_orders_active_account'")
+        ).scalar_one()
+
+    engine.dispose()
+
+
 def _postgres_engine() -> Engine:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
@@ -241,7 +298,7 @@ def test_postgresql_additive_corporate_action_migration_is_repeatable():
             connection.execute(text("DROP TYPE paper_corporate_action_type"))
             connection.execute(text("DROP TYPE paper_corporate_action_processing_status"))
             connection.execute(text("ALTER TABLE paper_accounts ALTER COLUMN share_count TYPE NUMERIC(20, 6)"))
-            connection.execute(text("ALTER TABLE paper_cash_ledger ALTER COLUMN amount TYPE NUMERIC(20, 4)"))
+            connection.execute(text("ALTER TABLE paper_cash_ledger ALTER COLUMN amount TYPE NUMERIC(40, 4)"))
             connection.execute(text("INSERT INTO paper_accounts (name, initial_cash) VALUES ('legacy', 10000)"))
 
             migrate_paper_trading_enums(connection)
@@ -343,7 +400,7 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             observed = {(row[0], row[1]): (row[2], row[3]) for row in types}
             assert observed[("paper_accounts", "initial_cash")] == (30, 12)
             assert observed[("paper_accounts", "share_count")] == (40, 20)
-            assert observed[("paper_cash_ledger", "amount")] == (30, 12)
+            assert observed[("paper_cash_ledger", "amount")] == (40, 12)
             assert observed[("paper_cash_ledger", "rounding_residual")] == (30, 24)
             assert observed[("paper_account_snapshots", "net_asset_value")] == (30, 12)
             assert connection.execute(

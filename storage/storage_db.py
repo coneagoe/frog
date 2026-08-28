@@ -4453,15 +4453,18 @@ class StorageDb:
             cursor.execute(f"ALTER TABLE {quoted_temp} RENAME TO {quoted_table}")
             for sql in index_sql:
                 cursor.execute(sql)
-            raw_connection.commit()
-            cursor.execute(f"PRAGMA foreign_keys = {foreign_keys_enabled}")
             violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
             if violations:
                 raise IntegrityError("PRAGMA foreign_key_check", None, violations)
+            raw_connection.commit()
         except Exception:
             raw_connection.rollback()
             raise
         finally:
+            # PRAGMA foreign_keys is a no-op inside a transaction. Ensure the
+            # successful commit or failed rollback has ended it before putting
+            # the connection back into the pool with its original setting.
+            raw_connection.rollback()
             cursor.execute(f"PRAGMA foreign_keys = {foreign_keys_enabled}")
             cursor.close()
             raw_connection.close()
@@ -4486,7 +4489,7 @@ class StorageDb:
         try:
             if not inspect(connection).has_table(table_name):
                 return
-            existing: list[str] = []
+            existing: dict[str, str] = {}
             for column in inspect(connection).get_columns(table_name):
                 column_name = column["name"]
                 target = column_types.get(column_name)
@@ -4497,19 +4500,18 @@ class StorageDb:
                 target_precision, target_scale = _numeric_precision_scale(target)
                 if precision is None or scale is None:
                     continue
-                if (
-                    precision <= target_precision
-                    and scale <= target_scale
-                    and (precision < target_precision or scale < target_scale)
-                ):
-                    existing.append(column_name)
+                if precision < target_precision or scale < target_scale:
+                    widened_precision = max(precision, target_precision)
+                    widened_scale = max(scale, target_scale)
+                    existing[column_name] = f"NUMERIC({widened_precision}, {widened_scale})"
             if not existing:
                 return
             connection.execute(
                 text(
                     f"ALTER TABLE {table_name} "
                     + ", ".join(
-                        f"ALTER COLUMN {column_name} TYPE {column_types[column_name]}" for column_name in existing
+                        f"ALTER COLUMN {column_name} TYPE {target_type}"
+                        for column_name, target_type in existing.items()
                     )
                 )
             )
