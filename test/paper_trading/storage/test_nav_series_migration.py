@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import uuid
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
@@ -11,6 +13,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_GROUPS
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.storage_db import _PAPER_SNAPSHOT_SERIES_LOCK_KEY, StorageDb
 
@@ -31,6 +34,7 @@ _FINANCIAL_COLUMNS = (
     "net_cash_flow",
     "pending_settlement",
 )
+_DECIMAL_NAN = Decimal("NaN")
 
 
 def _engine() -> Engine:
@@ -205,8 +209,78 @@ def _storage(engine: Engine) -> StorageDb:
     return db
 
 
+def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
+    """Complete reduced fixtures without adding columns owned by NAV migration."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+        for group in PAPER_TRADING_ENUM_GROUPS:
+            if group.type_name in {
+                "paper_market",
+                "paper_snapshot_point_type",
+                "paper_snapshot_quality_status",
+                "paper_snapshot_valuation_quality",
+                "paper_account_migration_repair_reason",
+            }:
+                continue
+            for column in group.columns:
+                if column.table_name not in tables:
+                    continue
+                columns = {item["name"] for item in inspector.get_columns(column.table_name)}
+                if column.column_name in columns:
+                    continue
+
+                default = column.default_sql
+                if default is None and not column.nullable:
+                    default = f"'{group.labels[0]}'::character varying"
+                nullable = "" if column.nullable else " NOT NULL"
+                default_clause = "" if default is None else f" DEFAULT {default}"
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} "
+                        f"{column.legacy_type_sql}{nullable}{default_clause}"
+                    )
+                )
+                if column.default_sql is None and not column.nullable:
+                    connection.execute(
+                        text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} DROP DEFAULT")
+                    )
+
+                table_columns = {item["name"] for item in inspect(connection).get_columns(column.table_name)}
+                existing_indexes = {index["name"] for index in inspect(connection).get_indexes(column.table_name)}
+                for index_name, index_sql in column.indexes:
+                    if index_name in existing_indexes or column.column_name not in table_columns:
+                        continue
+                    indexed_columns = set(re.findall(r"\b[a-z_]+\b", index_sql.lower())) & table_columns
+                    if not {column.column_name} <= indexed_columns:
+                        continue
+                    if (
+                        index_name == "uq_matching_active_scope"
+                        and not {
+                            "trade_date",
+                            "scope_key",
+                            "status",
+                        }
+                        <= table_columns
+                    ):
+                        continue
+                    index_sql = index_sql.replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ", 1)
+                    index_sql = index_sql.replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
+                    connection.execute(text(index_sql))
+
+
 def ensure_paper_trading_schema(engine: Engine) -> None:
-    _storage(engine).ensure_paper_trading_schema()
+    _prepare_reduced_legacy_enum_columns(engine)
+    governed_tables = {column.table_name for group in PAPER_TRADING_ENUM_GROUPS for column in group.columns}
+    existing_tables = set(inspect(engine).get_table_names())
+    has_reduced_governed_schema = bool(governed_tables & existing_tables) and bool(governed_tables - existing_tables)
+    if engine.dialect.name == "postgresql" and has_reduced_governed_schema:
+        with patch("paper_trading.storage.enum_migration.migrate_paper_trading_enums", return_value=None):
+            _storage(engine).ensure_paper_trading_schema()
+    else:
+        _storage(engine).ensure_paper_trading_schema()
 
 
 def fetch_snapshots(engine: Engine, account_id: int):
@@ -246,7 +320,11 @@ def _financials(row) -> dict[str, object]:
         if column not in row:
             continue
         value = row[column]
-        values[column] = None if value is None else Decimal(str(value))
+        if value is None:
+            values[column] = None
+        else:
+            numeric = value if isinstance(value, Decimal) else Decimal(str(value))
+            values[column] = _DECIMAL_NAN if numeric.is_nan() else numeric
     return values
 
 

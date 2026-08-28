@@ -663,6 +663,84 @@ The required simplification review found no further safe behavior-preserving
 simplification. PostgreSQL integration was not rerun in this environment when
 `TEST_POSTGRESQL_URL` was unavailable.
 
+## Task 8 NAV Legacy Fixture Compatibility
+
+Implemented a test-only compatibility helper in
+`test/paper_trading/storage/test_nav_series_migration.py`. Immediately before
+the schema wrapper, it inspects existing PostgreSQL tables and fills only
+missing non-addable enum-governed legacy VARCHAR columns, safely backfills
+non-null columns through temporary defaults, removes temporary defaults where
+the governance contract has no default, and creates applicable governed
+indexes. Snapshot-series addable columns remain absent so the NAV migration
+continues to own those additions. The wrapper avoids running the production
+enum migration preflight against intentionally partial reduced fixtures; no
+production migration code was changed. `_financials()` now compares numeric
+Decimal values and uses a shared NaN Decimal for stable NaN equality.
+
+### Exact validation output
+
+```text
+tools/run_tests.sh test/paper_trading/storage/test_nav_series_migration.py -q
+.......................                                                  [100%]
+23 passed in 44.53s
+```
+
+```text
+tools/run_tests.sh test/paper_trading/storage/test_enum_migration.py test/paper_trading/storage/test_corporate_action_migration.py -q
+........................................                                 [100%]
+40 passed in 180.70s (0:03:00)
+```
+
+```text
+uv run ruff format --check test/paper_trading/storage/test_nav_series_migration.py
+1 file already formatted
+uv run ruff check test/paper_trading/storage/test_nav_series_migration.py
+All checks passed!
+uv run mypy test/paper_trading/storage/test_nav_series_migration.py
+Success: no issues found in 1 source file
+git diff --check
+(no output)
+```
+
+```text
+uv run pre-commit run --files test/paper_trading/storage/test_nav_series_migration.py
+trim trailing whitespace.................................................Passed
+fix end of files.........................................................Passed
+mixed line ending........................................................Passed
+ruff format..............................................................Passed
+ruff (legacy alias)......................................................Passed
+mypy.....................................................................Passed
+```
+
+The required full-suite command was started twice with the PostgreSQL test
+runner and a 30-minute timeout. Both runs progressed into the repository
+suite, but the shared test PostgreSQL container terminated and subsequent
+connections failed with `server closed the connection unexpectedly` /
+`Connection refused`, producing broad database-backed failures unrelated to
+this fixture. The exact final full-suite summary was:
+
+```text
+=================== 14 failed, 5 passed, 4 errors in 35.13s ====================
+```
+
+### Simplify review
+
+Reviewed the touched helper after formatting and focused verification. The
+dialect guard, governed-group exclusions, temporary-default handling, and
+conditional index checks are required to preserve reduced fixture chronology
+and NAV-owned column additions. No safe simplification was identified.
+
+### Self-review and blockers
+
+- Only `test/paper_trading/storage/test_nav_series_migration.py` and this
+  required report were changed.
+- Production enum preflight and migration behavior were not modified.
+- Existing rows are not rewritten by the compatibility helper.
+- No unrelated tables are created by the helper.
+- Full-suite verification remains blocked by instability/termination of the
+  PostgreSQL test container; focused required suites and touched-file checks
+  are green.
+
 ## NAV Migration Fixture Fix
 
 - Added governed legacy `paper_accounts.status` and `paper_accounts.fee_preset`
