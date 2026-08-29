@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from paper_trading.domain.enums import OrderSide
 
@@ -39,6 +39,10 @@ class OrderResponse(BaseModel):
     validity_checked_at: datetime | None = None
     market: str = "a_share"
     stock_name: str | None = None
+
+    @field_serializer("limit_price", "frozen_cash")
+    def serialize_money(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"))
 
 
 class OrderListQuery(BaseModel):

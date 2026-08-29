@@ -115,6 +115,32 @@ def test_place_buy_order_freezes_estimated_cash(tmp_path):
     engine.dispose()
 
 
+def test_place_buy_order_authorizes_with_exact_sqlite_cash(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    cash = Decimal("123456.789012345678")
+    persisted_cash = Decimal("123456.789012346000")
+    account = repo.create_account("exact-order-cash", cash)
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    session.commit()
+    session.expire_all()
+
+    assert order.status == OrderStatus.ACCEPTED.value
+    assert repo.get_cash_frozen_internal(account.id) == Decimal("1005.010000000000")
+    assert repo.get_cash_available_internal(account.id) == persisted_cash - Decimal("1005.010000000000")
+    assert repo.get_cash_available(account.id) == (persisted_cash - Decimal("1005.010000000000")).quantize(
+        Decimal("0.0001")
+    )
+    engine.dispose()
+
+
 def test_place_order_rejects_invalid_lot_size(tmp_path):
     engine, session, repo, service = _repo_and_service(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
@@ -588,6 +614,52 @@ def test_place_buy_order_rejects_insufficient_cash(tmp_path):
     assert order.status == OrderStatus.REJECTED.value
     assert order.rejection_code == "INSUFFICIENT_CASH"
     assert repo.get_cash_available(account.id) == Decimal("1000.0000")
+    engine.dispose()
+
+
+def test_place_buy_order_authorizes_against_internal_cash_boundary(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    probe_account = repo.create_account("internal-cash-boundary-probe", Decimal("100000000.000000000000"))
+    probe_order = service.place_order(
+        probe_account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("12483.656608717554"),
+        date(2026, 6, 16),
+    )
+    session.commit()
+
+    required_cash = Decimal(str(probe_order.frozen_cash))
+    insufficient_cash = required_cash - Decimal("0.0001")
+    sufficient_account = repo.create_account("internal-cash-boundary-sufficient", required_cash)
+    insufficient_account = repo.create_account("internal-cash-boundary-insufficient", insufficient_cash)
+
+    sufficient_order = service.place_order(
+        sufficient_account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("12483.656608717554"),
+        date(2026, 6, 16),
+    )
+    insufficient_order = service.place_order(
+        insufficient_account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("12483.656608717554"),
+        date(2026, 6, 16),
+    )
+    session.commit()
+
+    assert required_cash == Decimal("1248752.650871755322")
+    assert sufficient_order.frozen_cash == required_cash
+    assert sufficient_order.status == OrderStatus.ACCEPTED.value
+    assert insufficient_order.status == OrderStatus.REJECTED.value
+    assert insufficient_order.rejection_code == "INSUFFICIENT_CASH"
+    assert repo.get_cash_available_internal(sufficient_account.id) == Decimal("0.000000000000")
+    assert repo.get_cash_available_internal(insufficient_account.id) < required_cash
     engine.dispose()
 
 

@@ -110,6 +110,46 @@ def _add_supported_etf(repo, symbol: str = "510300") -> None:
     )
 
 
+def test_matching_preserves_accounting_precision_through_buy_and_sell(tmp_path):
+    engine, session, repo, _, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("precision-matching", Decimal("100000"))
+    price = Decimal("1.234567891234")
+    buy = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        3,
+        price,
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("100000"),
+    )
+    matching_service._fill_order(buy)
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
+    assert position is not None
+    position.frozen_quantity = 3
+    sell = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.SELL,
+        3,
+        Decimal("1.345678912345"),
+        date(2026, 6, 17),
+        OrderStatus.ACCEPTED,
+        frozen_quantity=3,
+    )
+    matching_service._fill_order(sell)
+
+    trades = repo.list_trades(account.id)
+    assert trades[0].amount == Decimal("3.703703673702")
+    assert trades[1].amount == Decimal("4.037036737035")
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
+    assert position is None
+    assert account.realized_pnl == Decimal("-4.666666936667")
+    session.commit()
+    engine.dispose()
+
+
 def test_etf_workflow_fills_buy_rejects_same_date_sell_and_settles_next_date_sell(tmp_path):
     engine, session, repo, _, _, trade_date = _services(tmp_path)
     _add_supported_etf(repo)
@@ -251,12 +291,12 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         buy_snapshot.trade_count,
     ) == (
         buy_date,
-        Decimal("99684.9685"),
-        Decimal("0.0000"),
-        Decimal("315.0000"),
-        Decimal("99999.9685"),
-        Decimal("0.0000"),
-        Decimal("-0.0315"),
+        Decimal("99684.968500000003"),
+        Decimal("0.000000000000"),
+        Decimal("315.000000000000"),
+        Decimal("99999.968500000003"),
+        Decimal("0.000000000000"),
+        Decimal("-0.031500000000"),
         1,
         1,
         1,
@@ -336,8 +376,8 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         for snapshot in snapshots
         if snapshot.point_type == SnapshotPointType.TRADING.value
     ] == [
-        (buy_date, Decimal("99684.9685"), Decimal("315.0000"), Decimal("99999.9685")),
-        (sell_date, Decimal("100009.9360"), Decimal("0.0000"), Decimal("100009.9360")),
+        (buy_date, Decimal("99684.968500000003"), Decimal("315.000000000000"), Decimal("99999.968500000003")),
+        (sell_date, Decimal("100009.936000000002"), Decimal("0.000000000000"), Decimal("100009.936000000002")),
     ]
     sell_snapshot = snapshots[2]
     assert (

@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 from paper_trading.domain.enums import Market, MigrationRepairReason
 
@@ -86,6 +86,14 @@ class AccountResponse(BaseModel):
     cumulative_withdrawal: Decimal
     migration_repair_reason: MigrationRepairReason | None = None
 
+    @field_serializer("initial_cash", "cash_available", "cumulative_deposit", "cumulative_withdrawal")
+    def serialize_money(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"))
+
+    @field_serializer("share_count", "net_asset_value")
+    def serialize_nav_values(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.000000"))
+
 
 class PositionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -113,7 +121,16 @@ class CashLedgerResponse(BaseModel):
     trade_date: date | None = None
     net_asset_value: Decimal | None = None
     share_delta: Decimal | None = None
+    rounding_residual: Decimal = Decimal("0")
     note: str | None = None
+
+    @field_serializer("amount")
+    def serialize_amount(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"))
+
+    @field_serializer("net_asset_value", "share_delta")
+    def serialize_nav_values(self, value: Decimal | None) -> Decimal | None:
+        return value.quantize(Decimal("0.000000")) if value is not None else None
 
 
 class ImportPositionItem(BaseModel):
@@ -171,6 +188,14 @@ class CashFlowResponse(BaseModel):
     net_asset_value: Decimal
     share_count: Decimal
     ledger: CashLedgerResponse
+
+    @field_serializer("cash_available")
+    def serialize_cash_available(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.0001"))
+
+    @field_serializer("net_asset_value", "share_count")
+    def serialize_nav_values(self, value: Decimal) -> Decimal:
+        return value.quantize(Decimal("0.000000"))
 
 
 class LedgerRebuildRequest(BaseModel):

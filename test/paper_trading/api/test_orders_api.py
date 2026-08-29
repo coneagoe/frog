@@ -60,7 +60,7 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
             "symbol": "000001",
             "side": "buy",
             "quantity": 100,
-            "limit_price": "10.00",
+            "limit_price": "10.123456789012",
             "trade_date": "2026-06-16",
         },
         headers=headers,
@@ -71,7 +71,8 @@ def test_create_order_returns_accepted_order(monkeypatch, sqlite_session):
     assert payload["status"] == "accepted"
     assert payload["symbol"] == "000001"
     assert payload["quantity"] == 100
-    assert payload["limit_price"] == "10.0000"
+    assert payload["limit_price"] == "10.1235"
+    assert PaperTradingRepository(session).get_order(payload["id"]).limit_price == Decimal("10.123456789012")
 
 
 def test_trade_list_response_exposes_pagination_envelope():

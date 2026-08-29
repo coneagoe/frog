@@ -4,16 +4,14 @@ from decimal import Decimal
 from typing import Any, cast
 
 from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus, SnapshotValuationQuality
+from paper_trading.domain.precision import quantize_account_money, quantize_nav, quantize_shares
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperAccountSnapshot, PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
 
-_NAV = Decimal("0.000001")
-_MONEY = Decimal("0.0001")
 
-
-def _quantize_finite(value: Decimal, quantum: Decimal) -> Decimal:
-    return value.quantize(quantum) if value.is_finite() else value
+def _quantize_account_money_if_finite(value: Decimal) -> Decimal:
+    return quantize_account_money(value) if value.is_finite() else value
 
 
 def _validated_trading_nav(share_count: Decimal | None, candidate: Decimal | None) -> tuple[Decimal | None, str | None]:
@@ -60,11 +58,11 @@ class SnapshotService:
         preserve_account_nav: bool = False,
         event_at: datetime | None = None,
     ) -> PaperAccountSnapshot:
-        cash_available = self.repo.get_cash_available(account_id)
-        cash_frozen = self.repo.get_cash_frozen(account_id)
-        pending_settlement = self.repo.get_pending_settlement_total(account_id)
-        market_value = Decimal("0.0000")
-        unrealized_pnl = Decimal("0.0000")
+        cash_available = self.repo.get_cash_available_internal(account_id)
+        cash_frozen = self.repo.get_cash_frozen_internal(account_id)
+        pending_settlement = self.repo.get_pending_settlement_total_internal(account_id)
+        market_value = Decimal("0")
+        unrealized_pnl = Decimal("0")
         positions = self.repo.get_positions(account_id)
         active_positions = [position for position in positions if int(position.total_quantity or 0) > 0]
         resolved = valuations if valuations is not None else self._resolve_valuations(active_positions, trade_date)
@@ -74,19 +72,23 @@ class SnapshotService:
             close = prices[(market, position.symbol)]
             if close is None:
                 raise KeyError(f"No valuation available for {position.symbol} on {trade_date.isoformat()}")
-            position_value = (Decimal(position.total_quantity) * close).quantize(_MONEY)
+            position_value = Decimal(position.total_quantity) * close
             market_value += position_value
             unrealized_pnl += position_value - Decimal(position.cost_amount or 0)
 
         account = self.repo.get_account(account_id)
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
-        share_count = None if account.share_count is None else _quantize_finite(Decimal(account.share_count), _NAV)
+        raw_share_count = None if account.share_count is None else Decimal(account.share_count)
+        share_count = (
+            None if raw_share_count is None or not raw_share_count.is_finite() else quantize_shares(raw_share_count)
+        )
         raw_total = cash_available + cash_frozen + market_value + pending_settlement
-        total_assets = _quantize_finite(raw_total, _MONEY)
+        total_assets = _quantize_account_money_if_finite(raw_total)
         candidate = None
         if share_count is not None and share_count.is_finite() and share_count > 0:
-            candidate = _quantize_finite(raw_total / share_count, _NAV)
+            raw_candidate = raw_total / share_count
+            candidate = quantize_nav(raw_candidate) if raw_candidate.is_finite() else raw_candidate
         net_asset_value, invalid_reason = _validated_trading_nav(share_count, candidate)
         if net_asset_value is not None and share_count is not None and not preserve_account_nav:
             self.repo.update_account_nav_state(
@@ -118,20 +120,20 @@ class SnapshotService:
             valuation_details=stale_details or None,
             cash_available=cash_available,
             cash_frozen=cash_frozen,
-            market_value=market_value.quantize(_MONEY),
+            market_value=_quantize_account_money_if_finite(market_value),
             total_assets=total_assets,
-            realized_pnl=Decimal(account.realized_pnl or 0).quantize(_MONEY),
-            unrealized_pnl=unrealized_pnl.quantize(_MONEY),
+            realized_pnl=_quantize_account_money_if_finite(Decimal(account.realized_pnl or 0)),
+            unrealized_pnl=_quantize_account_money_if_finite(unrealized_pnl),
             position_count=len(active_positions),
             order_count=self.repo.count_orders(account_id, trade_date),
             trade_count=self.repo.count_trades(account_id, trade_date),
             net_asset_value=net_asset_value,
             share_count=share_count,
-            cumulative_deposit=Decimal(account.cumulative_deposit or 0).quantize(_MONEY),
-            cumulative_withdrawal=Decimal(account.cumulative_withdrawal or 0).quantize(_MONEY),
-            net_cash_flow=(
+            cumulative_deposit=_quantize_account_money_if_finite(Decimal(account.cumulative_deposit or 0)),
+            cumulative_withdrawal=_quantize_account_money_if_finite(Decimal(account.cumulative_withdrawal or 0)),
+            net_cash_flow=_quantize_account_money_if_finite(
                 Decimal(account.cumulative_deposit or 0) - Decimal(account.cumulative_withdrawal or 0)
-            ).quantize(_MONEY),
+            ),
             pending_settlement=pending_settlement,
         )
 

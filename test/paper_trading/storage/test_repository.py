@@ -3,12 +3,14 @@ from decimal import Decimal
 from typing import Any, cast
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import String, create_engine
+from sqlalchemy import cast as sa_cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.domain.enums import (
     CashEventType,
+    CorporateActionType,
     ETFEligibilityStatus,
     LedgerRebuildStatus,
     Market,
@@ -18,7 +20,12 @@ from paper_trading.domain.enums import (
     SnapshotPointType,
     SnapshotQualityStatus,
 )
-from paper_trading.storage.models import PaperPendingSettlement, PaperTradeValidityCheck, PaperValuationGap
+from paper_trading.storage.models import (
+    PaperCashLedger,
+    PaperPendingSettlement,
+    PaperTradeValidityCheck,
+    PaperValuationGap,
+)
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.domain_enums import (
     DailyBarDiagnosticAdjust,
@@ -185,6 +192,34 @@ def test_create_account_persists_initial_snapshot(sqlite_session) -> None:
     assert snapshot.cumulative_withdrawal == Decimal("0.0000")
     assert snapshot.net_cash_flow == Decimal("100000.0000")
     assert snapshot.net_asset_value == Decimal("1.000000")
+
+
+def test_list_snapshots_does_not_round_loaded_entities_before_commit(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("snapshot-precision", Decimal("100000"))
+    precise = Decimal("123456.789012345678")
+    persisted_precise = Decimal("123456.789012345675")
+    snapshot = repo.save_snapshot(
+        **{
+            **_trading_snapshot_values(account.id, date(2026, 8, 25), datetime(2026, 8, 25, tzinfo=timezone.utc)),
+            "cash_available": precise,
+            "total_assets": precise,
+            "net_asset_value": Decimal("1.123456789012"),
+            "share_count": precise,
+        }
+    )
+
+    listed = next(row for row in repo.list_snapshots(account.id) if row.id == snapshot.id)
+    assert listed.cash_available == precise
+    assert listed.net_asset_value == Decimal("1.123456789012")
+    sqlite_session.commit()
+    sqlite_session.expire_all()
+
+    reloaded = sqlite_session.get(type(snapshot), snapshot.id)
+    assert reloaded is not None
+    assert reloaded.cash_available == persisted_precise
+    assert reloaded.net_asset_value == Decimal("1.123456789012")
 
 
 def test_list_snapshots_orders_same_day_initial_before_trading(sqlite_session) -> None:
@@ -370,6 +405,44 @@ def test_add_cash_event_persists_nav_share_fields(sqlite_session):
     assert event.share_delta == Decimal("-4000.000000")
 
 
+def test_add_cash_event_defaults_rounding_residual_to_zero(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("cash-event-default-residual", Decimal("100000.00"))
+
+    event = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("1"))
+
+    assert event.rounding_residual == Decimal("0.000000000000")
+
+
+def test_add_cash_event_derives_residual_from_persisted_values(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("cash-event-derived-residual", Decimal("100000.00"))
+    amount = Decimal("10.000000000001")
+    nav = Decimal("1.234567890123")
+    shares = Decimal("8.100000000001")
+
+    event = repo.add_cash_event(
+        account.id,
+        CashEventType.DEPOSIT,
+        amount,
+        net_asset_value=nav,
+        share_delta=shares,
+        rounding_residual=Decimal("999"),
+    )
+    account_id = account.id
+    sqlite_session.flush()
+    loaded = next(ledger for ledger in repo.list_cash_ledger(account_id) if ledger.id == event.id)
+
+    assert loaded.share_delta is not None
+    assert loaded.net_asset_value is not None
+    assert event.share_delta is not None
+    assert event.net_asset_value is not None
+    assert loaded.rounding_residual == loaded.amount - loaded.share_delta * loaded.net_asset_value
+    assert event.rounding_residual == event.amount - event.share_delta * event.net_asset_value
+
+
 def test_cash_ledger_orders_by_occurred_at_then_id(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
@@ -399,6 +472,153 @@ def test_cash_ledger_orders_equal_occurred_at_by_id(sqlite_session):
         first.id,
         second.id,
     ]
+
+
+def test_corporate_actions_persist_filter_and_order(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-actions", Decimal("10000"))
+    event_at = datetime(2026, 8, 27, 9, 0, tzinfo=timezone.utc)
+    first = repo.create_corporate_action(
+        account_id=account.id,
+        market=Market.A_SHARE,
+        symbol="000001",
+        event_type=CorporateActionType.SPLIT,
+        event_at=event_at,
+        idempotency_key="split-1",
+        parameters={"ratio": "2"},
+        before_quantity=Decimal("100"),
+        after_quantity=Decimal("200"),
+        before_cost_amount=Decimal("1000"),
+        after_cost_amount=Decimal("1000"),
+        before_cash_available=Decimal("9000"),
+        after_cash_available=Decimal("9000"),
+    )
+    second = repo.create_corporate_action(
+        account_id=account.id,
+        market=Market.A_SHARE,
+        symbol="000002",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="dividend-1",
+        parameters={"amount": "50"},
+        cash_delta=Decimal("50"),
+        before_quantity=Decimal("100"),
+        after_quantity=Decimal("100"),
+        before_cost_amount=Decimal("1000"),
+        after_cost_amount=Decimal("1000"),
+        before_cash_available=Decimal("9000"),
+        after_cash_available=Decimal("9050"),
+    )
+
+    assert repo.get_corporate_action_by_idempotency_key(account.id, "split-1") is first
+    assert [item.id for item in repo.list_corporate_actions(account.id)] == [first.id, second.id]
+    assert repo.list_corporate_actions(account.id, symbol="000002") == [second]
+    assert repo.list_corporate_actions(account.id, event_type=CorporateActionType.SPLIT) == [first]
+    assert first.parameters == {"ratio": "2"}
+    assert first.after_quantity == Decimal("200.000000000000")
+
+
+def test_corporate_action_filters_normalize_offset_bounds_to_utc(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-utc-bounds", Decimal("10000"))
+    event = repo.create_corporate_action(
+        account_id=account.id,
+        market=Market.A_SHARE,
+        symbol="000001",
+        event_type=CorporateActionType.SPLIT,
+        event_at=datetime(2026, 8, 27, 1, tzinfo=timezone.utc),
+        idempotency_key="utc-bounds",
+        parameters={"ratio": Decimal("2")},
+        before_quantity=Decimal("1"),
+        after_quantity=Decimal("2"),
+        before_cost_amount=Decimal("1"),
+        after_cost_amount=Decimal("1"),
+        before_cash_available=Decimal("1"),
+        after_cash_available=Decimal("1"),
+    )
+    offset = timezone(timedelta(hours=8))
+    assert repo.list_corporate_actions(account.id, start_at=datetime(2026, 8, 27, 9, tzinfo=offset)) == [event]
+    assert repo.list_corporate_actions(account.id, end_at=datetime(2026, 8, 27, 9, tzinfo=offset)) == [event]
+
+
+def test_delete_account_removes_corporate_actions(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-actions-delete", Decimal("10000"))
+    repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.BONUS_SHARE,
+        event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        idempotency_key="bonus-1",
+        parameters={},
+        before_quantity=Decimal("1"),
+        after_quantity=Decimal("2"),
+        before_cost_amount=Decimal("1"),
+        after_cost_amount=Decimal("1"),
+        before_cash_available=Decimal("1"),
+        after_cash_available=Decimal("1"),
+    )
+
+    assert repo.delete_account(account.id) is True
+    assert repo.list_corporate_actions(account.id) == []
+
+
+def test_corporate_action_persistence_applies_shared_precision(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-actions-precision", Decimal("10000"))
+
+    action = repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        idempotency_key="precision-1",
+        parameters={"per_share_amount": Decimal("1.1234567890129")},
+        cash_delta=Decimal("1.1234567890129"),
+        quantity_delta=Decimal("2.1234567890129"),
+        before_quantity=Decimal("3.1234567890129"),
+        after_quantity=Decimal("5.2469135780258"),
+        before_cost_amount=Decimal("10.1234567890129"),
+        after_cost_amount=Decimal("10.1234567890129"),
+        before_cash_available=Decimal("100.1234567890129"),
+        after_cash_available=Decimal("101.2469135780258"),
+    )
+
+    assert action.parameters == {"per_share_amount": "1.1234567890129"}
+    assert action.cash_delta == Decimal("1.123456789013")
+    assert action.quantity_delta == Decimal("2.123456789013")
+    assert action.before_quantity == Decimal("3.123456789013")
+
+
+@pytest.mark.parametrize("field", ["parameters", "cash_delta", "before_quantity", "after_cash_available"])
+def test_corporate_action_persistence_rejects_non_finite_values(sqlite_session, field):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account(f"corporate-actions-finite-{field}", Decimal("10000"))
+    values: dict[str, Any] = {
+        "account_id": account.id,
+        "symbol": "000001",
+        "event_type": CorporateActionType.DIVIDEND,
+        "event_at": datetime(2026, 8, 27, tzinfo=timezone.utc),
+        "idempotency_key": f"finite-{field}",
+        "parameters": {"per_share_amount": Decimal("1")},
+        "cash_delta": Decimal("0"),
+        "quantity_delta": Decimal("0"),
+        "before_quantity": Decimal("1"),
+        "after_quantity": Decimal("1"),
+        "before_cost_amount": Decimal("1"),
+        "after_cost_amount": Decimal("1"),
+        "before_cash_available": Decimal("1"),
+        "after_cash_available": Decimal("1"),
+    }
+    values[field] = {"per_share_amount": Decimal("NaN")} if field == "parameters" else Decimal("Infinity")
+
+    with pytest.raises(ValueError, match="finite"):
+        repo.create_corporate_action(**values)
 
 
 class _NoOffsetTz(tzinfo):
@@ -1399,6 +1619,45 @@ def test_clear_account_rebuild_state_from_restores_pre_start_lots_and_realized_p
     assert position.cost_amount == Decimal("600.0000")
 
 
+def test_clear_account_rebuild_state_preserves_12_decimal_cost_and_pnl(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("precision-rebuild", Decimal("100000"))
+    trade_date = date(2026, 6, 16)
+    repo.create_position_lot(
+        account.id,
+        Market.A_SHARE,
+        "000001.SZ",
+        trade_date,
+        3,
+        3,
+        Decimal("1.234567891234"),
+        source="imported",
+    )
+    order = repo.create_order(
+        account.id, "000001.SZ", OrderSide.SELL, 1, Decimal("1.345678912345"), trade_date, OrderStatus.FILLED
+    )
+    repo.create_trade(
+        order.id,
+        account.id,
+        "000001.SZ",
+        OrderSide.SELL,
+        1,
+        Decimal("1.345678912345"),
+        Decimal("1.345678912345"),
+        Decimal("0.000023456789"),
+        trade_date,
+    )
+
+    repo.clear_account_rebuild_state_from(account.id, date(2026, 6, 17))
+
+    rebuilt_account = repo.get_account(account.id)
+    positions = repo.get_positions(account.id)
+    assert rebuilt_account is not None
+    assert rebuilt_account.realized_pnl == Decimal("0.111087564322")
+    assert positions[0].cost_amount == Decimal("2.469135782468")
+
+
 def test_clear_account_rebuild_state_preserves_initial_cash(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
@@ -2112,6 +2371,58 @@ def test_create_pending_settlement(sqlite_session):
     assert pending.settled is False
 
 
+def test_internal_cash_aggregations_preserve_sqlite_decimal_text(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    amount = Decimal("123456.789012345678")
+    persisted_amount = Decimal("123456.789012346000")
+    account = repo.create_account("aggregation-precision", amount)
+    order = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 8, 28),
+        OrderStatus.ACCEPTED,
+        frozen_cash=amount,
+    )
+    pending_amount = Decimal("123456.789012345678")
+    persisted_pending_amount = Decimal("123456.789012346000")
+    pending = repo.create_pending_settlement(
+        account.id,
+        pending_amount,
+        date(2026, 8, 29),
+        trade_id=1,
+    )
+    sqlite_session.commit()
+    sqlite_session.expire_all()
+
+    assert repo.get_cash_available_internal(account.id) == persisted_amount
+    assert repo.get_cash_available(account.id) == persisted_amount.quantize(Decimal("0.0001"))
+    assert repo.get_cash_frozen_internal(account.id) == persisted_amount
+    assert repo.get_pending_settlement_total_internal(account.id) == persisted_pending_amount
+    assert order.frozen_cash == Decimal("123456.789012345675")
+    assert repo.session.query(PaperPendingSettlement.amount).filter_by(id=pending.id).scalar() == Decimal(
+        "123456.789012345675"
+    )
+
+
+def test_cash_available_as_of_internal_preserves_adjacent_decimal_boundary(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("as-of-precision", Decimal("100.000000000001"))
+    repo.add_cash_event(
+        account.id,
+        CashEventType.TRADE,
+        Decimal("0.000000000001"),
+        trade_date=date(2026, 8, 28),
+    )
+
+    assert repo.get_cash_available_as_of_internal(account.id, date(2026, 8, 27)) == Decimal("100.000000000001")
+    assert repo.get_cash_available_as_of_internal(account.id, date(2026, 8, 28)) == Decimal("100.000000000002")
+
+
 def test_settle_pending_releases_cash(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
@@ -2125,3 +2436,27 @@ def test_settle_pending_releases_cash(sqlite_session):
     )
     repo.settle_pending(pending.id)
     assert pending.settled is True
+
+
+def test_settle_pending_preserves_sqlite_high_precision_amount(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("settle-precision", Decimal("0.01"))
+    logical_amount = Decimal("123456.789012346000")
+    pending = repo.create_pending_settlement(
+        account_id=account.id,
+        amount=logical_amount,
+        expected_settle_date=date(2026, 8, 29),
+        trade_id=1,
+        source="hk_sell",
+    )
+    sqlite_session.commit()
+    sqlite_session.expire_all()
+
+    repo.settle_pending(pending.id)
+    ledger_amount = repo.session.query(sa_cast(PaperCashLedger.amount, String)).filter_by(trade_id=1).scalar()
+
+    assert Decimal(str(ledger_amount)) == logical_amount
+    assert repo.get_cash_available_internal(account.id) == Decimal("0.01") + logical_amount
+    assert pending.settled is True
+    assert repo.get_pending_settlement_total_internal(account.id) == Decimal("0")

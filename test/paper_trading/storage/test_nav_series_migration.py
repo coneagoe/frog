@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import uuid
 from decimal import Decimal
@@ -11,7 +12,9 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from paper_trading.storage.enum_migration import PAPER_TRADING_ENUM_GROUPS
 from paper_trading.storage.repository import PaperTradingRepository
+from storage.model import Base
 from storage.storage_db import _PAPER_SNAPSHOT_SERIES_LOCK_KEY, StorageDb
 
 _FINANCIAL_COLUMNS = (
@@ -31,6 +34,7 @@ _FINANCIAL_COLUMNS = (
     "net_cash_flow",
     "pending_settlement",
 )
+_DECIMAL_NAN = Decimal("NaN")
 
 
 def _engine() -> Engine:
@@ -79,6 +83,8 @@ def _create_legacy_schema(
             CREATE TABLE paper_accounts (
                 id integer PRIMARY KEY,
                 name varchar(100) NOT NULL UNIQUE,
+                status varchar(20) NOT NULL DEFAULT 'active',
+                fee_preset varchar(30) NOT NULL DEFAULT 'a_share',
                 initial_cash numeric(20, 4) NOT NULL,
                 share_count numeric(20, 6) NOT NULL DEFAULT 0,
                 net_asset_value numeric(20, 6) NOT NULL DEFAULT 1,
@@ -203,7 +209,98 @@ def _storage(engine: Engine) -> StorageDb:
     return db
 
 
+def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
+    """Complete reduced fixtures without adding columns owned by NAV migration."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        tables = set(inspector.get_table_names())
+        governed_tables = {column.table_name for group in PAPER_TRADING_ENUM_GROUPS for column in group.columns}
+        operational_tables = {"paper_account_snapshots", "paper_valuation_gaps", "paper_etf_eligibility"}
+        optional_tables = {"daily_bar_diagnostics", "paper_corporate_actions"}
+        missing_tables = governed_tables - tables - operational_tables - optional_tables
+        missing_metadata_tables = [table for table in Base.metadata.sorted_tables if table.name in missing_tables]
+        required_enum_types = {
+            group.type_name
+            for group in PAPER_TRADING_ENUM_GROUPS
+            if any(column.table_name in missing_tables for column in group.columns)
+        }
+
+        for group in PAPER_TRADING_ENUM_GROUPS:
+            if group.type_name not in required_enum_types:
+                continue
+            labels = ", ".join(f"'{label}'" for label in group.labels)
+            connection.execute(
+                text(
+                    f"DO $$ BEGIN CREATE TYPE {group.type_name} AS ENUM ({labels}); "
+                    "EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+                )
+            )
+        if missing_metadata_tables:
+            Base.metadata.create_all(connection, tables=missing_metadata_tables, checkfirst=True)
+            tables = set(inspect(connection).get_table_names())
+        for group in PAPER_TRADING_ENUM_GROUPS:
+            if group.type_name in {
+                "paper_market",
+                "paper_snapshot_point_type",
+                "paper_snapshot_quality_status",
+                "paper_snapshot_valuation_quality",
+                "paper_account_migration_repair_reason",
+            }:
+                continue
+            for column in group.columns:
+                if column.table_name not in tables:
+                    continue
+                columns = {item["name"] for item in inspect(connection).get_columns(column.table_name)}
+                if column.column_name in columns:
+                    continue
+
+                default = column.default_sql
+                if default is None and not column.nullable:
+                    default = f"'{group.labels[0]}'::character varying"
+                nullable = "" if column.nullable else " NOT NULL"
+                default_clause = "" if default is None else f" DEFAULT {default}"
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} "
+                        f"{column.legacy_type_sql}{nullable}{default_clause}"
+                    )
+                )
+                if column.default_sql is None and not column.nullable:
+                    connection.execute(
+                        text(f"ALTER TABLE {column.table_name} ALTER COLUMN {column.column_name} DROP DEFAULT")
+                    )
+
+                table_columns = {item["name"] for item in inspect(connection).get_columns(column.table_name)}
+                existing_indexes = {index["name"] for index in inspect(connection).get_indexes(column.table_name)}
+                for index_name, index_sql in column.indexes:
+                    if index_name in existing_indexes or column.column_name not in table_columns:
+                        continue
+                    indexed_columns = set(re.findall(r"\b[a-z_]+\b", index_sql.lower())) & table_columns
+                    if not {column.column_name} <= indexed_columns:
+                        continue
+                    if (
+                        index_name == "uq_matching_active_scope"
+                        and not {
+                            "trade_date",
+                            "scope_key",
+                            "status",
+                        }
+                        <= table_columns
+                    ):
+                        continue
+                    index_sql = index_sql.replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ", 1)
+                    index_sql = index_sql.replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
+                    connection.execute(text(index_sql))
+
+
 def ensure_paper_trading_schema(engine: Engine) -> None:
+    existing_tables = set(inspect(engine).get_table_names())
+    if engine.dialect.name == "postgresql" and "paper_account_snapshots" not in existing_tables:
+        _storage(engine)._ensure_paper_account_repair_without_orders()
+        return
+    _prepare_reduced_legacy_enum_columns(engine)
     _storage(engine).ensure_paper_trading_schema()
 
 
@@ -244,7 +341,11 @@ def _financials(row) -> dict[str, object]:
         if column not in row:
             continue
         value = row[column]
-        values[column] = None if value is None else str(value)
+        if value is None:
+            values[column] = None
+        else:
+            numeric = value if isinstance(value, Decimal) else Decimal(str(value))
+            values[column] = _DECIMAL_NAN if numeric.is_nan() else numeric
     return values
 
 
@@ -585,6 +686,7 @@ def test_nav_series_migration_waits_on_transaction_advisory_lock(postgres_legacy
 
 def test_nav_series_migration_serializes_concurrent_startup(postgres_legacy_db):
     engine, schema = postgres_legacy_db
+    _prepare_reduced_legacy_enum_columns(engine)
     errors: list[BaseException] = []
     workers_engines = [_schema_engine(engine.url, schema) for _ in range(2)]
 
@@ -1139,6 +1241,7 @@ def test_nav_series_migration_marks_omitted_historical_trading_tables():
         original = {snapshot_id: _financials(_snapshot_by_id(bound, snapshot_id)) for snapshot_id in range(1, 5)}
 
         db = _storage(bound)
+        _prepare_reduced_legacy_enum_columns(bound)
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 
@@ -1179,6 +1282,7 @@ def test_nav_series_migration_marks_global_pre_creation_matching_run():
         original = _financials(_snapshot_by_id(bound, 1))
 
         db = _storage(bound)
+        _prepare_reduced_legacy_enum_columns(bound)
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 
@@ -1222,6 +1326,7 @@ def test_nav_series_migration_ignores_null_account_non_global_matching_run():
         original = _financials(_snapshot_by_id(bound, 1))
 
         db = _storage(bound)
+        _prepare_reduced_legacy_enum_columns(bound)
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 
@@ -1248,6 +1353,7 @@ def test_nav_series_migration_ignores_null_account_non_global_matching_run():
         original = _financials(_snapshot_by_id(bound, 1))
 
         db = _storage(bound)
+        _prepare_reduced_legacy_enum_columns(bound)
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 
@@ -1508,6 +1614,8 @@ def _create_accounts_without_orders_or_snapshots(connection: Connection, *, sqli
             CREATE TABLE paper_accounts (
                 id integer PRIMARY KEY,
                 name varchar(100) NOT NULL UNIQUE,
+                status varchar(20) NOT NULL DEFAULT 'active',
+                fee_preset varchar(30) NOT NULL DEFAULT 'a_share',
                 initial_cash numeric(20, 4) NOT NULL,
                 share_count numeric(20, 6) NOT NULL DEFAULT 0,
                 created_at {timestamp_type} NOT NULL

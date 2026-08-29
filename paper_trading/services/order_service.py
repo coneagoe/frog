@@ -21,6 +21,7 @@ from paper_trading.domain.hk_connect_rules import (
     ensure_hk_odd_lot_sell,
     validate_hk_tick_size,
 )
+from paper_trading.domain.precision import quantize_account_money
 from paper_trading.domain.rules import (
     ensure_lot_size,
     ensure_sufficient_cash,
@@ -303,7 +304,7 @@ class OrderService:
         if side == OrderSide.BUY:
             amount = Decimal(quantity) * limit_price
             fees = calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account))
-            frozen_cash = (amount + fees.total).quantize(Decimal("0.0001"))
+            frozen_cash = quantize_account_money(amount + fees.total)
 
         order = self.repo.create_order(
             account_id=account_id,
@@ -391,7 +392,7 @@ class OrderService:
         if side == OrderSide.BUY:
             amount = Decimal(quantity) * limit_price
             fees = calculate_etf_fees(OrderSide.BUY, amount, etf_fee_config_from_account(account))
-            frozen_cash = (amount + fees.total).quantize(Decimal("0.0001"))
+            frozen_cash = quantize_account_money(amount + fees.total)
 
         order = self.repo.create_order(
             account_id=account_id,
@@ -505,8 +506,8 @@ class OrderService:
             if market == Market.ETF
             else calculate_a_share_fees(OrderSide.BUY, amount, fee_config_from_account(account))
         )
-        frozen_cash = (amount + fees.total).quantize(Decimal("0.0001"))
-        ensure_sufficient_cash(self.repo.get_cash_available(account_id), frozen_cash)
+        frozen_cash = quantize_account_money(amount + fees.total)
+        ensure_sufficient_cash(self.repo.get_cash_available_internal(account_id), frozen_cash)
         order = self.repo.create_order(
             account_id=account_id,
             symbol=symbol,
@@ -611,8 +612,8 @@ class OrderService:
         amount = Decimal(quantity) * limit_price
         fee_config = hk_fee_config_from_account(account)
         fees = calculate_hk_connect_fees(OrderSide.BUY, amount, fee_config)
-        frozen_cash = (amount + fees.total).quantize(Decimal("0.01"))
-        ensure_sufficient_cash(self.repo.get_cash_available(account_id), frozen_cash)
+        frozen_cash = quantize_account_money(amount + fees.total)
+        ensure_sufficient_cash(self.repo.get_cash_available_internal(account_id), frozen_cash)
         order = self.repo.create_order(
             account_id=account_id,
             symbol=symbol,

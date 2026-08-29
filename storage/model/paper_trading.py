@@ -24,6 +24,8 @@ from sqlalchemy.sql import func
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
+    CorporateActionProcessingStatus,
+    CorporateActionType,
     ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
@@ -48,6 +50,7 @@ from .orm_compat import Mapped, mapped_column
 
 tb_name_paper_accounts = "paper_accounts"
 tb_name_paper_cash_ledger = "paper_cash_ledger"
+tb_name_paper_corporate_actions = "paper_corporate_actions"
 tb_name_paper_positions = "paper_positions"
 tb_name_paper_position_lots = "paper_position_lots"
 tb_name_paper_orders = "paper_orders"
@@ -86,12 +89,12 @@ class PaperAccount(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    initial_cash: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    share_count: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, server_default=text("0"))
-    net_asset_value: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False, server_default=text("1"))
-    cumulative_deposit: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
-    cumulative_withdrawal: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
-    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    initial_cash: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    share_count: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    net_asset_value: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("1"))
+    cumulative_deposit: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    cumulative_withdrawal: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
     fee_preset: Mapped[str] = mapped_column(
         _value_enum(FeePreset, "paper_fee_preset"), nullable=False, server_default="a_share"
     )
@@ -125,14 +128,63 @@ class PaperCashLedger(Base):
         Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True
     )
     event_type: Mapped[str] = mapped_column(_value_enum(CashEventType, "paper_cash_event_type"), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
     order_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     trade_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
-    net_asset_value: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
-    share_delta: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    net_asset_value: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    share_delta: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    rounding_residual: Mapped[Decimal] = mapped_column(Numeric(30, 24), nullable=False, server_default=text("0"))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PaperCorporateAction(Base):
+    __tablename__ = tb_name_paper_corporate_actions
+    __table_args__ = (
+        Index(
+            "uq_paper_corporate_actions_account_idempotency",
+            "account_id",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index("ix_paper_corporate_actions_account_event", "account_id", "event_at", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True
+    )
+    market: Mapped[str] = mapped_column(
+        _value_enum(Market, "paper_market"), nullable=False, server_default="a_share", index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(
+        _value_enum(CorporateActionType, "paper_corporate_action_type"), nullable=False, index=True
+    )
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    processing_status: Mapped[str] = mapped_column(
+        _value_enum(CorporateActionProcessingStatus, "paper_corporate_action_processing_status"),
+        nullable=False,
+        server_default="completed",
+        index=True,
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    error_details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cash_delta: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    quantity_delta: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    before_quantity: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    after_quantity: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    before_cost_amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    after_cost_amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    before_cash_available: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    after_cash_available: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    affected_start_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    affected_end_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class PaperPosition(Base):
@@ -148,8 +200,8 @@ class PaperPosition(Base):
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     total_quantity: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     frozen_quantity: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    cost_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
-    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    cost_amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
     source: Mapped[str] = mapped_column(
         _value_enum(PositionSource, "paper_position_source"), nullable=False, server_default="trade"
     )
@@ -169,7 +221,7 @@ class PaperPositionLot(Base):
     buy_trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     original_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     remaining_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    cost_price: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    cost_price: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
     source: Mapped[str] = mapped_column(
         _value_enum(PositionSource, "paper_position_source"), nullable=False, server_default="trade"
     )
@@ -198,11 +250,11 @@ class PaperOrder(Base):
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     side: Mapped[str] = mapped_column(_value_enum(OrderSide, "paper_order_side"), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    limit_price: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    limit_price: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     status: Mapped[str] = mapped_column(_value_enum(OrderStatus, "paper_order_status"), nullable=False, index=True)
     filled_quantity: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    frozen_cash: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    frozen_cash: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
     frozen_quantity: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     rejection_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -231,11 +283,11 @@ class PaperTradeValidityCheck(Base):
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     side: Mapped[str] = mapped_column(_value_enum(OrderSide, "paper_order_side"), nullable=False)
-    input_price: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    daily_low: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
-    daily_high: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
-    limit_up_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
-    limit_down_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
+    input_price: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    daily_low: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    daily_high: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    limit_up_price: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    limit_down_price: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
     touched_limit_up: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     touched_limit_down: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     price_in_range: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -266,9 +318,9 @@ class PaperTrade(Base):
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     side: Mapped[str] = mapped_column(_value_enum(OrderSide, "paper_order_side"), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    price: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    fees: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    fees: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     trade_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -293,11 +345,11 @@ class PaperPositionRoundTrip(Base):
     )
     open_trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     close_trade_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
-    entry_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
-    exit_amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
-    fees: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
-    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
-    return_pct: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    entry_amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    exit_amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    fees: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    return_pct: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
     holding_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(
         _value_enum(RoundTripStatus, "paper_round_trip_status"), nullable=False, server_default="open", index=True
@@ -355,21 +407,21 @@ class PaperAccountSnapshot(Base):
         _value_enum(SnapshotValuationQuality, "paper_snapshot_valuation_quality"), nullable=True
     )
     valuation_details: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
-    cash_available: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    cash_frozen: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    market_value: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    total_assets: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
-    unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    cash_available: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    cash_frozen: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    market_value: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    total_assets: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    realized_pnl: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    unrealized_pnl: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
     position_count: Mapped[int] = mapped_column(Integer, nullable=False)
     order_count: Mapped[int] = mapped_column(Integer, nullable=False)
     trade_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    net_asset_value: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
-    share_count: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
-    cumulative_deposit: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
-    cumulative_withdrawal: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
-    net_cash_flow: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
-    pending_settlement: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False, server_default=text("0"))
+    net_asset_value: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    share_count: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    cumulative_deposit: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    cumulative_withdrawal: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    net_cash_flow: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
+    pending_settlement: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -429,7 +481,7 @@ class PaperPendingSettlement(Base):
     account_id: Mapped[int] = mapped_column(
         Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True
     )
-    amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
     expected_settle_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source: Mapped[str] = mapped_column(

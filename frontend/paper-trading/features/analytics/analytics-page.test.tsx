@@ -323,4 +323,40 @@ describe("AnalyticsPage", () => {
     expect(closedRoundTripsCard.closest(".metric-card")).toHaveTextContent("-");
     expect(closedRoundTripsCard.closest(".metric-card")).not.toHaveTextContent("0");
   });
+
+  it("renders the corporate action audit with formatted values and labels", async () => {
+    getAnalyticsMock.mockResolvedValueOnce({
+      ...analyticsPayload,
+      event_series: [{
+        event_type: "corporate_action",
+        id: 4,
+        event_at: "2026-09-10T15:00:00Z",
+        symbol: "000001.SZ",
+        action_type: "rights_issue",
+        parameters: { price: "12.50", quantity: "100" },
+        impact: {
+          cash_delta: "-12.50",
+          quantity_delta: "-100",
+          before_quantity: "200",
+          after_quantity: "100",
+          before_cost_amount: "¥2000",
+          after_cost_amount: "¥2000",
+          before_cash_available: "100000.00",
+          after_cash_available: "99987.50",
+          affected_start_date: null,
+          affected_end_date: null
+        },
+        created_at: "2026-09-10T15:00:00Z"
+      }]
+    });
+
+    render(<AnalyticsPage />);
+
+    const audit = closestSection(await screen.findByRole("heading", { level: 2, name: "Corporate Action Audit" }));
+    expect(within(audit).getByRole("cell", { name: /Rights Issue/ })).toBeInTheDocument();
+    expect(within(audit).getByRole("cell", { name: /Price ¥12\.50\s*, Quantity 100/ })).toBeInTheDocument();
+    expect(within(audit).getByText(/Qty 200 → 100/)).toBeInTheDocument();
+    expect(within(audit).getByText(/¥100,000.00/)).toBeInTheDocument();
+    expect(within(audit).getByText(/¥99,987.50/)).toBeInTheDocument();
+  });
 });

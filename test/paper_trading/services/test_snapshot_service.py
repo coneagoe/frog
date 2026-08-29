@@ -62,6 +62,30 @@ def test_generate_snapshot_values_positions_at_close(tmp_path):
     engine.dispose()
 
 
+def test_generate_snapshot_preserves_high_precision_cash_after_reload(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_precision.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    repo = PaperTradingRepository(session)
+    cash = Decimal("123456.789012345678")
+    account = repo.create_account("precise-cash", cash)
+
+    snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 8, 25))
+    session.commit()
+    snapshot_id = snapshot.id
+    session.close()
+
+    reloaded_session = sessionmaker(bind=engine)()
+    reloaded = reloaded_session.get(type(snapshot), snapshot_id)
+    assert reloaded is not None
+    assert reloaded.cash_available == Decimal("123456.789012345995")
+    assert reloaded.total_assets == Decimal("123456.789012345995")
+    assert reloaded.cumulative_deposit == Decimal("123456.789012345675")
+    assert reloaded.net_cash_flow == Decimal("123456.789012345675")
+    reloaded_session.close()
+    engine.dispose()
+
+
 def test_snapshot_values_etf_position_from_etf_daily_bar(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'snapshot_etf.db'}")
     Base.metadata.create_all(engine)
@@ -412,9 +436,11 @@ def test_snapshot_includes_pending_settlement(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("pending-snap", Decimal("100000.00"))
+    amount = Decimal("123456.789012345678")
+    persisted_amount = Decimal("123456.789012346000")
     repo.create_pending_settlement(
         account_id=account.id,
-        amount=Decimal("50000.00"),
+        amount=amount,
         expected_settle_date=date(2026, 7, 23),
         trade_id=1,
         source="hk_sell",
@@ -423,9 +449,10 @@ def test_snapshot_includes_pending_settlement(sqlite_session):
     snapshot_service = SnapshotService(repo, md)
     snapshot = snapshot_service.generate_snapshot(account.id, date(2026, 7, 21))
 
-    assert snapshot.pending_settlement == Decimal("50000.0000")
+    assert repo.get_pending_settlement_total_internal(account.id) == persisted_amount
+    assert snapshot.pending_settlement == persisted_amount
     # total_assets includes cash_available + cash_frozen + market_value + pending_settlement
-    assert snapshot.total_assets == Decimal("150000.0000")  # 100000 + 50000
+    assert snapshot.total_assets == persisted_amount + Decimal("100000.00")
 
 
 def test_snapshot_passes_position_market_to_get_daily_bar(sqlite_session):
@@ -684,13 +711,13 @@ def _fake_snapshot_repo(account: SimpleNamespace, *, cash_available: Decimal = D
     class Repository:
         updated = False
 
-        def get_cash_available(self, account_id):
+        def get_cash_available_internal(self, account_id):
             return cash_available
 
-        def get_cash_frozen(self, account_id):
+        def get_cash_frozen_internal(self, account_id):
             return Decimal("0")
 
-        def get_pending_settlement_total(self, account_id):
+        def get_pending_settlement_total_internal(self, account_id):
             return Decimal("0")
 
         def get_positions(self, account_id):

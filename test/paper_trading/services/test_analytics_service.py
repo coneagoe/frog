@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from paper_trading.domain.enums import (
+    CorporateActionType,
     Market,
     MigrationRepairReason,
     OrderSide,
@@ -17,7 +18,7 @@ from paper_trading.domain.enums import (
 )
 from paper_trading.schemas.analytics import AnalyticsUnavailableResponse
 from paper_trading.services.analytics_service import AnalyticsService
-from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger
+from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger, PaperCorporateAction
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -831,6 +832,16 @@ def test_nav_series_preserves_input_order_and_excludes_invalid_points():
     ]
 
 
+def test_nav_series_excludes_later_non_snapshot_points_even_with_positive_nav():
+    snapshots = [
+        _nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value),
+        _nav_snapshot(nav=Decimal("1.100000"), point_type=SnapshotPointType.TRADING.value),
+        _nav_snapshot(nav=Decimal("9.000000"), point_type="recalculation"),
+    ]
+
+    assert AnalyticsService._nav_series(snapshots) == [Decimal("1.000000"), Decimal("1.100000")]
+
+
 def test_nav_series_is_empty_when_first_point_is_not_valid_initial():
     invalid_initial = [
         _nav_snapshot(
@@ -1005,6 +1016,16 @@ def test_event_series_narrows_cash_event_types_and_excludes_non_cash_events():
             trade_date=date(2026, 8, 1),
             note=None,
         ),
+        SimpleNamespace(
+            id=4,
+            occurred_at=occurred_at,
+            event_type="corporate_action",
+            amount=Decimal("25"),
+            net_asset_value=None,
+            share_delta=None,
+            trade_date=date(2026, 8, 1),
+            note="dividend",
+        ),
     ]
 
     events = AnalyticsService._event_series(
@@ -1043,6 +1064,79 @@ def test_event_series_excludes_only_structural_initial_funding():
     events = AnalyticsService._event_series([], cast(list, ledger_entries))
 
     assert [event.id for event in events] == [2]
+
+
+def test_event_series_normalizes_offset_equivalent_and_legacy_naive_timestamps():
+    timestamp = datetime(2026, 8, 1, 1, 0, tzinfo=timezone.utc)
+    snapshots = [
+        SimpleNamespace(
+            id=1,
+            event_at=datetime(2026, 8, 1, 1, 0),
+            point_type="initial",
+            quality_status="valid",
+            invalid_reason=None,
+            net_asset_value=Decimal("1"),
+            share_count=Decimal("100"),
+        ),
+        SimpleNamespace(
+            id=2,
+            event_at=datetime(2026, 8, 1, 9, 0, tzinfo=timezone(timedelta(hours=8))),
+            point_type="trading",
+            quality_status="valid",
+            invalid_reason=None,
+            net_asset_value=Decimal("1.1"),
+            share_count=Decimal("100"),
+        ),
+    ]
+    ledger_entries = [
+        SimpleNamespace(
+            id=3,
+            occurred_at=timestamp,
+            event_type="deposit",
+            amount=Decimal("10"),
+            net_asset_value=Decimal("1"),
+            share_delta=Decimal("10"),
+            trade_date=date(2026, 8, 1),
+            note=None,
+        )
+    ]
+
+    events = AnalyticsService._event_series(
+        cast(list[PaperAccountSnapshot], snapshots),
+        cast(list[PaperCashLedger], ledger_entries),
+    )
+
+    assert [event.id for event in events] == [1, 2, 3]
+    assert all(event_time.tzinfo == timezone.utc for event_time in [events[0].event_at, events[1].event_at])
+    assert events[0].event_at == timestamp
+    assert events[1].event_at == timestamp
+
+
+def test_event_series_orders_corporate_action_by_utc_priority_and_serializes_impact():
+    action = SimpleNamespace(
+        id=4,
+        event_at=datetime(2026, 8, 1, 9, 0),
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND.value,
+        parameters={"per_share_amount": "1"},
+        cash_delta=Decimal("1.123456789"),
+        quantity_delta=Decimal("2.123456789"),
+        before_quantity=Decimal("100"),
+        after_quantity=Decimal("102"),
+        before_cost_amount=Decimal("1000.123456"),
+        after_cost_amount=Decimal("1001.123456"),
+        before_cash_available=Decimal("10"),
+        after_cash_available=Decimal("11.123456"),
+        affected_start_date=date(2026, 8, 1),
+        affected_end_date=date(2026, 8, 2),
+        created_at=datetime(2026, 8, 1, 1, 0),
+    )
+
+    events = AnalyticsService._event_series([], [], [cast(PaperCorporateAction, action)])
+
+    assert events[0].event_at == datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
+    assert events[0].impact["cash_delta"] == Decimal("1.1235")
+    assert events[0].impact["quantity_delta"] == Decimal("2.123457")
 
 
 def test_linked_total_return_uses_valid_valuation_snapshots_only():

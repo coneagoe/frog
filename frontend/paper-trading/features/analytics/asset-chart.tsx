@@ -14,8 +14,9 @@ export function AssetChart({ events }: { events: Array<AnalyticsEvent | Snapshot
         if ("event_type" in event && event.event_type !== "snapshot") {
           return [];
         }
-        const snapshot = event;
+        const snapshot = event as Snapshot | Extract<AnalyticsEvent, { event_type: "snapshot" }>;
         const navValue = "event_type" in snapshot ? snapshot.nav : snapshot.net_asset_value;
+        if (!("event_type" in snapshot) && !("net_asset_value" in snapshot)) return [];
         const nav = Number(navValue);
         const timestamp = Math.floor(new Date(snapshot.event_at).getTime() / 1000);
         if (

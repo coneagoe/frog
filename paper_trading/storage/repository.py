@@ -4,7 +4,8 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import func, or_
+from sqlalchemy import String, func, or_
+from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from paper_trading.domain.enums import (
     REPLAY_REJECTION_MARKER,
     CashEventType,
+    CorporateActionType,
     ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
@@ -29,12 +31,20 @@ from paper_trading.domain.enums import (
 )
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label, canonical_stock_id
+from paper_trading.domain.precision import (
+    quantize_account_money,
+    quantize_nav,
+    quantize_rounding_residual,
+    quantize_shares,
+    require_finite,
+)
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
     ETFEligibility,
     PaperAccount,
     PaperAccountSnapshot,
     PaperCashLedger,
+    PaperCorporateAction,
     PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
@@ -54,6 +64,13 @@ from storage.domain_enums import (
 from storage.model.etf_basic import ETFBasic
 
 _BARE_ETF_SYMBOL = re.compile(r"^\d{6}$")
+
+
+def _whole_quantity(value: int | Decimal, field_name: str) -> int:
+    quantity = Decimal(value)
+    if not quantity.is_finite() or quantity != quantity.to_integral_value():
+        raise ValueError(f"{field_name} must be a finite whole quantity")
+    return int(quantity)
 
 
 def _require_bare_etf_symbol(symbol: str) -> str:
@@ -76,6 +93,14 @@ def _require_fee_update(**values: Decimal | None) -> None:
 class PaperTradingRepository:
     def __init__(self, session: Session):
         self.session = session
+
+    def _get_decimal_value(self, column: Any, *criteria: Any) -> Decimal | None:
+        """Read a numeric column without SQLite's ORM float conversion."""
+        query: Any = self.session.query(column).filter(*criteria)
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            query = self.session.query(sa_cast(column, String)).filter(*criteria)
+        value = query.scalar()
+        return None if value is None else Decimal(str(value))
 
     def list_etf_eligibility(self, status: str | None = None) -> list[ETFEligibility]:
         query = self.session.query(ETFEligibility)
@@ -277,8 +302,9 @@ class PaperTradingRepository:
         if cash <= 0:
             raise ValueError("initial_cash must be positive")
         initial_nav = Decimal("1.000000")
-        initial_shares = cash.quantize(Decimal("0.000001"))
-        initial_deposit = cash.quantize(Decimal("0.0001"))
+        cash = quantize_account_money(require_finite(cash, "initial_cash"))
+        initial_shares = quantize_shares(cash)
+        initial_deposit = quantize_account_money(cash)
         account = PaperAccount(
             name=name,
             initial_cash=cash,
@@ -321,7 +347,7 @@ class PaperTradingRepository:
         return account
 
     def add_account_realized_pnl(self, account: PaperAccount, amount: Decimal) -> PaperAccount:
-        account.realized_pnl = (Decimal(account.realized_pnl or 0) + amount).quantize(Decimal("0.0001"))
+        account.realized_pnl = quantize_account_money(Decimal(account.realized_pnl or 0) + amount)
         self.session.flush()
         return account
 
@@ -434,6 +460,9 @@ class PaperTradingRepository:
         self.session.query(PaperCashLedger).filter(PaperCashLedger.account_id == account_id).delete(
             synchronize_session=False
         )
+        self.session.query(PaperCorporateAction).filter(PaperCorporateAction.account_id == account_id).delete(
+            synchronize_session=False
+        )
         self.session.query(PaperPositionRoundTrip).filter(PaperPositionRoundTrip.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -472,19 +501,29 @@ class PaperTradingRepository:
         trade_date: date | None = None,
         net_asset_value: Decimal | None = None,
         share_delta: Decimal | None = None,
+        rounding_residual: Decimal = Decimal("0"),
         occurred_at: datetime | None = None,
     ) -> PaperCashLedger:
         if occurred_at is not None and (occurred_at.tzinfo is None or occurred_at.utcoffset() is None):
             raise ValueError("occurred_at must include a timezone offset")
+        persisted_amount = quantize_account_money(amount)
+        persisted_nav = None if net_asset_value is None else quantize_nav(net_asset_value)
+        persisted_shares = None if share_delta is None else quantize_shares(share_delta)
+        persisted_residual = (
+            quantize_rounding_residual(persisted_amount - persisted_shares * persisted_nav)
+            if persisted_nav is not None and persisted_shares is not None
+            else quantize_rounding_residual(rounding_residual)
+        )
         event = PaperCashLedger(
             account_id=account_id,
             event_type=CashEventType(event_type).value,
-            amount=amount,
+            amount=persisted_amount,
             order_id=order_id,
             trade_id=trade_id,
             trade_date=trade_date,
-            net_asset_value=net_asset_value,
-            share_delta=share_delta,
+            net_asset_value=persisted_nav,
+            share_delta=persisted_shares,
+            rounding_residual=persisted_residual,
             occurred_at=occurred_at or datetime.now(timezone.utc),
             note=note,
         )
@@ -501,10 +540,10 @@ class PaperTradingRepository:
         cumulative_deposit: Decimal,
         cumulative_withdrawal: Decimal,
     ) -> PaperAccount:
-        account.share_count = share_count.quantize(Decimal("0.000001"))
-        account.net_asset_value = net_asset_value.quantize(Decimal("0.000001"))
-        account.cumulative_deposit = cumulative_deposit.quantize(Decimal("0.0001"))
-        account.cumulative_withdrawal = cumulative_withdrawal.quantize(Decimal("0.0001"))
+        account.share_count = quantize_shares(share_count)
+        account.net_asset_value = quantize_nav(net_asset_value)
+        account.cumulative_deposit = quantize_account_money(cumulative_deposit)
+        account.cumulative_withdrawal = quantize_account_money(cumulative_withdrawal)
         self.session.flush()
         return account
 
@@ -514,7 +553,15 @@ class PaperTradingRepository:
             .filter(PaperCashLedger.account_id == account_id)
             .scalar()
         )
-        return Decimal(total).quantize(Decimal("0.0001"))
+        return Decimal(str(total)).quantize(Decimal("0.0001"))
+
+    def get_cash_available_internal(self, account_id: int) -> Decimal:
+        amount_query: Any = self.session.query(PaperCashLedger.amount)
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            amount_query = self.session.query(sa_cast(PaperCashLedger.amount, String))
+        amounts = amount_query.filter(PaperCashLedger.account_id == account_id).all()
+        values = (Decimal(str(amount)) for (amount,) in amounts)
+        return quantize_account_money(sum((quantize_account_money(value) for value in values), Decimal("0")))
 
     def get_cash_available_as_of(self, account_id: int, as_of: date) -> Decimal:
         total = (
@@ -525,18 +572,42 @@ class PaperTradingRepository:
             )
             .scalar()
         )
-        return Decimal(total).quantize(Decimal("0.0001"))
+        return Decimal(str(total)).quantize(Decimal("0.0001"))
+
+    def get_cash_available_as_of_internal(self, account_id: int, as_of: date) -> Decimal:
+        """Return accounting-precision cash available through ``as_of``.
+
+        SQLite stores SQLAlchemy numerics as floating point values when they
+        are aggregated directly.  Read the values as text there and sum
+        Decimal values in Python, just as the all-time internal accessor does.
+        """
+        query: Any = self.session.query(PaperCashLedger.amount).filter(
+            PaperCashLedger.account_id == account_id,
+            or_(PaperCashLedger.trade_date.is_(None), PaperCashLedger.trade_date <= as_of),
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            query = self.session.query(sa_cast(PaperCashLedger.amount, String)).filter(
+                PaperCashLedger.account_id == account_id,
+                or_(PaperCashLedger.trade_date.is_(None), PaperCashLedger.trade_date <= as_of),
+            )
+        values = (Decimal(str(amount)) for (amount,) in query.all())
+        return quantize_account_money(sum((quantize_account_money(value) for value in values), Decimal("0")))
 
     def get_cash_frozen(self, account_id: int) -> Decimal:
-        total = (
-            self.session.query(func.coalesce(func.sum(PaperOrder.frozen_cash), 0))
-            .filter(
+        return self.get_cash_frozen_internal(account_id).quantize(Decimal("0.0001"))
+
+    def get_cash_frozen_internal(self, account_id: int) -> Decimal:
+        query: Any = self.session.query(PaperOrder.frozen_cash).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.status == OrderStatus.ACCEPTED.value,
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            query = self.session.query(sa_cast(PaperOrder.frozen_cash, String)).filter(
                 PaperOrder.account_id == account_id,
                 PaperOrder.status == OrderStatus.ACCEPTED.value,
             )
-            .scalar()
-        )
-        return Decimal(total).quantize(Decimal("0.0001"))
+        values = (Decimal(str(row[0])) for row in query.all())
+        return quantize_account_money(sum(values, Decimal("0")))
 
     @staticmethod
     def _normalize_comment(comment: str | None) -> str | None:
@@ -566,12 +637,12 @@ class PaperTradingRepository:
             account_id=account_id,
             symbol=symbol,
             side=side.value,
-            quantity=quantity,
-            limit_price=limit_price,
+            quantity=_whole_quantity(quantity, "quantity"),
+            limit_price=quantize_account_money(limit_price),
             trade_date=trade_date,
             status=status.value,
-            frozen_cash=frozen_cash,
-            frozen_quantity=frozen_quantity,
+            frozen_cash=quantize_account_money(frozen_cash),
+            frozen_quantity=_whole_quantity(frozen_quantity, "frozen_quantity"),
             idempotency_key=normalized_idempotency_key,
             rejection_code=rejection_code,
             rejection_reason=rejection_reason,
@@ -588,6 +659,79 @@ class PaperTradingRepository:
             .filter(PaperOrder.account_id == account_id, PaperOrder.idempotency_key == idempotency_key)
             .one_or_none()
         )
+
+    def get_corporate_action_by_idempotency_key(self, account_id: int, key: str) -> PaperCorporateAction | None:
+        return (
+            self.session.query(PaperCorporateAction)
+            .filter(PaperCorporateAction.account_id == account_id, PaperCorporateAction.idempotency_key == key)
+            .one_or_none()
+        )
+
+    def lock_corporate_action_by_idempotency_key(self, account_id: int, key: str) -> PaperCorporateAction | None:
+        query = self.session.query(PaperCorporateAction).filter(
+            PaperCorporateAction.account_id == account_id,
+            PaperCorporateAction.idempotency_key == key,
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.one_or_none()
+
+    def create_corporate_action(self, **values: Any) -> PaperCorporateAction:
+        if "event_type" in values:
+            values["event_type"] = CorporateActionType(values["event_type"]).value
+        if "market" in values:
+            values["market"] = Market(values["market"]).value
+        if "parameters" in values:
+            values["parameters"] = {
+                name: str(require_finite(Decimal(value), f"parameters.{name}"))
+                for name, value in values["parameters"].items()
+            }
+        for field_name in (
+            "cash_delta",
+            "before_cost_amount",
+            "after_cost_amount",
+            "before_cash_available",
+            "after_cash_available",
+        ):
+            if field_name in values and values[field_name] is not None:
+                values[field_name] = quantize_account_money(values[field_name])
+        for field_name in ("quantity_delta", "before_quantity", "after_quantity"):
+            if field_name in values and values[field_name] is not None:
+                values[field_name] = quantize_shares(values[field_name])
+        event_at = values.get("event_at")
+        if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
+            raise ValueError("event_at must include a timezone offset")
+        if event_at is not None:
+            values["event_at"] = event_at.astimezone(timezone.utc)
+        action = PaperCorporateAction(**values)
+        self.session.add(action)
+        self.session.flush()
+        return action
+
+    def list_corporate_actions(
+        self,
+        account_id: int,
+        symbol: str | None = None,
+        event_type: str | CorporateActionType | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> list[PaperCorporateAction]:
+        query = self.session.query(PaperCorporateAction).filter(PaperCorporateAction.account_id == account_id)
+        if symbol is not None:
+            query = query.filter(PaperCorporateAction.symbol == symbol)
+        if event_type is not None:
+            query = query.filter(PaperCorporateAction.event_type == CorporateActionType(event_type).value)
+        if start_at is not None:
+            query = query.filter(PaperCorporateAction.event_at >= self._normalize_datetime_filter(start_at))
+        if end_at is not None:
+            query = query.filter(PaperCorporateAction.event_at <= self._normalize_datetime_filter(end_at))
+        return list(query.order_by(PaperCorporateAction.event_at.asc(), PaperCorporateAction.id.asc()).all())
+
+    @staticmethod
+    def _normalize_datetime_filter(value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("corporate-action time filters must include a timezone offset")
+        return value.astimezone(timezone.utc)
 
     def get_order(self, order_id: int) -> PaperOrder:
         order = self.session.get(PaperOrder, order_id)
@@ -678,7 +822,7 @@ class PaperTradingRepository:
         for snapshot in snapshots:
             nav = Decimal(snapshot.net_asset_value or 0)
             if nav.is_finite() and nav > 0:
-                return nav.quantize(Decimal("0.000001"))
+                return quantize_nav(nav)
         return None
 
     def list_trades(self, account_id: int) -> list[PaperTrade]:
@@ -839,8 +983,8 @@ class PaperTradingRepository:
         account_id: int,
         market: str | Market,
         symbol: str,
-        total_quantity: int,
-        frozen_quantity: int,
+        total_quantity: int | Decimal,
+        frozen_quantity: int | Decimal,
         cost_amount: Decimal,
         realized_pnl: Decimal = Decimal("0"),
         source: str = "trade",
@@ -851,10 +995,10 @@ class PaperTradingRepository:
         if position is None:
             position = PaperPosition(account_id=account_id, market=market, symbol=symbol, source=source)
             self.session.add(position)
-        position.total_quantity = total_quantity
-        position.frozen_quantity = frozen_quantity
-        position.cost_amount = cost_amount
-        position.realized_pnl = realized_pnl
+        position.total_quantity = _whole_quantity(total_quantity, "total_quantity")
+        position.frozen_quantity = _whole_quantity(frozen_quantity, "frozen_quantity")
+        position.cost_amount = quantize_account_money(cost_amount)
+        position.realized_pnl = quantize_account_money(realized_pnl)
         self.session.flush()
         return position
 
@@ -864,8 +1008,8 @@ class PaperTradingRepository:
         market: str | Market,
         symbol: str,
         buy_trade_date: date,
-        original_quantity: int,
-        remaining_quantity: int,
+        original_quantity: int | Decimal,
+        remaining_quantity: int | Decimal,
         cost_price: Decimal,
         source: str = "trade",
     ) -> PaperPositionLot:
@@ -874,9 +1018,9 @@ class PaperTradingRepository:
             account_id=account_id,
             symbol=symbol,
             buy_trade_date=buy_trade_date,
-            original_quantity=original_quantity,
-            remaining_quantity=remaining_quantity,
-            cost_price=cost_price,
+            original_quantity=_whole_quantity(original_quantity, "original_quantity"),
+            remaining_quantity=_whole_quantity(remaining_quantity, "remaining_quantity"),
+            cost_price=quantize_account_money(cost_price),
             source=PositionSource(source).value,
             market=market,
         )
@@ -885,7 +1029,7 @@ class PaperTradingRepository:
         return lot
 
     def create_initial_snapshot(self, account: PaperAccount, *, event_at: datetime) -> PaperAccountSnapshot:
-        initial_cash = Decimal(account.initial_cash).quantize(Decimal("0.0001"))
+        initial_cash = quantize_account_money(Decimal(account.initial_cash))
         snapshot = PaperAccountSnapshot(
             account_id=account.id,
             trade_date=event_at.date(),
@@ -913,6 +1057,7 @@ class PaperTradingRepository:
         return snapshot
 
     def save_snapshot(self, **values: Any) -> PaperAccountSnapshot:
+        self._quantize_snapshot_values(values)
         snapshot = PaperAccountSnapshot(**values)
         self.session.add(snapshot)
         self.session.flush()
@@ -920,6 +1065,7 @@ class PaperTradingRepository:
 
     def save_trading_snapshot(self, **values: Any) -> PaperAccountSnapshot:
         """Create or update the single trading snapshot for an account date."""
+        self._quantize_snapshot_values(values)
         account_id = values["account_id"]
         trade_date = values["trade_date"]
         snapshot = (
@@ -938,7 +1084,30 @@ class PaperTradingRepository:
             for field, value in values.items():
                 setattr(snapshot, field, value)
         self.session.flush()
+        for field, value in values.items():
+            setattr(snapshot, field, value)
         return snapshot
+
+    @staticmethod
+    def _quantize_snapshot_values(values: dict[str, Any]) -> None:
+        for field_name in (
+            "cash_available",
+            "cash_frozen",
+            "market_value",
+            "total_assets",
+            "realized_pnl",
+            "unrealized_pnl",
+            "cumulative_deposit",
+            "cumulative_withdrawal",
+            "net_cash_flow",
+            "pending_settlement",
+        ):
+            if field_name in values and values[field_name] is not None:
+                values[field_name] = quantize_account_money(values[field_name])
+        if values.get("net_asset_value") is not None:
+            values["net_asset_value"] = quantize_nav(values["net_asset_value"])
+        if values.get("share_count") is not None:
+            values["share_count"] = quantize_shares(values["share_count"])
 
     def delete_trading_snapshot(self, account_id: int, trade_date: date) -> None:
         (
@@ -1068,10 +1237,10 @@ class PaperTradingRepository:
             account_id=account_id,
             symbol=symbol,
             side=side.value,
-            quantity=quantity,
-            price=price,
-            amount=amount,
-            fees=fees,
+            quantity=_whole_quantity(quantity, "quantity"),
+            price=quantize_account_money(price),
+            amount=quantize_account_money(amount),
+            fees=quantize_account_money(fees),
             trade_date=trade_date,
             comment=self._normalize_comment(comment),
             market=Market(market or Market.A_SHARE).value,
@@ -1102,6 +1271,26 @@ class PaperTradingRepository:
             )
             .one_or_none()
         )
+
+    def lock_position(self, account_id: int, market: str | Market, symbol: str) -> PaperPosition | None:
+        query = self.session.query(PaperPosition).filter(
+            PaperPosition.account_id == account_id,
+            PaperPosition.market == Market(market).value,
+            PaperPosition.symbol == symbol,
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return query.one_or_none()
+
+    def lock_lots(self, account_id: int, market: str | Market, symbol: str) -> list[PaperPositionLot]:
+        query = self.session.query(PaperPositionLot).filter(
+            PaperPositionLot.account_id == account_id,
+            PaperPositionLot.market == Market(market).value,
+            PaperPositionLot.symbol == symbol,
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            query = query.with_for_update()
+        return list(query.order_by(PaperPositionLot.buy_trade_date.asc(), PaperPositionLot.id.asc()).all())
 
     def delete_position(self, position: PaperPosition) -> None:
         self.session.delete(position)
@@ -1301,7 +1490,7 @@ class PaperTradingRepository:
                     symbol=symbol,
                     total_quantity=total_qty[(market, symbol)],
                     frozen_quantity=0,
-                    cost_amount=total_cost[(market, symbol)].quantize(Decimal("0.0001")),
+                    cost_amount=quantize_account_money(total_cost[(market, symbol)]),
                     realized_pnl=Decimal("0"),
                     source=source,
                     market=market,
@@ -1313,7 +1502,7 @@ class PaperTradingRepository:
             {PaperPositionLot.remaining_quantity: PaperPositionLot.original_quantity},
             synchronize_session="fetch",
         )
-        realized_pnl = Decimal("0.0000")
+        realized_pnl = Decimal("0")
         pre_start_sells = (
             self.session.query(PaperTrade)
             .filter(
@@ -1326,17 +1515,17 @@ class PaperTradingRepository:
         )
         for trade in pre_start_sells:
             remaining = int(trade.quantity)
-            cost_reduction = Decimal("0.0000")
+            cost_reduction = Decimal("0")
             for lot in self.get_lots(account_id, trade.market, trade.symbol):
                 if remaining <= 0:
                     break
                 available = int(lot.remaining_quantity or 0)
                 used = min(available, remaining)
                 lot.remaining_quantity = available - used
-                cost_reduction += (Decimal(used) * Decimal(lot.cost_price)).quantize(Decimal("0.0001"))
+                cost_reduction += Decimal(used) * Decimal(lot.cost_price)
                 remaining -= used
-            realized_pnl += (Decimal(trade.amount) - Decimal(trade.fees) - cost_reduction).quantize(Decimal("0.0001"))
-        return realized_pnl.quantize(Decimal("0.0001"))
+            realized_pnl += Decimal(trade.amount) - Decimal(trade.fees) - cost_reduction
+        return quantize_account_money(realized_pnl)
 
     def clear_account_rebuild_state_from(self, account_id: int, start_date: date) -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -1429,7 +1618,7 @@ class PaperTradingRepository:
         account = self.get_account(account_id)
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
-        account.realized_pnl = Decimal("0.0000")
+        account.realized_pnl = Decimal("0")
         imported_lots = (
             self.session.query(PaperPositionLot)
             .filter(
@@ -1530,7 +1719,7 @@ class PaperTradingRepository:
                 symbol=symbol,
                 total_quantity=total_qty[(market, symbol)],
                 frozen_quantity=0,
-                cost_amount=total_cost[(market, symbol)].quantize(Decimal("0.0001")),
+                cost_amount=quantize_account_money(total_cost[(market, symbol)]),
                 realized_pnl=Decimal("0"),
                 source=PositionSource.IMPORTED.value,
                 market=market,
@@ -1629,7 +1818,7 @@ class PaperTradingRepository:
     ) -> PaperPendingSettlement:
         pending = PaperPendingSettlement(
             account_id=account_id,
-            amount=amount,
+            amount=quantize_account_money(amount),
             expected_settle_date=expected_settle_date,
             trade_id=trade_id,
             source=PendingSettlementSource(source).value,
@@ -1658,10 +1847,12 @@ class PaperTradingRepository:
             return pending
         pending.settled = True
         # Add cash to ledger as trade event
+        amount = self._get_decimal_value(PaperPendingSettlement.amount, PaperPendingSettlement.id == pending_id)
+        assert amount is not None
         self.add_cash_event(
             pending.account_id,
             CashEventType.TRADE,
-            pending.amount,
+            amount,
             trade_id=pending.trade_id,
             note="hk_sell_settlement",
         )
@@ -1669,15 +1860,20 @@ class PaperTradingRepository:
         return pending
 
     def get_pending_settlement_total(self, account_id: int) -> Decimal:
-        total = (
-            self.session.query(func.coalesce(func.sum(PaperPendingSettlement.amount), 0))
-            .filter(
+        return self.get_pending_settlement_total_internal(account_id).quantize(Decimal("0.0001"))
+
+    def get_pending_settlement_total_internal(self, account_id: int) -> Decimal:
+        query: Any = self.session.query(PaperPendingSettlement.amount).filter(
+            PaperPendingSettlement.account_id == account_id,
+            PaperPendingSettlement.settled.is_(False),
+        )
+        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
+            query = self.session.query(sa_cast(PaperPendingSettlement.amount, String)).filter(
                 PaperPendingSettlement.account_id == account_id,
                 PaperPendingSettlement.settled.is_(False),
             )
-            .scalar()
-        )
-        return Decimal(total).quantize(Decimal("0.0001"))
+        values = (Decimal(str(row[0])) for row in query.all())
+        return quantize_account_money(sum(values, Decimal("0")))
 
     def list_order_trade_dates(self, account_id: int) -> list[date]:
         rows = (

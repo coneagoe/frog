@@ -113,6 +113,42 @@ def test_snapshots_api_returns_ordered_nav_point_metadata(monkeypatch, sqlite_se
     assert all(item["valuation_details"] is None for item in payload)
 
 
+def test_snapshots_api_preserves_nullable_money_fields_for_initial_and_legacy_snapshots(monkeypatch, sqlite_session):
+    client, headers, session = _client(monkeypatch, sqlite_session)
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("nullable-snapshot-money", Decimal("100000.00"))
+    initial = repo.list_snapshots(account.id)[0]
+    legacy = _seed_trading_point(
+        repo,
+        account.id,
+        event_at=datetime(2026, 8, 25, 10, tzinfo=timezone.utc),
+        quality_status=SnapshotQualityStatus.VALID.value,
+        invalid_reason=None,
+        nav=Decimal("1.123456789"),
+        total_assets=Decimal("112345.67891"),
+    )
+    for snapshot in (initial, legacy):
+        snapshot.cumulative_deposit = None
+        snapshot.cumulative_withdrawal = None
+        snapshot.net_cash_flow = None
+    session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/snapshots", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 2
+    for item in payload:
+        assert item["cumulative_deposit"] is None
+        assert item["cumulative_withdrawal"] is None
+        assert item["net_cash_flow"] is None
+    snapshots = {item["point_type"]: item for item in payload}
+    assert snapshots["initial"]["total_assets"] == "100000.0000"
+    assert snapshots["initial"]["net_asset_value"] == "1.000000"
+    assert snapshots["trading"]["total_assets"] == "112345.6789"
+    assert snapshots["trading"]["net_asset_value"] == "1.123457"
+
+
 def test_snapshots_api_serializes_stale_valuation_metadata(monkeypatch, sqlite_session):
     client, headers, session = _client(monkeypatch, sqlite_session)
     repo = PaperTradingRepository(session)

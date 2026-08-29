@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from paper_trading.domain.enums import OrderSide, RoundTripStatus
+from paper_trading.domain.precision import quantize_account_money
 from paper_trading.storage.models import PaperPositionRoundTrip, PaperTrade
 from paper_trading.storage.repository import PaperTradingRepository
 
@@ -25,23 +26,23 @@ class RoundTripService:
                 symbol=trade.symbol,
                 open_trade_id=trade.id,
                 open_trade_date=trade.trade_date,
-                entry_amount=Decimal(trade.amount).quantize(Decimal("0.0001")),
-                fees=Decimal(trade.fees).quantize(Decimal("0.0001")),
+                entry_amount=quantize_account_money(Decimal(trade.amount)),
+                fees=quantize_account_money(Decimal(trade.fees)),
             )
             return
         self.repo.update_round_trip(
             cycle,
-            entry_amount=(Decimal(cycle.entry_amount or 0) + Decimal(trade.amount)).quantize(Decimal("0.0001")),
-            fees=(Decimal(cycle.fees or 0) + Decimal(trade.fees)).quantize(Decimal("0.0001")),
+            entry_amount=quantize_account_money(Decimal(cycle.entry_amount or 0) + Decimal(trade.amount)),
+            fees=quantize_account_money(Decimal(cycle.fees or 0) + Decimal(trade.fees)),
         )
 
     def _record_sell(self, trade: PaperTrade, post_position_quantity: int) -> None:
         cycle = self.repo.get_open_round_trip(trade.account_id, trade.market, trade.symbol)
         if cycle is None:
             return
-        exit_amount = (Decimal(cycle.exit_amount or 0) + Decimal(trade.amount)).quantize(Decimal("0.0001"))
-        fees = (Decimal(cycle.fees or 0) + Decimal(trade.fees)).quantize(Decimal("0.0001"))
-        realized_pnl = (exit_amount - Decimal(cycle.entry_amount or 0) - fees).quantize(Decimal("0.0001"))
+        exit_amount = quantize_account_money(Decimal(cycle.exit_amount or 0) + Decimal(trade.amount))
+        fees = quantize_account_money(Decimal(cycle.fees or 0) + Decimal(trade.fees))
+        realized_pnl = quantize_account_money(exit_amount - Decimal(cycle.entry_amount or 0) - fees)
         values = {
             "close_trade_id": trade.id,
             "close_trade_date": trade.trade_date,
@@ -51,7 +52,7 @@ class RoundTripService:
         }
         if post_position_quantity == 0:
             entry_amount = Decimal(cycle.entry_amount or 0)
-            values["return_pct"] = (realized_pnl / entry_amount).quantize(Decimal("0.000001")) if entry_amount else None
+            values["return_pct"] = quantize_account_money(realized_pnl / entry_amount) if entry_amount else None
             values["holding_days"] = (trade.trade_date - cycle.open_trade_date).days
             values["status"] = RoundTripStatus.CLOSED.value
         self.repo.update_round_trip(cycle, **values)

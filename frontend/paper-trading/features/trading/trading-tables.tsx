@@ -222,7 +222,8 @@ const cashEventLabels: Record<string, string> = {
   freeze: "Freeze",
   release: "Release",
   trade: "Trade",
-  fee: "Fee"
+  fee: "Fee",
+  corporate_action: "Corporate action"
 };
 
 export function CashLedgerTable({ density, entries }: { density?: "default" | "compact"; entries: CashLedgerEntry[] }) {
@@ -232,6 +233,7 @@ export function CashLedgerTable({ density, entries }: { density?: "default" | "c
     { key: "amount", header: "Amount", align: "right", render: (row) => <MoneyText value={row.amount} /> },
     { key: "nav", header: "NAV", align: "right", render: (row) => row.net_asset_value ?? "-" },
     { key: "shares", header: "Share Delta", align: "right", render: (row) => row.share_delta ?? "-" },
+    { key: "residual", header: "Rounding residual", align: "right", render: (row) => <MoneyText value={row.rounding_residual} /> },
     { key: "note", header: "Note", render: (row) => row.note ?? "-" }
   ];
   return <DataTable columns={columns} density={density} emptyTitle="No cash ledger entries" getRowKey={(row) => row.id} rows={entries} />;

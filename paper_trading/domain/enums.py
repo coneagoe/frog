@@ -37,6 +37,21 @@ class CashEventType(StrEnum):
     RELEASE = "release"
     TRADE = "trade"
     FEE = "fee"
+    CORPORATE_ACTION = "corporate_action"
+
+
+class CorporateActionType(StrEnum):
+    DIVIDEND = "dividend"
+    SPLIT = "split"
+    REVERSE_SPLIT = "reverse_split"
+    BONUS_SHARE = "bonus_share"
+    RIGHTS_ISSUE = "rights_issue"
+
+
+class CorporateActionProcessingStatus(StrEnum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class MatchingRunStatus(StrEnum):
