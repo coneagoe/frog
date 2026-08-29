@@ -102,7 +102,7 @@ def test_recalculation_includes_event_date_and_later_snapshot_and_gap(tmp_path):
     session = factory()
     try:
         repo = PaperTradingRepository(session)
-        trading_dates = [row.trade_date for row in repo.list_snapshots(account_id) if row.point_type == "trading"]
+        trading_dates = sorted(row.trade_date for row in repo.list_snapshots(account_id) if row.point_type == "trading")
         assert trading_dates == [date(2026, 8, 27), date(2026, 8, 28), date(2026, 8, 29)]
         gap = repo.get_valuation_gap(account_id, date(2026, 8, 29))
         assert gap is not None and gap.resolved is True
