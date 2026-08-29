@@ -117,6 +117,28 @@ def test_cash_flow_rejects_conflicting_share_count_payload():
         NavSeriesReplay().replay([event], initial_state={"share_count": Decimal("100")})
 
 
+def test_cash_flow_rejects_pre_share_count_without_replay_share_state():
+    event = _event(
+        NavReplayEventType.CASH_FLOW,
+        "deposit",
+        {"amount": Decimal("100"), "pre_share_count": Decimal("100")},
+    )
+
+    with pytest.raises(ValueError, match="pre_share_count"):
+        NavSeriesReplay().replay([event], initial_state={})
+
+
+def test_cash_flow_rejects_payload_nav_instead_of_overriding_replay_nav():
+    event = _event(
+        NavReplayEventType.CASH_FLOW,
+        "deposit",
+        {"amount": Decimal("100"), "nav": Decimal("99")},
+    )
+
+    with pytest.raises(ValueError, match="nav"):
+        NavSeriesReplay().replay([event], initial_state={"nav": Decimal("1")})
+
+
 @pytest.mark.parametrize("value", [None, Decimal("NaN"), Decimal("Infinity"), Decimal("0"), Decimal("-1")])
 def test_invalid_nav_values_produce_invalid_points(value):
     result = NavSeriesReplay().replay(

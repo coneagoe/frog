@@ -177,3 +177,58 @@ test/paper_trading/services/test_nav_series.py::test_builder_rejects_invalid_qua
 
 - Repository-backed event loading and later service integration remain deferred to subsequent tasks.
 - Matching and settlement remain unchanged.
+
+## Important findings remediation
+
+### Changes
+
+- A cash-flow payload containing `pre_share_count` now requires an existing replay `share_count` and must match it; missing state is rejected.
+- Cash-flow payloads now reject state-bearing `nav`, ensuring pricing uses only the previously confirmed valid replay NAV or the `1` fallback.
+- Added regression tests covering both rejection rules. Existing state-bearing `share_count` rejection and all prior contract tests remain covered.
+
+### Focused test command and complete output
+
+Command:
+
+```text
+uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py -v
+```
+
+Complete output:
+
+```text
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0 -- /data/frog/.worktrees/issue-82-nav-series/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /data/frog/.worktrees/issue-82-nav-series
+configfile: pyproject.toml
+plugins: anyio-4.14.0
+collecting ... collected 19 items
+
+test/paper_trading/domain/test_nav_replay.py::test_replay_orders_same_timestamp_by_fixed_precedence_then_source_id PASSED [  5%]
+test/paper_trading/domain/test_nav_replay.py::test_replay_rejects_events_with_identical_complete_ordering_key PASSED [ 10%]
+test/paper_trading/domain/test_nav_replay.py::test_replay_normalizes_non_utc_event_timestamp_before_sorting PASSED [ 15%]
+test/paper_trading/domain/test_nav_replay.py::test_cash_flow_uses_previous_valid_nav_or_one_and_does_not_create_return PASSED [ 21%]
+test/paper_trading/domain/test_nav_replay.py::test_cash_flow_rejects_conflicting_pre_and_post_asset_payload PASSED [ 26%]
+test/paper_trading/domain/test_nav_replay.py::test_cash_flow_rejects_total_assets_that_could_be_double_counted PASSED [ 31%]
+test/paper_trading/domain/test_nav_replay.py::test_cash_flow_rejects_conflicting_share_count_payload PASSED [ 36%]
+test/paper_trading/domain/test_nav_replay.py::test_cash_flow_rejects_pre_share_count_without_replay_share_state PASSED [ 42%]
+test/paper_trading/domain/test_nav_replay.py::test_cash_flow_rejects_payload_nav_instead_of_overriding_replay_nav PASSED [ 47%]
+test/paper_trading/domain/test_nav_replay.py::test_invalid_nav_values_produce_invalid_points[None] PASSED [ 52%]
+test/paper_trading/domain/test_nav_replay.py::test_invalid_nav_values_produce_invalid_points[value1] PASSED [ 57%]
+test/paper_trading/domain/test_nav_replay.py::test_invalid_nav_values_produce_invalid_points[value2] PASSED [ 63%]
+test/paper_trading/domain/test_nav_replay.py::test_invalid_nav_values_produce_invalid_points[value3] PASSED [ 68%]
+test/paper_trading/domain/test_nav_replay.py::test_invalid_nav_values_produce_invalid_points[value4] PASSED [ 73%]
+test/paper_trading/services/test_nav_series.py::test_baseline_requires_provable_creation_ledger_or_history_source PASSED [ 78%]
+test/paper_trading/services/test_nav_series.py::test_builder_filters_events_by_requested_date_without_using_account_share_count PASSED [ 84%]
+test/paper_trading/services/test_nav_series.py::test_builder_rejects_legacy_baseline_from_current_account_share_count PASSED [ 89%]
+test/paper_trading/services/test_nav_series.py::test_builder_constructs_baseline_state_from_provable_source PASSED [ 94%]
+test/paper_trading/services/test_nav_series.py::test_builder_rejects_invalid_quality_initial_as_baseline PASSED [100%]
+
+============================== 19 passed in 0.09s ==============================
+```
+
+### Concerns
+
+- Repository-backed event loading and later service integration remain deferred to subsequent tasks.
+- Matching and settlement remain unchanged.
