@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType
+from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType, SnapshotQualityStatus
 from paper_trading.domain.nav_replay import NavSeriesReplay, ReplayEvent, ReplayResult
 
 _PROVABLE_BASELINE_SOURCES = frozenset({"creation", "ledger", "history"})
@@ -59,6 +59,7 @@ class NavSeriesBuilder:
             for event in events
             if event.event_type is NavReplayEventType.INITIAL
             and event.source_kind in _PROVABLE_BASELINE_SOURCES
+            and event.quality_status is SnapshotQualityStatus.VALID
             and self._valid_baseline_source(event.payload)
         ]
         if not candidates:

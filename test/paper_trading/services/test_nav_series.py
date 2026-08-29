@@ -74,3 +74,20 @@ def test_builder_constructs_baseline_state_from_provable_source():
     assert result.points[0].total_assets == Decimal("250")
     assert result.points[0].share_count == Decimal("100")
     assert result.points[0].nav == Decimal("2.5")
+
+
+def test_builder_rejects_invalid_quality_initial_as_baseline():
+    events = [
+        ReplayEvent(
+            event_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 25),
+            event_type=NavReplayEventType.INITIAL,
+            source_id="creation-invalid",
+            source_kind="creation",
+            payload={"opening_cash": Decimal("250"), "opening_shares": Decimal("100")},
+            quality_status=SnapshotQualityStatus.INVALID,
+        )
+    ]
+
+    with pytest.raises(ValueError, match="baseline"):
+        NavSeriesBuilder(event_loader=lambda account_id: events).build(1)

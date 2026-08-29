@@ -76,6 +76,12 @@ class NavSeriesReplay:
         if event.event_type is NavReplayEventType.CASH_FLOW:
             if "total_assets" in event.payload or "post_total_assets" in event.payload:
                 raise ValueError("cash-flow payload uses pre-event state and cannot contain post total_assets")
+            if "share_count" in event.payload:
+                raise ValueError("cash-flow payload cannot contain state-bearing share_count")
+            if "pre_share_count" in event.payload:
+                pre_share_count = self._decimal(event.payload["pre_share_count"])
+                if state.get("share_count") is not None and pre_share_count != self._decimal(state["share_count"]):
+                    raise ValueError("cash-flow pre_share_count conflicts with replay state")
             pre_total_assets = self._decimal(event.payload.get("pre_total_assets", state.get("total_assets")))
             if state.get("total_assets") is not None and pre_total_assets != self._decimal(state["total_assets"]):
                 raise ValueError("cash-flow pre_total_assets conflicts with replay state")
@@ -92,8 +98,6 @@ class NavSeriesReplay:
             share_count = self._decimal(event.payload.get("opening_shares", share_count))
             if nav is None and total_assets is not None and share_count:
                 nav = total_assets / share_count
-        elif event.event_type is NavReplayEventType.MARKET_VALUATION and total_assets is not None and share_count:
-            nav = total_assets / share_count
         elif total_assets is not None and share_count:
             nav = total_assets / share_count
 

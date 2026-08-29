@@ -106,6 +106,17 @@ def test_cash_flow_rejects_total_assets_that_could_be_double_counted():
         NavSeriesReplay().replay([event], initial_state={})
 
 
+def test_cash_flow_rejects_conflicting_share_count_payload():
+    event = _event(
+        NavReplayEventType.CASH_FLOW,
+        "deposit",
+        {"amount": Decimal("100"), "share_count": Decimal("999")},
+    )
+
+    with pytest.raises(ValueError, match="share_count"):
+        NavSeriesReplay().replay([event], initial_state={"share_count": Decimal("100")})
+
+
 @pytest.mark.parametrize("value", [None, Decimal("NaN"), Decimal("Infinity"), Decimal("0"), Decimal("-1")])
 def test_invalid_nav_values_produce_invalid_points(value):
     result = NavSeriesReplay().replay(
