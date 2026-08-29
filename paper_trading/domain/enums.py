@@ -118,6 +118,19 @@ class SnapshotValuationQuality(StrEnum):
     STALE_SUSPENDED = "stale_suspended"
 
 
+class NavReplayEventType(StrEnum):
+    INITIAL = "initial"
+    CASH_FLOW = "cash_flow"
+    TRADE_SETTLEMENT = "trade_settlement"
+    CORPORATE_ACTION = "corporate_action"
+    MARKET_VALUATION = "market_valuation"
+
+
+class NavBaselineEligibility(StrEnum):
+    ELIGIBLE = "eligible"
+    INELIGIBLE = "ineligible"
+
+
 # Marker prefix for rejection reasons set by OrderDeleteService replay.
 # reset_orders_for_replay uses this to distinguish replay-induced rejections
 # (which may become resolvable after a later delete) from original/business
