@@ -2,7 +2,7 @@
 
 ## Status
 
-Task 2 scoped review findings are resolved. The final authoritative verification is the 126-test focused run recorded below.
+Task 2 scoped review findings are resolved. The final authoritative verification is the 126-test focused run recorded below, plus the optional 23-test migration run.
 
 ## Modified files
 
@@ -21,7 +21,7 @@ Replay adapters preserve source table/row IDs, distinguish external deposit/with
 
 ## Superseded history
 
-Earlier intermediate runs contained failures while the review tests were being corrected; those results are superseded and are intentionally not reproduced here. The final result below is authoritative.
+Earlier intermediate failures during review correction are superseded and are intentionally not reproduced here. The final results below are authoritative.
 
 ## Final authoritative verification
 
@@ -40,7 +40,7 @@ cachedir: .pytest_cache
 rootdir: /data/frog/.worktrees/issue-82-nav-series
 configfile: pyproject.toml
 plugins: anyio-4.14.0
-collecting ... collected 125 items
+collecting ... collected 126 items
 
 test/paper_trading/storage/test_repository.py::test_daily_bar_diagnostic_scalar_columns_use_value_enums PASSED [  0%]
 test/paper_trading/storage/test_repository.py::test_etf_eligibility_repository_upserts_gets_and_filters_status PASSED [  1%]
@@ -168,8 +168,16 @@ test/paper_trading/domain/test_nav_replay.py::test_invalid_nav_values_produce_in
 test/paper_trading/domain/test_nav_replay.py::test_invalid_nav_values_produce_invalid_points[value3] PASSED [ 99%]
 test/paper_trading/domain/test_nav_replay.py::test_invalid_nav_values_produce_invalid_points[value4] PASSED [100%]
 
-============================= 125 passed in 40.22s =============================
+============================= 126 passed in 40.17s =============================
 
 ```
 
 Final exit status: 0.
+
+## Optional migration verification
+
+Command: `tools/run_tests.sh test/paper_trading/storage/test_nav_series_migration.py -v`
+
+Result: `23 passed in 47.82s` (PostgreSQL test_db started successfully).
+
+Concern: locale warnings (`en_US.UTF-8` unavailable) were emitted by the shell/container setup; tests passed.
