@@ -200,3 +200,48 @@ All checks passed!
 ```
 
 `git diff --check`: passed.
+
+## Settlement and Outcome Follow-up
+
+- HK Connect sell executions now remove holdings at execution while retaining
+  proceeds in replay `pending_settlement`; linked T+2 cash-ledger settlement
+  releases that amount to replay cash without changing total assets.
+- Settlement-ledger deduplication preserves linked HK sell settlement facts and
+  removes only duplicate non-HK execution projections. Corporate-action ledger
+  projections remain excluded when their audited action fact is present.
+- Repository-backed builder initial snapshots are enriched with persisted
+  cumulative deposit, withdrawal, and pending-settlement values before baseline
+  construction; recalculation uses that enriched baseline.
+- Recalculation writes replay pending settlement separately from cash and market
+  value. Provider/system valuation failures are recorded as failed recalculation
+  errors, while expected missing-close conditions remain valuation gaps.
+
+Added focused tests cover HK execution/T+2 release, repository initial
+cumulative-flow preservation, and provider failure classification. Existing
+backdated cash-flow, gap-state, holdings/cost, market-key, corporate-action,
+stale, idempotency, external rollback, and callable-builder tests remain in the
+focused suite.
+
+## Settlement Follow-up Verification
+
+```text
+uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+```text
+============================= 87 passed in 17.23s ==============================
+```
+
+```text
+uv run ruff format paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py
+uv run ruff check --fix test/paper_trading/services/test_snapshot_recalculation_service.py
+uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+```text
+6 files left unchanged
+Found 1 error (1 fixed, 0 remaining).
+All checks passed!
+```
+
+`git diff --check`: passed.

@@ -136,3 +136,23 @@ def test_builder_keeps_positional_event_loader_compatibility():
     ]
 
     assert NavSeriesBuilder(lambda _account_id: events).build(1).points[0].nav == Decimal("1")
+
+
+def test_repository_builder_preserves_initial_cumulative_cash_flow_fields(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'builder_cumulative.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("repository-builder-cumulative", Decimal("100"))
+        initial = next(row for row in repo.list_snapshots(account.id) if row.point_type == "initial")
+        initial.cumulative_deposit = Decimal("125")
+        initial.cumulative_withdrawal = Decimal("25")
+        result = NavSeriesBuilder(repo=repo).build(account.id)
+
+        assert result.points[0].cumulative_deposit == Decimal("125")
+        assert result.points[0].cumulative_withdrawal == Decimal("25")
+        assert result.points[0].net_cash_flow == Decimal("100")
+    finally:
+        session.close()
+        engine.dispose()

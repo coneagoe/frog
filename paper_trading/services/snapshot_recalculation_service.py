@@ -54,15 +54,23 @@ class SnapshotRecalculationService:
             }
             all_events = repo.list_replay_events(account_id)
             builder = NavSeriesBuilder(repo=repo)
+            all_events = builder._enrich_initial_events(account_id, all_events)
             baseline = builder._baseline_from_events(all_events)
             if baseline is None:
                 raise ValueError("baseline is not provably reconstructible")
             events = [
                 event
                 for event in builder._deduplicate_trade_settlements(all_events)
-                if event.event_type is not NavReplayEventType.INITIAL
+                if event.event_type not in {NavReplayEventType.INITIAL, NavReplayEventType.MARKET_VALUATION}
             ]
-            valuation_events, gaps = self._valuation_events(snapshot_service, events, dates, baseline)
+            valuation_events, gaps, valuation_failures = self._valuation_events(
+                snapshot_service, events, dates, baseline
+            )
+            for trade_date, error in valuation_failures.items():
+                failed_dates.append(trade_date)
+                errors.append(f"{trade_date.isoformat()}: {error}")
+            if failed_dates:
+                raise RuntimeError("snapshot recalculation failed: " + "; ".join(errors))
             events.extend(valuation_events)
             replay = NavSeriesReplay().replay(events, baseline)
             by_date = {
@@ -154,11 +162,16 @@ class SnapshotRecalculationService:
         events: list[ReplayEvent],
         dates: list[date],
         baseline: dict[str, Any],
-    ) -> tuple[list[ReplayEvent], dict[date, tuple[list[str], list[dict[str, Any]]]]]:
+    ) -> tuple[
+        list[ReplayEvent],
+        dict[date, tuple[list[str], list[dict[str, Any]]]],
+        dict[date, str],
+    ]:
         replay = NavSeriesReplay().replay(events, baseline)
         points = replay.points
         valuation_events: list[ReplayEvent] = []
         gaps: dict[date, tuple[list[str], list[dict[str, Any]]]] = {}
+        failures: dict[date, str] = {}
         for trade_date in dates:
             prior = [point for point in points if point.trade_date <= trade_date]
             point = prior[-1] if prior else self._baseline_point(baseline)
@@ -181,6 +194,12 @@ class SnapshotRecalculationService:
                 position = type("Position", (), {"symbol": item.symbol, "market": item.market})()
                 resolved.extend(snapshot_service._resolve_valuations([position], trade_date))
             unavailable = [item for item in resolved if item.price is None]
+            provider_errors = [item for item in unavailable if item.error == "market_data_error"]
+            if provider_errors:
+                failures[trade_date] = "; ".join(
+                    sorted({item.error or "market_data_error" for item in provider_errors})
+                )
+                continue
             if unavailable:
                 details = sorted(
                     (snapshot_service._valuation_detail(item) for item in unavailable),
@@ -222,7 +241,7 @@ class SnapshotRecalculationService:
                     quality_status=SnapshotQualityStatus.VALID,
                 )
             )
-        return valuation_events, gaps
+        return valuation_events, gaps, failures
 
     @staticmethod
     def _baseline_point(baseline: dict[str, Any]) -> Any:
@@ -242,7 +261,8 @@ class SnapshotRecalculationService:
     ) -> dict[str, Any]:
         cash = point.cash or Decimal("0")
         total_assets = point.total_assets or Decimal("0")
-        market_value = total_assets - cash
+        pending_settlement = point.pending_settlement
+        market_value = total_assets - cash - pending_settlement
         return {
             "account_id": account_id,
             "trade_date": trade_date,
@@ -264,7 +284,7 @@ class SnapshotRecalculationService:
             "cumulative_deposit": point.cumulative_deposit,
             "cumulative_withdrawal": point.cumulative_withdrawal,
             "net_cash_flow": point.net_cash_flow,
-            "pending_settlement": Decimal("0"),
+            "pending_settlement": pending_settlement,
         }
 
     @staticmethod

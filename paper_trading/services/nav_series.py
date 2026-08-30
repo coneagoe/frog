@@ -15,6 +15,7 @@ class NavSeriesBuilder:
         repo: Any | None = None,
         event_loader: Callable[[int], list[ReplayEvent]] | None = None,
     ):
+        self._repo = None if callable(repo) else repo
         if callable(repo) and event_loader is None:
             event_loader = cast(Callable[[int], list[ReplayEvent]], repo)
             repo = None
@@ -35,6 +36,8 @@ class NavSeriesBuilder:
         end_date: date | None = None,
     ) -> ReplayResult:
         events = self._event_loader(account_id)
+        if self._repo is not None:
+            events = self._enrich_initial_events(account_id, events)
         events = self._deduplicate_trade_settlements(events)
         baseline = self._baseline_from_events(events)
         if baseline is None:
@@ -48,12 +51,52 @@ class NavSeriesBuilder:
         ]
         return ReplayResult(points=tuple(points))
 
+    def _enrich_initial_events(self, account_id: int, events: list[ReplayEvent]) -> list[ReplayEvent]:
+        if self._repo is None:
+            return events
+        snapshots = {
+            f"paper_account_snapshots:{snapshot.id}": snapshot
+            for snapshot in self._repo.list_snapshots(account_id)
+            if snapshot.point_type == "initial"
+        }
+        enriched: list[ReplayEvent] = []
+        for event in events:
+            snapshot = snapshots.get(event.source_id)
+            if snapshot is None:
+                enriched.append(event)
+                continue
+            payload = dict(event.payload)
+            payload.update(
+                cumulative_deposit=snapshot.cumulative_deposit,
+                cumulative_withdrawal=snapshot.cumulative_withdrawal,
+                pending_settlement=snapshot.pending_settlement,
+            )
+            enriched.append(
+                ReplayEvent(
+                    event_at=event.event_at,
+                    trade_date=event.trade_date,
+                    event_type=event.event_type,
+                    source_id=event.source_id,
+                    source_kind=event.source_kind,
+                    payload=payload,
+                    quality_status=event.quality_status,
+                )
+            )
+        return enriched
+
     @staticmethod
     def _deduplicate_trade_settlements(events: list[ReplayEvent]) -> list[ReplayEvent]:
         trade_ids = {
             event.payload.get("trade_id")
             for event in events
             if event.source_kind == "paper_trades" and event.payload.get("trade_id") is not None
+        }
+        hk_trade_ids = {
+            event.payload.get("trade_id")
+            for event in events
+            if event.source_kind == "paper_trades"
+            and event.payload.get("market") == "hk_connect"
+            and event.payload.get("side") == "sell"
         }
         return [
             event
@@ -62,7 +105,7 @@ class NavSeriesBuilder:
                 event.source_kind == "paper_cash_ledger"
                 and event.event_type is NavReplayEventType.TRADE_SETTLEMENT
                 and (
-                    event.payload.get("trade_id") in trade_ids
+                    (event.payload.get("trade_id") in trade_ids and event.payload.get("trade_id") not in hk_trade_ids)
                     or event.payload.get("ledger_event_type") == "corporate_action"
                 )
             )
@@ -109,4 +152,7 @@ class NavSeriesBuilder:
             "cash": opening_cash,
             "holdings": {},
             "costs": {},
+            "cumulative_deposit": candidates[0].payload.get("cumulative_deposit", opening_cash),
+            "cumulative_withdrawal": candidates[0].payload.get("cumulative_withdrawal", Decimal("0")),
+            "pending_settlement": candidates[0].payload.get("pending_settlement", Decimal("0")),
         }

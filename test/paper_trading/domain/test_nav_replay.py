@@ -242,6 +242,60 @@ def test_trade_replay_rejects_unknown_side():
         )
 
 
+def test_hk_sell_defers_cash_until_linked_settlement_ledger():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL,
+            "initial",
+            {"opening_cash": Decimal("100"), "opening_shares": Decimal("100")},
+        ),
+        _event(
+            NavReplayEventType.TRADE_SETTLEMENT,
+            "buy",
+            {
+                "side": "buy",
+                "market": "hk_connect",
+                "symbol": "000001",
+                "quantity": 10,
+                "price": Decimal("5"),
+                "amount": Decimal("50"),
+                "fees": Decimal("0"),
+            },
+        ),
+        _event(
+            NavReplayEventType.TRADE_SETTLEMENT,
+            "sell",
+            {
+                "side": "sell",
+                "market": "hk_connect",
+                "symbol": "000001",
+                "quantity": 10,
+                "price": Decimal("8"),
+                "amount": Decimal("80"),
+                "fees": Decimal("2"),
+            },
+            event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        ),
+        ReplayEvent(
+            event_at=datetime(2026, 8, 28, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 28),
+            event_type=NavReplayEventType.TRADE_SETTLEMENT,
+            source_id="settlement",
+            source_kind="paper_cash_ledger",
+            payload={"amount": Decimal("78"), "trade_id": 2},
+            quality_status=SnapshotQualityStatus.VALID,
+        ),
+    ]
+
+    points = NavSeriesReplay().replay(events, initial_state={}).points
+
+    assert points[2].cash == Decimal("50")
+    assert points[2].total_assets == Decimal("98")
+    assert points[2].pending_settlement == Decimal("78")
+    assert points[-1].cash == Decimal("128")
+    assert points[-1].pending_settlement == Decimal("0")
+
+
 def test_cash_flow_rejects_conflicting_pre_and_post_asset_payload():
     event = _event(
         NavReplayEventType.CASH_FLOW,

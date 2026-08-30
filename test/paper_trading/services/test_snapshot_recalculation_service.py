@@ -1,4 +1,4 @@
-from datetime import date, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from paper_trading.domain.enums import OrderSide
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import DailyBar
@@ -273,3 +274,36 @@ def test_recalculation_rolls_back_external_session_on_replay_failure():
             )
 
     session.rollback.assert_called_once()
+
+
+def test_recalculation_classifies_provider_failure_as_failed_not_unavailable(tmp_path):
+    factory = _sqlite_factory(tmp_path)
+    session = factory()
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("provider-failure-recalc", Decimal("100"))
+        repo.create_trade(
+            1,
+            account.id,
+            "000001",
+            OrderSide.BUY,
+            10,
+            Decimal("10"),
+            Decimal("100"),
+            Decimal("0"),
+            date(2026, 8, 25),
+            trade_time=datetime(2026, 8, 25, tzinfo=timezone.utc),
+        )
+        account_id = account.id
+        session.commit()
+    finally:
+        session.close()
+
+    class ProviderFailure(MarketDataProviderCompatibility):
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            raise RuntimeError("provider down")
+
+    with pytest.raises(RuntimeError, match="failed"):
+        SnapshotRecalculationService(factory, ProviderFailure()).recalculate(
+            account_id, date(2026, 8, 25), date(2026, 8, 25)
+        )
