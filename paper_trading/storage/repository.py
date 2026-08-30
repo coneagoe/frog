@@ -926,6 +926,12 @@ class PaperTradingRepository:
                         "affected_start_date": action.affected_start_date,
                         "affected_end_date": action.affected_end_date,
                         "cash_ledger_event_type": CashEventType.CORPORATE_ACTION.value,
+                        "before_quantity": self._replay_decimal(action.before_quantity),
+                        "after_quantity": self._replay_decimal(action.after_quantity),
+                        "before_cost_amount": self._replay_decimal(action.before_cost_amount),
+                        "after_cost_amount": self._replay_decimal(action.after_cost_amount),
+                        "before_cash_available": self._replay_decimal(action.before_cash_available),
+                        "after_cash_available": self._replay_decimal(action.after_cash_available),
                     },
                     quality_status=quality_status,
                 )

@@ -2,7 +2,7 @@
 
 ## Status
 
-Task 2 scoped review findings are resolved. The final authoritative verification is the 126-test focused run recorded below, plus the optional 23-test migration run.
+Task 2 scoped review findings are resolved. The final authoritative verification is the 126-test focused run with complete economic assertions recorded below, plus the optional 23-test migration run.
 
 ## Modified files
 
@@ -31,7 +31,7 @@ Command:
 uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/domain/test_nav_replay.py -v
 ```
 
-### Complete final test output
+### Complete final test output (authoritative)
 
 ```text
 ============================= test session starts ==============================
@@ -181,3 +181,7 @@ Command: `tools/run_tests.sh test/paper_trading/storage/test_nav_series_migratio
 Result: `23 passed in 47.82s` (PostgreSQL test_db started successfully).
 
 Concern: locale warnings (`en_US.UTF-8` unavailable) were emitted by the shell/container setup; tests passed.
+
+## Latest scoped review resolution
+
+Added complete corporate-action audit payload fields and strengthened the mixed repository-to-replay test with intermediate economic state comparisons: correct mapping yields assets/shares `100075`, while incorrectly treating the dividend ledger as CASH_FLOW yields `100085`; NAV remains `1` in this deliberately neutral-price scenario. The authoritative command above passed all 126 tests. `git diff --check` passed.

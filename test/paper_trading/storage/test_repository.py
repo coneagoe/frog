@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -447,7 +448,30 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
     assert action_event.payload["action_type"] == CorporateActionType.DIVIDEND.value
     assert action_event.payload["affected_start_date"] is None
     assert action_event.payload["symbol"] == "000001"
+    assert action_event.payload["before_quantity"] == Decimal("10.000000000000")
+    assert action_event.payload["after_quantity"] == Decimal("10.000000000000")
+    assert action_event.payload["before_cost_amount"] == Decimal("100.000000000000")
+    assert action_event.payload["after_cost_amount"] == Decimal("100.000000000000")
+    assert action_event.payload["before_cash_available"] == Decimal("100000.000000000000")
+    assert action_event.payload["after_cash_available"] == Decimal("100010.000000000000")
     replay = NavSeriesReplay().replay(events, {"total_assets": Decimal("100000"), "share_count": Decimal("100000")})
+    correct_before_valuation = replay.points[-2]
+    assert correct_before_valuation.total_assets == Decimal("100075")
+    assert correct_before_valuation.share_count == Decimal("100075")
+    wrong_dividend = replace(
+        next(event for event in events if event.source_id == f"paper_cash_ledger:{dividend_ledger.id}"),
+        event_type=NavReplayEventType.CASH_FLOW,
+    )
+    wrong_events = [wrong_dividend if event.source_id == wrong_dividend.source_id else event for event in events]
+    wrong_replay = NavSeriesReplay().replay(wrong_events, {"total_assets": Decimal("100000"), "share_count": Decimal("100000")})
+    wrong_before_valuation = wrong_replay.points[-2]
+    assert wrong_before_valuation.share_count == Decimal("100085")
+    assert wrong_before_valuation.total_assets == Decimal("100085")
+    assert wrong_before_valuation.nav == correct_before_valuation.nav == Decimal("1")
+    assert (
+        (wrong_before_valuation.total_assets, wrong_before_valuation.share_count)
+        != (correct_before_valuation.total_assets, correct_before_valuation.share_count)
+    )
     assert replay.points[-1].event_type is NavReplayEventType.MARKET_VALUATION
     assert replay.points[-1].total_assets == Decimal("100075.000000000000")
     assert replay.points[-1].share_count == Decimal("100075.000000000000")
