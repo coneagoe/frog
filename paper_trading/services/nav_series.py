@@ -28,7 +28,8 @@ class NavSeriesBuilder:
         points = [
             point
             for point in replayed.points
-            if (start_date is None or point.trade_date >= start_date) and (end_date is None or point.trade_date <= end_date)
+            if (start_date is None or point.trade_date >= start_date)
+            and (end_date is None or point.trade_date <= end_date)
         ]
         return ReplayResult(points=tuple(points))
 

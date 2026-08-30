@@ -80,6 +80,54 @@ def test_cash_flow_uses_previous_valid_nav_or_one_and_does_not_create_return():
     assert result.points[-1].share_count == Decimal("120")
 
 
+def test_backdated_cash_flow_reprices_later_valuation_without_using_stale_snapshot_nav():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL,
+            "initial",
+            {"opening_cash": Decimal("100"), "opening_shares": Decimal("100")},
+        ),
+        _event(
+            NavReplayEventType.CASH_FLOW,
+            "backdated-deposit",
+            {"amount": Decimal("100")},
+            event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        ),
+        _event(
+            NavReplayEventType.MARKET_VALUATION,
+            "close",
+            {"total_assets": Decimal("240")},
+            event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        ),
+    ]
+
+    result = NavSeriesReplay().replay(events, initial_state={})
+
+    assert result.points[-1].share_count == Decimal("200")
+    assert result.points[-1].nav == Decimal("1.2")
+
+
+def test_missing_market_valuation_is_a_gap_not_a_carried_forward_nav():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL,
+            "initial",
+            {"opening_cash": Decimal("100"), "opening_shares": Decimal("100")},
+        ),
+        _event(
+            NavReplayEventType.MARKET_VALUATION,
+            "missing-close",
+            {},
+            event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        ),
+    ]
+
+    result = NavSeriesReplay().replay(events, initial_state={})
+
+    assert result.points[-1].nav is None
+    assert result.points[-1].quality_status is SnapshotQualityStatus.INVALID
+
+
 def test_cash_flow_rejects_conflicting_pre_and_post_asset_payload():
     event = _event(
         NavReplayEventType.CASH_FLOW,

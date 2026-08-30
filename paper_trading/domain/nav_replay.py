@@ -69,9 +69,9 @@ class NavSeriesReplay:
         return event.event_at, _EVENT_PRECEDENCE[event.event_type], event.source_id
 
     def _apply_event(self, event: ReplayEvent, state: dict[str, Any]) -> NavPoint:
-        total_assets = self._decimal(event.payload.get("total_assets", state.get("total_assets")))
-        share_count = self._decimal(event.payload.get("share_count", state.get("share_count")))
-        nav = self._decimal(event.payload.get("nav", state.get("nav")))
+        total_assets = self._decimal(state.get("total_assets"))
+        share_count = self._decimal(state.get("share_count"))
+        nav = self._decimal(state.get("nav"))
 
         if event.event_type is NavReplayEventType.CASH_FLOW:
             if "total_assets" in event.payload or "post_total_assets" in event.payload:
@@ -88,23 +88,43 @@ class NavSeriesReplay:
             if state.get("total_assets") is not None and pre_total_assets != self._decimal(state["total_assets"]):
                 raise ValueError("cash-flow pre_total_assets conflicts with replay state")
             amount = self._decimal(event.payload.get("amount"))
-            pricing_nav = nav if nav is not None and self._valid_nav(nav) else Decimal("1")
+            pricing_nav = nav if self._valid_nav(nav) else Decimal("1")
+            if pricing_nav is None:
+                pricing_nav = Decimal("1")
             cash_amount = amount or Decimal("0")
             total_assets = (pre_total_assets or Decimal("0")) + cash_amount
             share_count = (share_count or Decimal("0")) + cash_amount / pricing_nav
             nav = pricing_nav
-        elif event.event_type is NavReplayEventType.MARKET_VALUATION and total_assets is not None and share_count:
-            nav = total_assets / share_count
+        elif event.event_type is NavReplayEventType.MARKET_VALUATION:
+            total_assets = self._decimal(event.payload.get("total_assets"))
+            if total_assets is None:
+                nav = None
+            elif share_count:
+                nav = total_assets / share_count
         elif event.event_type is NavReplayEventType.INITIAL:
-            total_assets = self._decimal(event.payload.get("opening_cash", total_assets))
-            share_count = self._decimal(event.payload.get("opening_shares", share_count))
+            total_assets = self._decimal(
+                event.payload.get("opening_cash", event.payload.get("total_assets", total_assets))
+            )
+            share_count = self._decimal(
+                event.payload.get("opening_shares", event.payload.get("share_count", share_count))
+            )
             if nav is None and total_assets is not None and share_count:
+                nav = total_assets / share_count
+        elif event.event_type is NavReplayEventType.TRADE_SETTLEMENT:
+            total_assets = (total_assets or Decimal("0")) + (self._decimal(event.payload.get("amount")) or Decimal("0"))
+            if share_count:
+                nav = total_assets / share_count
+        elif event.event_type is NavReplayEventType.CORPORATE_ACTION:
+            total_assets = (total_assets or Decimal("0")) + (
+                self._decimal(event.payload.get("cash_delta")) or Decimal("0")
+            )
+            if share_count:
                 nav = total_assets / share_count
         elif total_assets is not None and share_count:
             nav = total_assets / share_count
 
         valid = event.quality_status is SnapshotQualityStatus.VALID and self._valid_nav(nav)
-        return NavPoint(
+        point = NavPoint(
             event_at=event.event_at,
             trade_date=event.trade_date,
             source_id=event.source_id,
@@ -114,6 +134,11 @@ class NavSeriesReplay:
             nav=nav if valid else None,
             quality_status=SnapshotQualityStatus.VALID if valid else SnapshotQualityStatus.INVALID,
         )
+        state["total_assets"] = total_assets
+        state["share_count"] = share_count
+        if valid:
+            state["nav"] = nav
+        return point
 
     @staticmethod
     def _decimal(value: Any) -> Decimal | None:

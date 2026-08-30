@@ -168,6 +168,10 @@ class SnapshotService:
                 ),
                 None,
             )
+            if historical_event_at is not None and (
+                historical_event_at.tzinfo is None or historical_event_at.utcoffset() is None
+            ):
+                historical_event_at = historical_event_at.replace(tzinfo=timezone.utc)
         snapshot = self.generate_snapshot(
             account_id,
             trade_date,
