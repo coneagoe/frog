@@ -4331,24 +4331,8 @@ class StorageDb:
             "CAST(account.initial_cash AS TEXT) IN ('NaN', 'Infinity', '-Infinity')",
             "CAST(account.initial_cash AS REAL) <= 0",
         ]
-        snapshot_columns = self._table_column_names(conn, tb_name_paper_account_snapshots)
-        if "event_time_provenance" not in snapshot_columns:
-            predicates.append("TRUE")
-        else:
-            quality_check = (
-                " OR snapshot.quality_status IS NOT 'valid'" if "quality_status" in snapshot_columns else ""
-            )
-            predicates.append(
-                f"""EXISTS (
-                SELECT 1
-                FROM {tb_name_paper_account_snapshots} AS snapshot
-                WHERE snapshot.account_id = account.id
-                  AND snapshot.point_type IS NOT 'initial'
-                  AND (
-                      snapshot.event_time_provenance IS NOT 'canonical_utc'{quality_check}
-                  )
-            )"""
-            )
+        predicates.extend(self._sqlite_legacy_source_predicates(conn))
+        predicates.append(self._sqlite_initial_snapshot_uncertain(conn))
         conn.execute(
             text(
                 f"""
@@ -4359,6 +4343,100 @@ class StorageDb:
                 """
             )
         )
+
+    def _sqlite_initial_snapshot_uncertain(self, conn) -> str:
+        columns = self._table_column_names(conn, tb_name_paper_account_snapshots)
+        required = {
+            "trade_date",
+            "event_at",
+            "point_type",
+            "cash_available",
+            "total_assets",
+            "net_asset_value",
+            "share_count",
+        }
+        if not required <= columns:
+            return "1 = 1"
+        provenance = (
+            "snapshot.event_time_provenance IS 'canonical_utc'"
+            if "event_time_provenance" in columns
+            else "1 = 0"
+        )
+        return f"""EXISTS (
+            SELECT 1 FROM {tb_name_paper_account_snapshots} AS snapshot
+            WHERE snapshot.account_id = account.id
+              AND snapshot.point_type = 'initial'
+              AND NOT (
+                  {provenance}
+                  AND date(snapshot.trade_date) = date(account.created_at)
+                  AND datetime(snapshot.event_at) = datetime(account.created_at)
+                  AND snapshot.cash_available = account.initial_cash
+                  AND snapshot.total_assets = account.initial_cash
+                  AND snapshot.net_asset_value = 1
+                  AND snapshot.share_count = account.initial_cash
+              )
+        )"""
+
+    def _sqlite_legacy_source_predicates(self, conn) -> list[str]:
+        predicates: list[str] = []
+        for table_name, timestamp_columns, date_columns in _LEGACY_CHRONOLOGY_SOURCES:
+            if not inspect(conn).has_table(table_name):
+                continue
+            columns = self._table_column_names(conn, table_name)
+            expected = (*timestamp_columns, *date_columns)
+            account_match = self._legacy_chronology_account_match(table_name, columns)
+            if any(column not in columns for column in expected):
+                predicates.append(f"EXISTS (SELECT 1 FROM {table_name} AS source WHERE {account_match})")
+                continue
+            timestamp_checks = [
+                f"source.{column} IS NULL OR datetime(source.{column}) < datetime(account.created_at)"
+                for column in timestamp_columns
+            ]
+            date_checks = [
+                f"source.{column} IS NULL OR date(source.{column}) < date(account.created_at)"
+                for column in date_columns
+            ]
+            conflict = ""
+            if timestamp_columns and date_columns:
+                conflict = " OR " + " OR ".join(
+                    f"date(source.{date_column}) != date(source.{timestamp_column})"
+                    for timestamp_column in timestamp_columns
+                    for date_column in date_columns
+                )
+            checks = " OR ".join((*timestamp_checks, *date_checks)) + conflict
+            if table_name == tb_name_paper_account_snapshots:
+                provenance = (
+                    "source.event_time_provenance IS NOT 'canonical_utc'"
+                    if "event_time_provenance" in columns
+                    else "1 = 1"
+                )
+                checks = f"{checks} OR {provenance} OR source.quality_status IS NOT 'valid'"
+            if table_name == tb_name_paper_cash_ledger:
+                checks = f"{checks} OR {self._sqlite_legacy_cash_ledger_invalid(columns)}"
+            predicates.append(
+                f"EXISTS (SELECT 1 FROM {table_name} AS source WHERE {account_match} AND ({checks}))"
+            )
+        return predicates
+
+    @staticmethod
+    def _sqlite_legacy_cash_ledger_invalid(columns: set[str]) -> str:
+        numeric_columns = ("amount", "net_asset_value", "share_delta", "rounding_residual")
+        invalid = [
+            f"source.{column} IS NULL OR CAST(source.{column} AS TEXT) IN ('NaN', 'Infinity', '-Infinity')"
+            for column in numeric_columns
+            if column in columns
+        ]
+        if not all(column in columns for column in numeric_columns):
+            return "1 = 1"
+        invalid.extend(
+            (
+                "(source.event_type = 'deposit' AND (source.amount <= 0 OR source.share_delta <= 0))",
+                "(source.event_type = 'withdrawal' AND (source.amount >= 0 OR source.share_delta >= 0))",
+                "source.net_asset_value <= 0",
+                "source.amount != source.share_delta * source.net_asset_value + source.rounding_residual",
+            )
+        )
+        return " OR ".join(invalid)
 
     def _ensure_sqlite_snapshot_trading_identity(self, conn) -> None:
         snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
@@ -4749,6 +4827,38 @@ class StorageDb:
 
     def _legacy_chronology_predicates(self, conn) -> list[str]:
         predicates: list[str] = []
+        snapshot_columns = self._table_column_names(conn, tb_name_paper_account_snapshots)
+        initial_required = {
+            "trade_date",
+            "event_at",
+            "point_type",
+            "cash_available",
+            "total_assets",
+            "net_asset_value",
+            "share_count",
+        }
+        if initial_required <= snapshot_columns:
+            provenance = (
+                "source.event_time_provenance IS NOT DISTINCT FROM 'canonical_utc'"
+                if "event_time_provenance" in snapshot_columns
+                else "FALSE"
+            )
+            predicates.append(
+                f"""EXISTS (
+                SELECT 1 FROM {tb_name_paper_account_snapshots} AS source
+                WHERE source.account_id = account.id
+                  AND source.point_type = 'initial'
+                  AND NOT (
+                      {provenance}
+                      AND source.trade_date = CAST(account.created_at AS date)
+                      AND source.event_at = account.created_at
+                      AND source.cash_available = account.initial_cash
+                      AND source.total_assets = account.initial_cash
+                      AND source.net_asset_value = 1
+                      AND source.share_count = account.initial_cash
+                  )
+            )"""
+            )
         if not inspect(conn).has_table(tb_name_paper_cash_ledger):
             predicates.append(
                 f"""EXISTS (
@@ -4774,10 +4884,18 @@ class StorageDb:
                 )
                 continue
             row_uncertain = self._legacy_chronology_row_uncertain(timestamp_columns, date_columns)
-            if table_name in _SQLITE_PAPER_REPLAY_PROVENANCE_TABLES and "event_time_provenance" in columns:
+            if table_name in _SQLITE_PAPER_REPLAY_PROVENANCE_TABLES:
+                if "event_time_provenance" not in columns:
+                    row_uncertain = f"({row_uncertain}) OR TRUE"
+                else:
+                    row_uncertain = (
+                        f"({row_uncertain}) OR "
+                        "(source.event_time_provenance IS DISTINCT FROM 'canonical_utc')"
+                    )
+            if table_name == tb_name_paper_cash_ledger:
                 row_uncertain = (
                     f"({row_uncertain}) OR "
-                    "(source.event_time_provenance IS DISTINCT FROM 'canonical_utc')"
+                    f"({self._legacy_cash_ledger_invalid(columns)})"
                 )
             if table_name == tb_name_paper_account_snapshots:
                 row_uncertain = f"({row_uncertain}) OR source.quality_status IS DISTINCT FROM 'valid'"
@@ -4791,20 +4909,46 @@ class StorageDb:
             )
         return predicates
 
+    @staticmethod
+    def _legacy_cash_ledger_invalid(columns: set[str]) -> str:
+        numeric_columns = ("amount", "net_asset_value", "share_delta", "rounding_residual")
+        if not all(column in columns for column in numeric_columns):
+            return "TRUE"
+        return " OR ".join(
+            (
+                "source.amount IS NULL OR source.amount::text IN ('NaN', 'Infinity', '-Infinity')",
+                "source.net_asset_value IS NULL OR source.net_asset_value::text IN ('NaN', 'Infinity', '-Infinity')",
+                "source.share_delta IS NULL OR source.share_delta::text IN ('NaN', 'Infinity', '-Infinity')",
+                "source.rounding_residual IS NULL OR source.rounding_residual::text "
+                "IN ('NaN', 'Infinity', '-Infinity')",
+                "source.net_asset_value <= 0",
+                "(source.event_type = 'deposit' AND (source.amount <= 0 OR source.share_delta <= 0))",
+                "(source.event_type = 'withdrawal' AND (source.amount >= 0 OR source.share_delta >= 0))",
+                "source.amount <> source.share_delta * source.net_asset_value + source.rounding_residual",
+            )
+        )
+
     def _legacy_chronology_row_uncertain(
         self, timestamp_columns: tuple[str, ...], date_columns: tuple[str, ...]
     ) -> str:
         date_unproven = " OR ".join(
-            f"(source.{column_name} IS NULL OR source.{column_name} <= CAST(account.created_at AS date))"
+            f"(source.{column_name} IS NULL OR source.{column_name} < CAST(account.created_at AS date))"
             for column_name in date_columns
         )
         if not timestamp_columns:
             return date_unproven
-        timestamp_early = " OR ".join(f"source.{column_name} < account.created_at" for column_name in timestamp_columns)
-        all_timestamps_null = " AND ".join(f"source.{column_name} IS NULL" for column_name in timestamp_columns)
+        timestamp_early = " OR ".join(
+            f"source.{column_name} IS NULL OR source.{column_name} < account.created_at"
+            for column_name in timestamp_columns
+        )
         if not date_columns:
-            return f"({timestamp_early}) OR ({all_timestamps_null})"
-        return f"({timestamp_early}) OR (({all_timestamps_null}) AND ({date_unproven}))"
+            return f"({timestamp_early})"
+        timestamp_date_conflict = " OR ".join(
+            f"CAST(source.{date_column} AS date) <> CAST(source.{timestamp_column} AS date)"
+            for timestamp_column in timestamp_columns
+            for date_column in date_columns
+        )
+        return f"({timestamp_early}) OR ({date_unproven}) OR ({timestamp_date_conflict})"
 
     def _legacy_chronology_account_match(self, table_name: str, columns: set[str]) -> str:
         if table_name == tb_name_paper_matching_runs:
@@ -4839,7 +4983,8 @@ class StorageDb:
             text(
                 f"""
                 INSERT INTO {tb_name_paper_account_snapshots} (
-                    {id_column}account_id, trade_date, point_type, event_at, quality_status, invalid_reason,
+                    {id_column}account_id, trade_date, point_type, event_at, event_time_provenance, quality_status,
+                    invalid_reason,
                     cash_available, cash_frozen, market_value, total_assets, realized_pnl,
                     unrealized_pnl, position_count, order_count, trade_count, pending_settlement,
                     net_asset_value, share_count, cumulative_deposit, cumulative_withdrawal, net_cash_flow
@@ -4849,6 +4994,7 @@ class StorageDb:
                     CAST(account.created_at AS date),
                     'initial',
                     account.created_at,
+                    'canonical_utc',
                     'valid',
                     NULL,
                     account.initial_cash,
