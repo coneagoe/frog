@@ -54,3 +54,31 @@ All checks passed.
   service, so no provider is initialized for its cash-only account paths.
 - Full repository-wide tests and PostgreSQL integration tests were not run;
   they are outside the assigned focused validation.
+
+## Review Follow-up
+
+- Forward-dated cash flows now recalculate through `max(latest_snapshot_date,
+  cash_flow_date)`, avoiding an invalid reversed range and materializing the
+  new derived trading date.
+- Replay events now carry persisted pricing NAV, share delta, and rounding
+  residual. Cash-flow replay uses the persisted share delta and validates the
+  residual identity at residual precision instead of recomputing and dropping
+  the ledger allocation.
+- Account NAV/share/cumulative state is taken from the final replay projection,
+  including when trading snapshots exist; failed replay raises before the
+  request transaction can commit the ledger event.
+- Added exact-one initial ledger/snapshot field and provenance assertions,
+  backdated withdrawal coverage, forward-dated deposit coverage, and persisted
+  residual consistency coverage.
+
+Review follow-up verification:
+
+```text
+uv run pytest test/paper_trading/services/test_cash_service.py test/paper_trading/services/test_account_service.py test/paper_trading/api/test_accounts_api.py -q
+83 passed, 5 warnings
+
+uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py -q
+54 passed, 3 skipped
+
+Scoped Ruff: All checks passed.
+```

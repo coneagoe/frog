@@ -338,8 +338,10 @@ class PaperTradingRepository:
             account.id,
             CashEventType.DEPOSIT,
             initial_deposit,
+            trade_date=event_at.date(),
             net_asset_value=initial_nav,
             share_delta=initial_shares,
+            occurred_at=event_at,
             note="initial_cash",
         )
         self.create_initial_snapshot(account, event_at=event_at)
@@ -899,7 +901,9 @@ class PaperTradingRepository:
                     source_kind="paper_cash_ledger",
                     payload={
                         "amount": self._replay_decimal(ledger.amount, quantize_account_money),
+                        "pricing_nav": self._replay_decimal(ledger.net_asset_value, quantize_nav),
                         "share_delta": self._replay_decimal(ledger.share_delta, quantize_shares),
+                        "rounding_residual": self._replay_decimal(ledger.rounding_residual, quantize_rounding_residual),
                         "ledger_event_type": ledger_event_type.value,
                         "order_id": ledger.order_id,
                         "trade_id": ledger.trade_id,

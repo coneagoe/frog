@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timezone
 from decimal import Decimal
 
 import pytest
@@ -59,8 +59,20 @@ def test_account_creation_persists_initial_nav_snapshot(tmp_path):
 
     account = service.create_account(request.name, request.initial_cash)
     snapshots = repo.list_snapshots(account.id)
+    ledger = repo.list_cash_ledger(account.id)
 
     assert [(row.point_type, row.net_asset_value) for row in snapshots] == [("initial", Decimal("1.000000"))]
+    assert len(ledger) == 1
+    assert ledger[0].amount == Decimal("1000.0000")
+    assert ledger[0].share_delta == Decimal("1000.000000")
+    assert ledger[0].note == "initial_cash"
+    assert ledger[0].occurred_at.replace(tzinfo=timezone.utc).tzinfo == timezone.utc
+    assert ledger[0].event_time_provenance == "canonical_utc"
+    assert snapshots[0].share_count == Decimal("1000.000000")
+    assert snapshots[0].cash_available == Decimal("1000.0000")
+    assert snapshots[0].event_at.replace(tzinfo=timezone.utc).tzinfo == timezone.utc
+    assert snapshots[0].event_time_provenance == "canonical_utc"
+    assert ledger[0].occurred_at.replace(tzinfo=timezone.utc) == snapshots[0].event_at.replace(tzinfo=timezone.utc)
     engine.dispose()
 
 

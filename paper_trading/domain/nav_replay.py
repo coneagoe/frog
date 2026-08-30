@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 from paper_trading.domain.enums import NavReplayEventType, SnapshotQualityStatus
+from paper_trading.domain.precision import quantize_rounding_residual
 
 _EVENT_PRECEDENCE = {
     NavReplayEventType.INITIAL: 0,
@@ -128,14 +129,24 @@ class NavSeriesReplay:
             if state.get("total_assets") is not None and pre_total_assets != self._decimal(state["total_assets"]):
                 raise ValueError("cash-flow pre_total_assets conflicts with replay state")
             amount = self._decimal(event.payload.get("amount"))
-            pricing_nav = nav if self._valid_nav(nav) else Decimal("1")
+            persisted_pricing_nav = self._decimal(event.payload.get("pricing_nav"))
+            pricing_nav = persisted_pricing_nav if self._valid_nav(persisted_pricing_nav) else nav
+            pricing_nav = pricing_nav if self._valid_nav(pricing_nav) else Decimal("1")
             if pricing_nav is None:
                 pricing_nav = Decimal("1")
             cash_amount = amount if amount is not None else Decimal("0")
             prior_total_assets = pre_total_assets if pre_total_assets is not None else Decimal("0")
             total_assets = prior_total_assets + cash_amount
             prior_share_count = share_count if share_count is not None else Decimal("0")
-            share_count = prior_share_count + cash_amount / pricing_nav
+            persisted_share_delta = self._decimal(event.payload.get("share_delta"))
+            persisted_residual = self._decimal(event.payload.get("rounding_residual"))
+            if persisted_share_delta is not None and persisted_residual is not None:
+                expected_residual = quantize_rounding_residual(cash_amount - persisted_share_delta * pricing_nav)
+                if persisted_residual != expected_residual:
+                    raise ValueError("cash-flow rounding residual conflicts with persisted share_delta")
+            share_count = prior_share_count + (
+                persisted_share_delta if persisted_share_delta is not None else cash_amount / pricing_nav
+            )
             nav = pricing_nav
             cash = (cash if cash is not None else Decimal("0")) + cash_amount
             if cash_amount >= 0:

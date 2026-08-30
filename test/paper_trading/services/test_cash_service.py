@@ -169,6 +169,70 @@ def test_backdated_deposit_replays_existing_trading_snapshot(tmp_path):
     engine.dispose()
 
 
+def test_backdated_withdrawal_replays_existing_trading_snapshot(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("backdated-withdrawal", Decimal("100000.00"))
+    snapshot_at = datetime(2026, 7, 21, 23, tzinfo=timezone.utc)
+    repo.save_trading_snapshot(
+        account_id=account.id,
+        trade_date=snapshot_at.date(),
+        event_at=snapshot_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("100000"), cash_frozen=Decimal("0"), market_value=Decimal("0"),
+        total_assets=Decimal("100000"), realized_pnl=Decimal("0"), unrealized_pnl=Decimal("0"),
+        position_count=0, order_count=0, trade_count=0, net_asset_value=Decimal("1"),
+    )
+
+    result = CashService(repo).withdraw(
+        account.id,
+        Decimal("25000.00"),
+        date(2026, 7, 20),
+        occurred_at=datetime(2026, 7, 20, 10, tzinfo=timezone.utc),
+    )
+
+    rebuilt = next(snapshot for snapshot in repo.list_snapshots(account.id) if snapshot.trade_date == date(2026, 7, 21))
+    withdrawal = result.ledger
+    assert rebuilt.cash_available == Decimal("75000.0000")
+    assert rebuilt.share_count == Decimal("75000.000000")
+    assert rebuilt.cumulative_withdrawal == Decimal("25000.0000")
+    assert rebuilt.net_asset_value == Decimal("1.000000")
+    assert withdrawal.amount == Decimal("-25000.0000")
+    assert withdrawal.share_delta == Decimal("-25000.000000")
+    assert withdrawal.event_time_provenance == "canonical_utc"
+    assert result.account.share_count == Decimal("75000.000000")
+    engine.dispose()
+
+
+def test_forward_dated_deposit_recalculates_from_latest_snapshot(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("forward", Decimal("100000.00"))
+    latest_at = datetime(2026, 7, 20, 23, tzinfo=timezone.utc)
+    repo.save_trading_snapshot(
+        account_id=account.id,
+        trade_date=latest_at.date(),
+        event_at=latest_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("100000"), cash_frozen=Decimal("0"), market_value=Decimal("0"),
+        total_assets=Decimal("100000"), realized_pnl=Decimal("0"), unrealized_pnl=Decimal("0"),
+        position_count=0, order_count=0, trade_count=0, net_asset_value=Decimal("1"),
+    )
+
+    result = CashService(repo).deposit(
+        account.id,
+        Decimal("25000.00"),
+        date(2026, 7, 21),
+        occurred_at=datetime(2026, 7, 21, 10, tzinfo=timezone.utc),
+    )
+
+    future = next(snapshot for snapshot in repo.list_snapshots(account.id) if snapshot.trade_date == date(2026, 7, 21))
+    assert future.cash_available == Decimal("125000.0000")
+    assert future.share_count == Decimal("125000.000000")
+    assert result.account.share_count == Decimal("125000.000000")
+    engine.dispose()
+
+
 @pytest.mark.parametrize(
     ("operation", "amount", "nav"),
     [
@@ -210,6 +274,7 @@ def test_cash_flow_records_signed_rounding_residual(tmp_path, operation, amount,
     assert result.ledger.share_delta == result.ledger.share_delta.quantize(Decimal("0.000000000001"))
     assert result.ledger.rounding_residual == requested - represented
     assert result.ledger.rounding_residual != 0
+    assert result.account.share_count == Decimal("100000") + result.ledger.share_delta
     engine.dispose()
 
 
@@ -253,6 +318,29 @@ def test_cash_flow_reconciles_persisted_residual_beyond_twelve_decimals(tmp_path
 
     assert ledger.rounding_residual == requested - ledger.share_delta * ledger.net_asset_value
     assert abs(ledger.rounding_residual) > Decimal("0.000000000001")
+    engine.dispose()
+
+
+def test_replay_uses_persisted_cash_flow_share_delta_and_residual(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("persisted-share-delta", Decimal("100000.00"))
+    event_at = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+    ledger = repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("10.0000"),
+        trade_date=event_at.date(),
+        net_asset_value=Decimal("3.333333333333"),
+        share_delta=Decimal("3.000000000000"),
+        rounding_residual=Decimal("0.000000000001"),
+        occurred_at=event_at,
+    )
+    # The persisted ledger is the replay fact; changing the ORM object must not
+    # cause replay to fall back to amount / NAV recomputation.
+    ledger.share_delta = Decimal("2.000000000000")
+    with pytest.raises(ValueError, match="rounding residual"):
+        CashService(repo)._replay_from(account, event_at.date())
+    session.rollback()
     engine.dispose()
 
 

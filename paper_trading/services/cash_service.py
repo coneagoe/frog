@@ -124,9 +124,10 @@ class CashService:
             has_holdings = any(position.total_quantity > 0 for position in self.repo.get_positions(account.id))
             if has_holdings and self.market_data is None:
                 raise ValueError("cash-flow replay requires market data for existing positions")
+            end_date = max(max(trading_dates), start_date)
             SnapshotRecalculationService(
                 lambda: self.repo.session, cast(MarketDataProvider, self.market_data)
-            ).recalculate(account.id, start_date, max(trading_dates), session=self.repo.session)
+            ).recalculate(account.id, start_date, end_date, session=self.repo.session)
 
         events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account.id)
         result = NavSeriesReplay().replay(
@@ -135,20 +136,10 @@ class CashService:
         if not result.points:
             raise ValueError("cash-flow replay produced no NAV state")
         point = result.points[-1]
-        trading_snapshots = [
-            snapshot for snapshot in self.repo.list_snapshots(account.id) if snapshot.point_type == "trading"
-        ]
-        if trading_snapshots:
-            latest = trading_snapshots[-1]
-            share_count = latest.share_count
-            net_asset_value = latest.net_asset_value
-            cumulative_deposit = latest.cumulative_deposit
-            cumulative_withdrawal = latest.cumulative_withdrawal
-        else:
-            share_count = point.share_count
-            net_asset_value = point.nav
-            cumulative_deposit = point.cumulative_deposit
-            cumulative_withdrawal = point.cumulative_withdrawal
+        share_count = point.share_count
+        net_asset_value = point.nav
+        cumulative_deposit = point.cumulative_deposit
+        cumulative_withdrawal = point.cumulative_withdrawal
         if net_asset_value is None or share_count is None:
             raise ValueError("cash-flow replay could not prove NAV state")
         self.repo.update_account_nav_state(
