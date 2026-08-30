@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
@@ -129,9 +129,7 @@ class NavSeriesReplay:
             if state.get("total_assets") is not None and pre_total_assets != self._decimal(state["total_assets"]):
                 raise ValueError("cash-flow pre_total_assets conflicts with replay state")
             amount = self._decimal(event.payload.get("amount"))
-            allocation = tuple(
-                event.payload.get(name) for name in ("pricing_nav", "share_delta", "rounding_residual")
-            )
+            allocation = tuple(event.payload.get(name) for name in ("pricing_nav", "share_delta", "rounding_residual"))
             has_allocation = any(value is not None for value in allocation)
             if has_allocation and any(value is None for value in allocation):
                 raise ValueError("cash-flow allocation requires pricing_nav, share_delta, and rounding_residual")
@@ -218,6 +216,18 @@ class NavSeriesReplay:
             cash_frozen = self._decimal(event.payload.get("cash_frozen"))
             if cash_frozen is None:
                 cash_frozen = Decimal("0")
+            payload_holdings = event.payload.get("holdings")
+            if isinstance(payload_holdings, Mapping):
+                holdings = {}
+                for key, value in payload_holdings.items():
+                    parsed = self._decimal(value)
+                    holdings[str(key)] = parsed if parsed is not None else Decimal("0")
+            payload_costs = event.payload.get("costs")
+            if isinstance(payload_costs, Mapping):
+                costs = {}
+                for key, value in payload_costs.items():
+                    parsed = self._decimal(value)
+                    costs[str(key)] = parsed if parsed is not None else Decimal("0")
         elif event.event_type is NavReplayEventType.TRADE_SETTLEMENT:
             amount = self._decimal(event.payload.get("amount"))
             if amount is None:
@@ -298,26 +308,49 @@ class NavSeriesReplay:
                 if share_count:
                     nav = total_assets / share_count
         elif event.event_type is NavReplayEventType.CORPORATE_ACTION:
-            cash_delta = self._decimal(event.payload.get("cash_delta"))
-            if cash_delta is None:
-                cash_delta = Decimal("0")
-            total_assets = (total_assets if total_assets is not None else Decimal("0")) + cash_delta
-            if share_count:
-                nav = total_assets / share_count
             market = str(event.payload.get("market") or "")
             symbol = str(event.payload.get("symbol", ""))
             if not symbol:
                 raise ValueError("corporate action symbol is required")
             holding_key = f"{market}:{symbol}"
-            quantity_delta = self._decimal(event.payload.get("quantity_delta"))
-            if quantity_delta is None:
-                quantity_delta = Decimal("0")
-            holdings[holding_key] = holdings.get(holding_key, Decimal("0")) + quantity_delta
-            if "after_cost_amount" in event.payload:
+            quantity = holdings.get(holding_key, Decimal("0"))
+            cost = costs.get(holding_key, Decimal("0"))
+            parameters = event.payload.get("parameters")
+            action_type = event.payload.get("action_type")
+            if not isinstance(parameters, Mapping) or action_type is None:
+                # Keep the low-level replay API compatible with callers that
+                # already provide a fully calculated impact. Persisted
+                # corporate actions always take the parameterized path below.
+                cash_delta = self._decimal(event.payload.get("cash_delta")) or Decimal("0")
+                quantity_delta = self._decimal(event.payload.get("quantity_delta")) or Decimal("0")
+                holdings[holding_key] = quantity + quantity_delta
                 after_cost = self._decimal(event.payload.get("after_cost_amount"))
                 if after_cost is not None:
                     costs[holding_key] = after_cost
-            cash = (cash if cash is not None else Decimal("0")) + cash_delta
+                total_assets = (total_assets if total_assets is not None else Decimal("0")) + cash_delta
+                if share_count:
+                    nav = total_assets / share_count
+                cash = (cash if cash is not None else Decimal("0")) + cash_delta
+                # Continue to the common point construction below.
+                parameters = None
+            if parameters is None:
+                pass
+            else:
+                from paper_trading.domain.corporate_actions import calculate_corporate_action_impact
+                from paper_trading.domain.enums import CorporateActionType
+
+                impact = calculate_corporate_action_impact(
+                    CorporateActionType(action_type), quantity, cost, cash or Decimal("0"), parameters
+                )
+                if CorporateActionType(action_type) is CorporateActionType.RIGHTS_ISSUE:
+                    impact = replace(impact, after_cost_amount=cost - impact.cash_delta)
+                cash_delta = impact.cash_delta
+                holdings[holding_key] = impact.after_quantity
+                costs[holding_key] = impact.after_cost_amount
+                total_assets = (total_assets if total_assets is not None else Decimal("0")) + cash_delta
+                if share_count:
+                    nav = total_assets / share_count
+                cash = (cash if cash is not None else Decimal("0")) + cash_delta
         elif total_assets is not None and share_count:
             nav = total_assets / share_count
 

@@ -32,8 +32,10 @@ def _service(session):
 def test_dividend_is_audited_and_credits_cash(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-dividend", Decimal("10000"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
 
     result = _service(sqlite_session).apply(
         account.id,
@@ -68,8 +70,10 @@ def test_non_dividend_actions_keep_position_and_lot_consistent(
 ):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account(f"corporate-action-{event_type.value}", Decimal("10000"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
 
     result = _service(sqlite_session).apply(
         account.id, "000001", event_type, datetime(2026, 8, 27, tzinfo=timezone.utc), event_type.value, parameters
@@ -133,8 +137,10 @@ def test_idempotent_replay_returns_original_and_conflict_is_rejected(sqlite_sess
 def test_recalculation_failure_rolls_back_all_accounting_writes(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-rollback", Decimal("10000"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
     repo.save_snapshot(
         account_id=account.id,
         trade_date=date(2026, 8, 27),
@@ -203,8 +209,10 @@ def test_recalculation_failure_rolls_back_all_accounting_writes(sqlite_session):
 def test_insufficient_rights_cash_rejects_without_any_persisted_change(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-insufficient-cash", Decimal("10"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
     sqlite_session.commit()
 
     with pytest.raises(InsufficientRightsCashError, match="cash"):
@@ -227,8 +235,10 @@ def test_insufficient_rights_cash_rejects_without_any_persisted_change(sqlite_se
 def test_rights_issue_uses_internal_cash_precision_for_eligibility(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-precise-cash", Decimal("10.00004"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 1, 0, Decimal("1"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 1, 1, Decimal("1"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 1, 0, Decimal("1"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 1, 1, Decimal("1"), source="imported"
+    )
 
     result = _service(sqlite_session).apply(
         account.id,
@@ -248,8 +258,10 @@ def test_rights_issue_preserves_large_twelve_decimal_cash_eligibility(sqlite_ses
     repo = PaperTradingRepository(sqlite_session)
     cash = Decimal("999999999999.125000000000")
     account = repo.create_account("corporate-action-large-cash", cash)
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 1, 0, Decimal("1"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 1, 1, Decimal("1"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 1, 0, Decimal("1"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 1, 1, Decimal("1"), source="imported"
+    )
 
     assert repo.get_cash_available_internal(account.id) == cash
     result = _service(sqlite_session).apply(
@@ -294,8 +306,10 @@ def test_service_rejects_extra_parameters_before_idempotency_resolution(sqlite_s
 def test_invalid_holding_rejects_before_writes(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-invalid-holding", Decimal("10000"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 90, 90, Decimal("10"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 90, 90, Decimal("10"), source="imported"
+    )
     sqlite_session.commit()
 
     with pytest.raises(ValueError, match="aggregate"):
@@ -317,8 +331,10 @@ def test_invalid_holding_rejects_before_writes(sqlite_session):
 def test_fractional_result_rejects_integer_backed_holding_without_writes(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-fractional", Decimal("10000"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 101, 0, Decimal("1010"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 101, 101, Decimal("10"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 101, 0, Decimal("1010"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 101, 101, Decimal("10"), source="imported"
+    )
     sqlite_session.commit()
 
     with pytest.raises(ValueError, match="fractional quantity"):
@@ -339,8 +355,10 @@ def test_fractional_result_rejects_integer_backed_holding_without_writes(sqlite_
 def test_failed_recalculation_dates_roll_back_event_and_all_accounting_changes(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-failed-date", Decimal("10000"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
     sqlite_session.commit()
 
     with pytest.raises(RuntimeError, match="2026-08-27"):
@@ -362,8 +380,10 @@ def test_failed_recalculation_dates_roll_back_event_and_all_accounting_changes(s
 def test_recalculation_covers_event_and_later_snapshot_and_gap_dates(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("corporate-action-recalculation-range", Decimal("10000"))
-    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
-    repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
     repo.save_snapshot(
         account_id=account.id,
         trade_date=date(2026, 8, 28),

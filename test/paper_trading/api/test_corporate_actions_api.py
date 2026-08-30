@@ -35,7 +35,7 @@ def _payload(action_type: str, key: str = "key-1") -> dict:
     return {
         "symbol": "000001.SZ",
         "event_type": action_type,
-        "event_at": "2026-08-20T09:30:00+08:00",
+        "event_at": "2026-09-02T09:30:00+08:00",
         "idempotency_key": key,
         "parameters": parameters,
     }
@@ -107,12 +107,12 @@ def test_corporate_action_errors_and_list_filters(monkeypatch, sqlite_session):
     )
 
     second = _payload("split", "split-key")
-    second["event_at"] = "2026-08-21T01:30:00Z"
+    second["event_at"] = "2026-09-03T01:30:00Z"
     assert (
         client.post(f"/paper/accounts/{account.id}/corporate-actions", json=second, headers=headers).status_code == 200
     )
-    start = "2026-08-20T01:30:00Z"
-    end = "2026-08-21T01:30:00Z"
+    start = "2026-09-02T01:30:00Z"
+    end = "2026-09-03T01:30:00Z"
     response = client.get(
         f"/paper/accounts/{account.id}/corporate-actions",
         params={"symbol": "000001.SZ", "start_at": start, "end_at": end, "event_type": "split"},
