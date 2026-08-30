@@ -9,12 +9,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.domain.enums import (
+    AccountStatus,
     CashEventType,
     CorporateActionType,
     ETFEligibilityStatus,
     LedgerRebuildStatus,
     Market,
     MatchingRunStatus,
+    NavReplayEventType,
     OrderSide,
     OrderStatus,
     SnapshotPointType,
@@ -267,6 +269,121 @@ def test_create_initial_snapshot_rejects_duplicate_initial_point(sqlite_session)
 
     with pytest.raises(IntegrityError):
         repo.create_initial_snapshot(account, event_at=account.created_at + timedelta(seconds=1))
+
+
+def test_list_replay_events_adapts_sources_in_stable_utc_order(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("replay-events", Decimal("100000.00"))
+    event_at = datetime(2026, 8, 25, 9, tzinfo=timezone.utc)
+    order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10"), event_at.date(), OrderStatus.FILLED
+    )
+    trade = repo.create_trade(
+        order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        Decimal("1000"),
+        Decimal("5"),
+        event_at.date(),
+    )
+    trade.trade_time = event_at
+    ledger = repo.add_cash_event(
+        account.id, CashEventType.DEPOSIT, Decimal("10"), trade_date=event_at.date(), occurred_at=event_at
+    )
+    action = repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="replay-dividend",
+        parameters={"per_share_amount": "1"},
+        cash_delta=Decimal("100"),
+        before_quantity=Decimal("100"),
+        after_quantity=Decimal("100"),
+        before_cost_amount=Decimal("1000"),
+        after_cost_amount=Decimal("1000"),
+        before_cash_available=Decimal("10"),
+        after_cash_available=Decimal("110"),
+    )
+    snapshot = repo.save_trading_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
+
+    events = repo.list_replay_events(account.id, start_at=event_at, end_at=event_at)
+
+    assert [(event.event_type, event.source_kind, event.source_id) for event in events] == [
+        (NavReplayEventType.CASH_FLOW, "paper_cash_ledger", f"paper_cash_ledger:{ledger.id}"),
+        (NavReplayEventType.TRADE_SETTLEMENT, "paper_trades", f"paper_trades:{trade.id}"),
+        (NavReplayEventType.CORPORATE_ACTION, "paper_corporate_actions", f"paper_corporate_actions:{action.id}"),
+        (NavReplayEventType.MARKET_VALUATION, "paper_account_snapshots", f"paper_account_snapshots:{snapshot.id}"),
+    ]
+    assert all(event.event_at.tzinfo is timezone.utc for event in events)
+    assert events[0].payload["amount"] == Decimal("10.000000000000")
+    assert "nav" not in events[0].payload
+
+
+def test_list_replay_events_marks_legacy_missing_time_invalid(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    event_at, quality_status = repo._replay_event_time(None, date(2026, 8, 25))
+
+    assert event_at == datetime(2026, 8, 25, tzinfo=timezone.utc)
+    assert quality_status is SnapshotQualityStatus.INVALID
+
+
+def test_replace_trading_snapshots_is_bounded_and_upserts_dates(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("replace-derived", Decimal("100000.00"))
+    before = date(2026, 8, 24)
+    within = date(2026, 8, 25)
+    after = date(2026, 8, 26)
+    repo.save_trading_snapshot(
+        **_trading_snapshot_values(account.id, before, datetime(2026, 8, 24, tzinfo=timezone.utc))
+    )
+    repo.save_trading_snapshot(
+        **_trading_snapshot_values(account.id, within, datetime(2026, 8, 25, tzinfo=timezone.utc))
+    )
+    repo.save_trading_snapshot(
+        **_trading_snapshot_values(account.id, after, datetime(2026, 8, 26, tzinfo=timezone.utc))
+    )
+
+    repo.replace_trading_snapshots(
+        account.id,
+        within,
+        within,
+        [
+            {
+                **_trading_snapshot_values(account.id, within, datetime(2026, 8, 25, 16, tzinfo=timezone.utc)),
+                "total_assets": Decimal("120000"),
+            }
+        ],
+    )
+
+    snapshots = [item for item in repo.list_snapshots(account.id) if item.point_type == SnapshotPointType.TRADING.value]
+    assert [(item.trade_date, item.total_assets) for item in snapshots] == [
+        (before, Decimal("100000.0000")),
+        (within, Decimal("120000.0000")),
+        (after, Decimal("100000.0000")),
+    ]
+
+
+def test_get_accounts_for_snapshot_includes_active_cash_only_accounts(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    cash_only = repo.create_account("cash-only", Decimal("100000.00"))
+    future = repo.create_account("future-cash-only", Decimal("100000.00"))
+    inactive = repo.create_account("inactive-cash-only", Decimal("100000.00"))
+    cash_only.created_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    future.created_at = datetime(2026, 8, 26, tzinfo=timezone.utc)
+    inactive.created_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    inactive.status = AccountStatus.DISABLED.value
+    sqlite_session.flush()
+
+    assert repo.get_accounts_for_snapshot(date(2026, 8, 25)) == [cash_only.id]
+    assert repo.get_accounts_for_snapshot(date(2026, 8, 25), account_id=future.id) == []
 
 
 def test_acquire_matching_run_uses_canonical_active_status(sqlite_session):

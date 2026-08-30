@@ -1,6 +1,6 @@
 import re
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, cast
 
@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from paper_trading.domain.enums import (
-    REPLAY_REJECTION_MARKER,
+    AccountStatus,
     CashEventType,
     CorporateActionType,
     ETFEligibilityStatus,
@@ -20,10 +20,12 @@ from paper_trading.domain.enums import (
     LedgerRebuildStatus,
     Market,
     MatchingRunStatus,
+    NavReplayEventType,
     OrderSide,
     OrderStatus,
     PendingSettlementSource,
     PositionSource,
+    REPLAY_REJECTION_MARKER,
     RoundTripStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
@@ -31,6 +33,7 @@ from paper_trading.domain.enums import (
 )
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label, canonical_stock_id
+from paper_trading.domain.nav_replay import ReplayEvent
 from paper_trading.domain.precision import (
     quantize_account_money,
     quantize_nav,
@@ -805,6 +808,153 @@ class PaperTradingRepository:
             .all()
         )
 
+    @staticmethod
+    def _replay_event_time(
+        event_at: datetime | None, trade_date: date | None
+    ) -> tuple[datetime, SnapshotQualityStatus]:
+        """Normalize replay event time; legacy missing times remain explicitly invalid."""
+        if event_at is None:
+            return (
+                datetime.combine(trade_date or date.min, time.min, tzinfo=timezone.utc),
+                SnapshotQualityStatus.INVALID,
+            )
+        if event_at.tzinfo is None or event_at.utcoffset() is None:
+            return event_at.replace(tzinfo=timezone.utc), SnapshotQualityStatus.VALID
+        return event_at.astimezone(timezone.utc), SnapshotQualityStatus.VALID
+
+    @staticmethod
+    def _replay_decimal(value: Decimal | None) -> Decimal | None:
+        return None if value is None else Decimal(str(value))
+
+    @staticmethod
+    def _replay_source_id(source_kind: str, row_id: int) -> str:
+        return f"{source_kind}:{row_id}"
+
+    @staticmethod
+    def _validate_replay_range(
+        start_at: datetime | None, end_at: datetime | None
+    ) -> tuple[datetime | None, datetime | None]:
+        for name, value in (("start_at", start_at), ("end_at", end_at)):
+            if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+                raise ValueError(f"{name} must include a timezone offset")
+        normalized_start = None if start_at is None else start_at.astimezone(timezone.utc)
+        normalized_end = None if end_at is None else end_at.astimezone(timezone.utc)
+        if normalized_start is not None and normalized_end is not None and normalized_start > normalized_end:
+            raise ValueError("start_at must not be after end_at")
+        return normalized_start, normalized_end
+
+    def list_replay_events(
+        self, account_id: int, start_at: datetime | None = None, end_at: datetime | None = None
+    ) -> list[ReplayEvent]:
+        """Return deterministic, UTC-normalized replay inputs from persisted account history."""
+        start_at, end_at = self._validate_replay_range(start_at, end_at)
+        events: list[ReplayEvent] = []
+
+        for ledger in self.list_cash_ledger(account_id):
+            event_at, quality_status = self._replay_event_time(ledger.occurred_at, ledger.trade_date)
+            events.append(
+                ReplayEvent(
+                    event_at=event_at,
+                    trade_date=ledger.trade_date or event_at.date(),
+                    event_type=NavReplayEventType.CASH_FLOW,
+                    source_id=self._replay_source_id("paper_cash_ledger", ledger.id),
+                    source_kind="paper_cash_ledger",
+                    payload={
+                        "amount": self._replay_decimal(ledger.amount),
+                        "share_delta": self._replay_decimal(ledger.share_delta),
+                    },
+                    quality_status=quality_status,
+                )
+            )
+
+        for trade in self.list_trades(account_id):
+            event_at, quality_status = self._replay_event_time(trade.trade_time, trade.trade_date)
+            events.append(
+                ReplayEvent(
+                    event_at=event_at,
+                    trade_date=trade.trade_date,
+                    event_type=NavReplayEventType.TRADE_SETTLEMENT,
+                    source_id=self._replay_source_id("paper_trades", trade.id),
+                    source_kind="paper_trades",
+                    payload={
+                        "amount": self._replay_decimal(trade.amount),
+                        "fees": self._replay_decimal(trade.fees),
+                        "side": trade.side,
+                    },
+                    quality_status=quality_status,
+                )
+            )
+
+        for action in self.list_corporate_actions(account_id):
+            event_at, quality_status = self._replay_event_time(action.event_at, action.affected_start_date)
+            events.append(
+                ReplayEvent(
+                    event_at=event_at,
+                    trade_date=action.affected_start_date or event_at.date(),
+                    event_type=NavReplayEventType.CORPORATE_ACTION,
+                    source_id=self._replay_source_id("paper_corporate_actions", action.id),
+                    source_kind="paper_corporate_actions",
+                    payload={
+                        "cash_delta": self._replay_decimal(action.cash_delta),
+                        "quantity_delta": self._replay_decimal(action.quantity_delta),
+                        "parameters": action.parameters,
+                    },
+                    quality_status=quality_status,
+                )
+            )
+
+        for snapshot in self.list_snapshots(account_id):
+            event_at, time_quality = self._replay_event_time(snapshot.event_at, snapshot.trade_date)
+            quality_status = (
+                time_quality
+                if time_quality is SnapshotQualityStatus.INVALID
+                else SnapshotQualityStatus(snapshot.quality_status)
+            )
+            events.append(
+                ReplayEvent(
+                    event_at=event_at,
+                    trade_date=snapshot.trade_date,
+                    event_type=(
+                        NavReplayEventType.INITIAL
+                        if snapshot.point_type == SnapshotPointType.INITIAL.value
+                        else NavReplayEventType.MARKET_VALUATION
+                    ),
+                    source_id=self._replay_source_id("paper_account_snapshots", snapshot.id),
+                    source_kind="paper_account_snapshots",
+                    payload={
+                        "opening_cash": self._replay_decimal(snapshot.cash_available),
+                        "opening_shares": self._replay_decimal(snapshot.share_count),
+                        "total_assets": self._replay_decimal(snapshot.total_assets),
+                        "share_count": self._replay_decimal(snapshot.share_count),
+                        "nav": self._replay_decimal(snapshot.net_asset_value),
+                    },
+                    quality_status=quality_status,
+                )
+            )
+
+        filtered = [
+            event
+            for event in events
+            if (start_at is None or event.event_at >= start_at) and (end_at is None or event.event_at <= end_at)
+        ]
+        precedence = {
+            NavReplayEventType.INITIAL: 0,
+            NavReplayEventType.CASH_FLOW: 1,
+            NavReplayEventType.TRADE_SETTLEMENT: 2,
+            NavReplayEventType.CORPORATE_ACTION: 3,
+            NavReplayEventType.MARKET_VALUATION: 4,
+        }
+        return sorted(
+            filtered,
+            key=lambda event: (event.event_at, precedence[event.event_type], event.source_kind, event.source_id),
+        )
+
+    def get_replay_events(
+        self, account_id: int, start_at: datetime | None = None, end_at: datetime | None = None
+    ) -> list[ReplayEvent]:
+        """Compatibility alias for callers that use getter naming."""
+        return self.list_replay_events(account_id, start_at=start_at, end_at=end_at)
+
     def latest_valid_nav_before(self, account_id: int, occurred_at: datetime) -> Decimal | None:
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must include a timezone offset")
@@ -901,11 +1051,18 @@ class PaperTradingRepository:
     def get_accounts_for_snapshot(self, trade_date: date, account_id: int | None = None) -> list[int]:
         position_query = self.session.query(PaperPosition.account_id).filter(PaperPosition.total_quantity > 0)
         order_query = self.session.query(PaperOrder.account_id).filter(PaperOrder.trade_date == trade_date)
+        valuation_end = datetime.combine(trade_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+        active_account_query = self.session.query(PaperAccount.id).filter(
+            PaperAccount.status == AccountStatus.ACTIVE.value,
+            PaperAccount.created_at < valuation_end,
+        )
         if account_id is not None:
             position_query = position_query.filter(PaperPosition.account_id == account_id)
             order_query = order_query.filter(PaperOrder.account_id == account_id)
+            active_account_query = active_account_query.filter(PaperAccount.id == account_id)
         ids = {int(value) for (value,) in position_query.all()}
         ids.update(int(value) for (value,) in order_query.all())
+        ids.update(int(value) for (value,) in active_account_query.all())
         return sorted(ids)
 
     def get_orders_for_matching(self, trade_date: date, account_id: int | None = None) -> list[PaperOrder]:
@@ -1120,6 +1277,38 @@ class PaperTradingRepository:
             .delete(synchronize_session="fetch")
         )
         self.session.flush()
+
+    def replace_trading_snapshots(
+        self,
+        account_id: int,
+        start_date: date,
+        end_date: date,
+        snapshots: list[dict[str, Any]],
+    ) -> list[PaperAccountSnapshot]:
+        """Replace only derived trading snapshots in an inclusive account/date range."""
+        if start_date > end_date:
+            raise ValueError("start_date must not be after end_date")
+        for values in snapshots:
+            if values.get("account_id") != account_id:
+                raise ValueError("snapshot account_id must match replacement account")
+            trade_date = values.get("trade_date")
+            if not isinstance(trade_date, date) or not start_date <= trade_date <= end_date:
+                raise ValueError("snapshot trade_date must be within replacement range")
+        (
+            self.session.query(PaperAccountSnapshot)
+            .filter(
+                PaperAccountSnapshot.account_id == account_id,
+                PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
+                PaperAccountSnapshot.trade_date >= start_date,
+                PaperAccountSnapshot.trade_date <= end_date,
+            )
+            .delete(synchronize_session="fetch")
+        )
+        self.session.flush()
+        return [
+            self.save_trading_snapshot(**{**values, "point_type": SnapshotPointType.TRADING.value})
+            for values in snapshots
+        ]
 
     def count_orders(self, account_id: int, trade_date: date) -> int:
         return int(
