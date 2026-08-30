@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService
-from paper_trading.services.snapshot_service import SnapshotOutcome, SnapshotService
+from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.models import PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
@@ -114,16 +114,10 @@ def test_recalculation_classifies_unavailable_and_failed_dates():
     session = MagicMock()
     repo = MagicMock()
     repo.get_account.return_value = object()
-    snapshot_service = MagicMock()
-    snapshot_service.generate_snapshot_or_gap.side_effect = [
-        SnapshotOutcome(status="valuation_gap"),
-        RuntimeError("market data failed"),
-    ]
     factory = MagicMock(return_value=session)
 
     with (
         patch("paper_trading.services.snapshot_recalculation_service.PaperTradingRepository", return_value=repo),
-        patch("paper_trading.services.snapshot_recalculation_service.SnapshotService", return_value=snapshot_service),
     ):
         service = SnapshotRecalculationService(factory, MagicMock())
         with patch.object(
@@ -131,7 +125,7 @@ def test_recalculation_classifies_unavailable_and_failed_dates():
             "_dates_with_valuation_state",
             return_value=[date(2026, 8, 25), date(2026, 8, 26)],
         ):
-            with pytest.raises(RuntimeError, match="2026-08-26: market data failed"):
+            with pytest.raises(ValueError, match="baseline"):
                 service.recalculate(1, date(2026, 8, 25), date(2026, 8, 26))
 
     session.rollback.assert_called_once()
@@ -229,8 +223,6 @@ def test_recalculation_does_not_invoke_matching_order_ledger_or_settlement():
     session = MagicMock()
     repo = MagicMock()
     repo.get_account.return_value = object()
-    snapshot_service = MagicMock()
-    snapshot_service.generate_snapshot_or_gap.return_value = SnapshotOutcome(status="complete")
     forbidden = {
         name: MagicMock()
         for name in ("MatchingService", "OrderDeleteService", "LedgerRebuildService", "HkSettlementService")
@@ -238,7 +230,6 @@ def test_recalculation_does_not_invoke_matching_order_ledger_or_settlement():
 
     with (
         patch("paper_trading.services.snapshot_recalculation_service.PaperTradingRepository", return_value=repo),
-        patch("paper_trading.services.snapshot_recalculation_service.SnapshotService", return_value=snapshot_service),
         patch("paper_trading.services.matching_service.MatchingService", forbidden["MatchingService"]),
         patch("paper_trading.services.order_delete_service.OrderDeleteService", forbidden["OrderDeleteService"]),
         patch("paper_trading.services.ledger_rebuild_service.LedgerRebuildService", forbidden["LedgerRebuildService"]),
@@ -246,7 +237,8 @@ def test_recalculation_does_not_invoke_matching_order_ledger_or_settlement():
     ):
         service = SnapshotRecalculationService(MagicMock(return_value=session), MagicMock())
         with patch.object(service, "_dates_with_valuation_state", return_value=[date(2026, 8, 25)]):
-            service.recalculate(1, date(2026, 8, 25), date(2026, 8, 25))
+            with pytest.raises(ValueError, match="baseline"):
+                service.recalculate(1, date(2026, 8, 25), date(2026, 8, 25))
 
     for constructor in forbidden.values():
         constructor.assert_not_called()
@@ -266,3 +258,18 @@ def test_recalculation_rejects_unknown_account():
     with patch("paper_trading.services.snapshot_recalculation_service.PaperTradingRepository", return_value=repo):
         with pytest.raises(KeyError, match="not found"):
             SnapshotRecalculationService(factory, MagicMock()).recalculate(1, date(2026, 8, 25), date(2026, 8, 25))
+
+
+def test_recalculation_rolls_back_external_session_on_replay_failure():
+    session = MagicMock()
+    repo = MagicMock()
+    repo.get_account.return_value = object()
+    repo.list_replay_events.return_value = []
+
+    with patch("paper_trading.services.snapshot_recalculation_service.PaperTradingRepository", return_value=repo):
+        with pytest.raises(ValueError, match="baseline"):
+            SnapshotRecalculationService(MagicMock(), MagicMock()).recalculate(
+                1, date(2026, 8, 25), date(2026, 8, 25), session=session
+            )
+
+    session.rollback.assert_called_once()

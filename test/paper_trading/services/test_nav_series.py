@@ -1,11 +1,15 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType, SnapshotQualityStatus
 from paper_trading.domain.nav_replay import ReplayEvent
 from paper_trading.services.nav_series import NavSeriesBuilder
+from paper_trading.storage.repository import PaperTradingRepository
+from storage.model.base import Base
 
 
 def test_baseline_requires_provable_creation_ledger_or_history_source():
@@ -91,3 +95,28 @@ def test_builder_rejects_invalid_quality_initial_as_baseline():
 
     with pytest.raises(ValueError, match="baseline"):
         NavSeriesBuilder(event_loader=lambda account_id: events).build(1)
+
+
+def test_builder_default_repository_loader_replays_persisted_events(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'builder.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("repository-builder", Decimal("100"))
+        occurred_at = datetime.now(timezone.utc) + timedelta(days=1)
+        repo.add_cash_event(
+            account.id,
+            "deposit",
+            Decimal("50"),
+            trade_date=occurred_at.date(),
+            occurred_at=occurred_at,
+        )
+
+        result = NavSeriesBuilder(repo=repo).build(account.id)
+
+        assert result.points[-1].share_count == Decimal("150")
+        assert result.points[-1].nav == Decimal("1")
+    finally:
+        session.close()
+        engine.dispose()

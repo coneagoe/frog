@@ -1,10 +1,14 @@
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
-from typing import Callable
+from decimal import Decimal
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from paper_trading.services.snapshot_service import SnapshotService
+from paper_trading.domain.enums import NavReplayEventType, SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.nav_replay import NavSeriesReplay, ReplayEvent
+from paper_trading.services.nav_series import NavSeriesBuilder
+from paper_trading.services.snapshot_service import PositionValuation, SnapshotService
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperAccountSnapshot, PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
@@ -46,29 +50,53 @@ class SnapshotRecalculationService:
             existing_event_at = {
                 snapshot.trade_date: self._utc(snapshot.event_at)
                 for snapshot in repo.list_snapshots(account_id)
-                if snapshot.point_type == "trading" and snapshot.trade_date in dates
+                if snapshot.point_type == SnapshotPointType.TRADING.value
             }
-
+            all_events = repo.list_replay_events(account_id)
+            builder = NavSeriesBuilder(event_loader=lambda _account_id: all_events)
+            baseline = builder._baseline_from_events(all_events)
+            if baseline is None:
+                raise ValueError("baseline is not provably reconstructible")
+            events = [
+                event
+                for event in builder._deduplicate_trade_settlements(all_events)
+                if event.event_type is not NavReplayEventType.MARKET_VALUATION
+            ]
+            valuation_events, gaps = self._valuation_events(snapshot_service, events, dates, baseline)
+            events.extend(valuation_events)
+            replay = NavSeriesReplay().replay(events, baseline)
+            by_date = {
+                point.trade_date: point
+                for point in replay.points
+                if point.event_type is NavReplayEventType.MARKET_VALUATION
+            }
+            snapshots = []
             for trade_date in dates:
-                try:
-                    with current_session.begin_nested():
-                        outcome = snapshot_service.generate_snapshot_or_gap(
-                            account_id, trade_date, preserve_account_nav=True
-                        )
-                    if outcome.status == "complete":
-                        if outcome.snapshot is not None:
-                            outcome.snapshot.event_at = existing_event_at.get(
-                                trade_date,
-                                datetime.combine(trade_date, time.min, tzinfo=timezone.utc),
-                            )
-                        updated_dates.append(trade_date)
-                    elif outcome.status == "valuation_gap":
-                        unavailable_dates.append(trade_date)
-                    else:
-                        raise RuntimeError(f"unexpected snapshot outcome: {outcome.status}")
-                except Exception as exc:
-                    failed_dates.append(trade_date)
-                    errors.append(f"{trade_date.isoformat()}: {exc}")
+                if trade_date in gaps:
+                    unavailable_dates.append(trade_date)
+                    repo.upsert_valuation_gap(account_id, trade_date, gaps[trade_date][0], gaps[trade_date][1])
+                    continue
+                point = by_date.get(trade_date)
+                if point is None or point.nav is None:
+                    unavailable_dates.append(trade_date)
+                    continue
+                snapshots.append(
+                    self._snapshot_values(
+                        repo,
+                        account_id,
+                        trade_date,
+                        point,
+                        existing_event_at.get(
+                            trade_date,
+                            point.event_at or datetime.combine(trade_date, time.max, tzinfo=timezone.utc),
+                        ),
+                    )
+                )
+                existing_gap = repo.get_valuation_gap(account_id, trade_date)
+                if existing_gap is not None and not existing_gap.resolved:
+                    repo.upsert_valuation_gap(account_id, trade_date, [], [], resolved=True)
+                updated_dates.append(trade_date)
+            repo.replace_trading_snapshots(account_id, start_date, end_date, snapshots)
 
             if failed_dates:
                 raise RuntimeError(
@@ -80,8 +108,7 @@ class SnapshotRecalculationService:
                 current_session.commit()
             return SnapshotRecalculationResult(account_id, updated_dates, unavailable_dates, failed_dates, errors)
         except BaseException:
-            if owns_session:
-                current_session.rollback()
+            current_session.rollback()
             raise
         finally:
             if owns_session:
@@ -114,7 +141,114 @@ class SnapshotRecalculationService:
         }
         # The bounded start date is the corporate-action event date. Include it
         # even when no prior snapshot or gap exists for that date.
-        return sorted(snapshot_dates | gap_dates | {start_date})
+        event_dates = {
+            event.trade_date
+            for event in repo.list_replay_events(account_id)
+            if event.trade_date is not None and start_date <= event.trade_date <= end_date
+        }
+        return sorted(snapshot_dates | gap_dates | event_dates | {start_date})
+
+    def _valuation_events(
+        self,
+        snapshot_service: SnapshotService,
+        events: list[ReplayEvent],
+        dates: list[date],
+        baseline: dict[str, Any],
+    ) -> tuple[list[ReplayEvent], dict[date, tuple[list[str], list[dict[str, Any]]]]]:
+        replay = NavSeriesReplay().replay(events, baseline)
+        points = replay.points
+        valuation_events: list[ReplayEvent] = []
+        gaps: dict[date, tuple[list[str], list[dict[str, Any]]]] = {}
+        for trade_date in dates:
+            prior = [point for point in points if point.trade_date <= trade_date]
+            point = prior[-1] if prior else self._baseline_point(baseline)
+            holdings = {} if point is None or point.holdings is None else point.holdings
+            valuations = [
+                PositionValuation(symbol, None, trade_date, None, None, None, "missing_replay_market")
+                for symbol, quantity in holdings.items()
+                if quantity > 0
+            ]
+            resolved = []
+            for item in valuations:
+                position = type("Position", (), {"symbol": item.symbol, "market": item.market})()
+                resolved.extend(snapshot_service._resolve_valuations([position], trade_date))
+            unavailable = [item for item in resolved if item.price is None]
+            if unavailable:
+                details = sorted(
+                    (snapshot_service._valuation_detail(item) for item in unavailable),
+                    key=snapshot_service._detail_sort_key,
+                )
+                gaps[trade_date] = ([detail["symbol"] for detail in details], details)
+                continue
+            market_value = sum(
+                (holdings[item.symbol] * (item.price or Decimal("0")) for item in resolved),
+                Decimal("0"),
+            )
+            cash = Decimal("0") if point is None or point.cash is None else point.cash
+            stale_details = tuple(
+                snapshot_service._valuation_detail(item)
+                for item in resolved
+                if item.quality == "stale_suspended"
+            )
+            valuation_events.append(
+                ReplayEvent(
+                    event_at=datetime.combine(trade_date, time.max, tzinfo=timezone.utc),
+                    trade_date=trade_date,
+                    event_type=NavReplayEventType.MARKET_VALUATION,
+                    source_id=f"recalculation:valuation:{trade_date.isoformat()}",
+                    source_kind="recalculation",
+                    payload={
+                        "total_assets": cash + market_value,
+                        "valuation_quality": "stale_suspended" if stale_details else "current",
+                        "valuation_details": stale_details,
+                    },
+                    quality_status=SnapshotQualityStatus.VALID,
+                )
+            )
+        return valuation_events, gaps
+
+    @staticmethod
+    def _baseline_point(baseline: dict[str, Any]) -> Any:
+        return type(
+            "BaselinePoint",
+            (),
+            {
+                "cash": Decimal(str(baseline["cash"])),
+                "holdings": {},
+                "costs": {},
+            },
+        )()
+
+    @staticmethod
+    def _snapshot_values(
+        repo: PaperTradingRepository, account_id: int, trade_date: date, point: Any, event_at: datetime
+    ) -> dict[str, Any]:
+        cash = point.cash or Decimal("0")
+        total_assets = point.total_assets or Decimal("0")
+        market_value = total_assets - cash
+        return {
+            "account_id": account_id,
+            "trade_date": trade_date,
+            "event_at": event_at,
+            "quality_status": SnapshotQualityStatus.VALID.value,
+            "valuation_quality": point.valuation_quality or "current",
+            "valuation_details": list(point.valuation_details) or None,
+            "cash_available": cash,
+            "cash_frozen": Decimal("0"),
+            "market_value": market_value,
+            "total_assets": total_assets,
+            "realized_pnl": Decimal("0"),
+            "unrealized_pnl": Decimal("0"),
+            "position_count": sum(1 for quantity in (point.holdings or {}).values() if quantity > 0),
+            "order_count": repo.count_orders(account_id, trade_date),
+            "trade_count": repo.count_trades(account_id, trade_date),
+            "net_asset_value": point.nav,
+            "share_count": point.share_count,
+            "cumulative_deposit": Decimal("0"),
+            "cumulative_withdrawal": Decimal("0"),
+            "net_cash_flow": Decimal("0"),
+            "pending_settlement": Decimal("0"),
+        }
 
     @staticmethod
     def _utc(value: datetime) -> datetime:

@@ -79,3 +79,74 @@ Output: passed with no whitespace errors.
   their existing SQLite fixtures and mocks.
 - Documentation skill review found no README/AGENTS/topic-document changes
   warranted by this internal implementation.
+
+## Follow-up implementation
+
+- `paper_trading/services/nav_series.py`
+  - The default builder path now requires a repository and calls its
+    `list_replay_events(account_id)` adapter; the explicit `event_loader` test
+    seam remains supported.
+  - Trade settlement facts duplicated in cash-ledger rows are deduplicated by
+    `trade_id` before replay.
+  - Baseline validation accepts the persisted initial snapshot payload shape as
+    well as the opening-state shape.
+
+- `paper_trading/domain/nav_replay.py`
+  - Replay points now carry cash, holdings, costs, valuation quality, and
+    valuation details.
+  - Trade settlements rebuild symbol quantities/costs and cash; corporate
+    actions apply quantity, cost, and cash deltas.
+  - Missing valuation input invalidates only the current NAV point while
+    preserving replay cash/holdings/state for later events.
+
+- `paper_trading/services/snapshot_recalculation_service.py`
+  - Recalculation derives affected dates from replay events, snapshots, gaps,
+    and the requested bounds.
+  - Historical valuation points are generated from replay holdings/cost state,
+    then materialized through bounded `replace_trading_snapshots`.
+  - Existing derived event timestamps are preserved, gaps are resolved only
+    after successful valuation, and any failure rolls back external sessions as
+    well as service-owned sessions.
+
+- `test/paper_trading/services/test_nav_series.py`
+  - Added a real SQLite repository-to-builder integration test.
+
+- `test/paper_trading/services/test_snapshot_recalculation_service.py`
+  - Updated focused service expectations to the replay-backed recalculation
+    contract and its baseline guard.
+
+## Follow-up verification
+
+Command:
+
+```text
+uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+Output:
+
+```text
+============================= 79 passed in 16.36s ==============================
+```
+
+Command:
+
+```text
+uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+Output:
+
+```text
+All checks passed!
+```
+
+Follow-up concerns:
+
+- The replay materializer intentionally remains within the four-file Task 3
+  scope and uses existing repository replacement APIs; full PostgreSQL
+  integration verification remains the orchestrator's responsibility.
+- The focused legacy mock cases now verify the baseline guard rather than
+  invoking the removed per-date snapshot-generation path.
+- Added focused coverage that a replay/baseline failure rolls back a
+  caller-owned SQLAlchemy session.

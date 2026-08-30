@@ -10,8 +10,19 @@ _PROVABLE_BASELINE_SOURCES = frozenset({"creation", "ledger", "history"})
 
 
 class NavSeriesBuilder:
-    def __init__(self, event_loader: Callable[[int], list[ReplayEvent]] | None = None):
-        self._event_loader = event_loader or (lambda account_id: [])
+    def __init__(
+        self,
+        repo: Any | None = None,
+        event_loader: Callable[[int], list[ReplayEvent]] | None = None,
+    ):
+        if event_loader is not None:
+            self._event_loader = event_loader
+        elif repo is not None:
+            self._event_loader = repo.list_replay_events
+        else:
+            self._event_loader = lambda _account_id: (_ for _ in ()).throw(
+                ValueError("NavSeriesBuilder requires a repository or event_loader")
+            )
         self._replay = NavSeriesReplay()
 
     def build(
@@ -21,6 +32,7 @@ class NavSeriesBuilder:
         end_date: date | None = None,
     ) -> ReplayResult:
         events = self._event_loader(account_id)
+        events = self._deduplicate_trade_settlements(events)
         baseline = self._baseline_from_events(events)
         if baseline is None:
             raise ValueError("baseline is not provably reconstructible")
@@ -34,6 +46,23 @@ class NavSeriesBuilder:
         return ReplayResult(points=tuple(points))
 
     @staticmethod
+    def _deduplicate_trade_settlements(events: list[ReplayEvent]) -> list[ReplayEvent]:
+        trade_ids = {
+            event.payload.get("trade_id")
+            for event in events
+            if event.source_kind == "paper_trades" and event.payload.get("trade_id") is not None
+        }
+        return [
+            event
+            for event in events
+            if not (
+                event.source_kind == "paper_cash_ledger"
+                and event.event_type is NavReplayEventType.TRADE_SETTLEMENT
+                and event.payload.get("trade_id") in trade_ids
+            )
+        ]
+
+    @staticmethod
     def baseline_eligibility(initial_state: Mapping[str, Any]) -> NavBaselineEligibility:
         for source in _PROVABLE_BASELINE_SOURCES:
             value = initial_state.get(source)
@@ -43,8 +72,8 @@ class NavSeriesBuilder:
 
     @staticmethod
     def _valid_baseline_source(source: Mapping[str, Any]) -> bool:
-        cash = source.get("opening_cash")
-        shares = source.get("opening_shares")
+        cash = source.get("opening_cash", source.get("total_assets"))
+        shares = source.get("opening_shares", source.get("share_count"))
         if cash is None or shares is None:
             return False
         try:
@@ -66,7 +95,12 @@ class NavSeriesBuilder:
         if not candidates:
             return None
         candidates.sort(key=lambda event: (event.event_at, event.source_id))
+        opening_cash = candidates[0].payload.get("opening_cash", candidates[0].payload.get("total_assets"))
+        opening_shares = candidates[0].payload.get("opening_shares", candidates[0].payload.get("share_count"))
         return {
-            "total_assets": candidates[0].payload["opening_cash"],
-            "share_count": candidates[0].payload["opening_shares"],
+            "total_assets": opening_cash,
+            "share_count": opening_shares,
+            "cash": opening_cash,
+            "holdings": {},
+            "costs": {},
         }
