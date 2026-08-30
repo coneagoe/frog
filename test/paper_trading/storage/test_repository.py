@@ -22,6 +22,7 @@ from paper_trading.domain.enums import (
     SnapshotPointType,
     SnapshotQualityStatus,
 )
+from paper_trading.domain.nav_replay import NavSeriesReplay
 from paper_trading.storage.models import (
     PaperCashLedger,
     PaperPendingSettlement,
@@ -275,7 +276,8 @@ def test_list_replay_events_adapts_sources_in_stable_utc_order(sqlite_session) -
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("replay-events", Decimal("100000.00"))
-    event_at = datetime(2026, 8, 25, 9, tzinfo=timezone.utc)
+    created_at = account.created_at.replace(tzinfo=timezone.utc)
+    event_at = created_at + timedelta(hours=1)
     order = repo.create_order(
         account.id, "000001", OrderSide.BUY, 100, Decimal("10"), event_at.date(), OrderStatus.FILLED
     )
@@ -347,8 +349,57 @@ def test_repository_replay_has_eligible_creation_baseline(sqlite_session) -> Non
     from paper_trading.services.nav_series import NavSeriesBuilder
 
     assert NavSeriesBuilder().baseline_eligibility({initial.source_kind: initial.payload}).value == "eligible"
-    result = NavSeriesBuilder(lambda _account_id: events).build(account.id)
-    assert result.points[0].event_type is NavReplayEventType.INITIAL
+    replay = NavSeriesReplay().replay(
+        events,
+        {"total_assets": initial.payload["opening_cash"], "share_count": initial.payload["opening_shares"]},
+    )
+    assert any(point.event_type is NavReplayEventType.INITIAL for point in replay.points)
+
+
+def test_replay_range_retains_valid_initial_baseline(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("range-baseline", Decimal("100000.00"))
+    event_at = datetime(2026, 8, 25, tzinfo=timezone.utc)
+    repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("10"), occurred_at=event_at)
+    snapshot = repo.list_snapshots(account.id)[0]
+    snapshot.event_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    sqlite_session.flush()
+    bounded = repo.list_replay_events(account.id, start_at=datetime(2026, 8, 25, tzinfo=timezone.utc))
+    assert bounded[0].event_type is NavReplayEventType.INITIAL
+    assert bounded[0].event_at == datetime(2026, 8, 1, tzinfo=timezone.utc)
+
+
+def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("mixed-replay-stream", Decimal("100000.00"))
+    event_at = account.created_at.replace(tzinfo=timezone.utc) + timedelta(hours=1)
+    deposit = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("100"), occurred_at=event_at)
+    withdrawal = repo.add_cash_event(account.id, CashEventType.WITHDRAWAL, Decimal("25"), occurred_at=event_at)
+    internal = repo.add_cash_event(account.id, CashEventType.FEE, Decimal("5"), occurred_at=event_at)
+    order = repo.create_order(account.id, "000001", OrderSide.BUY, 10, Decimal("10"), event_at.date(), OrderStatus.FILLED)
+    trade = repo.create_trade(order.id, account.id, "000001", OrderSide.BUY, 10, Decimal("10"), Decimal("100"), Decimal("1"), event_at.date())
+    trade.trade_time = event_at
+    action = repo.create_corporate_action(
+        account_id=account.id, symbol="000001", event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at, idempotency_key="mixed-dividend", parameters={"per_share_amount": "1"},
+        cash_delta=Decimal("10"), before_quantity=Decimal("10"), after_quantity=Decimal("10"),
+        before_cost_amount=Decimal("100"), after_cost_amount=Decimal("100"),
+        before_cash_available=Decimal("100000"), after_cash_available=Decimal("100010"),
+    )
+    dividend_ledger = repo.add_cash_event(account.id, CashEventType.CORPORATE_ACTION, Decimal("10"), trade_date=event_at.date(), occurred_at=event_at, note="dividend")
+    valuation = repo.save_trading_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
+    events = repo.list_replay_events(account.id)
+    assert {event.source_id for event in events} >= {
+        f"paper_cash_ledger:{deposit.id}", f"paper_cash_ledger:{withdrawal.id}",
+        f"paper_cash_ledger:{internal.id}", f"paper_cash_ledger:{dividend_ledger.id}",
+        f"paper_trades:{trade.id}", f"paper_corporate_actions:{action.id}",
+        f"paper_account_snapshots:{valuation.id}",
+    }
+    assert sum(event.event_type is NavReplayEventType.CASH_FLOW for event in events) == 2
+    replay = NavSeriesReplay().replay(events, {"total_assets": Decimal("100000"), "share_count": Decimal("100000")})
+    assert any(point.event_type is NavReplayEventType.INITIAL for point in replay.points)
 
 
 def test_repository_preserves_cash_ledger_event_type_and_internal_events_do_not_flow_shares(sqlite_session) -> None:

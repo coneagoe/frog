@@ -938,11 +938,6 @@ class PaperTradingRepository:
                 if time_quality is SnapshotQualityStatus.INVALID
                 else SnapshotQualityStatus(snapshot.quality_status)
             )
-            # SQLite returns timezone-aware DateTime values as naive values.
-            # The unique initial snapshot is the repository's trusted creation
-            # baseline, so its persisted quality remains authoritative.
-            if snapshot.point_type == SnapshotPointType.INITIAL.value:
-                quality_status = SnapshotQualityStatus(snapshot.quality_status)
             events.append(
                 ReplayEvent(
                     event_at=event_at,
@@ -965,11 +960,22 @@ class PaperTradingRepository:
                 )
             )
 
+        baseline_events = [
+            event
+            for event in events
+            if event.event_type is NavReplayEventType.INITIAL
+            and event.source_kind == "creation"
+            and event.quality_status is SnapshotQualityStatus.VALID
+            and event.event_at < (start_at or datetime.max.replace(tzinfo=timezone.utc))
+        ]
+        baseline = min(baseline_events, key=NavSeriesReplay._sort_key) if baseline_events else None
         filtered = [
             event
             for event in events
             if (start_at is None or event.event_at >= start_at) and (end_at is None or event.event_at <= end_at)
         ]
+        if baseline is not None and baseline not in filtered:
+            filtered.insert(0, baseline)
         return sorted(filtered, key=NavSeriesReplay._sort_key)
 
     def get_replay_events(
