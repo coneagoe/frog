@@ -301,7 +301,7 @@ def test_apply_adds_nullable_replay_time_provenance_without_backfilling_legacy_r
             "paper_account_snapshots",
         ):
             assert _column_type(connection, table_name, "event_time_provenance") == "paper_replay_time_provenance"
-        assert _enum_labels(connection, "paper_replay_time_provenance") == ("canonical_utc",)
+        assert _enum_labels(connection, "paper_replay_time_provenance") == ("canonical_utc", "unknown")
         assert connection.execute(text("SELECT event_time_provenance FROM paper_cash_ledger WHERE id = 1")).scalar_one() is None
         assert migrate_paper_trading_enums(connection).converted is False
 

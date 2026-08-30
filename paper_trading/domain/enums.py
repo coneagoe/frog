@@ -120,6 +120,7 @@ class SnapshotValuationQuality(StrEnum):
 
 class ReplayTimeProvenance(StrEnum):
     CANONICAL_UTC = "canonical_utc"
+    UNKNOWN = "unknown"
 
 
 class NavReplayEventType(StrEnum):

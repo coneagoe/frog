@@ -835,11 +835,14 @@ class PaperTradingRepository:
     def _replay_persisted_event_time(
         self, event_at: datetime | None, trade_date: date | None, provenance: str | None
     ) -> tuple[datetime, SnapshotQualityStatus]:
-        return self._replay_event_time(
+        normalized_time, time_quality = self._replay_event_time(
             event_at,
             trade_date,
             persisted_timezone_aware=provenance == ReplayTimeProvenance.CANONICAL_UTC.value,
         )
+        if provenance != ReplayTimeProvenance.CANONICAL_UTC.value:
+            return normalized_time, SnapshotQualityStatus.INVALID
+        return normalized_time, time_quality
 
     @staticmethod
     def _replay_decimal(value: Decimal | None, quantizer: Any) -> Decimal | None:

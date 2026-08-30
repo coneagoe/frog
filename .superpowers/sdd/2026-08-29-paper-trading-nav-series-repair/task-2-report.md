@@ -31,10 +31,12 @@ No matching, settlement, or Task 3+ behavior was modified.
 - `paper_account_snapshots`
 
 Normal repository writes mark timestamps as `canonical_utc`. The replay adapter
-only interprets a naive datetime as UTC when its persisted provenance is
-`canonical_utc`; this covers SQLite's loss of timezone information on a
-`DateTime(timezone=True)` round trip. Missing provenance, unknown provenance,
-or missing timestamps are explicitly invalid rather than inferred as UTC.
+requires exactly `canonical_utc` for `quality_status=VALID`; NULL or `unknown`
+provenance is always `INVALID`, even when the timestamp is timezone-aware. A
+canonical SQLite naive datetime is interpreted as UTC to cover SQLite's loss of
+timezone information on a `DateTime(timezone=True)` round trip. Non-canonical
+timestamps retain a UTC-normalized ordering placeholder only. Missing event
+time is also explicitly invalid.
 
 The PostgreSQL migration creates the provenance enum and nullable columns
 idempotently. SQLite's schema upgrade adds the equivalent nullable `VARCHAR(20)`
@@ -81,8 +83,8 @@ uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/d
 Output summary:
 
 ```text
-collected 133 items
-======================= 133 passed, 2 skipped in 41.12s ========================
+collected 137 items
+======================= 135 passed, 2 skipped in 40.60s ========================
 ```
 
 The two skipped parameter cases require `TEST_POSTGRESQL_URL`; the PostgreSQL
@@ -101,16 +103,22 @@ tools/run_tests.sh test/paper_trading/storage/test_repository.py -v
 Output summary:
 
 ```text
-collected 121 items
+collected 123 items
 test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[sqlite_repository] PASSED
 test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[postgres_repository] PASSED
 test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql PASSED
-============================= 121 passed in 43.39s =============================
+test_unproven_persisted_aware_replay_event_is_invalid[None] PASSED
+test_unproven_persisted_aware_replay_event_is_invalid[unknown] PASSED
+============================= 123 passed in 43.62s =============================
 ```
 
 The parity test commits both databases, expires both ORM sessions, creates fresh
 sessions, then compares each replay event's `event_at`, quality status, payload,
 event type, source kind, and source ID for equality.
+
+Fresh-session legacy tests verify both SQLite and PostgreSQL return `INVALID`
+for NULL/unknown provenance with aware timestamps; the naive legacy case is
+also invalid.
 
 Exit status: `0`.
 
@@ -125,7 +133,7 @@ tools/run_tests.sh test/paper_trading/storage/test_enum_migration.py -k replay_t
 Output summary:
 
 ```text
-1 passed, 35 deselected in 3.71s
+1 passed, 35 deselected in 3.62s
 ```
 
 The PostgreSQL migration test proves the enum and four nullable columns are
@@ -144,8 +152,9 @@ Output: no findings. Exit status: `0`.
 ## Concerns
 
 - Existing historical replay rows receive no guessed provenance. They remain
-  invalid when their timestamp lacks timezone evidence; a separate explicit
-  repair workflow is required to assert provenance.
+  invalid when provenance is NULL/unknown, regardless of timestamp awareness;
+  a separate explicit repair workflow is required to assert canonical
+  provenance.
 - The runner emits existing `en_US.UTF-8` and Docker `No services to build`
   warnings. They did not affect test execution.
 

@@ -755,7 +755,7 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
     missing_tables = {name for name in governed_names if not _table_exists(connection, name)}
     for group in groups:
         labels = _enum_labels(connection, group.type_name)
-        if labels and labels != group.labels:
+        if labels and labels != group.labels and not _can_extend_replay_time_provenance(group, labels):
             raise PaperTradingEnumMigrationError(f"{group.type_name}: unexpected enum labels {labels}")
         for column in group.columns:
             if column.table_name in missing_tables:
@@ -811,10 +811,18 @@ def _create_missing_tables(
 
 
 def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
-    if _enum_labels(connection, group.type_name):
+    labels = _enum_labels(connection, group.type_name)
+    if labels:
+        if _can_extend_replay_time_provenance(group, labels):
+            for label in group.labels[len(labels) :]:
+                connection.execute(text(f"ALTER TYPE {group.type_name} ADD VALUE '{label}'"))
         return
     labels = ", ".join(f"'{label}'" for label in group.labels)
     connection.execute(text(f"CREATE TYPE {group.type_name} AS ENUM ({labels})"))
+
+
+def _can_extend_replay_time_provenance(group: PaperTradingEnumGroup, labels: tuple[str, ...]) -> bool:
+    return group.type_name == "paper_replay_time_provenance" and group.labels[: len(labels)] == labels
 
 
 def ensure_paper_market_type(connection: Connection) -> None:
