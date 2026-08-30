@@ -3,9 +3,14 @@ from datetime import date, datetime, time, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, cast
 
-from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType, SnapshotQualityStatus
+from paper_trading.domain.enums import (
+    NavBaselineEligibility,
+    NavReplayEventType,
+    PositionSource,
+    SnapshotQualityStatus,
+)
 from paper_trading.domain.nav_replay import NavSeriesReplay, ReplayEvent, ReplayResult
-from paper_trading.storage.models import PaperPendingSettlement
+from paper_trading.storage.models import PaperPendingSettlement, PaperPosition, PaperPositionLot
 
 _PROVABLE_BASELINE_SOURCES = frozenset({"creation", "ledger", "history"})
 
@@ -81,6 +86,9 @@ class NavSeriesBuilder:
                 cash_frozen=snapshot.cash_frozen,
                 total_assets=snapshot.total_assets,
             )
+            holdings, costs = self._initial_holdings_and_costs(account_id)
+            payload["holdings"] = holdings
+            payload["costs"] = costs
             enriched.append(
                 ReplayEvent(
                     event_at=event.event_at,
@@ -93,6 +101,42 @@ class NavSeriesBuilder:
                 )
             )
         return enriched
+
+    def _initial_holdings_and_costs(self, account_id: int) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+        if self._repo is None:
+            return {}, {}
+        lots = (
+            self._repo.session.query(PaperPositionLot)
+            .filter(
+                PaperPositionLot.account_id == account_id,
+                PaperPositionLot.source == PositionSource.IMPORTED.value,
+            )
+            .all()
+        )
+        holdings: dict[str, Decimal] = {}
+        costs: dict[str, Decimal] = {}
+        for lot in lots:
+            quantity = Decimal(str(lot.original_quantity or 0))
+            if quantity <= 0:
+                continue
+            key = f"{lot.market}:{lot.symbol}"
+            holdings[key] = holdings.get(key, Decimal("0")) + quantity
+            costs[key] = costs.get(key, Decimal("0")) + Decimal(str(lot.cost_price or 0)) * quantity
+        positions = (
+            self._repo.session.query(PaperPosition)
+            .filter(
+                PaperPosition.account_id == account_id,
+                PaperPosition.source == PositionSource.IMPORTED.value,
+            )
+            .all()
+        )
+        for position in positions:
+            key = f"{position.market}:{position.symbol}"
+            quantity = Decimal(str(position.total_quantity or 0))
+            if key not in holdings and quantity > 0:
+                holdings[key] = quantity
+                costs[key] = Decimal(str(position.cost_amount or 0))
+        return holdings, costs
 
     def _normalize_hk_settlement_dates(self, account_id: int, events: list[ReplayEvent]) -> list[ReplayEvent]:
         if self._repo is None:
@@ -196,15 +240,29 @@ class NavSeriesBuilder:
         if not candidates:
             return None
         candidates.sort(key=lambda event: (event.event_at, event.source_id))
-        opening_cash = candidates[0].payload.get("opening_cash", candidates[0].payload.get("total_assets"))
-        opening_shares = candidates[0].payload.get("opening_shares", candidates[0].payload.get("share_count"))
+        initial = candidates[0].payload
+        opening_cash = initial.get("opening_cash", initial.get("total_assets"))
+        opening_shares = initial.get("opening_shares", initial.get("share_count"))
+        cash = initial.get("cash_available", initial.get("cash", opening_cash))
+        if cash is None:
+            cash = opening_cash
+        total_assets = initial.get("total_assets", opening_cash)
+        cash_frozen = initial.get("cash_frozen", Decimal("0"))
+        pending_settlement = initial.get("pending_settlement", Decimal("0"))
+        cumulative_deposit = initial.get("cumulative_deposit")
+        if cumulative_deposit is None:
+            cumulative_deposit = opening_cash
+        cumulative_withdrawal = initial.get("cumulative_withdrawal")
+        if cumulative_withdrawal is None:
+            cumulative_withdrawal = Decimal("0")
         return {
-            "total_assets": opening_cash,
+            "total_assets": total_assets,
             "share_count": opening_shares,
-            "cash": opening_cash,
-            "holdings": {},
-            "costs": {},
-            "cumulative_deposit": candidates[0].payload.get("cumulative_deposit", opening_cash),
-            "cumulative_withdrawal": candidates[0].payload.get("cumulative_withdrawal", Decimal("0")),
-            "pending_settlement": candidates[0].payload.get("pending_settlement", Decimal("0")),
+            "cash": cash,
+            "cash_frozen": cash_frozen,
+            "pending_settlement": pending_settlement,
+            "holdings": initial.get("holdings", {}),
+            "costs": initial.get("costs", {}),
+            "cumulative_deposit": cumulative_deposit,
+            "cumulative_withdrawal": cumulative_withdrawal,
         }

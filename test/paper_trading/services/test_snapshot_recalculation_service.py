@@ -9,13 +9,24 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from paper_trading.domain.enums import OrderSide
+from paper_trading.domain.enums import OrderSide, OrderStatus, PositionSource
 from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.enum_migration import migrate_paper_trading_enums
 from paper_trading.storage.market_data import DailyBar
-from paper_trading.storage.models import PaperAccount, PaperAccountSnapshot, PaperCashLedger, PaperValuationGap
+from paper_trading.storage.models import (
+    PaperAccount,
+    PaperAccountSnapshot,
+    PaperCashLedger,
+    PaperCorporateAction,
+    PaperOrder,
+    PaperPendingSettlement,
+    PaperPosition,
+    PaperPositionLot,
+    PaperTrade,
+    PaperValuationGap,
+)
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import FakeMarketDataProvider, MarketDataProviderCompatibility
@@ -388,6 +399,117 @@ def test_recalculation_uses_pending_settlement_business_date_after_settlement(tm
         session.close()
 
 
+def test_recalculation_preserves_initial_cash_components_and_identity(tmp_path):
+    factory = _sqlite_factory(tmp_path)
+    session = factory()
+    trade_date = date.today() + timedelta(days=1)
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("initial-component-recalc", Decimal("100"))
+        initial = next(row for row in repo.list_snapshots(account.id) if row.point_type == "initial")
+        initial.cash_available = Decimal("70")
+        initial.cash_frozen = Decimal("10")
+        initial.pending_settlement = Decimal("20")
+        initial.total_assets = Decimal("100")
+        initial.cumulative_deposit = Decimal("0")
+        initial.cumulative_withdrawal = Decimal("0")
+        account_id = account.id
+        session.commit()
+    finally:
+        session.close()
+
+    result = SnapshotRecalculationService(factory, FakeMarketDataProvider()).recalculate(
+        account_id, trade_date, trade_date
+    )
+
+    assert result.updated_dates == [trade_date]
+    session = factory()
+    try:
+        snapshot = next(
+            row
+            for row in PaperTradingRepository(session).list_snapshots(account_id)
+            if row.point_type == "trading" and row.trade_date == trade_date
+        )
+        assert snapshot.cash_available == Decimal("70")
+        assert snapshot.cash_frozen == Decimal("10")
+        assert snapshot.pending_settlement == Decimal("20")
+        assert snapshot.total_assets == Decimal("100")
+        assert snapshot.cash_available + snapshot.cash_frozen + snapshot.pending_settlement + snapshot.market_value == (
+            snapshot.total_assets
+        )
+        assert snapshot.cumulative_deposit == Decimal("0")
+        assert snapshot.cumulative_withdrawal == Decimal("0")
+    finally:
+        session.close()
+
+
+def test_recalculation_restores_initial_position_holdings_and_cost(tmp_path):
+    factory = _sqlite_factory(tmp_path)
+    session = factory()
+    trade_date = date.today() + timedelta(days=1)
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("initial-position-recalc", Decimal("100"))
+        initial = next(row for row in repo.list_snapshots(account.id) if row.point_type == "initial")
+        initial.cash_available = Decimal("90")
+        initial.total_assets = Decimal("100")
+        repo.upsert_position(
+            account.id,
+            "a_share",
+            "000001",
+            3,
+            0,
+            Decimal("18"),
+            source=PositionSource.IMPORTED.value,
+        )
+        repo.create_position_lot(
+            account.id,
+            "a_share",
+            "000001",
+            date.today(),
+            2,
+            2,
+            Decimal("4"),
+            source=PositionSource.IMPORTED.value,
+        )
+        repo.create_trade(
+            1,
+            account.id,
+            "000001",
+            OrderSide.BUY,
+            1,
+            Decimal("10"),
+            Decimal("10"),
+            Decimal("0"),
+            trade_date,
+            trade_time=datetime.combine(trade_date, datetime.min.time(), tzinfo=timezone.utc),
+        )
+        account_id = account.id
+        session.commit()
+    finally:
+        session.close()
+
+    result = SnapshotRecalculationService(factory, FakeMarketDataProvider()).recalculate(
+        account_id, trade_date, trade_date
+    )
+
+    assert result.updated_dates == [trade_date]
+    session = factory()
+    try:
+        snapshot = next(
+            row
+            for row in PaperTradingRepository(session).list_snapshots(account_id)
+            if row.point_type == "trading" and row.trade_date == trade_date
+        )
+        assert snapshot.market_value == Decimal("150")
+        assert snapshot.total_assets == Decimal("230")
+        replay_point = NavSeriesBuilder(repo=PaperTradingRepository(session)).build(account_id).points[-1]
+        assert replay_point.holdings == {"a_share:000001": Decimal("3")}
+        assert replay_point.costs == {"a_share:000001": Decimal("18")}
+    finally:
+        session.close()
+
+
 def test_postgresql_recalculation_persists_snapshots_and_gaps():
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
@@ -404,6 +526,12 @@ def test_postgresql_recalculation_persists_snapshots_and_gaps():
             PaperCashLedger.__table__,
             PaperAccountSnapshot.__table__,
             PaperValuationGap.__table__,
+            PaperCorporateAction.__table__,
+            PaperOrder.__table__,
+            PaperTrade.__table__,
+            PaperPendingSettlement.__table__,
+            PaperPosition.__table__,
+            PaperPositionLot.__table__,
         ],
     )
     factory = sessionmaker(bind=engine)
@@ -426,6 +554,143 @@ def test_postgresql_recalculation_persists_snapshots_and_gaps():
         assert all(row.total_assets == Decimal("100") for row in rows)
     finally:
         session.close()
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        engine.dispose()
+
+
+def test_postgresql_recalculation_preserves_initial_components_and_imported_holdings():
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    schema_name = f"task3_recalc_baseline_{uuid.uuid4().hex}"
+    engine = create_engine(url, connect_args={"options": f"-csearch_path={schema_name}"})
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+        migrate_paper_trading_enums(connection)
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            PaperAccount.__table__,
+            PaperCashLedger.__table__,
+            PaperAccountSnapshot.__table__,
+            PaperValuationGap.__table__,
+            PaperCorporateAction.__table__,
+            PaperOrder.__table__,
+            PaperTrade.__table__,
+            PaperPendingSettlement.__table__,
+            PaperPosition.__table__,
+            PaperPositionLot.__table__,
+        ],
+    )
+    factory = sessionmaker(bind=engine)
+    start_date = date(2026, 8, 25)
+    try:
+        session = factory()
+        try:
+            repo = PaperTradingRepository(session)
+            account = repo.create_account("postgres-recalculation-baseline", Decimal("100"))
+            initial = next(row for row in repo.list_snapshots(account.id) if row.point_type == "initial")
+            initial.cash_available = Decimal("70")
+            initial.cash_frozen = Decimal("10")
+            initial.pending_settlement = Decimal("20")
+            initial.total_assets = Decimal("100")
+            initial.cumulative_deposit = Decimal("0")
+            initial.cumulative_withdrawal = Decimal("0")
+            repo.upsert_position(
+                account.id,
+                "a_share",
+                "000001",
+                3,
+                0,
+                Decimal("18"),
+                source=PositionSource.IMPORTED.value,
+            )
+            repo.create_position_lot(
+                account.id,
+                "a_share",
+                "000001",
+                start_date,
+                2,
+                2,
+                Decimal("4"),
+                source=PositionSource.IMPORTED.value,
+            )
+            order = repo.create_order(
+                account.id,
+                "000001",
+                OrderSide.BUY,
+                1,
+                Decimal("10"),
+                start_date,
+                OrderStatus.FILLED,
+            )
+            repo.create_trade(
+                order.id,
+                account.id,
+                "000001",
+                OrderSide.BUY,
+                1,
+                Decimal("10"),
+                Decimal("10"),
+                Decimal("0"),
+                start_date,
+                trade_time=datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc),
+            )
+            account_id = account.id
+            session.commit()
+        finally:
+            session.close()
+
+        service = SnapshotRecalculationService(factory, FakeMarketDataProvider())
+        result = service.recalculate(account_id, start_date, start_date)
+        assert result.updated_dates == [start_date]
+        assert result.unavailable_dates == []
+        assert result.failed_dates == []
+
+        session = factory()
+        try:
+            repo = PaperTradingRepository(session)
+            snapshot = next(
+                row
+                for row in repo.list_snapshots(account_id)
+                if row.point_type == "trading" and row.trade_date == start_date
+            )
+            assert snapshot.cash_available == Decimal("70")
+            assert snapshot.cash_frozen == Decimal("0")
+            assert snapshot.pending_settlement == Decimal("20")
+            assert snapshot.market_value == Decimal("150")
+            assert snapshot.total_assets == Decimal("240")
+            assert (
+                snapshot.cash_available + snapshot.cash_frozen + snapshot.pending_settlement + snapshot.market_value
+                == (snapshot.total_assets)
+            )
+            assert snapshot.share_count == Decimal("100")
+            assert snapshot.cumulative_deposit == Decimal("0")
+            assert snapshot.cumulative_withdrawal == Decimal("0")
+            point = NavSeriesBuilder(repo=repo).build(account_id).points[-1]
+            assert point.holdings == {"a_share:000001": Decimal("3")}
+            assert point.costs == {"a_share:000001": Decimal("18")}
+        finally:
+            session.close()
+
+        repeated = service.recalculate(account_id, start_date, start_date)
+        assert repeated.updated_dates == [start_date]
+        session = factory()
+        try:
+            snapshot = next(
+                row
+                for row in PaperTradingRepository(session).list_snapshots(account_id)
+                if row.point_type == "trading" and row.trade_date == start_date
+            )
+            assert snapshot.cash_available == Decimal("70")
+            assert snapshot.cash_frozen == Decimal("0")
+            assert snapshot.pending_settlement == Decimal("20")
+            assert snapshot.market_value == Decimal("150")
+            assert snapshot.total_assets == Decimal("240")
+        finally:
+            session.close()
+    finally:
         with engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
         engine.dispose()
