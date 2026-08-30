@@ -22,6 +22,7 @@ from paper_trading.domain.enums import (
     OrderStatus,
     PendingSettlementSource,
     PositionSource,
+    ReplayTimeProvenance,
     RoundTripStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
@@ -369,6 +370,16 @@ PAPER_TRADING_ENUM_GROUPS = (
         (_column("paper_account_snapshots", "valuation_quality", "VARCHAR(20)", nullable=True),),
     ),
     PaperTradingEnumGroup(
+        "paper_replay_time_provenance",
+        _labels(ReplayTimeProvenance),
+        (
+            _column("paper_cash_ledger", "event_time_provenance", "VARCHAR(20)", nullable=True),
+            _column("paper_trades", "event_time_provenance", "VARCHAR(20)", nullable=True),
+            _column(tb_name_paper_corporate_actions, "event_time_provenance", "VARCHAR(20)", nullable=True),
+            _column("paper_account_snapshots", "event_time_provenance", "VARCHAR(20)", nullable=True),
+        ),
+    ),
+    PaperTradingEnumGroup(
         "paper_account_migration_repair_reason",
         _labels(MigrationRepairReason),
         (_column("paper_accounts", "migration_repair_reason", "VARCHAR(40)", nullable=True),),
@@ -438,12 +449,17 @@ def _is_addable_valuation_quality_column(group: PaperTradingEnumGroup, column: P
     )
 
 
+def _is_addable_replay_time_provenance_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
+    return group.type_name == "paper_replay_time_provenance" and column.column_name == "event_time_provenance"
+
+
 def _is_addable_missing_column(group: PaperTradingEnumGroup, column: PaperTradingEnumColumn) -> bool:
     return (
         (group.type_name == "paper_market" and column.column_name == "market")
         or _is_addable_snapshot_column(group, column)
         or _is_addable_repair_reason_column(group, column)
         or _is_addable_valuation_quality_column(group, column)
+        or _is_addable_replay_time_provenance_column(group, column)
     )
 
 
@@ -534,6 +550,7 @@ def _adapter_apply(connection: Connection) -> bool:
         _add_market_columns(connection)
         _add_snapshot_columns(connection)
         _add_repair_reason_column(connection)
+        _add_replay_time_provenance_columns(connection)
         for group in groups:
             _alter_group(connection, group, rollback=False)
         ensure_snapshot_valuation_metadata(connection)
@@ -547,6 +564,7 @@ def _adapter_apply(connection: Connection) -> bool:
         _add_market_columns(connection)
         _add_snapshot_columns(connection)
         _add_repair_reason_column(connection)
+        _add_replay_time_provenance_columns(connection)
         for group in groups:
             _alter_group(connection, group, rollback=False)
     changed = ensure_snapshot_valuation_metadata(connection) or changed
@@ -1055,6 +1073,17 @@ def _add_repair_reason_column(connection: Connection) -> None:
 
 def _add_valuation_quality_column(connection: Connection) -> bool:
     group = next(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == "paper_snapshot_valuation_quality")
+    changed = False
+    for column in group.columns:
+        if not _table_exists(connection, column.table_name) or _column_facts(connection, column) is not None:
+            continue
+        connection.execute(text(f"ALTER TABLE {column.table_name} ADD COLUMN {column.column_name} {group.type_name}"))
+        changed = True
+    return changed
+
+
+def _add_replay_time_provenance_columns(connection: Connection) -> bool:
+    group = next(group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == "paper_replay_time_provenance")
     changed = False
     for column in group.columns:
         if not _table_exists(connection, column.table_name) or _column_facts(connection, column) is not None:

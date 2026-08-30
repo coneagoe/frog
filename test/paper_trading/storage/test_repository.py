@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from sqlalchemy import String, create_engine, event, text
+from sqlalchemy import String, create_engine, event, inspect, text
 from sqlalchemy import cast as sa_cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -23,6 +23,7 @@ from paper_trading.domain.enums import (
     NavReplayEventType,
     OrderSide,
     OrderStatus,
+    ReplayTimeProvenance,
     SnapshotPointType,
     SnapshotQualityStatus,
 )
@@ -49,6 +50,7 @@ from storage.domain_enums import (
 from storage.model.base import Base
 from storage.model.etf_basic import ETFBasic
 from storage.model.paper_trading import DailyBarDiagnostic
+from storage.storage_db import StorageDb
 
 
 def test_daily_bar_diagnostic_scalar_columns_use_value_enums():
@@ -239,7 +241,7 @@ def test_list_snapshots_orders_same_day_initial_before_trading(sqlite_session) -
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("same-day-order", Decimal("100000.00"))
-    created_at = account.created_at
+    created_at = account.created_at.replace(tzinfo=timezone.utc)
 
     initial = repo.list_snapshots(account.id)[0]
     trading = repo.save_snapshot(
@@ -279,7 +281,10 @@ def test_create_initial_snapshot_rejects_duplicate_initial_point(sqlite_session)
     account = repo.create_account("duplicate-initial", Decimal("100000.00"))
 
     with pytest.raises(IntegrityError):
-        repo.create_initial_snapshot(account, event_at=account.created_at + timedelta(seconds=1))
+        repo.create_initial_snapshot(
+            account,
+            event_at=account.created_at.replace(tzinfo=timezone.utc) + timedelta(seconds=1),
+        )
 
 
 def test_list_replay_events_adapts_sources_in_stable_utc_order(sqlite_session) -> None:
@@ -351,6 +356,104 @@ def test_list_replay_events_marks_legacy_missing_time_invalid(sqlite_session) ->
     assert quality_status is SnapshotQualityStatus.INVALID
 
 
+def test_normal_repository_writes_record_canonical_utc_provenance(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("provenance-writes", Decimal("100000.00"))
+    event_at = datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
+
+    order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 10, Decimal("10"), event_at.date(), OrderStatus.FILLED
+    )
+    trade = repo.create_trade(
+        order.id, account.id, "000001", OrderSide.BUY, 10, Decimal("10"), Decimal("100"), Decimal("1"), event_at.date()
+    )
+    trade.trade_time = event_at
+    ledger = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("10"), occurred_at=event_at)
+    action = repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="provenance-action",
+        parameters={},
+        before_quantity=Decimal("10"),
+        after_quantity=Decimal("10"),
+        before_cost_amount=Decimal("100"),
+        after_cost_amount=Decimal("100"),
+        before_cash_available=Decimal("10"),
+        after_cash_available=Decimal("20"),
+    )
+    trading_snapshot = repo.save_trading_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
+
+    assert ledger.event_time_provenance == ReplayTimeProvenance.CANONICAL_UTC.value
+    assert trade.event_time_provenance == ReplayTimeProvenance.CANONICAL_UTC.value
+    assert action.event_time_provenance == ReplayTimeProvenance.CANONICAL_UTC.value
+    assert trading_snapshot.event_time_provenance == ReplayTimeProvenance.CANONICAL_UTC.value
+    assert repo.list_snapshots(account.id)[0].event_time_provenance == ReplayTimeProvenance.CANONICAL_UTC.value
+
+
+@pytest.mark.parametrize("method_name", ["save_snapshot", "save_trading_snapshot"])
+def test_repository_does_not_mark_naive_snapshot_time_as_canonical(sqlite_session, method_name) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("reject-naive-provenance", Decimal("100000.00"))
+    values = _trading_snapshot_values(account.id, date(2026, 8, 25), datetime(2026, 8, 25, 9, 30))
+
+    with pytest.raises(ValueError, match="timezone offset"):
+        getattr(repo, method_name)(**values)
+
+
+def test_unproven_persisted_naive_replay_event_is_invalid(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("legacy-provenance", Decimal("100000.00"))
+    snapshot = repo.save_trading_snapshot(
+        **_trading_snapshot_values(
+            account.id, date(2026, 8, 25), datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
+        )
+    )
+    snapshot.event_time_provenance = None
+    sqlite_session.commit()
+    sqlite_session.expire_all()
+    fresh_session = sessionmaker(bind=sqlite_session.get_bind())()
+    try:
+        fresh_repo = PaperTradingRepository(fresh_session)
+        event = next(
+            item for item in fresh_repo.list_replay_events(account.id) if item.source_id.endswith(f":{snapshot.id}")
+        )
+    finally:
+        fresh_session.close()
+
+    assert event.event_at == datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
+    assert event.quality_status is SnapshotQualityStatus.INVALID
+
+
+def test_sqlite_replay_provenance_upgrade_is_idempotent_and_does_not_backfill(sqlite_session) -> None:
+    table_names = (
+        "paper_cash_ledger",
+        "paper_trades",
+        "paper_corporate_actions",
+        "paper_account_snapshots",
+    )
+    for table_name in table_names:
+        sqlite_session.execute(text(f"CREATE TABLE {table_name} (id INTEGER PRIMARY KEY)"))
+        sqlite_session.execute(text(f"INSERT INTO {table_name} (id) VALUES (1)"))
+    sqlite_session.commit()
+
+    storage = StorageDb.__new__(StorageDb)
+    storage.engine = sqlite_session.get_bind()
+    storage._ensure_sqlite_replay_time_provenance_columns()
+    storage._ensure_sqlite_replay_time_provenance_columns()
+
+    for table_name in table_names:
+        columns = {column["name"] for column in inspect(storage.engine).get_columns(table_name)}
+        assert "event_time_provenance" in columns
+        assert sqlite_session.execute(
+            text(f"SELECT event_time_provenance FROM {table_name} WHERE id = 1")
+        ).scalar_one() is None
+
+
 def test_replay_event_time_keeps_unproven_naive_input_invalid(sqlite_session) -> None:
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
@@ -411,6 +514,7 @@ def test_replay_range_retains_latest_provable_baseline_before_start(sqlite_sessi
             share_count=Decimal("100000"),
             total_assets=Decimal("100000"),
             net_asset_value=Decimal("1"),
+            event_time_provenance=ReplayTimeProvenance.CANONICAL_UTC.value,
         ),
         SimpleNamespace(
             id=2,
@@ -422,6 +526,7 @@ def test_replay_range_retains_latest_provable_baseline_before_start(sqlite_sessi
             share_count=Decimal("110000"),
             total_assets=Decimal("110000"),
             net_asset_value=Decimal("1"),
+            event_time_provenance=ReplayTimeProvenance.CANONICAL_UTC.value,
         ),
     ]
     repo.list_snapshots = lambda _account_id: snapshots  # type: ignore[method-assign]
@@ -661,6 +766,7 @@ _SNAPSHOT_FIELDS = (
     "cumulative_withdrawal",
     "net_cash_flow",
     "created_at",
+    "event_time_provenance",
 )
 
 
@@ -855,9 +961,21 @@ def test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgres
     sqlite_repo = PaperTradingRepository(sqlite_session)
     sqlite_account_id = _populate_replay_facts(sqlite_repo)
     postgres_account_id = _populate_replay_facts(postgres_repository)
+    sqlite_session.commit()
+    postgres_repository.session.commit()
+    sqlite_session.expire_all()
+    postgres_repository.session.expire_all()
 
-    sqlite_events = sqlite_repo.list_replay_events(sqlite_account_id)
-    postgres_events = postgres_repository.list_replay_events(postgres_account_id)
+    sqlite_fresh_session = sessionmaker(bind=sqlite_session.get_bind())()
+    postgres_fresh_session = sessionmaker(bind=postgres_repository.session.get_bind())()
+    try:
+        sqlite_fresh_repo = PaperTradingRepository(sqlite_fresh_session)
+        postgres_fresh_repo = PaperTradingRepository(postgres_fresh_session)
+        sqlite_events = sqlite_fresh_repo.list_replay_events(sqlite_account_id)
+        postgres_events = postgres_fresh_repo.list_replay_events(postgres_account_id)
+    finally:
+        sqlite_fresh_session.close()
+        postgres_fresh_session.close()
 
     sqlite_signature = _replay_event_signature(sqlite_events)
     postgres_signature = _replay_event_signature(postgres_events)

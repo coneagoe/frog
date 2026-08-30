@@ -285,6 +285,27 @@ def test_apply_adds_missing_nullable_migration_repair_reason_column(postgres_sch
         )
 
 
+def test_apply_adds_nullable_replay_time_provenance_without_backfilling_legacy_rows(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("INSERT INTO paper_accounts (id, status, fee_preset) VALUES (1, 'active', 'a_share')"))
+        connection.execute(text("INSERT INTO paper_cash_ledger (id, event_type) VALUES (1, 'deposit')"))
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        for table_name in (
+            "paper_cash_ledger",
+            "paper_trades",
+            "paper_corporate_actions",
+            "paper_account_snapshots",
+        ):
+            assert _column_type(connection, table_name, "event_time_provenance") == "paper_replay_time_provenance"
+        assert _enum_labels(connection, "paper_replay_time_provenance") == ("canonical_utc",)
+        assert connection.execute(text("SELECT event_time_provenance FROM paper_cash_ledger WHERE id = 1")).scalar_one() is None
+        assert migrate_paper_trading_enums(connection).converted is False
+
+
 def test_apply_converts_legacy_migration_repair_reason_text_and_is_idempotent(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:

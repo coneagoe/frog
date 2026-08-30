@@ -26,6 +26,7 @@ from paper_trading.domain.enums import (
     OrderStatus,
     PendingSettlementSource,
     PositionSource,
+    ReplayTimeProvenance,
     RoundTripStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
@@ -329,6 +330,8 @@ class PaperTradingRepository:
         event_at = account.created_at
         if event_at is None:
             raise RuntimeError("paper account created_at is missing after flush")
+        if event_at.tzinfo is None or event_at.utcoffset() is None:
+            event_at = event_at.replace(tzinfo=timezone.utc)
         self.add_cash_event(
             account.id,
             CashEventType.DEPOSIT,
@@ -528,6 +531,7 @@ class PaperTradingRepository:
             share_delta=persisted_shares,
             rounding_residual=persisted_residual,
             occurred_at=occurred_at or datetime.now(timezone.utc),
+            event_time_provenance=ReplayTimeProvenance.CANONICAL_UTC.value,
             note=note,
         )
         self.session.add(event)
@@ -706,6 +710,7 @@ class PaperTradingRepository:
             raise ValueError("event_at must include a timezone offset")
         if event_at is not None:
             values["event_at"] = event_at.astimezone(timezone.utc)
+        values["event_time_provenance"] = ReplayTimeProvenance.CANONICAL_UTC.value
         action = PaperCorporateAction(**values)
         self.session.add(action)
         self.session.flush()
@@ -828,13 +833,12 @@ class PaperTradingRepository:
         return event_at.astimezone(timezone.utc), SnapshotQualityStatus.VALID
 
     def _replay_persisted_event_time(
-        self, event_at: datetime | None, trade_date: date | None
+        self, event_at: datetime | None, trade_date: date | None, provenance: str | None
     ) -> tuple[datetime, SnapshotQualityStatus]:
         return self._replay_event_time(
             event_at,
             trade_date,
-            persisted_timezone_aware=self.session.bind is not None
-            and self.session.bind.dialect.name == "sqlite",
+            persisted_timezone_aware=provenance == ReplayTimeProvenance.CANONICAL_UTC.value,
         )
 
     @staticmethod
@@ -871,7 +875,9 @@ class PaperTradingRepository:
             # replaying both would subscribe the opening cash twice.
             if ledger.note == "initial_cash":
                 continue
-            event_at, quality_status = self._replay_persisted_event_time(ledger.occurred_at, ledger.trade_date)
+            event_at, quality_status = self._replay_persisted_event_time(
+                ledger.occurred_at, ledger.trade_date, ledger.event_time_provenance
+            )
             # Only external cash movements are CASH_FLOW. Internal ledger rows
             # remain visible as settlement facts, but never mint/burn shares.
             replay_event_type = (
@@ -898,7 +904,9 @@ class PaperTradingRepository:
             )
 
         for trade in self.list_trades(account_id):
-            event_at, quality_status = self._replay_persisted_event_time(trade.trade_time, trade.trade_date)
+            event_at, quality_status = self._replay_persisted_event_time(
+                trade.trade_time, trade.trade_date, trade.event_time_provenance
+            )
             events.append(
                 ReplayEvent(
                     event_at=event_at,
@@ -923,7 +931,9 @@ class PaperTradingRepository:
             )
 
         for action in self.list_corporate_actions(account_id):
-            event_at, quality_status = self._replay_persisted_event_time(action.event_at, action.affected_start_date)
+            event_at, quality_status = self._replay_persisted_event_time(
+                action.event_at, action.affected_start_date, action.event_time_provenance
+            )
             events.append(
                 ReplayEvent(
                     event_at=event_at,
@@ -957,7 +967,11 @@ class PaperTradingRepository:
             )
 
         for snapshot in self.list_snapshots(account_id):
-            event_at, time_quality = self._replay_persisted_event_time(snapshot.event_at, snapshot.trade_date)
+            event_at, time_quality = self._replay_persisted_event_time(
+                snapshot.event_at,
+                snapshot.trade_date,
+                getattr(snapshot, "event_time_provenance", None),
+            )
             quality_status = (
                 time_quality
                 if time_quality is SnapshotQualityStatus.INVALID
@@ -1244,6 +1258,8 @@ class PaperTradingRepository:
         return lot
 
     def create_initial_snapshot(self, account: PaperAccount, *, event_at: datetime) -> PaperAccountSnapshot:
+        if event_at.tzinfo is None or event_at.utcoffset() is None:
+            raise ValueError("event_at must include a timezone offset")
         initial_cash = quantize_account_money(Decimal(account.initial_cash))
         initial_shares = quantize_shares(initial_cash)
         snapshot = PaperAccountSnapshot(
@@ -1267,12 +1283,17 @@ class PaperTradingRepository:
             cumulative_deposit=initial_cash,
             cumulative_withdrawal=Decimal("0.0000"),
             net_cash_flow=initial_cash,
+            event_time_provenance=ReplayTimeProvenance.CANONICAL_UTC.value,
         )
         self.session.add(snapshot)
         self.session.flush()
         return snapshot
 
     def save_snapshot(self, **values: Any) -> PaperAccountSnapshot:
+        event_at = values.get("event_at")
+        if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
+            raise ValueError("event_at must include a timezone offset")
+        values["event_time_provenance"] = ReplayTimeProvenance.CANONICAL_UTC.value
         self._quantize_snapshot_values(values)
         snapshot = PaperAccountSnapshot(**values)
         self.session.add(snapshot)
@@ -1281,6 +1302,10 @@ class PaperTradingRepository:
 
     def save_trading_snapshot(self, **values: Any) -> PaperAccountSnapshot:
         """Create or update the single trading snapshot for an account date."""
+        event_at = values.get("event_at")
+        if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
+            raise ValueError("event_at must include a timezone offset")
+        values["event_time_provenance"] = ReplayTimeProvenance.CANONICAL_UTC.value
         self._quantize_snapshot_values(values)
         account_id = values["account_id"]
         trade_date = values["trade_date"]
@@ -1511,6 +1536,7 @@ class PaperTradingRepository:
             trade_date=trade_date,
             comment=self._normalize_comment(comment),
             market=Market(market or Market.A_SHARE).value,
+            event_time_provenance=ReplayTimeProvenance.CANONICAL_UTC.value,
         )
         self.session.add(trade)
         self.session.flush()

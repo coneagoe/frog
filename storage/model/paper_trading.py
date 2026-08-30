@@ -36,6 +36,7 @@ from paper_trading.domain.enums import (
     OrderStatus,
     PendingSettlementSource,
     PositionSource,
+    ReplayTimeProvenance,
     RoundTripStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
@@ -136,6 +137,9 @@ class PaperCashLedger(Base):
     share_delta: Mapped[Decimal | None] = mapped_column(Numeric(30, 12), nullable=True)
     rounding_residual: Mapped[Decimal] = mapped_column(Numeric(30, 24), nullable=False, server_default=text("0"))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    event_time_provenance: Mapped[str | None] = mapped_column(
+        _value_enum(ReplayTimeProvenance, "paper_replay_time_provenance"), nullable=True
+    )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -163,6 +167,9 @@ class PaperCorporateAction(Base):
         _value_enum(CorporateActionType, "paper_corporate_action_type"), nullable=False, index=True
     )
     event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    event_time_provenance: Mapped[str | None] = mapped_column(
+        _value_enum(ReplayTimeProvenance, "paper_replay_time_provenance"), nullable=True
+    )
     idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
     parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     processing_status: Mapped[str] = mapped_column(
@@ -324,6 +331,9 @@ class PaperTrade(Base):
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     trade_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    event_time_provenance: Mapped[str | None] = mapped_column(
+        _value_enum(ReplayTimeProvenance, "paper_replay_time_provenance"), nullable=True
+    )
     market: Mapped[str] = mapped_column(
         _value_enum(Market, "paper_market"), nullable=False, server_default="a_share", index=True
     )
@@ -395,6 +405,9 @@ class PaperAccountSnapshot(Base):
     )
     event_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now()
+    )
+    event_time_provenance: Mapped[str | None] = mapped_column(
+        _value_enum(ReplayTimeProvenance, "paper_replay_time_provenance"), nullable=True
     )
     quality_status: Mapped[str] = mapped_column(
         _value_enum(SnapshotQualityStatus, "paper_snapshot_quality_status"),

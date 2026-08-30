@@ -410,6 +410,12 @@ _SQLITE_PAPER_SNAPSHOT_SERIES_COLUMNS = {
 _PAPER_ACCOUNT_REPAIR_REASON_TYPE = "paper_account_migration_repair_reason"
 _PAPER_ACCOUNT_REPAIR_REASON_COLUMN = "migration_repair_reason"
 _SQLITE_PAPER_ACCOUNT_REPAIR_REASON_DDL = "VARCHAR(40)"
+_SQLITE_PAPER_REPLAY_PROVENANCE_TABLES = (
+    tb_name_paper_cash_ledger,
+    tb_name_paper_trades,
+    tb_name_paper_corporate_actions,
+    tb_name_paper_account_snapshots,
+)
 _PAPER_ACCOUNT_ACCOUNTING_COLUMNS = (
     "initial_cash",
     "share_count",
@@ -4003,6 +4009,7 @@ class StorageDb:
         if self.engine.dialect.name != "postgresql" and has_paper_accounts:
             PaperCorporateAction.__table__.create(self.engine, checkfirst=True)
         self._ensure_paper_cash_ledger_columns()
+        self._ensure_sqlite_replay_time_provenance_columns()
         if self.engine.dialect.name == "sqlite":
             self._widen_sqlite_numeric_columns()
         if self.engine.dialect.name != "postgresql" and has_paper_orders:
@@ -4384,6 +4391,17 @@ class StorageDb:
                     "rounding_residual": "NUMERIC(30, 24)",
                 },
             )
+
+    def _ensure_sqlite_replay_time_provenance_columns(self) -> None:
+        if self.engine.dialect.name != "sqlite":
+            return
+        for table_name in _SQLITE_PAPER_REPLAY_PROVENANCE_TABLES:
+            if not inspect(self.engine).has_table(table_name):
+                continue
+            columns = {column["name"] for column in inspect(self.engine).get_columns(table_name)}
+            if "event_time_provenance" not in columns:
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN event_time_provenance VARCHAR(20)"))
 
     def _widen_sqlite_numeric_columns(self) -> None:
         for table_name, column_names in _PAPER_SQLITE_PRECISION_COLUMNS.items():

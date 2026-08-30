@@ -2,52 +2,55 @@
 
 ## Status
 
-Task 2 final review coverage is complete. The authoritative evidence is the
-focused SQLite/domain run, the PostgreSQL-backed repository run, and the
-scoped Ruff check recorded below.
+Task 2 provenance remediation is complete. This document is the sole
+authoritative result for Task 2 verification.
 
 ## Scope
 
-Modified only:
+Modified only for Task 2 provenance:
 
+- `paper_trading/domain/enums.py`
+- `storage/model/paper_trading.py`
+- `paper_trading/storage/enum_migration.py`
 - `paper_trading/storage/repository.py`
+- `storage/storage_db.py`
 - `test/paper_trading/storage/test_repository.py`
+- `test/paper_trading/storage/test_enum_migration.py`
 - this report
 
-No Task 3+ files and no matching or settlement code were modified.
+No matching, settlement, or Task 3+ behavior was modified.
 
-## Changes
+## Provenance Design
 
-- Added a parameterized SQLite/PostgreSQL write-stage failure regression for
-  `replace_trading_snapshots()`. It creates two existing trading snapshots,
-  calls the real `save_trading_snapshot()` for replacement writes, injects an
-  exception from the second `before_flush` after the first replacement write,
-  calls `expire_all()`, reloads through an independent Session, and verifies
-  the old range's complete persisted field signatures including `created_at`,
-  count, and ID set are restored. The original Session is queried again to
-  verify it remains usable.
-- Added a PostgreSQL-backed repository fixture using an isolated schema and the
-  canonical paper-trading enum migration. The parity test writes the same
-  account, order/trade, cash-ledger, corporate-action, and valuation facts to
-  SQLite and PostgreSQL and compares ordered event identity, `event_at`,
-  quality status, and complete payloads. SQLite and PostgreSQL signatures must
-  be fully equal.
-- Defined the replay adapter's timestamp compatibility rule: for SQLite rows
-  read from model columns declared `DateTime(timezone=True)`, a driver-returned
-  naive value is interpreted as canonical UTC and marked `VALID`, matching
-  PostgreSQL. Direct naive values passed to the generic time helper and rows
-  with missing event time remain explicitly `INVALID` because their timezone
-  cannot be proven. Creation baselines therefore remain eligible on SQLite.
-- Normalized replay Decimal payloads through the existing account-money,
-  NAV, and share quantizers. This removes SQLite binary-float residue while
-  preserving the repository's 12-decimal precision contract.
-- Applied Ruff import ordering and line wrapping in the two touched source/test
-  files.
+`ReplayTimeProvenance.CANONICAL_UTC` is persisted as nullable
+`event_time_provenance` on all replay source tables:
 
-Previously verified Task 2 behavior remains covered: cash-ledger event
-classification, creation baseline and latest bounded baseline selection,
-complete corporate-action payload, invalid legacy/naive timestamps, stable
-ordering, cash-only account selection, and mixed-dividend economic assertions.
+- `paper_cash_ledger`
+- `paper_trades`
+- `paper_corporate_actions`
+- `paper_account_snapshots`
+
+Normal repository writes mark timestamps as `canonical_utc`. The replay adapter
+only interprets a naive datetime as UTC when its persisted provenance is
+`canonical_utc`; this covers SQLite's loss of timezone information on a
+`DateTime(timezone=True)` round trip. Missing provenance, unknown provenance,
+or missing timestamps are explicitly invalid rather than inferred as UTC.
+
+The PostgreSQL migration creates the provenance enum and nullable columns
+idempotently. SQLite's schema upgrade adds the equivalent nullable `VARCHAR(20)`
+columns idempotently. Neither migration backfills legacy rows, so historical
+records remain `NULL` provenance and are replayed as invalid until repaired by
+an explicit future workflow.
+
+## Preserved Task 2 Behavior
+
+- Cash ledger external-flow classification and internal settlement handling
+- Creation and latest bounded baseline selection
+- Complete corporate-action payloads
+- Stable UTC ordering and invalid unproven timestamps
+- Cash-only account snapshot selection
+- Mixed-dividend economic assertions
+- Bounded replacement rollback with real second-write failure on SQLite and PostgreSQL
 
 ## Verification
 
@@ -56,7 +59,7 @@ ordering, cash-only account selection, and mixed-dividend economic assertions.
 Command:
 
 ```text
-uv run ruff check paper_trading/storage/repository.py test/paper_trading/storage/test_repository.py
+uv run ruff check paper_trading/domain/enums.py storage/model/paper_trading.py paper_trading/storage/enum_migration.py paper_trading/storage/repository.py storage/storage_db.py test/paper_trading/storage/test_repository.py test/paper_trading/storage/test_enum_migration.py
 ```
 
 Output:
@@ -67,7 +70,7 @@ All checks passed!
 
 Exit status: `0`.
 
-### Focused SQLite/domain tests
+### Focused Repository And Replay Tests
 
 Command:
 
@@ -78,19 +81,16 @@ uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/d
 Output summary:
 
 ```text
-collected 130 items
-======================= 128 passed, 2 skipped in 50.76s =======================
+collected 133 items
+======================= 133 passed, 2 skipped in 41.12s ========================
 ```
 
-The two skipped parameter cases are the PostgreSQL rollback and parity cases
-because this direct command does not provide `TEST_POSTGRESQL_URL`. This is
-expected and is not the PostgreSQL evidence path. The direct run also covers
-the explicit unproven-naive timestamp invalid regression and the SQLite
-creation-baseline eligibility regression.
+The two skipped parameter cases require `TEST_POSTGRESQL_URL`; the PostgreSQL
+runner below executes them.
 
 Exit status: `0`.
 
-### PostgreSQL-backed repository tests
+### PostgreSQL Repository Tests
 
 Command:
 
@@ -98,46 +98,60 @@ Command:
 tools/run_tests.sh test/paper_trading/storage/test_repository.py -v
 ```
 
-Relevant runner output:
+Output summary:
 
 ```text
-Container issue-82-nav-series-test_db-1 Healthy
-collected 116 items
-test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[sqlite_repository] PASSED
-test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[postgres_repository] PASSED
-test/paper_trading/storage/test_repository.py::test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql PASSED
-============================= 116 passed in 52.71s =============================
+collected 121 items
+test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[sqlite_repository] PASSED
+test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[postgres_repository] PASSED
+test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql PASSED
+============================= 121 passed in 43.39s =============================
 ```
 
-Exit status: `0`. Both rollback parameter paths and the parity test ran against
-the isolated PostgreSQL service; none was skipped or blocked.
+The parity test commits both databases, expires both ORM sessions, creates fresh
+sessions, then compares each replay event's `event_at`, quality status, payload,
+event type, source kind, and source ID for equality.
 
-### Whitespace
+Exit status: `0`.
+
+### Provenance Migration Test
 
 Command:
 
 ```text
-git diff --check
+tools/run_tests.sh test/paper_trading/storage/test_enum_migration.py -k replay_time_provenance -v
 ```
+
+Output summary:
+
+```text
+1 passed, 35 deselected in 3.71s
+```
+
+The PostgreSQL migration test proves the enum and four nullable columns are
+added, existing legacy provenance remains `NULL`, and rerunning migration is
+idempotent. A focused SQLite test covers the equivalent nullable-column upgrade
+and no-backfill behavior.
+
+Exit status: `0`.
+
+### Whitespace
+
+Command: `git diff --check`
 
 Output: no findings. Exit status: `0`.
 
-## Concerns and limits
+## Concerns
 
-- The direct focused command reports the PostgreSQL rollback and parity cases as
-  skipped by design; the required `tools/run_tests.sh` run provides the actual
-  PostgreSQL results. No PostgreSQL case was blocked under the runner.
-- The runner emits the existing locale warning
-  `setlocale: LC_ALL: cannot change locale (en_US.UTF-8)` and Docker's
-  `No services to build` warning. Neither affected test execution.
-- The parity assertion compares event ordering identity, `event_at`, quality
-  status, and complete payload values with full signature equality. SQLite
-  timezone-aware columns that load as naive are normalized to canonical UTC at
-  the adapter boundary; genuinely unproven naive or missing timestamps remain
-  invalid under the dedicated regression tests.
+- Existing historical replay rows receive no guessed provenance. They remain
+  invalid when their timestamp lacks timezone evidence; a separate explicit
+  repair workflow is required to assert provenance.
+- The runner emits existing `en_US.UTF-8` and Docker `No services to build`
+  warnings. They did not affect test execution.
 
-## Final result
+## Final Result
 
-Task 2 final review coverage is complete. SQLite and PostgreSQL both verified
-replacement rollback, timestamp compatibility, and replay Decimal/payload
-parity; no requested test is blocked under the PostgreSQL runner.
+Canonical UTC timestamp provenance is now explicit and auditable across SQLite
+and PostgreSQL. SQLite no longer gains `VALID` solely from its dialect; only
+rows written with `canonical_utc` provenance do. All required verification
+commands completed with the results above.

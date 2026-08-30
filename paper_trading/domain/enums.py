@@ -118,6 +118,10 @@ class SnapshotValuationQuality(StrEnum):
     STALE_SUSPENDED = "stale_suspended"
 
 
+class ReplayTimeProvenance(StrEnum):
+    CANONICAL_UTC = "canonical_utc"
+
+
 class NavReplayEventType(StrEnum):
     INITIAL = "initial"
     CASH_FLOW = "cash_flow"
