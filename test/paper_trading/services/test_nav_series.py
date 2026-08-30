@@ -120,3 +120,19 @@ def test_builder_default_repository_loader_replays_persisted_events(tmp_path):
     finally:
         session.close()
         engine.dispose()
+
+
+def test_builder_keeps_positional_event_loader_compatibility():
+    events = [
+        ReplayEvent(
+            event_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 25),
+            event_type=NavReplayEventType.INITIAL,
+            source_id="initial",
+            source_kind="creation",
+            payload={"opening_cash": Decimal("10"), "opening_shares": Decimal("10")},
+            quality_status=SnapshotQualityStatus.VALID,
+        )
+    ]
+
+    assert NavSeriesBuilder(lambda _account_id: events).build(1).points[0].nav == Decimal("1")

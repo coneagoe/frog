@@ -53,14 +53,14 @@ class SnapshotRecalculationService:
                 if snapshot.point_type == SnapshotPointType.TRADING.value
             }
             all_events = repo.list_replay_events(account_id)
-            builder = NavSeriesBuilder(event_loader=lambda _account_id: all_events)
+            builder = NavSeriesBuilder(repo=repo)
             baseline = builder._baseline_from_events(all_events)
             if baseline is None:
                 raise ValueError("baseline is not provably reconstructible")
             events = [
                 event
                 for event in builder._deduplicate_trade_settlements(all_events)
-                if event.event_type is not NavReplayEventType.MARKET_VALUATION
+                if event.event_type is not NavReplayEventType.INITIAL
             ]
             valuation_events, gaps = self._valuation_events(snapshot_service, events, dates, baseline)
             events.extend(valuation_events)
@@ -164,8 +164,16 @@ class SnapshotRecalculationService:
             point = prior[-1] if prior else self._baseline_point(baseline)
             holdings = {} if point is None or point.holdings is None else point.holdings
             valuations = [
-                PositionValuation(symbol, None, trade_date, None, None, None, "missing_replay_market")
-                for symbol, quantity in holdings.items()
+                PositionValuation(
+                    holding_key.split(":", 1)[1],
+                    holding_key.split(":", 1)[0] or None,
+                    trade_date,
+                    None,
+                    None,
+                    None,
+                    "missing_replay_market",
+                )
+                for holding_key, quantity in holdings.items()
                 if quantity > 0
             ]
             resolved = []
@@ -179,16 +187,25 @@ class SnapshotRecalculationService:
                     key=snapshot_service._detail_sort_key,
                 )
                 gaps[trade_date] = ([detail["symbol"] for detail in details], details)
+                valuation_events.append(
+                    ReplayEvent(
+                        event_at=datetime.combine(trade_date, time.max, tzinfo=timezone.utc),
+                        trade_date=trade_date,
+                        event_type=NavReplayEventType.MARKET_VALUATION,
+                        source_id=f"recalculation:valuation:{trade_date.isoformat()}",
+                        source_kind="recalculation",
+                        payload={"valuation_quality": "gap", "valuation_details": details},
+                        quality_status=SnapshotQualityStatus.INVALID,
+                    )
+                )
                 continue
             market_value = sum(
-                (holdings[item.symbol] * (item.price or Decimal("0")) for item in resolved),
+                (holdings[f"{item.market or ''}:{item.symbol}"] * (item.price or Decimal("0")) for item in resolved),
                 Decimal("0"),
             )
             cash = Decimal("0") if point is None or point.cash is None else point.cash
             stale_details = tuple(
-                snapshot_service._valuation_detail(item)
-                for item in resolved
-                if item.quality == "stale_suspended"
+                snapshot_service._valuation_detail(item) for item in resolved if item.quality == "stale_suspended"
             )
             valuation_events.append(
                 ReplayEvent(
@@ -238,15 +255,15 @@ class SnapshotRecalculationService:
             "market_value": market_value,
             "total_assets": total_assets,
             "realized_pnl": Decimal("0"),
-            "unrealized_pnl": Decimal("0"),
+            "unrealized_pnl": market_value - sum((point.costs or {}).values(), Decimal("0")),
             "position_count": sum(1 for quantity in (point.holdings or {}).values() if quantity > 0),
             "order_count": repo.count_orders(account_id, trade_date),
             "trade_count": repo.count_trades(account_id, trade_date),
             "net_asset_value": point.nav,
             "share_count": point.share_count,
-            "cumulative_deposit": Decimal("0"),
-            "cumulative_withdrawal": Decimal("0"),
-            "net_cash_flow": Decimal("0"),
+            "cumulative_deposit": point.cumulative_deposit,
+            "cumulative_withdrawal": point.cumulative_withdrawal,
+            "net_cash_flow": point.net_cash_flow,
             "pending_settlement": Decimal("0"),
         }
 

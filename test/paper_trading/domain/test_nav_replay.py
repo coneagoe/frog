@@ -128,6 +128,120 @@ def test_missing_market_valuation_is_a_gap_not_a_carried_forward_nav():
     assert result.points[-1].quality_status is SnapshotQualityStatus.INVALID
 
 
+def test_gap_preserves_state_for_later_cash_flow_and_cumulative_cash_flow():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL, "initial", {"opening_cash": Decimal("100"), "opening_shares": Decimal("100")}
+        ),
+        _event(NavReplayEventType.MARKET_VALUATION, "gap", {}, event_at=datetime(2026, 8, 26, tzinfo=timezone.utc)),
+        _event(
+            NavReplayEventType.CASH_FLOW,
+            "withdraw",
+            {"amount": Decimal("-20")},
+            event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        ),
+    ]
+
+    result = NavSeriesReplay().replay(events, initial_state={})
+
+    assert result.points[-1].cash == Decimal("80")
+    assert result.points[-1].share_count == Decimal("80")
+    assert result.points[-1].cumulative_deposit == Decimal("100")
+    assert result.points[-1].cumulative_withdrawal == Decimal("20")
+    assert result.points[-1].net_cash_flow == Decimal("80")
+
+
+def test_trade_replay_uses_average_cost_with_fees_and_market_symbol_key():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL, "initial", {"opening_cash": Decimal("1000"), "opening_shares": Decimal("1000")}
+        ),
+        _event(
+            NavReplayEventType.TRADE_SETTLEMENT,
+            "buy-a",
+            {
+                "side": "buy",
+                "market": "a_share",
+                "symbol": "000001",
+                "quantity": 10,
+                "price": Decimal("10"),
+                "amount": Decimal("100"),
+                "fees": Decimal("5"),
+            },
+        ),
+        _event(
+            NavReplayEventType.TRADE_SETTLEMENT,
+            "buy-hk",
+            {
+                "side": "buy",
+                "market": "hk_connect",
+                "symbol": "000001",
+                "quantity": 10,
+                "price": Decimal("20"),
+                "amount": Decimal("200"),
+                "fees": Decimal("2"),
+            },
+            event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        ),
+        _event(
+            NavReplayEventType.TRADE_SETTLEMENT,
+            "sell-a",
+            {
+                "side": "sell",
+                "market": "a_share",
+                "symbol": "000001",
+                "quantity": 4,
+                "price": Decimal("30"),
+                "amount": Decimal("120"),
+                "fees": Decimal("1"),
+            },
+            event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        ),
+    ]
+
+    point = NavSeriesReplay().replay(events, initial_state={}).points[-1]
+
+    assert point.holdings == {"a_share:000001": Decimal("6"), "hk_connect:000001": Decimal("10")}
+    assert point.costs == {"a_share:000001": Decimal("63"), "hk_connect:000001": Decimal("202")}
+
+
+def test_corporate_action_updates_market_symbol_quantity_cost_and_cash():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL, "initial", {"opening_cash": Decimal("100"), "opening_shares": Decimal("100")}
+        ),
+        _event(
+            NavReplayEventType.CORPORATE_ACTION,
+            "split",
+            {
+                "market": "a_share",
+                "symbol": "000001",
+                "quantity_delta": Decimal("20"),
+                "cash_delta": Decimal("5"),
+                "after_cost_amount": Decimal("80"),
+            },
+        ),
+    ]
+
+    point = (
+        NavSeriesReplay()
+        .replay(events, {"holdings": {"a_share:000001": Decimal("10")}, "costs": {"a_share:000001": Decimal("100")}})
+        .points[-1]
+    )
+
+    assert point.holdings == {"a_share:000001": Decimal("30")}
+    assert point.costs == {"a_share:000001": Decimal("80")}
+    assert point.cash == Decimal("105")
+
+
+def test_trade_replay_rejects_unknown_side():
+    with pytest.raises(ValueError, match="unsupported trade side"):
+        NavSeriesReplay().replay(
+            [_event(NavReplayEventType.TRADE_SETTLEMENT, "bad", {"side": "hold", "quantity": 1, "price": 1})],
+            initial_state={"total_assets": Decimal("100"), "share_count": Decimal("100")},
+        )
+
+
 def test_cash_flow_rejects_conflicting_pre_and_post_asset_payload():
     event = _event(
         NavReplayEventType.CASH_FLOW,

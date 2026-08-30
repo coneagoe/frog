@@ -150,3 +150,53 @@ Follow-up concerns:
   invoking the removed per-date snapshot-generation path.
 - Added focused coverage that a replay/baseline failure rolls back a
   caller-owned SQLAlchemy session.
+
+## Final follow-up implementation
+
+- `paper_trading/services/nav_series.py`
+  - Preserved the legacy positional callable constructor form while making the
+    repository-backed `list_replay_events` path the default when a repository
+    is supplied.
+  - Added deterministic settlement-ledger deduplication and corporate-action
+    ledger exclusion.
+
+- `paper_trading/domain/nav_replay.py`
+  - Added cumulative deposit/withdrawal/net-cash-flow state to every point.
+  - Trade replay now validates sides, tracks market+symbol holdings, includes
+    buy fees in cost, and reduces sell cost using average cost.
+  - Corporate actions update market+symbol quantity/cost/cash state.
+  - Missing valuations leave cash, holdings, costs, shares, and cumulative
+    flow state intact for subsequent events.
+
+- `paper_trading/services/snapshot_recalculation_service.py`
+  - Materialized snapshots now write replay cumulative cash-flow values and
+    preserve stale/gap valuation metadata through replay valuation events.
+  - Existing bounded replacement and external-session rollback behavior remain
+    enforced.
+
+- Tests added for positional/default builder compatibility, gap state
+  preservation, cumulative cash flow, trade average cost and fees, multi-market
+  symbol separation, corporate-action quantity/cost/cash updates, and invalid
+  trade sides.
+
+## Final verification
+
+```text
+uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+```text
+============================= 84 passed in 15.61s ==============================
+```
+
+```text
+uv run ruff format paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py
+uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+```text
+2 files reformatted, 4 files left unchanged
+All checks passed!
+```
+
+`git diff --check`: passed.

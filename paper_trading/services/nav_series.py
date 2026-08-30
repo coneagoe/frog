@@ -1,7 +1,7 @@
 from collections.abc import Callable, Mapping
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, cast
 
 from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType, SnapshotQualityStatus
 from paper_trading.domain.nav_replay import NavSeriesReplay, ReplayEvent, ReplayResult
@@ -15,10 +15,13 @@ class NavSeriesBuilder:
         repo: Any | None = None,
         event_loader: Callable[[int], list[ReplayEvent]] | None = None,
     ):
+        if callable(repo) and event_loader is None:
+            event_loader = cast(Callable[[int], list[ReplayEvent]], repo)
+            repo = None
         if event_loader is not None:
             self._event_loader = event_loader
         elif repo is not None:
-            self._event_loader = repo.list_replay_events
+            self._event_loader = cast(Callable[[int], list[ReplayEvent]], getattr(repo, "list_replay_events"))
         else:
             self._event_loader = lambda _account_id: (_ for _ in ()).throw(
                 ValueError("NavSeriesBuilder requires a repository or event_loader")
@@ -58,7 +61,10 @@ class NavSeriesBuilder:
             if not (
                 event.source_kind == "paper_cash_ledger"
                 and event.event_type is NavReplayEventType.TRADE_SETTLEMENT
-                and event.payload.get("trade_id") in trade_ids
+                and (
+                    event.payload.get("trade_id") in trade_ids
+                    or event.payload.get("ledger_event_type") == "corporate_action"
+                )
             )
         ]
 

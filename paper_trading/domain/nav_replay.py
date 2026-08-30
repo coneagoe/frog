@@ -45,6 +45,9 @@ class NavPoint:
     cash: Decimal | None = None
     holdings: Mapping[str, Decimal] | None = None
     costs: Mapping[str, Decimal] | None = None
+    cumulative_deposit: Decimal = Decimal("0")
+    cumulative_withdrawal: Decimal = Decimal("0")
+    net_cash_flow: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,8 @@ class NavSeriesReplay:
         state.setdefault("cash", self._decimal(state.get("total_assets")) or Decimal("0"))
         state.setdefault("holdings", {})
         state.setdefault("costs", {})
+        state.setdefault("cumulative_deposit", Decimal("0"))
+        state.setdefault("cumulative_withdrawal", Decimal("0"))
         points: list[NavPoint] = []
         ordered_events = sorted(events, key=self._sort_key)
         for previous, event in zip(ordered_events, ordered_events[1:]):
@@ -83,6 +88,8 @@ class NavSeriesReplay:
         cash = self._decimal(state.get("cash"))
         holdings = dict(state.get("holdings", {}))
         costs = dict(state.get("costs", {}))
+        cumulative_deposit = self._decimal(state.get("cumulative_deposit")) or Decimal("0")
+        cumulative_withdrawal = self._decimal(state.get("cumulative_withdrawal")) or Decimal("0")
         valuation_quality = event.payload.get("valuation_quality")
         valuation_details = tuple(event.payload.get("valuation_details", ()))
 
@@ -109,6 +116,10 @@ class NavSeriesReplay:
             share_count = (share_count or Decimal("0")) + cash_amount / pricing_nav
             nav = pricing_nav
             cash = (cash or Decimal("0")) + cash_amount
+            if cash_amount >= 0:
+                cumulative_deposit += cash_amount
+            else:
+                cumulative_withdrawal += -cash_amount
         elif event.event_type is NavReplayEventType.MARKET_VALUATION:
             valuation_total = self._decimal(event.payload.get("total_assets"))
             if valuation_total is None:
@@ -127,6 +138,8 @@ class NavSeriesReplay:
             if nav is None and total_assets is not None and share_count:
                 nav = total_assets / share_count
             cash = total_assets
+            cumulative_deposit = self._decimal(event.payload.get("cumulative_deposit")) or total_assets or Decimal("0")
+            cumulative_withdrawal = self._decimal(event.payload.get("cumulative_withdrawal")) or Decimal("0")
         elif event.event_type is NavReplayEventType.TRADE_SETTLEMENT:
             amount = self._decimal(event.payload.get("amount")) or Decimal("0")
             fees = self._decimal(event.payload.get("fees")) or Decimal("0")
@@ -134,10 +147,25 @@ class NavSeriesReplay:
             price = self._decimal(event.payload.get("price")) or Decimal("0")
             symbol = str(event.payload.get("symbol", ""))
             side = str(event.payload.get("side", ""))
+            if side not in {"buy", "sell"}:
+                raise ValueError(f"unsupported trade side: {side}")
+            if quantity <= 0 or price <= 0:
+                raise ValueError("trade quantity and price must be positive")
+            market = str(event.payload.get("market") or "")
+            holding_key = f"{market}:{symbol}"
             sign = Decimal("1") if side == "sell" else Decimal("-1")
             cash = (cash or Decimal("0")) + sign * amount - fees
-            holdings[symbol] = holdings.get(symbol, Decimal("0")) + sign * quantity
-            costs[symbol] = costs.get(symbol, Decimal("0")) + sign * quantity * price
+            current_quantity = holdings.get(holding_key, Decimal("0"))
+            current_cost = costs.get(holding_key, Decimal("0"))
+            if side == "buy":
+                holdings[holding_key] = current_quantity + quantity
+                costs[holding_key] = current_cost + amount + fees
+            else:
+                if quantity > current_quantity:
+                    raise ValueError("sell quantity exceeds replay holdings")
+                reduction = current_cost * quantity / current_quantity if current_quantity else Decimal("0")
+                holdings[holding_key] = current_quantity - quantity
+                costs[holding_key] = current_cost - reduction
             total_assets = (total_assets or Decimal("0")) - fees
             if share_count:
                 nav = total_assets / share_count
@@ -147,12 +175,18 @@ class NavSeriesReplay:
             )
             if share_count:
                 nav = total_assets / share_count
+            market = str(event.payload.get("market") or "")
             symbol = str(event.payload.get("symbol", ""))
-            holdings[symbol] = holdings.get(symbol, Decimal("0")) + (
+            if not symbol:
+                raise ValueError("corporate action symbol is required")
+            holding_key = f"{market}:{symbol}"
+            holdings[holding_key] = holdings.get(holding_key, Decimal("0")) + (
                 self._decimal(event.payload.get("quantity_delta")) or Decimal("0")
             )
             if "after_cost_amount" in event.payload:
-                costs[symbol] = self._decimal(event.payload.get("after_cost_amount")) or costs.get(symbol, Decimal("0"))
+                costs[holding_key] = self._decimal(event.payload.get("after_cost_amount")) or costs.get(
+                    holding_key, Decimal("0")
+                )
             cash = (cash or Decimal("0")) + (self._decimal(event.payload.get("cash_delta")) or Decimal("0"))
         elif total_assets is not None and share_count:
             nav = total_assets / share_count
@@ -172,10 +206,15 @@ class NavSeriesReplay:
             cash=cash,
             holdings=dict(holdings),
             costs=dict(costs),
+            cumulative_deposit=cumulative_deposit,
+            cumulative_withdrawal=cumulative_withdrawal,
+            net_cash_flow=cumulative_deposit - cumulative_withdrawal,
         )
         state["cash"] = cash
         state["holdings"] = holdings
         state["costs"] = costs
+        state["cumulative_deposit"] = cumulative_deposit
+        state["cumulative_withdrawal"] = cumulative_withdrawal
         state["total_assets"] = total_assets
         state["share_count"] = share_count
         if valid:
