@@ -1618,7 +1618,7 @@ def test_sqlite_legacy_invalid_cash_allocation_marks_account_for_repair(tmp_path
     engine.dispose()
 
 
-def test_sqlite_legacy_high_precision_cash_allocation_remains_eligible(tmp_path):
+def test_sqlite_legacy_real_backed_high_precision_cash_allocation_marks_repair(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'high_precision_cash_allocation.db'}")
     with engine.begin() as connection:
         _create_sqlite_legacy_snapshot_schema(connection)
@@ -1633,6 +1633,38 @@ def test_sqlite_legacy_high_precision_cash_allocation_remains_eligible(tmp_path)
                 "CREATE TABLE paper_cash_ledger (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, "
                 "event_type VARCHAR(20) NOT NULL, amount NUMERIC, net_asset_value NUMERIC, share_delta NUMERIC, "
                 "rounding_residual NUMERIC, occurred_at DATETIME, trade_date DATE, event_time_provenance VARCHAR(20))"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO paper_cash_ledger VALUES "
+                "(1, 1, 'deposit', '0.123456789012', '0.000123456789012', "
+                "'1000.000000000000', '0.000000000000000', '2026-01-02 16:00:00', "
+                "'2026-01-02', 'canonical_utc')"
+            )
+        )
+
+    ensure_paper_trading_schema(engine)
+
+    assert _repair_reasons(engine) == {1: "legacy_ordering_uncertain"}
+    engine.dispose()
+
+
+def test_sqlite_legacy_text_cash_allocation_remains_eligible(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'text_cash_allocation.db'}")
+    with engine.begin() as connection:
+        _create_sqlite_legacy_snapshot_schema(connection)
+        connection.execute(
+            text(
+                "INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at) "
+                "VALUES (1, 'text-allocation', 10000, 10000, '2026-01-01 08:00:00')"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE paper_cash_ledger (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, "
+                "event_type VARCHAR(20) NOT NULL, amount TEXT, net_asset_value TEXT, share_delta TEXT, "
+                "rounding_residual TEXT, occurred_at DATETIME, trade_date DATE, event_time_provenance VARCHAR(20))"
             )
         )
         connection.execute(

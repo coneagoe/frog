@@ -4447,13 +4447,18 @@ class StorageDb:
                        CAST(amount AS TEXT),
                        CAST(net_asset_value AS TEXT),
                        CAST(share_delta AS TEXT),
-                       CAST(rounding_residual AS TEXT)
+                       CAST(rounding_residual AS TEXT),
+                       typeof(amount), typeof(net_asset_value),
+                       typeof(share_delta), typeof(rounding_residual)
                 FROM {tb_name_paper_cash_ledger}
                 """
             )
         )
         invalid_accounts: set[int] = set()
-        for account_id, event_type, amount, nav, share_delta, residual in rows:
+        for account_id, event_type, amount, nav, share_delta, residual, *value_types in rows:
+            if any(value_type != "text" for value_type in value_types):
+                invalid_accounts.add(account_id)
+                continue
             try:
                 values = tuple(Decimal(str(value)) for value in (amount, nav, share_delta, residual))
             except (InvalidOperation, TypeError, ValueError):
