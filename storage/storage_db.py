@@ -4,6 +4,7 @@ import os
 import re
 import textwrap
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from functools import wraps
 from typing import Any, Callable, Dict, List, Literal, Optional, Set, cast
@@ -4333,6 +4334,9 @@ class StorageDb:
             "CAST(account.initial_cash AS REAL) <= 0",
         ]
         predicates.extend(self._sqlite_legacy_source_predicates(conn))
+        invalid_ledger_accounts = self._sqlite_invalid_cash_ledger_accounts(conn)
+        if invalid_ledger_accounts:
+            predicates.append(f"account.id IN ({', '.join(str(account_id) for account_id in invalid_ledger_accounts)})")
         predicates.append(self._sqlite_initial_snapshot_uncertain(conn))
         conn.execute(
             text(
@@ -4421,32 +4425,50 @@ class StorageDb:
                 checks = f"{checks} OR {provenance}"
             if table_name == tb_name_paper_account_snapshots:
                 checks = f"{checks} OR source.quality_status IS NOT 'valid'"
-            if table_name == tb_name_paper_cash_ledger:
-                checks = f"{checks} OR {self._sqlite_legacy_cash_ledger_invalid(columns)}"
             predicates.append(
                 f"EXISTS (SELECT 1 FROM {table_name} AS source WHERE {account_match} AND ({checks}))"
             )
         return predicates
 
-    @staticmethod
-    def _sqlite_legacy_cash_ledger_invalid(columns: set[str]) -> str:
+    def _sqlite_invalid_cash_ledger_accounts(self, conn) -> tuple[int, ...]:
+        if not inspect(conn).has_table(tb_name_paper_cash_ledger):
+            return ()
+        columns = self._table_column_names(conn, tb_name_paper_cash_ledger)
         numeric_columns = ("amount", "net_asset_value", "share_delta", "rounding_residual")
-        invalid = [
-            f"source.{column} IS NULL OR CAST(source.{column} AS TEXT) IN ('NaN', 'Infinity', '-Infinity')"
-            for column in numeric_columns
-            if column in columns
-        ]
         if not all(column in columns for column in numeric_columns):
-            return "1 = 1"
-        invalid.extend(
-            (
-                "(source.event_type = 'deposit' AND (source.amount <= 0 OR source.share_delta <= 0))",
-                "(source.event_type = 'withdrawal' AND (source.amount >= 0 OR source.share_delta >= 0))",
-                "source.net_asset_value <= 0",
-                "source.amount != source.share_delta * source.net_asset_value + source.rounding_residual",
+            return tuple(
+                row[0]
+                for row in conn.execute(text(f"SELECT DISTINCT account_id FROM {tb_name_paper_cash_ledger}"))
+            )
+        rows = conn.execute(
+            text(
+                f"""
+                SELECT account_id, event_type,
+                       CAST(amount AS TEXT),
+                       CAST(net_asset_value AS TEXT),
+                       CAST(share_delta AS TEXT),
+                       CAST(rounding_residual AS TEXT)
+                FROM {tb_name_paper_cash_ledger}
+                """
             )
         )
-        return " OR ".join(invalid)
+        invalid_accounts: set[int] = set()
+        for account_id, event_type, amount, nav, share_delta, residual in rows:
+            try:
+                values = tuple(Decimal(str(value)) for value in (amount, nav, share_delta, residual))
+            except (InvalidOperation, TypeError, ValueError):
+                invalid_accounts.add(account_id)
+                continue
+            amount_value, nav_value, shares_value, residual_value = values
+            if (
+                not all(value.is_finite() for value in values)
+                or nav_value <= 0
+                or (event_type == "deposit" and (amount_value <= 0 or shares_value <= 0))
+                or (event_type == "withdrawal" and (amount_value >= 0 or shares_value >= 0))
+                or amount_value != shares_value * nav_value + residual_value
+            ):
+                invalid_accounts.add(account_id)
+        return tuple(sorted(invalid_accounts))
 
     def _ensure_sqlite_snapshot_trading_identity(self, conn) -> None:
         snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
