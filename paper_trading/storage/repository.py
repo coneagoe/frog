@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from paper_trading.domain.enums import (
+    REPLAY_REJECTION_MARKER,
     AccountStatus,
     CashEventType,
     CorporateActionType,
@@ -25,7 +26,6 @@ from paper_trading.domain.enums import (
     OrderStatus,
     PendingSettlementSource,
     PositionSource,
-    REPLAY_REJECTION_MARKER,
     RoundTripStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
@@ -823,8 +823,8 @@ class PaperTradingRepository:
         return event_at.astimezone(timezone.utc), SnapshotQualityStatus.VALID
 
     @staticmethod
-    def _replay_decimal(value: Decimal | None) -> Decimal | None:
-        return None if value is None else Decimal(str(value))
+    def _replay_decimal(value: Decimal | None, quantizer: Any) -> Decimal | None:
+        return None if value is None else quantizer(Decimal(str(value)))
 
     @staticmethod
     def _replay_source_id(source_kind: str, row_id: int) -> str:
@@ -872,8 +872,8 @@ class PaperTradingRepository:
                     source_id=self._replay_source_id("paper_cash_ledger", ledger.id),
                     source_kind="paper_cash_ledger",
                     payload={
-                        "amount": self._replay_decimal(ledger.amount),
-                        "share_delta": self._replay_decimal(ledger.share_delta),
+                        "amount": self._replay_decimal(ledger.amount, quantize_account_money),
+                        "share_delta": self._replay_decimal(ledger.share_delta, quantize_shares),
                         "ledger_event_type": ledger_event_type.value,
                         "order_id": ledger.order_id,
                         "trade_id": ledger.trade_id,
@@ -892,11 +892,11 @@ class PaperTradingRepository:
                     source_id=self._replay_source_id("paper_trades", trade.id),
                     source_kind="paper_trades",
                     payload={
-                        "amount": self._replay_decimal(trade.amount),
-                        "fees": self._replay_decimal(trade.fees),
+                        "amount": self._replay_decimal(trade.amount, quantize_account_money),
+                        "fees": self._replay_decimal(trade.fees, quantize_account_money),
                         "side": trade.side,
                         "quantity": trade.quantity,
-                        "price": self._replay_decimal(trade.price),
+                        "price": self._replay_decimal(trade.price, quantize_account_money),
                         "symbol": trade.symbol,
                         "market": trade.market,
                         "order_id": trade.order_id,
@@ -917,8 +917,8 @@ class PaperTradingRepository:
                     source_id=self._replay_source_id("paper_corporate_actions", action.id),
                     source_kind="paper_corporate_actions",
                     payload={
-                        "cash_delta": self._replay_decimal(action.cash_delta),
-                        "quantity_delta": self._replay_decimal(action.quantity_delta),
+                        "cash_delta": self._replay_decimal(action.cash_delta, quantize_account_money),
+                        "quantity_delta": self._replay_decimal(action.quantity_delta, quantize_shares),
                         "parameters": action.parameters,
                         "symbol": action.symbol,
                         "market": action.market,
@@ -926,12 +926,16 @@ class PaperTradingRepository:
                         "affected_start_date": action.affected_start_date,
                         "affected_end_date": action.affected_end_date,
                         "cash_ledger_event_type": CashEventType.CORPORATE_ACTION.value,
-                        "before_quantity": self._replay_decimal(action.before_quantity),
-                        "after_quantity": self._replay_decimal(action.after_quantity),
-                        "before_cost_amount": self._replay_decimal(action.before_cost_amount),
-                        "after_cost_amount": self._replay_decimal(action.after_cost_amount),
-                        "before_cash_available": self._replay_decimal(action.before_cash_available),
-                        "after_cash_available": self._replay_decimal(action.after_cash_available),
+                        "before_quantity": self._replay_decimal(action.before_quantity, quantize_shares),
+                        "after_quantity": self._replay_decimal(action.after_quantity, quantize_shares),
+                        "before_cost_amount": self._replay_decimal(action.before_cost_amount, quantize_account_money),
+                        "after_cost_amount": self._replay_decimal(action.after_cost_amount, quantize_account_money),
+                        "before_cash_available": self._replay_decimal(
+                            action.before_cash_available, quantize_account_money
+                        ),
+                        "after_cash_available": self._replay_decimal(
+                            action.after_cash_available, quantize_account_money
+                        ),
                     },
                     quality_status=quality_status,
                 )
@@ -954,13 +958,17 @@ class PaperTradingRepository:
                         else NavReplayEventType.MARKET_VALUATION
                     ),
                     source_id=self._replay_source_id("paper_account_snapshots", snapshot.id),
-                    source_kind=("creation" if snapshot.point_type == SnapshotPointType.INITIAL.value else "paper_account_snapshots"),
+                    source_kind=(
+                        "creation"
+                        if snapshot.point_type == SnapshotPointType.INITIAL.value
+                        else "paper_account_snapshots"
+                    ),
                     payload={
-                        "opening_cash": self._replay_decimal(snapshot.cash_available),
-                        "opening_shares": self._replay_decimal(snapshot.share_count),
-                        "total_assets": self._replay_decimal(snapshot.total_assets),
-                        "share_count": self._replay_decimal(snapshot.share_count),
-                        "nav": self._replay_decimal(snapshot.net_asset_value),
+                        "opening_cash": self._replay_decimal(snapshot.cash_available, quantize_account_money),
+                        "opening_shares": self._replay_decimal(snapshot.share_count, quantize_shares),
+                        "total_assets": self._replay_decimal(snapshot.total_assets, quantize_account_money),
+                        "share_count": self._replay_decimal(snapshot.share_count, quantize_shares),
+                        "nav": self._replay_decimal(snapshot.net_asset_value, quantize_nav),
                     },
                     quality_status=quality_status,
                 )

@@ -1,11 +1,13 @@
+import os
+import uuid
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
-from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from sqlalchemy import String, create_engine
+from sqlalchemy import String, create_engine, text
 from sqlalchemy import cast as sa_cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -25,9 +27,15 @@ from paper_trading.domain.enums import (
     SnapshotQualityStatus,
 )
 from paper_trading.domain.nav_replay import NavSeriesReplay
+from paper_trading.storage.enum_migration import migrate_paper_trading_enums
 from paper_trading.storage.models import (
+    PaperAccount,
+    PaperAccountSnapshot,
     PaperCashLedger,
+    PaperCorporateAction,
+    PaperOrder,
     PaperPendingSettlement,
+    PaperTrade,
     PaperTradeValidityCheck,
     PaperValuationGap,
 )
@@ -416,8 +424,20 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
     deposit = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("100"), occurred_at=event_at)
     withdrawal = repo.add_cash_event(account.id, CashEventType.WITHDRAWAL, Decimal("-25"), occurred_at=event_at)
     internal = repo.add_cash_event(account.id, CashEventType.FEE, Decimal("5"), occurred_at=event_at)
-    order = repo.create_order(account.id, "000001", OrderSide.BUY, 10, Decimal("10"), event_at.date(), OrderStatus.FILLED)
-    trade = repo.create_trade(order.id, account.id, "000001", OrderSide.BUY, 10, Decimal("10"), Decimal("100"), Decimal("1"), event_at.date())
+    order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 10, Decimal("10"), event_at.date(), OrderStatus.FILLED
+    )
+    trade = repo.create_trade(
+        order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        10,
+        Decimal("10"),
+        Decimal("100"),
+        Decimal("1"),
+        event_at.date(),
+    )
     trade.trade_time = event_at
     action = repo.create_corporate_action(
         account_id=account.id, symbol="000001", event_type=CorporateActionType.DIVIDEND,
@@ -426,7 +446,14 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
         before_cost_amount=Decimal("100"), after_cost_amount=Decimal("100"),
         before_cash_available=Decimal("100000"), after_cash_available=Decimal("100010"),
     )
-    dividend_ledger = repo.add_cash_event(account.id, CashEventType.CORPORATE_ACTION, Decimal("10"), trade_date=event_at.date(), occurred_at=event_at, note="dividend")
+    dividend_ledger = repo.add_cash_event(
+        account.id,
+        CashEventType.CORPORATE_ACTION,
+        Decimal("10"),
+        trade_date=event_at.date(),
+        occurred_at=event_at,
+        note="dividend",
+    )
     valuation_values = _trading_snapshot_values(account.id, event_at.date(), event_at)
     valuation_values.update(total_assets=Decimal("100075"), share_count=Decimal("100075"), net_asset_value=Decimal("1"))
     valuation = repo.save_trading_snapshot(**valuation_values)
@@ -463,7 +490,9 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
         event_type=NavReplayEventType.CASH_FLOW,
     )
     wrong_events = [wrong_dividend if event.source_id == wrong_dividend.source_id else event for event in events]
-    wrong_replay = NavSeriesReplay().replay(wrong_events, {"total_assets": Decimal("100000"), "share_count": Decimal("100000")})
+    wrong_replay = NavSeriesReplay().replay(
+        wrong_events, {"total_assets": Decimal("100000"), "share_count": Decimal("100000")}
+    )
     wrong_before_valuation = wrong_replay.points[-2]
     assert wrong_before_valuation.share_count == Decimal("100085")
     assert wrong_before_valuation.total_assets == Decimal("100085")
@@ -588,6 +617,133 @@ def test_replace_trading_snapshots_is_bounded_and_upserts_dates(sqlite_session) 
         (within, Decimal("120000.0000")),
         (after, Decimal("100000.0000")),
     ]
+
+
+def test_replace_trading_snapshots_restores_old_rows_when_write_fails(sqlite_session, monkeypatch) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("replace-rollback", Decimal("100000.00"))
+    trade_date = date(2026, 8, 25)
+    old_values = _trading_snapshot_values(
+        account.id, trade_date, datetime(2026, 8, 25, 10, tzinfo=timezone.utc)
+    )
+    old_values["total_assets"] = Decimal("101234.5678")
+    old_snapshot = repo.save_trading_snapshot(**old_values)
+    old_snapshot_id = old_snapshot.id
+
+    def fail_write(**_values):
+        raise RuntimeError("injected replacement write failure")
+
+    monkeypatch.setattr(repo, "save_trading_snapshot", fail_write)
+
+    with pytest.raises(RuntimeError, match="injected replacement write failure"):
+        repo.replace_trading_snapshots(
+            account.id,
+            trade_date,
+            trade_date,
+            [{**old_values, "total_assets": Decimal("999999.9999")}],
+        )
+
+    restored = repo.list_snapshots(account.id)
+    assert [(snapshot.id, snapshot.total_assets) for snapshot in restored if snapshot.id == old_snapshot_id] == [
+        (old_snapshot_id, Decimal("101234.5678"))
+    ]
+
+
+def _replay_event_signature(events):
+    return [
+        (
+            event.trade_date,
+            event.event_type,
+            event.source_id,
+            event.source_kind,
+            tuple(sorted(event.payload.items(), key=lambda item: item[0])),
+        )
+        for event in events
+    ]
+
+
+def _populate_replay_facts(repo: PaperTradingRepository):
+    account = repo.create_account("replay-parity", Decimal("100000.00"))
+    event_at = datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
+    order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10.25"), event_at.date(), OrderStatus.FILLED
+    )
+    trade = repo.create_trade(
+        order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.25"),
+        Decimal("1025.00"),
+        Decimal("5.00"),
+        event_at.date(),
+    )
+    trade.trade_time = event_at
+    repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("12.50"), occurred_at=event_at)
+    repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="parity-dividend",
+        parameters={"per_share_amount": "0.125"},
+        cash_delta=Decimal("12.50"),
+        quantity_delta=Decimal("0"),
+        before_quantity=Decimal("100.000000000000"),
+        after_quantity=Decimal("100.000000000000"),
+        before_cost_amount=Decimal("1025.00"),
+        after_cost_amount=Decimal("1025.00"),
+        before_cash_available=Decimal("100000.0000"),
+        after_cash_available=Decimal("100012.5000"),
+    )
+    repo.save_trading_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
+    return account.id
+
+
+@pytest.fixture
+def postgres_repository():
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    schema_name = f"paper_replay_{uuid.uuid4().hex}"
+    engine = create_engine(url, connect_args={"options": f"-csearch_path={schema_name}"})
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+    with engine.begin() as connection:
+        migrate_paper_trading_enums(connection)
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            PaperAccount.__table__,
+            PaperOrder.__table__,
+            PaperTrade.__table__,
+            PaperCashLedger.__table__,
+            PaperCorporateAction.__table__,
+            PaperAccountSnapshot.__table__,
+        ],
+    )
+    session = sessionmaker(bind=engine)()
+    try:
+        yield PaperTradingRepository(session)
+    finally:
+        session.close()
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        engine.dispose()
+
+
+def test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql(sqlite_session, postgres_repository):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    sqlite_repo = PaperTradingRepository(sqlite_session)
+    sqlite_account_id = _populate_replay_facts(sqlite_repo)
+    postgres_account_id = _populate_replay_facts(postgres_repository)
+
+    sqlite_events = sqlite_repo.list_replay_events(sqlite_account_id)
+    postgres_events = postgres_repository.list_replay_events(postgres_account_id)
+
+    assert _replay_event_signature(sqlite_events) == _replay_event_signature(postgres_events)
 
 
 def test_get_accounts_for_snapshot_includes_active_cash_only_accounts(sqlite_session) -> None:
