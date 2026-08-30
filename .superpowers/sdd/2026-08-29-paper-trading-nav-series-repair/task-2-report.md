@@ -368,21 +368,21 @@ sqlite_session = <sqlalchemy.orm.session.Session object at 0x7b86ad7a7aa0>
         Base.metadata.create_all(sqlite_session.get_bind())
         repo = PaperTradingRepository(sqlite_session)
         account = repo.create_account("repository-baseline", Decimal("100000.00"))
-    
+
         events = repo.list_replay_events(account.id)
-    
+
         initial = next(event for event in events if event.event_type is NavReplayEventType.INITIAL)
         assert initial.source_kind == "creation"
         assert initial.payload["opening_cash"] == Decimal("100000.000000000000")
         assert initial.payload["opening_shares"] == Decimal("100000.000000000000")
         from paper_trading.services.nav_series import NavSeriesBuilder
-    
+
         assert NavSeriesBuilder().baseline_eligibility({initial.source_kind: initial.payload}).value == "eligible"
 >       result = NavSeriesBuilder(lambda _account_id: events).build(account.id)
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-test/paper_trading/storage/test_repository.py:350: 
-_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+test/paper_trading/storage/test_repository.py:350:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
 
 self = <paper_trading.services.nav_series.NavSeriesBuilder object at 0x7b86ad326330>
 account_id = 1, start_date = None, end_date = None
