@@ -429,26 +429,27 @@ def test_unproven_persisted_naive_replay_event_is_invalid(sqlite_session) -> Non
     assert event.quality_status is SnapshotQualityStatus.INVALID
 
 
+@pytest.mark.parametrize("repository_fixture", ["sqlite_repository", "postgres_repository"])
 @pytest.mark.parametrize("provenance", [None, "unknown"])
-def test_unproven_persisted_aware_replay_event_is_invalid(sqlite_session, provenance) -> None:
-    Base.metadata.create_all(sqlite_session.get_bind())
-    repo = PaperTradingRepository(sqlite_session)
+def test_unproven_persisted_aware_replay_event_is_invalid(request, repository_fixture, provenance) -> None:
+    repo = request.getfixturevalue(repository_fixture)
     account = repo.create_account("legacy-aware-provenance", Decimal("100000.00"))
     snapshot = repo.save_trading_snapshot(
         **_trading_snapshot_values(
             account.id, date(2026, 8, 25), datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
         )
     )
+    session = repo.session
     if provenance is None:
         snapshot.event_time_provenance = None
     else:
-        sqlite_session.execute(
+        session.execute(
             text("UPDATE paper_account_snapshots SET event_time_provenance = :provenance WHERE id = :snapshot_id"),
             {"provenance": provenance, "snapshot_id": snapshot.id},
         )
-    sqlite_session.commit()
-    sqlite_session.expire_all()
-    fresh_session = sessionmaker(bind=sqlite_session.get_bind())()
+    session.commit()
+    session.expire_all()
+    fresh_session = sessionmaker(bind=session.get_bind())()
     try:
         fresh_repo = PaperTradingRepository(fresh_session)
         event = next(

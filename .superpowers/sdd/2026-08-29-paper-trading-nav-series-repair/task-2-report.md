@@ -83,12 +83,13 @@ uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/d
 Output summary:
 
 ```text
-collected 137 items
-======================= 135 passed, 2 skipped in 40.60s ========================
+collected 139 items
+======================= 135 passed, 4 skipped in 38.68s ========================
 ```
 
-The two skipped parameter cases require `TEST_POSTGRESQL_URL`; the PostgreSQL
-runner below executes them.
+The four skipped parameter cases are the PostgreSQL/SQLite fixture combinations
+that require `TEST_POSTGRESQL_URL`; the PostgreSQL runner below executes all
+four combinations.
 
 Exit status: `0`.
 
@@ -103,13 +104,15 @@ tools/run_tests.sh test/paper_trading/storage/test_repository.py -v
 Output summary:
 
 ```text
-collected 123 items
+collected 125 items
 test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[sqlite_repository] PASSED
 test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[postgres_repository] PASSED
 test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql PASSED
-test_unproven_persisted_aware_replay_event_is_invalid[None] PASSED
-test_unproven_persisted_aware_replay_event_is_invalid[unknown] PASSED
-============================= 123 passed in 43.62s =============================
+test_unproven_persisted_aware_replay_event_is_invalid[None-sqlite_repository] PASSED
+test_unproven_persisted_aware_replay_event_is_invalid[None-postgres_repository] PASSED
+test_unproven_persisted_aware_replay_event_is_invalid[unknown-sqlite_repository] PASSED
+test_unproven_persisted_aware_replay_event_is_invalid[unknown-postgres_repository] PASSED
+============================= 125 passed in 47.09s =============================
 ```
 
 The parity test commits both databases, expires both ORM sessions, creates fresh
@@ -118,7 +121,8 @@ event type, source kind, and source ID for equality.
 
 Fresh-session legacy tests verify both SQLite and PostgreSQL return `INVALID`
 for NULL/unknown provenance with aware timestamps; the naive legacy case is
-also invalid.
+also invalid. All four backend/provenance combinations execute under the
+runner.
 
 Exit status: `0`.
 
