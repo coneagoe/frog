@@ -458,23 +458,21 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
     ensure_paper_trading_schema(engine)
     rows = fetch_snapshots(engine, account_id=1)
 
-    assert rows[0]["point_type"] == "initial"
-    assert Decimal(str(rows[0]["net_asset_value"])) == Decimal("1.000000")
+    assert all(row["point_type"] == "trading" for row in rows)
     assert all(row["event_at"] is not None for row in rows)
 
-    assert [row["id"] for row in rows[1:]] == [1, 2, 3, 4, 5]
-    assert all(row["point_type"] == "trading" for row in rows[1:])
-    assert {row["quality_status"] for row in rows[1:]} == {"valid", "invalid"}
-    assert rows[1]["quality_status"] == "valid"
-    assert rows[1]["invalid_reason"] is None
-    assert [row["quality_status"] for row in rows[2:]] == ["invalid"] * 4
-    assert [row["invalid_reason"] for row in rows[2:]] == [
+    assert [row["id"] for row in rows] == [1, 2, 3, 4, 5]
+    assert {row["quality_status"] for row in rows} == {"valid", "invalid"}
+    assert rows[0]["quality_status"] == "valid"
+    assert rows[0]["invalid_reason"] is None
+    assert [row["quality_status"] for row in rows[1:]] == ["invalid"] * 4
+    assert [row["invalid_reason"] for row in rows[1:]] == [
         "missing_nav",
         "non_positive_nav",
         "non_positive_nav",
         "non_finite_nav",
     ]
-    assert [row["event_at"] for row in rows[1:]] == [row["created_at"] for row in rows[1:]]
+    assert [row["event_at"] for row in rows] == [row["created_at"] for row in rows]
 
     for snapshot_id, financials in original.items():
         assert _financials(_snapshot_by_id(engine, snapshot_id)) == financials
@@ -488,16 +486,11 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
     assert _financials(zero_rows[0]) == original[6]
     assert _financials(negative_rows[0]) == original[7]
 
-    initial = rows[0]
-    assert initial["trade_date"].isoformat() == "2025-12-31"
-    assert Decimal(str(initial["cash_available"])) == Decimal("10000.0000")
-    assert Decimal(str(initial["total_assets"])) == Decimal("10000.0000")
-    assert Decimal(str(initial["share_count"])) == Decimal("10000.000000")
-    assert Decimal(str(initial["cumulative_deposit"])) == Decimal("10000.0000")
-    assert Decimal(str(initial["net_cash_flow"])) == Decimal("10000.0000")
-    assert initial["quality_status"] == "valid"
-
-    assert _repair_reasons(engine) == {1: None, 2: None, 3: None}
+    assert _repair_reasons(engine) == {
+        1: "legacy_ordering_uncertain",
+        2: "legacy_ordering_uncertain",
+        3: "legacy_ordering_uncertain",
+    }
     assert not _constraint_exists(engine, "uq_paper_account_snapshots_account_date")
     assert _index_exists(engine, "ix_paper_account_snapshots_account_event")
     assert _index_exists(engine, "uq_paper_account_snapshots_account_initial")
@@ -521,8 +514,12 @@ def test_nav_series_migration_backfills_legacy_snapshot_metadata_and_baseline(po
 
     ensure_paper_trading_schema(engine)
     rerun_rows = fetch_snapshots(engine, account_id=1)
-    assert [row["point_type"] for row in rerun_rows if row["point_type"] == "initial"] == ["initial"]
-    assert _repair_reasons(engine) == {1: None, 2: None, 3: None}
+    assert [row["point_type"] for row in rerun_rows if row["point_type"] == "initial"] == []
+    assert _repair_reasons(engine) == {
+        1: "legacy_ordering_uncertain",
+        2: "legacy_ordering_uncertain",
+        3: "legacy_ordering_uncertain",
+    }
     assert [row["id"] for row in fetch_snapshots(engine, account_id=2)] == [6]
     assert [row["id"] for row in fetch_snapshots(engine, account_id=3)] == [7]
     inspector = inspect(engine)
@@ -652,7 +649,7 @@ def test_nav_series_migration_drops_standalone_account_date_unique_index():
                 )
             )
         rows = fetch_snapshots(bound, account_id=1)
-        assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == ["initial"]
+        assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == []
         assert [row["id"] for row in rows if row["point_type"] == "trading"] == [100, 1]
     finally:
         with engine.begin() as connection:
@@ -681,7 +678,7 @@ def test_nav_series_migration_waits_on_transaction_advisory_lock(postgres_legacy
 
     ensure_paper_trading_schema(engine)
     rows = fetch_snapshots(engine, account_id=1)
-    assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == ["initial"]
+    assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == []
 
 
 def test_nav_series_migration_serializes_concurrent_startup(postgres_legacy_db):
@@ -708,8 +705,12 @@ def test_nav_series_migration_serializes_concurrent_startup(postgres_legacy_db):
 
     assert errors == []
     rows = fetch_snapshots(engine, account_id=1)
-    assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == ["initial"]
-    assert _repair_reasons(engine) == {1: None, 2: None, 3: None}
+    assert [row["point_type"] for row in rows if row["point_type"] == "initial"] == []
+    assert _repair_reasons(engine) == {
+        1: "legacy_ordering_uncertain",
+        2: "legacy_ordering_uncertain",
+        3: "legacy_ordering_uncertain",
+    }
     assert len({row["id"] for row in rows}) == len(rows)
 
 
@@ -772,6 +773,30 @@ def test_nav_series_migration_marks_null_created_at_for_repair_without_baseline(
         _drop_isolated_postgres_schema(engine, bound, schema)
 
 
+def test_nav_series_migration_uses_creation_cash_not_current_shares_for_baseline():
+    engine, bound, schema = _isolated_postgres_schema()
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection)
+            _create_cash_ledger_table(connection)
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+                    VALUES (1, 'current-shares-only', 10000, 15000, '2026-01-01 08:00:00+00')
+                    """
+                )
+            )
+
+        ensure_paper_trading_schema(bound)
+
+        initial = _snapshot_by_id(bound, _initial_ids(bound, 1)[0])
+        assert _repair_reasons(bound) == {1: None}
+        assert Decimal(str(initial["share_count"])) == Decimal("10000.000000")
+    finally:
+        _drop_isolated_postgres_schema(engine, bound, schema)
+
+
 def test_nav_series_migration_marks_pre_creation_snapshot_event_time_and_date():
     engine, bound, schema = _isolated_postgres_schema()
     try:
@@ -809,14 +834,8 @@ def test_nav_series_migration_marks_pre_creation_snapshot_event_time_and_date():
 
         ensure_paper_trading_schema(bound)
 
-        assert _repair_reasons(bound) == {
-            1: "legacy_ordering_uncertain",
-            2: None,
-            3: None,
-        }
-        assert _initial_ids(bound, 1) == []
-        assert len(_initial_ids(bound, 2)) == 1
-        assert len(_initial_ids(bound, 3)) == 1
+        assert _repair_reasons(bound) == {account_id: "legacy_ordering_uncertain" for account_id in (1, 2, 3)}
+        assert all(_initial_ids(bound, account_id) == [] for account_id in (1, 2, 3))
         for snapshot_id, financials in original.items():
             assert _financials(_snapshot_by_id(bound, snapshot_id)) == financials
     finally:
@@ -905,18 +924,8 @@ def test_nav_series_migration_marks_pre_creation_cash_flow_and_trading_times():
 
         ensure_paper_trading_schema(bound)
 
-        assert _repair_reasons(bound) == {
-            1: "legacy_ordering_uncertain",
-            2: None,
-            3: "legacy_ordering_uncertain",
-            4: None,
-            5: "legacy_ordering_uncertain",
-        }
-        assert _initial_ids(bound, 1) == []
-        assert len(_initial_ids(bound, 2)) == 1
-        assert _initial_ids(bound, 3) == []
-        assert len(_initial_ids(bound, 4)) == 1
-        assert _initial_ids(bound, 5) == []
+        assert _repair_reasons(bound) == {account_id: "legacy_ordering_uncertain" for account_id in range(1, 6)}
+        assert all(_initial_ids(bound, account_id) == [] for account_id in range(1, 6))
         for snapshot_id, financials in original.items():
             assert _financials(_snapshot_by_id(bound, snapshot_id)) == financials
     finally:
@@ -994,8 +1003,8 @@ def test_nav_series_migration_keeps_later_timestamp_with_same_day_date_baseline_
 
         ensure_paper_trading_schema(bound)
 
-        assert _repair_reasons(bound) == {1: None}
-        assert len(_initial_ids(bound, 1)) == 1
+        assert _repair_reasons(bound) == {1: "legacy_ordering_uncertain"}
+        assert _initial_ids(bound, 1) == []
         assert _financials(_snapshot_by_id(bound, 1)) == original
     finally:
         _drop_isolated_postgres_schema(engine, bound, schema)
@@ -1099,22 +1108,8 @@ def test_nav_series_migration_prefers_available_timestamp_over_date_fallback():
 
         ensure_paper_trading_schema(bound)
 
-        assert _repair_reasons(bound) == {
-            1: None,
-            2: None,
-            3: "legacy_ordering_uncertain",
-            4: None,
-            5: None,
-            6: None,
-            7: "legacy_ordering_uncertain",
-        }
-        assert len(_initial_ids(bound, 1)) == 1
-        assert len(_initial_ids(bound, 2)) == 1
-        assert _initial_ids(bound, 3) == []
-        assert len(_initial_ids(bound, 4)) == 1
-        assert len(_initial_ids(bound, 5)) == 1
-        assert len(_initial_ids(bound, 6)) == 1
-        assert _initial_ids(bound, 7) == []
+        assert _repair_reasons(bound) == {account_id: "legacy_ordering_uncertain" for account_id in range(1, 8)}
+        assert all(_initial_ids(bound, account_id) == [] for account_id in range(1, 8))
         for snapshot_id, financials in original.items():
             assert _financials(_snapshot_by_id(bound, snapshot_id)) == financials
     finally:
@@ -1150,16 +1145,8 @@ def test_nav_series_migration_marks_null_and_missing_source_temporal_evidence():
 
         ensure_paper_trading_schema(bound)
 
-        assert _repair_reasons(bound) == {
-            1: None,
-            2: None,
-            3: "legacy_ordering_uncertain",
-            4: "legacy_ordering_uncertain",
-        }
-        assert len(_initial_ids(bound, 1)) == 1
-        assert len(_initial_ids(bound, 2)) == 1
-        assert _initial_ids(bound, 3) == []
-        assert _initial_ids(bound, 4) == []
+        assert _repair_reasons(bound) == {account_id: "legacy_ordering_uncertain" for account_id in range(1, 5)}
+        assert all(_initial_ids(bound, account_id) == [] for account_id in range(1, 5))
         for snapshot_id, financials in original.items():
             assert _financials(_snapshot_by_id(bound, snapshot_id)) == financials
     finally:
@@ -1330,8 +1317,8 @@ def test_nav_series_migration_ignores_null_account_non_global_matching_run():
         with bound.begin() as connection:
             db._ensure_paper_account_snapshot_series(connection)
 
-        assert _repair_reasons(bound) == {1: None}
-        assert len(_initial_ids(bound, 1)) == 1
+        assert _repair_reasons(bound) == {1: "legacy_ordering_uncertain"}
+        assert _initial_ids(bound, 1) == []
         assert _financials(_snapshot_by_id(bound, 1)) == original
     finally:
         _drop_isolated_postgres_schema(engine, bound, schema)
@@ -1422,7 +1409,7 @@ def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
         assert connection.execute(text("SELECT COUNT(*) FROM paper_account_snapshots")).scalar_one() == 3
         assert (
             connection.execute(text("SELECT migration_repair_reason FROM paper_accounts WHERE id = 1")).scalar_one()
-            is None
+            == "legacy_ordering_uncertain"
         )
 
     ensure_paper_trading_schema(engine)
@@ -1435,6 +1422,38 @@ def test_sqlite_legacy_snapshots_are_listed_by_event_at(tmp_path):
         for row in connection.execute(text("SELECT valuation_quality, valuation_details FROM paper_account_snapshots")):
             assert row.valuation_quality is None
             assert row.valuation_details is None
+    engine.dispose()
+
+
+def test_sqlite_legacy_snapshots_without_provenance_mark_account_for_repair(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy_provenance.db'}")
+    with engine.begin() as connection:
+        _create_sqlite_legacy_snapshot_schema(connection)
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at)
+                VALUES (1, 'unknown-provenance', 10000, 15000, '2026-01-01 08:00:00')
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_account_snapshots (
+                    id, account_id, trade_date, cash_available, cash_frozen, market_value,
+                    total_assets, realized_pnl, unrealized_pnl, position_count, order_count,
+                    trade_count, net_asset_value, created_at
+                ) VALUES (1, 1, '2026-01-02', 9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1.25,
+                          '2026-01-02 16:00:00')
+                """
+            )
+        )
+
+    ensure_paper_trading_schema(engine)
+
+    assert _repair_reasons(engine) == {1: "legacy_ordering_uncertain"}
+    assert _initial_ids(engine, 1) == []
     engine.dispose()
 
 

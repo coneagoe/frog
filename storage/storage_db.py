@@ -4317,6 +4317,48 @@ class StorageDb:
             )
         with self.engine.begin() as conn:
             self._ensure_sqlite_snapshot_trading_identity(conn)
+            self._classify_sqlite_legacy_paper_account_chronology(conn)
+
+    def _classify_sqlite_legacy_paper_account_chronology(self, conn) -> None:
+        if not inspect(conn).has_table(tb_name_paper_accounts):
+            return
+        account_columns = self._table_column_names(conn, tb_name_paper_accounts)
+        if _PAPER_ACCOUNT_REPAIR_REASON_COLUMN not in account_columns:
+            return
+        predicates = [
+            "account.created_at IS NULL",
+            "account.initial_cash IS NULL",
+            "CAST(account.initial_cash AS TEXT) IN ('NaN', 'Infinity', '-Infinity')",
+            "CAST(account.initial_cash AS REAL) <= 0",
+        ]
+        snapshot_columns = self._table_column_names(conn, tb_name_paper_account_snapshots)
+        if "event_time_provenance" not in snapshot_columns:
+            predicates.append("TRUE")
+        else:
+            quality_check = (
+                " OR snapshot.quality_status IS NOT 'valid'" if "quality_status" in snapshot_columns else ""
+            )
+            predicates.append(
+                f"""EXISTS (
+                SELECT 1
+                FROM {tb_name_paper_account_snapshots} AS snapshot
+                WHERE snapshot.account_id = account.id
+                  AND snapshot.point_type IS NOT 'initial'
+                  AND (
+                      snapshot.event_time_provenance IS NOT 'canonical_utc'{quality_check}
+                  )
+            )"""
+            )
+        conn.execute(
+            text(
+                f"""
+                UPDATE {tb_name_paper_accounts} AS account
+                SET {_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} = 'legacy_ordering_uncertain'
+                WHERE account.{_PAPER_ACCOUNT_REPAIR_REASON_COLUMN} IS NULL
+                  AND ({" OR ".join(predicates)})
+                """
+            )
+        )
 
     def _ensure_sqlite_snapshot_trading_identity(self, conn) -> None:
         snapshot_columns = {column["name"] for column in inspect(conn).get_columns(tb_name_paper_account_snapshots)}
@@ -4687,7 +4729,13 @@ class StorageDb:
         if "created_at" not in account_columns:
             predicates = ["TRUE"]
         else:
-            predicates = ["account.created_at IS NULL", *self._legacy_chronology_predicates(conn)]
+            predicates = [
+                "account.created_at IS NULL",
+                "account.initial_cash IS NULL",
+                "account.initial_cash::text IN ('NaN', 'Infinity', '-Infinity')",
+                "account.initial_cash <= 0",
+                *self._legacy_chronology_predicates(conn),
+            ]
         conn.execute(
             text(
                 f"""
@@ -4701,6 +4749,15 @@ class StorageDb:
 
     def _legacy_chronology_predicates(self, conn) -> list[str]:
         predicates: list[str] = []
+        if not inspect(conn).has_table(tb_name_paper_cash_ledger):
+            predicates.append(
+                f"""EXISTS (
+                SELECT 1
+                FROM {tb_name_paper_account_snapshots} AS snapshot
+                WHERE snapshot.account_id = account.id
+                  AND snapshot.point_type IS DISTINCT FROM 'initial'
+            )"""
+            )
         for table_name, timestamp_columns, date_columns in _LEGACY_CHRONOLOGY_SOURCES:
             if not inspect(conn).has_table(table_name):
                 continue
@@ -4717,6 +4774,13 @@ class StorageDb:
                 )
                 continue
             row_uncertain = self._legacy_chronology_row_uncertain(timestamp_columns, date_columns)
+            if table_name in _SQLITE_PAPER_REPLAY_PROVENANCE_TABLES and "event_time_provenance" in columns:
+                row_uncertain = (
+                    f"({row_uncertain}) OR "
+                    "(source.event_time_provenance IS DISTINCT FROM 'canonical_utc')"
+                )
+            if table_name == tb_name_paper_account_snapshots:
+                row_uncertain = f"({row_uncertain}) OR source.quality_status IS DISTINCT FROM 'valid'"
             predicates.append(
                 f"""EXISTS (
                     SELECT 1
@@ -4798,7 +4862,7 @@ class StorageDb:
                     0,
                     0,
                     1,
-                    account.share_count,
+                    account.initial_cash,
                     account.initial_cash,
                     0,
                     account.initial_cash
