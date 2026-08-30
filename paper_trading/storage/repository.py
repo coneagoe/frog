@@ -33,7 +33,7 @@ from paper_trading.domain.enums import (
 )
 from paper_trading.domain.fees import DEFAULT_FEE_PRESET, get_fee_preset
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label, canonical_stock_id
-from paper_trading.domain.nav_replay import ReplayEvent
+from paper_trading.domain.nav_replay import NavSeriesReplay, ReplayEvent
 from paper_trading.domain.precision import (
     quantize_account_money,
     quantize_nav,
@@ -819,7 +819,7 @@ class PaperTradingRepository:
                 SnapshotQualityStatus.INVALID,
             )
         if event_at.tzinfo is None or event_at.utcoffset() is None:
-            return event_at.replace(tzinfo=timezone.utc), SnapshotQualityStatus.VALID
+            return event_at.replace(tzinfo=timezone.utc), SnapshotQualityStatus.INVALID
         return event_at.astimezone(timezone.utc), SnapshotQualityStatus.VALID
 
     @staticmethod
@@ -851,17 +851,32 @@ class PaperTradingRepository:
         events: list[ReplayEvent] = []
 
         for ledger in self.list_cash_ledger(account_id):
+            ledger_event_type = CashEventType(ledger.event_type)
+            # The initial deposit is represented by the creation snapshot baseline;
+            # replaying both would subscribe the opening cash twice.
+            if ledger.note == "initial_cash":
+                continue
             event_at, quality_status = self._replay_event_time(ledger.occurred_at, ledger.trade_date)
+            # Only external cash movements are CASH_FLOW. Internal ledger rows
+            # remain visible as settlement facts, but never mint/burn shares.
+            replay_event_type = (
+                NavReplayEventType.CASH_FLOW
+                if ledger_event_type in {CashEventType.DEPOSIT, CashEventType.WITHDRAWAL}
+                else NavReplayEventType.TRADE_SETTLEMENT
+            )
             events.append(
                 ReplayEvent(
                     event_at=event_at,
                     trade_date=ledger.trade_date or event_at.date(),
-                    event_type=NavReplayEventType.CASH_FLOW,
+                    event_type=replay_event_type,
                     source_id=self._replay_source_id("paper_cash_ledger", ledger.id),
                     source_kind="paper_cash_ledger",
                     payload={
                         "amount": self._replay_decimal(ledger.amount),
                         "share_delta": self._replay_decimal(ledger.share_delta),
+                        "ledger_event_type": ledger_event_type.value,
+                        "order_id": ledger.order_id,
+                        "trade_id": ledger.trade_id,
                     },
                     quality_status=quality_status,
                 )
@@ -880,6 +895,13 @@ class PaperTradingRepository:
                         "amount": self._replay_decimal(trade.amount),
                         "fees": self._replay_decimal(trade.fees),
                         "side": trade.side,
+                        "quantity": trade.quantity,
+                        "price": self._replay_decimal(trade.price),
+                        "symbol": trade.symbol,
+                        "market": trade.market,
+                        "order_id": trade.order_id,
+                        "trade_id": trade.id,
+                        "settlement": True,
                     },
                     quality_status=quality_status,
                 )
@@ -898,6 +920,12 @@ class PaperTradingRepository:
                         "cash_delta": self._replay_decimal(action.cash_delta),
                         "quantity_delta": self._replay_decimal(action.quantity_delta),
                         "parameters": action.parameters,
+                        "symbol": action.symbol,
+                        "market": action.market,
+                        "action_type": action.event_type,
+                        "affected_start_date": action.affected_start_date,
+                        "affected_end_date": action.affected_end_date,
+                        "cash_ledger_event_type": CashEventType.CORPORATE_ACTION.value,
                     },
                     quality_status=quality_status,
                 )
@@ -910,6 +938,11 @@ class PaperTradingRepository:
                 if time_quality is SnapshotQualityStatus.INVALID
                 else SnapshotQualityStatus(snapshot.quality_status)
             )
+            # SQLite returns timezone-aware DateTime values as naive values.
+            # The unique initial snapshot is the repository's trusted creation
+            # baseline, so its persisted quality remains authoritative.
+            if snapshot.point_type == SnapshotPointType.INITIAL.value:
+                quality_status = SnapshotQualityStatus(snapshot.quality_status)
             events.append(
                 ReplayEvent(
                     event_at=event_at,
@@ -920,7 +953,7 @@ class PaperTradingRepository:
                         else NavReplayEventType.MARKET_VALUATION
                     ),
                     source_id=self._replay_source_id("paper_account_snapshots", snapshot.id),
-                    source_kind="paper_account_snapshots",
+                    source_kind=("creation" if snapshot.point_type == SnapshotPointType.INITIAL.value else "paper_account_snapshots"),
                     payload={
                         "opening_cash": self._replay_decimal(snapshot.cash_available),
                         "opening_shares": self._replay_decimal(snapshot.share_count),
@@ -937,17 +970,7 @@ class PaperTradingRepository:
             for event in events
             if (start_at is None or event.event_at >= start_at) and (end_at is None or event.event_at <= end_at)
         ]
-        precedence = {
-            NavReplayEventType.INITIAL: 0,
-            NavReplayEventType.CASH_FLOW: 1,
-            NavReplayEventType.TRADE_SETTLEMENT: 2,
-            NavReplayEventType.CORPORATE_ACTION: 3,
-            NavReplayEventType.MARKET_VALUATION: 4,
-        }
-        return sorted(
-            filtered,
-            key=lambda event: (event.event_at, precedence[event.event_type], event.source_kind, event.source_id),
-        )
+        return sorted(filtered, key=NavSeriesReplay._sort_key)
 
     def get_replay_events(
         self, account_id: int, start_at: datetime | None = None, end_at: datetime | None = None
@@ -1187,6 +1210,7 @@ class PaperTradingRepository:
 
     def create_initial_snapshot(self, account: PaperAccount, *, event_at: datetime) -> PaperAccountSnapshot:
         initial_cash = quantize_account_money(Decimal(account.initial_cash))
+        initial_shares = quantize_shares(initial_cash)
         snapshot = PaperAccountSnapshot(
             account_id=account.id,
             trade_date=event_at.date(),
@@ -1204,7 +1228,7 @@ class PaperTradingRepository:
             trade_count=0,
             pending_settlement=Decimal("0.0000"),
             net_asset_value=Decimal("1.000000"),
-            share_count=account.share_count,
+            share_count=initial_shares,
             cumulative_deposit=initial_cash,
             cumulative_withdrawal=Decimal("0.0000"),
             net_cash_flow=initial_cash,
@@ -1289,26 +1313,45 @@ class PaperTradingRepository:
         if start_date > end_date:
             raise ValueError("start_date must not be after end_date")
         for values in snapshots:
+            if not isinstance(values, dict):
+                raise ValueError("snapshot replacement values must be mappings")
             if values.get("account_id") != account_id:
                 raise ValueError("snapshot account_id must match replacement account")
+            if values.get("point_type", SnapshotPointType.TRADING.value) != SnapshotPointType.TRADING.value:
+                raise ValueError("snapshot replacement can only write trading points")
+            try:
+                SnapshotQualityStatus(values.get("quality_status", SnapshotQualityStatus.VALID.value))
+            except ValueError as exc:
+                raise ValueError("snapshot quality_status must be a valid SnapshotQualityStatus") from exc
             trade_date = values.get("trade_date")
             if not isinstance(trade_date, date) or not start_date <= trade_date <= end_date:
                 raise ValueError("snapshot trade_date must be within replacement range")
-        (
-            self.session.query(PaperAccountSnapshot)
-            .filter(
-                PaperAccountSnapshot.account_id == account_id,
-                PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
-                PaperAccountSnapshot.trade_date >= start_date,
-                PaperAccountSnapshot.trade_date <= end_date,
+            event_at = values.get("event_at")
+            if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
+                raise ValueError("snapshot event_at must include a timezone offset")
+            for field_name in (
+                "cash_available", "cash_frozen", "market_value", "total_assets",
+                "realized_pnl", "unrealized_pnl", "net_asset_value", "share_count",
+                "cumulative_deposit", "cumulative_withdrawal", "net_cash_flow", "pending_settlement",
+            ):
+                if field_name in values and values[field_name] is not None:
+                    require_finite(Decimal(values[field_name]), field_name)
+        with self.session.begin_nested():
+            (
+                self.session.query(PaperAccountSnapshot)
+                .filter(
+                    PaperAccountSnapshot.account_id == account_id,
+                    PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
+                    PaperAccountSnapshot.trade_date >= start_date,
+                    PaperAccountSnapshot.trade_date <= end_date,
+                )
+                .delete(synchronize_session="fetch")
             )
-            .delete(synchronize_session="fetch")
-        )
-        self.session.flush()
-        return [
-            self.save_trading_snapshot(**{**values, "point_type": SnapshotPointType.TRADING.value})
-            for values in snapshots
-        ]
+            self.session.flush()
+            return [
+                self.save_trading_snapshot(**{**values, "point_type": SnapshotPointType.TRADING.value})
+                for values in snapshots
+            ]
 
     def count_orders(self, account_id: int, trade_date: date) -> int:
         return int(

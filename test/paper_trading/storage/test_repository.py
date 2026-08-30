@@ -333,6 +333,99 @@ def test_list_replay_events_marks_legacy_missing_time_invalid(sqlite_session) ->
     assert quality_status is SnapshotQualityStatus.INVALID
 
 
+def test_repository_replay_has_eligible_creation_baseline(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("repository-baseline", Decimal("100000.00"))
+
+    events = repo.list_replay_events(account.id)
+
+    initial = next(event for event in events if event.event_type is NavReplayEventType.INITIAL)
+    assert initial.source_kind == "creation"
+    assert initial.payload["opening_cash"] == Decimal("100000.000000000000")
+    assert initial.payload["opening_shares"] == Decimal("100000.000000000000")
+    from paper_trading.services.nav_series import NavSeriesBuilder
+
+    assert NavSeriesBuilder().baseline_eligibility({initial.source_kind: initial.payload}).value == "eligible"
+    result = NavSeriesBuilder(lambda _account_id: events).build(account.id)
+    assert result.points[0].event_type is NavReplayEventType.INITIAL
+
+
+def test_repository_preserves_cash_ledger_event_type_and_internal_events_do_not_flow_shares(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("ledger-types", Decimal("100000.00"))
+    internal = repo.add_cash_event(
+        account.id,
+        CashEventType.FREEZE,
+        Decimal("10"),
+        occurred_at=account.created_at.replace(tzinfo=timezone.utc),
+    )
+    events = repo.list_replay_events(account.id)
+
+    adapted = next(event for event in events if event.source_id.endswith(f":{internal.id}"))
+    assert adapted.payload["ledger_event_type"] == CashEventType.FREEZE.value
+    assert adapted.event_type is NavReplayEventType.TRADE_SETTLEMENT
+
+
+def test_corporate_action_ledger_is_not_replayed_as_cash_flow(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("ledger-corporate-action", Decimal("100000.00"))
+    event_at = datetime(2026, 8, 25, tzinfo=timezone.utc)
+    action = repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="ledger-corporate-action",
+        parameters={"per_share_amount": "1"},
+        cash_delta=Decimal("100"),
+        before_quantity=Decimal("100"),
+        after_quantity=Decimal("100"),
+        before_cost_amount=Decimal("1000"),
+        after_cost_amount=Decimal("1000"),
+        before_cash_available=Decimal("10"),
+        after_cash_available=Decimal("110"),
+        affected_start_date=event_at.date(),
+    )
+    ledger = repo.add_cash_event(
+        account.id,
+        CashEventType.CORPORATE_ACTION,
+        Decimal("100"),
+        trade_date=event_at.date(),
+        occurred_at=event_at,
+        note=CorporateActionType.DIVIDEND.value,
+    )
+
+    events = repo.list_replay_events(account.id)
+    ledger_event = next(event for event in events if event.source_id.endswith(f":{ledger.id}"))
+    action_event = next(event for event in events if event.source_id.endswith(f":{action.id}"))
+    assert ledger_event.event_type is NavReplayEventType.TRADE_SETTLEMENT
+    assert ledger_event.payload["ledger_event_type"] == CashEventType.CORPORATE_ACTION.value
+    assert action_event.payload["action_type"] == CorporateActionType.DIVIDEND.value
+    assert action_event.payload["symbol"] == "000001"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("event_at", datetime(2026, 8, 25)),
+        ("quality_status", "unknown"),
+        ("total_assets", Decimal("NaN")),
+    ],
+)
+def test_replace_trading_snapshots_rejects_invalid_input(sqlite_session, field, value) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("replace-invalid", Decimal("100000.00"))
+    values = _trading_snapshot_values(account.id, date(2026, 8, 25), datetime(2026, 8, 25, tzinfo=timezone.utc))
+    values[field] = value
+
+    with pytest.raises(ValueError):
+        repo.replace_trading_snapshots(account.id, date(2026, 8, 25), date(2026, 8, 25), [values])
+
+
 def test_replace_trading_snapshots_is_bounded_and_upserts_dates(sqlite_session) -> None:
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
