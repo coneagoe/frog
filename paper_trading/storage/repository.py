@@ -876,11 +876,10 @@ class PaperTradingRepository:
         start_at, end_at = self._validate_replay_range(start_at, end_at)
         events: list[ReplayEvent] = []
 
+        account = self.get_account(account_id)
         for ledger in self.list_cash_ledger(account_id):
             ledger_event_type = CashEventType(ledger.event_type)
-            # The initial deposit is represented by the creation snapshot baseline;
-            # replaying both would subscribe the opening cash twice.
-            if ledger.note == "initial_cash":
+            if account is not None and self._is_creation_initial_cash_event(account, ledger):
                 continue
             event_at, quality_status = self._replay_persisted_event_time(
                 ledger.occurred_at, ledger.trade_date, ledger.event_time_provenance
@@ -1029,6 +1028,37 @@ class PaperTradingRepository:
         if baseline is not None and baseline not in filtered:
             filtered.insert(0, baseline)
         return sorted(filtered, key=NavSeriesReplay._sort_key)
+
+    def _is_creation_initial_cash_event(self, account: PaperAccount, ledger: PaperCashLedger) -> bool:
+        """Identify only the immutable creation event represented by INITIAL."""
+        initial_snapshots = [
+            snapshot
+            for snapshot in self.list_snapshots(account.id)
+            if snapshot.point_type == SnapshotPointType.INITIAL.value
+        ]
+        if len(initial_snapshots) != 1 or ledger.event_type != CashEventType.DEPOSIT.value:
+            return False
+        first_ledger_id = min(event.id for event in self.list_cash_ledger(account.id))
+        if ledger.id != first_ledger_id:
+            return False
+        snapshot = initial_snapshots[0]
+        ledger_at, ledger_quality = self._replay_persisted_event_time(
+            ledger.occurred_at, ledger.trade_date, ledger.event_time_provenance
+        )
+        snapshot_at, snapshot_quality = self._replay_persisted_event_time(
+            snapshot.event_at, snapshot.trade_date, snapshot.event_time_provenance
+        )
+        return (
+            ledger.note == "initial_cash"
+            and ledger_quality is SnapshotQualityStatus.VALID
+            and snapshot_quality is SnapshotQualityStatus.VALID
+            and ledger_at == snapshot_at
+            and ledger.trade_date == snapshot.trade_date
+            and Decimal(str(ledger.amount)) == Decimal(str(account.initial_cash))
+            and Decimal(str(ledger.net_asset_value)) == Decimal("1")
+            and Decimal(str(ledger.share_delta)) == Decimal(str(snapshot.share_count))
+            and Decimal(str(ledger.rounding_residual)) == Decimal("0")
+        )
 
     def get_replay_events(
         self, account_id: int, start_at: datetime | None = None, end_at: datetime | None = None

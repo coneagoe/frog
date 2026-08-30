@@ -34,6 +34,23 @@ def test_deposit_adds_cash_and_mints_shares_without_changing_nav(tmp_path):
     engine.dispose()
 
 
+def test_deposit_with_initial_cash_note_is_replayed_as_ordinary_cash_flow(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("ordinary-initial-note", Decimal("100000.00"))
+
+    result = CashService(repo).deposit(
+        account.id,
+        Decimal("25000.00"),
+        date(2026, 7, 20),
+        note="initial_cash",
+        occurred_at=datetime(2026, 7, 20, 10, tzinfo=timezone.utc),
+    )
+
+    assert result.account.share_count == Decimal("125000.000000")
+    assert len(repo.list_cash_ledger(account.id)) == 2
+    engine.dispose()
+
+
 def test_withdraw_reduces_cash_and_redeems_shares_without_changing_nav(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
@@ -204,6 +221,29 @@ def test_backdated_withdrawal_replays_existing_trading_snapshot(tmp_path):
     engine.dispose()
 
 
+def test_backdated_withdrawal_rejects_cash_only_added_by_future_deposit(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("withdrawal-history", Decimal("100.00"))
+    service = CashService(repo)
+    service.deposit(
+        account.id,
+        Decimal("100.00"),
+        date(2026, 7, 21),
+        occurred_at=datetime(2026, 7, 21, 10, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(ValueError, match="exceeds available cash 100.0000"):
+        service.withdraw(
+            account.id,
+            Decimal("150.00"),
+            date(2026, 7, 20),
+            occurred_at=datetime(2026, 7, 20, 10, tzinfo=timezone.utc),
+        )
+
+    assert len(repo.list_cash_ledger(account.id)) == 2
+    engine.dispose()
+
+
 def test_forward_dated_deposit_recalculates_from_latest_snapshot(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("forward", Decimal("100000.00"))
@@ -341,6 +381,56 @@ def test_replay_uses_persisted_cash_flow_share_delta_and_residual(tmp_path):
     with pytest.raises(ValueError, match="rounding residual"):
         CashService(repo)._replay_from(account, event_at.date())
     session.rollback()
+    engine.dispose()
+
+
+def test_cash_flow_replay_failure_rolls_back_inserted_ledger(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("replay-rollback", Decimal("100000.00"))
+    service = CashService(repo)
+
+    monkeypatch.setattr(service, "_replay_from", lambda *_args: (_ for _ in ()).throw(ValueError("replay failed")))
+    with pytest.raises(ValueError, match="replay failed"):
+        service.deposit(account.id, Decimal("1"), date(2026, 7, 20))
+    session.commit()
+
+    assert len(repo.list_cash_ledger(account.id)) == 1
+    engine.dispose()
+
+
+def test_cash_flow_share_delta_without_residual_requires_repair(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("missing-residual", Decimal("100000.00"))
+    event_at = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("10"),
+        trade_date=event_at.date(),
+        net_asset_value=Decimal("1"),
+        share_delta=Decimal("10"),
+        occurred_at=event_at,
+    )
+    original = repo.list_replay_events
+
+    def without_residual(account_id, start_at=None, end_at=None):
+        events = original(account_id, start_at, end_at)
+        return [
+            event.__class__(
+                event.event_at,
+                event.trade_date,
+                event.event_type,
+                event.source_id,
+                event.source_kind,
+                {key: value for key, value in event.payload.items() if key != "rounding_residual"},
+                event.quality_status,
+            )
+            for event in events
+        ]
+
+    monkeypatch.setattr(repo, "list_replay_events", without_residual)
+    with pytest.raises(ValueError, match="requires rounding_residual repair"):
+        CashService(repo)._replay_from(account, event_at.date())
     engine.dispose()
 
 

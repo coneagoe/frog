@@ -38,23 +38,26 @@ class CashService:
         note: str | None = None,
         occurred_at: datetime | None = None,
     ) -> CashFlowResult:
-        account = self._active_account(account_id)
-        amount = self._positive_money(amount)
-        occurred_at = self._occurred_at(occurred_at)
-        nav = self._cash_flow_nav(account_id, occurred_at)
-        share_delta = quantize_shares(amount / nav)
-        ledger = self.repo.add_cash_event(
-            account_id,
-            CashEventType.DEPOSIT,
-            amount,
-            trade_date=trade_date,
-            net_asset_value=nav,
-            share_delta=share_delta,
-            occurred_at=occurred_at,
-            note=note,
-        )
-        self._replay_from(account, trade_date)
-        return CashFlowResult(account=account, ledger=ledger, cash_available=self.repo.get_cash_available(account_id))
+        with self.repo.session.begin_nested():
+            account = self._active_account(account_id)
+            amount = self._positive_money(amount)
+            occurred_at = self._occurred_at(occurred_at)
+            nav = self._cash_flow_nav(account_id, occurred_at)
+            share_delta = quantize_shares(amount / nav)
+            ledger = self.repo.add_cash_event(
+                account_id,
+                CashEventType.DEPOSIT,
+                amount,
+                trade_date=trade_date,
+                net_asset_value=nav,
+                share_delta=share_delta,
+                occurred_at=occurred_at,
+                note=note,
+            )
+            self._replay_from(account, trade_date)
+            return CashFlowResult(
+                account=account, ledger=ledger, cash_available=self.repo.get_cash_available(account_id)
+            )
 
     def withdraw(
         self,
@@ -64,31 +67,32 @@ class CashService:
         note: str | None = None,
         occurred_at: datetime | None = None,
     ) -> CashFlowResult:
-        account = self._active_account(account_id)
-        amount = self._positive_money(amount)
-        cash_available = self.repo.get_cash_available_internal(account_id)
-        if amount > cash_available:
-            display_amount = amount.quantize(Decimal("0.0001"))
-            display_cash_available = cash_available.quantize(Decimal("0.0001"))
-            raise ValueError(f"withdrawal amount {display_amount} exceeds available cash {display_cash_available}")
-        occurred_at = self._occurred_at(occurred_at)
-        nav = self._cash_flow_nav(account_id, occurred_at)
-        share_delta = -quantize_shares(amount / nav)
-        next_shares = Decimal(account.share_count or 0) + share_delta
-        if next_shares < 0:
-            raise ValueError("withdrawal would make share count negative")
-        ledger = self.repo.add_cash_event(
-            account_id,
-            CashEventType.WITHDRAWAL,
-            -amount,
-            trade_date=trade_date,
-            net_asset_value=nav,
-            share_delta=share_delta,
-            occurred_at=occurred_at,
-            note=note,
-        )
-        self._replay_from(account, trade_date)
-        return CashFlowResult(account=account, ledger=ledger, cash_available=self.repo.get_cash_available(account_id))
+        with self.repo.session.begin_nested():
+            account = self._active_account(account_id)
+            amount = self._positive_money(amount)
+            occurred_at = self._occurred_at(occurred_at)
+            cash_available, share_count, nav = self._state_before(account_id, occurred_at)
+            if amount > cash_available:
+                display_amount = amount.quantize(Decimal("0.0001"))
+                display_cash_available = cash_available.quantize(Decimal("0.0001"))
+                raise ValueError(f"withdrawal amount {display_amount} exceeds available cash {display_cash_available}")
+            share_delta = -quantize_shares(amount / nav)
+            if share_count + share_delta < 0:
+                raise ValueError("withdrawal would make share count negative")
+            ledger = self.repo.add_cash_event(
+                account_id,
+                CashEventType.WITHDRAWAL,
+                -amount,
+                trade_date=trade_date,
+                net_asset_value=nav,
+                share_delta=share_delta,
+                occurred_at=occurred_at,
+                note=note,
+            )
+            self._replay_from(account, trade_date)
+            return CashFlowResult(
+                account=account, ledger=ledger, cash_available=self.repo.get_cash_available(account_id)
+            )
 
     def _active_account(self, account_id: int) -> PaperAccount:
         account = self.repo.get_account(account_id)
@@ -117,6 +121,26 @@ class CashService:
             return nav
         return quantize_nav(Decimal("1"))
 
+    def _state_before(self, account_id: int, occurred_at: datetime) -> tuple[Decimal, Decimal, Decimal]:
+        events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account_id)
+        self._require_complete_cash_allocations(events)
+        prior_events = [
+            event
+            for event in events
+            if event.event_type is not NavReplayEventType.INITIAL and event.event_at < occurred_at
+        ]
+        result = NavSeriesReplay().replay(prior_events, baseline)
+        if not result.points:
+            return (
+                Decimal(str(baseline["cash"])),
+                Decimal(str(baseline["share_count"])),
+                self._cash_flow_nav(account_id, occurred_at),
+            )
+        point = result.points[-1]
+        if point.cash is None or point.share_count is None:
+            raise ValueError("cash-flow replay could not prove pre-withdrawal state")
+        return point.cash, point.share_count, self._cash_flow_nav(account_id, occurred_at)
+
     def _replay_from(self, account: PaperAccount, start_date: date) -> None:
         snapshots = self.repo.list_snapshots(account.id)
         trading_dates = [snapshot.trade_date for snapshot in snapshots if snapshot.point_type == "trading"]
@@ -130,6 +154,7 @@ class CashService:
             ).recalculate(account.id, start_date, end_date, session=self.repo.session)
 
         events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account.id)
+        self._require_complete_cash_allocations(events)
         result = NavSeriesReplay().replay(
             [event for event in events if event.event_type is not NavReplayEventType.INITIAL], baseline
         )
@@ -149,3 +174,10 @@ class CashService:
             cumulative_deposit=cumulative_deposit,
             cumulative_withdrawal=cumulative_withdrawal,
         )
+
+    @staticmethod
+    def _require_complete_cash_allocations(events) -> None:
+        for event in events:
+            if event.event_type is NavReplayEventType.CASH_FLOW and event.payload.get("share_delta") is not None:
+                if event.payload.get("rounding_residual") is None:
+                    raise ValueError("cash-flow share_delta requires rounding_residual repair")

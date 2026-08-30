@@ -82,3 +82,28 @@ uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/se
 
 Scoped Ruff: All checks passed.
 ```
+
+## Review Follow-up 2
+
+- Initial ledger suppression now requires a matching creation snapshot,
+  canonical timestamp/trade date, initial amount/NAV/share allocation, and zero
+  residual; an ordinary deposit with `note="initial_cash"` remains replayable.
+- Withdrawals calculate available cash, shares, and pricing NAV from replay
+  facts strictly before `occurred_at`, so later deposits cannot authorize a
+  backdated withdrawal.
+- Deposit and withdrawal operations wrap ledger insertion and replay in a
+  service-level savepoint. Replay or materialization errors roll back the
+  inserted ledger even when a direct caller catches the exception and commits.
+- Replay rejects persisted `share_delta` without `rounding_residual` as a
+  repair-required legacy allocation rather than silently recomputing it.
+- Added regression coverage for ordinary initial-note deposits, future cash
+  followed by historical withdrawal, service rollback, missing residual,
+  initial identity fields, and prior backdated/forward cash flows.
+
+Verification:
+
+```text
+Task 4 focused: 87 passed, 5 warnings
+Task 3 regression: 54 passed, 3 skipped
+Scoped Ruff: All checks passed.
+```
