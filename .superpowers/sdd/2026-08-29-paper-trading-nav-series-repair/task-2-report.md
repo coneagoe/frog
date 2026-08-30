@@ -2,9 +2,9 @@
 
 ## Status
 
-Task 2 round 4 findings are resolved. The authoritative evidence is the
-focused SQLite/domain run, the PostgreSQL-backed repository run, and the
-scoped Ruff check recorded below.
+Task 2 round 4 final review coverage is complete. The authoritative evidence
+is the focused SQLite/domain run, the PostgreSQL-backed repository run, and
+the scoped Ruff check recorded below.
 
 ## Scope
 
@@ -18,10 +18,12 @@ No Task 3+ files and no matching or settlement code were modified.
 
 ## Changes
 
-- Added a write-stage failure regression for
-  `replace_trading_snapshots()`. It creates an existing trading snapshot,
-  injects a failure from `save_trading_snapshot()` after the bounded delete,
-  and verifies the original snapshot ID and content are restored.
+- Added a parameterized SQLite/PostgreSQL write-stage failure regression for
+  `replace_trading_snapshots()`. It creates two existing trading snapshots,
+  calls the real `save_trading_snapshot()` for replacement writes, injects an
+  exception from the second `before_flush` after the first replacement write,
+  and verifies the old range's complete persisted field signatures, count, and
+  ID set are restored.
 - Added a PostgreSQL-backed repository fixture using an isolated schema and the
   canonical paper-trading enum migration. The parity test writes the same
   account, order/trade, cash-ledger, corporate-action, and valuation facts to
@@ -67,13 +69,13 @@ uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/d
 Output summary:
 
 ```text
-collected 128 items
-======================= 127 passed, 1 skipped in 46.91s =======================
+collected 129 items
+======================= 127 passed, 2 skipped in 47.61s =======================
 ```
 
-The one skipped test is the PostgreSQL parity test because this direct command
-does not provide `TEST_POSTGRESQL_URL`. This is expected and is not the
-PostgreSQL evidence path.
+The two skipped parameter cases are the PostgreSQL rollback and parity cases
+because this direct command does not provide `TEST_POSTGRESQL_URL`. This is
+expected and is not the PostgreSQL evidence path.
 
 Exit status: `0`.
 
@@ -89,10 +91,11 @@ Relevant runner output:
 
 ```text
 Container issue-82-nav-series-test_db-1 Healthy
-collected 114 items
-test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_old_rows_when_write_fails PASSED
+collected 115 items
+test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[sqlite_repository] PASSED
+test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[postgres_repository] PASSED
 test/paper_trading/storage/test_repository.py::test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql PASSED
-============================= 114 passed in 47.66s =============================
+============================= 115 passed in 49.08s =============================
 ```
 
 Exit status: `0`. The parity test ran against the isolated PostgreSQL service;
@@ -110,8 +113,9 @@ Output: no findings. Exit status: `0`.
 
 ## Concerns and limits
 
-- The direct focused command reports the PostgreSQL test as skipped by design;
-  the required `tools/run_tests.sh` run provides the actual PostgreSQL result.
+- The direct focused command reports the PostgreSQL rollback and parity cases as
+  skipped by design; the required `tools/run_tests.sh` run provides the actual
+  PostgreSQL results. No PostgreSQL case was blocked under the runner.
 - The runner emits the existing locale warning
   `setlocale: LC_ALL: cannot change locale (en_US.UTF-8)` and Docker's
   `No services to build` warning. Neither affected test execution.
@@ -123,4 +127,6 @@ Output: no findings. Exit status: `0`.
 
 ## Final result
 
-Task 2 round 4 is ready for commit with all three review findings addressed.
+Task 2 round 4 final review coverage is complete. SQLite and PostgreSQL both
+verified replacement rollback and replay Decimal parity; no requested test is
+blocked under the PostgreSQL runner.

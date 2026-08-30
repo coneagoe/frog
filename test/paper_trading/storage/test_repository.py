@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from sqlalchemy import String, create_engine, text
+from sqlalchemy import String, create_engine, event, text
 from sqlalchemy import cast as sa_cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -619,35 +619,110 @@ def test_replace_trading_snapshots_is_bounded_and_upserts_dates(sqlite_session) 
     ]
 
 
-def test_replace_trading_snapshots_restores_old_rows_when_write_fails(sqlite_session, monkeypatch) -> None:
+_SNAPSHOT_FIELDS = (
+    "id",
+    "account_id",
+    "trade_date",
+    "point_type",
+    "event_at",
+    "quality_status",
+    "invalid_reason",
+    "valuation_quality",
+    "valuation_details",
+    "cash_available",
+    "cash_frozen",
+    "market_value",
+    "total_assets",
+    "realized_pnl",
+    "unrealized_pnl",
+    "position_count",
+    "order_count",
+    "trade_count",
+    "pending_settlement",
+    "net_asset_value",
+    "share_count",
+    "cumulative_deposit",
+    "cumulative_withdrawal",
+    "net_cash_flow",
+)
+
+
+def _snapshot_signature(snapshot):
+    return tuple(getattr(snapshot, field) for field in _SNAPSHOT_FIELDS)
+
+
+@pytest.fixture
+def sqlite_repository(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
-    repo = PaperTradingRepository(sqlite_session)
+    return PaperTradingRepository(sqlite_session)
+
+
+@pytest.mark.parametrize("repository_fixture", ["sqlite_repository", "postgres_repository"])
+def test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails(request, repository_fixture) -> None:
+    repo = request.getfixturevalue(repository_fixture)
     account = repo.create_account("replace-rollback", Decimal("100000.00"))
-    trade_date = date(2026, 8, 25)
-    old_values = _trading_snapshot_values(
-        account.id, trade_date, datetime(2026, 8, 25, 10, tzinfo=timezone.utc)
-    )
-    old_values["total_assets"] = Decimal("101234.5678")
-    old_snapshot = repo.save_trading_snapshot(**old_values)
-    old_snapshot_id = old_snapshot.id
-
-    def fail_write(**_values):
-        raise RuntimeError("injected replacement write failure")
-
-    monkeypatch.setattr(repo, "save_trading_snapshot", fail_write)
-
-    with pytest.raises(RuntimeError, match="injected replacement write failure"):
-        repo.replace_trading_snapshots(
-            account.id,
-            trade_date,
-            trade_date,
-            [{**old_values, "total_assets": Decimal("999999.9999")}],
+    old_rows = []
+    for offset, total_assets in enumerate((Decimal("101234.5678"), Decimal("102345.6789"))):
+        trade_date = date(2026, 8, 25 + offset)
+        old_rows.append(
+            repo.save_trading_snapshot(
+                **{
+                    **_trading_snapshot_values(
+                        account.id,
+                        trade_date,
+                        datetime(2026, 8, 25 + offset, 10, tzinfo=timezone.utc),
+                    ),
+                    "total_assets": total_assets,
+                }
+            )
         )
-
-    restored = repo.list_snapshots(account.id)
-    assert [(snapshot.id, snapshot.total_assets) for snapshot in restored if snapshot.id == old_snapshot_id] == [
-        (old_snapshot_id, Decimal("101234.5678"))
+    expected_rows = [_snapshot_signature(row) for row in old_rows]
+    replacement_rows = [
+        {
+            **_trading_snapshot_values(
+                account.id,
+                date(2026, 8, 25 + offset),
+                datetime(2026, 8, 25 + offset, 16, tzinfo=timezone.utc),
+            ),
+            "total_assets": Decimal("999999.9999"),
+        }
+        for offset in range(2)
     ]
+    replacement_writes = 0
+
+    def fail_on_second_replacement_write(session, _flush_context, _instances):
+        nonlocal replacement_writes
+        if session.new and any(
+            isinstance(row, type(old_rows[0])) and row.point_type == SnapshotPointType.TRADING.value
+            for row in session.new
+        ):
+            replacement_writes += 1
+            if replacement_writes == 2:
+                raise RuntimeError("injected replacement write failure")
+
+    session = repo.session
+    event.listen(session, "before_flush", fail_on_second_replacement_write)
+    try:
+        with pytest.raises(RuntimeError, match="injected replacement write failure"):
+            repo.replace_trading_snapshots(
+                account.id,
+                date(2026, 8, 25),
+                date(2026, 8, 26),
+                replacement_rows,
+            )
+    finally:
+        event.remove(session, "before_flush", fail_on_second_replacement_write)
+
+    restored_rows = [
+        row
+        for row in repo.list_snapshots(account.id)
+        if row.point_type == SnapshotPointType.TRADING.value
+        and date(2026, 8, 25) <= row.trade_date <= date(2026, 8, 26)
+    ]
+    assert replacement_writes == 2
+    assert len(restored_rows) == len(old_rows)
+    assert {row.id for row in restored_rows} == {row.id for row in old_rows}
+    assert [_snapshot_signature(row) for row in restored_rows] == expected_rows
 
 
 def _replay_event_signature(events):
