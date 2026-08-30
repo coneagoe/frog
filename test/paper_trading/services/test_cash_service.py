@@ -472,7 +472,10 @@ def test_cash_flow_incomplete_persisted_allocation_requires_repair(tmp_path, mon
 
 
 @pytest.mark.parametrize("field", ["pricing_nav", "share_delta", "rounding_residual"])
-@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "not-a-decimal"])
+@pytest.mark.parametrize(
+    "value",
+    ["NaN", "Infinity", "-Infinity", "not-a-decimal", "1.0", 1.0, 1],
+)
 def test_cash_flow_malformed_persisted_allocation_requires_repair(tmp_path, monkeypatch, field, value):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("malformed-allocation", Decimal("100000.00"))

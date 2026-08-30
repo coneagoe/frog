@@ -152,3 +152,21 @@ Task 3 regression: 54 passed, 3 skipped
 PostgreSQL runner: 39 passed
 Scoped Ruff: All checks passed.
 ```
+
+## Allocation Type Follow-up
+
+- Persisted cash allocation facts now accept only native finite `Decimal`
+  values. Numeric strings, floats, integers, `NaN`, and infinities are rejected
+  before any fallback pricing or share calculation can occur.
+- Added coverage for every allocation field with convertible strings, float,
+  and integer values, preserving existing invalid-state withdrawal, savepoint,
+  initial-event identity, and forward/backdated flow coverage.
+
+Verification:
+
+```text
+Task 4 focused: 113 passed, 5 warnings
+Task 3 regression: 54 passed, 3 skipped
+PostgreSQL runner: 48 passed
+Scoped Ruff: All checks passed.
+```

@@ -135,6 +135,8 @@ class NavSeriesReplay:
             has_allocation = any(value is not None for value in allocation)
             if has_allocation and any(value is None for value in allocation):
                 raise ValueError("cash-flow allocation requires pricing_nav, share_delta, and rounding_residual")
+            if has_allocation and any(not isinstance(value, Decimal) for value in allocation):
+                raise ValueError("cash-flow allocation contains invalid Decimal values")
             persisted_pricing_nav = self._decimal(event.payload.get("pricing_nav"))
             persisted_share_delta = self._decimal(event.payload.get("share_delta"))
             persisted_residual = self._decimal(event.payload.get("rounding_residual"))
