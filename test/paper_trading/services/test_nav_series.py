@@ -1,13 +1,17 @@
+import os
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType, OrderSide, SnapshotQualityStatus
 from paper_trading.domain.nav_replay import ReplayEvent
 from paper_trading.services.nav_series import NavSeriesBuilder
+from paper_trading.storage.enum_migration import migrate_paper_trading_enums
+from paper_trading.storage.models import PaperAccount, PaperAccountSnapshot, PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -202,4 +206,38 @@ def test_repository_replay_does_not_double_debit_freeze_trade_release(tmp_path):
         assert point.total_assets == Decimal("100")
     finally:
         session.close()
+        engine.dispose()
+
+
+def test_postgresql_repository_builder_replays_persisted_cash_flow():
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    schema_name = f"task3_nav_{uuid.uuid4().hex}"
+    engine = create_engine(url, connect_args={"options": f"-csearch_path={schema_name}"})
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+    with engine.begin() as connection:
+        migrate_paper_trading_enums(connection)
+    Base.metadata.create_all(
+        engine, tables=[PaperAccount.__table__, PaperCashLedger.__table__, PaperAccountSnapshot.__table__]
+    )
+    session = sessionmaker(bind=engine)()
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("postgres-builder", Decimal("100"))
+        occurred_at = datetime.now(timezone.utc) + timedelta(days=1)
+        repo.add_cash_event(
+            account.id, "deposit", Decimal("25"), trade_date=occurred_at.date(), occurred_at=occurred_at
+        )
+        session.commit()
+
+        point = NavSeriesBuilder(repo=repo).build(account.id).points[-1]
+
+        assert point.share_count == Decimal("125")
+        assert point.net_cash_flow == Decimal("125")
+    finally:
+        session.close()
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
         engine.dispose()

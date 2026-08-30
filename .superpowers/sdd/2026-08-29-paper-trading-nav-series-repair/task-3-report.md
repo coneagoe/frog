@@ -201,6 +201,64 @@ All checks passed!
 
 `git diff --check`: passed.
 
+## Third-Round Final Audit
+
+- Replay now maintains per-market/per-symbol market values, so a sell only
+  reduces the sold holding's mark and does not alter another holding's value.
+- Added same-day multi-holding sell plus cash-flow regression coverage.
+- Added a PostgreSQL-only repository-to-builder integration test. It is skipped
+  when `TEST_POSTGRESQL_URL` is absent and is executed through the repository
+  PostgreSQL runner when available.
+
+### Verification
+
+Focused command:
+
+```text
+uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+Output:
+
+```text
+======================== 92 passed, 1 skipped in 17.83s ========================
+```
+
+The single skip is the PostgreSQL-only test when run outside the database
+runner.
+
+Scoped Ruff command:
+
+```text
+uv run ruff format paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+Output:
+
+```text
+3 files reformatted, 5 files left unchanged
+Found 1 error (1 fixed, 0 remaining).
+All checks passed!
+```
+
+PostgreSQL evidence command:
+
+```text
+tools/run_tests.sh test/paper_trading/services/test_nav_series.py::test_postgresql_repository_builder_replays_persisted_cash_flow
+```
+
+Output:
+
+```text
+Container issue-82-nav-series-test_db-1 Started
+Container issue-82-nav-series-test_db-1 Healthy
+============================== 1 passed in 1.56s ===============================
+```
+
+`git diff --check`: passed. No Task 4+ or matching/settlement business files
+were modified.
+
 ## Final Repair
 
 - `paper_trading/domain/nav_replay.py`

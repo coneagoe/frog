@@ -215,10 +215,12 @@ class SnapshotRecalculationService:
                     )
                 )
                 continue
-            market_value = sum(
-                (holdings[f"{item.market or ''}:{item.symbol}"] * (item.price or Decimal("0")) for item in resolved),
-                Decimal("0"),
-            )
+            market_values = {
+                f"{item.market or ''}:{item.symbol}": holdings[f"{item.market or ''}:{item.symbol}"]
+                * (item.price or Decimal("0"))
+                for item in resolved
+            }
+            market_value = sum(market_values.values(), Decimal("0"))
             cash = Decimal("0") if point is None or point.cash is None else point.cash
             cash_frozen = Decimal("0") if point is None else point.cash_frozen
             pending_settlement = Decimal("0") if point is None else point.pending_settlement
@@ -234,6 +236,7 @@ class SnapshotRecalculationService:
                     source_kind="recalculation",
                     payload={
                         "total_assets": cash + cash_frozen + pending_settlement + market_value,
+                        "market_values": market_values,
                         "valuation_quality": "stale_suspended" if stale_details else "current",
                         "valuation_details": stale_details,
                     },

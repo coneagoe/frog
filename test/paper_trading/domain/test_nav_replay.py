@@ -333,6 +333,69 @@ def test_replay_moves_cash_between_available_and_frozen_without_changing_assets(
     assert points[-1].total_assets == Decimal("100")
 
 
+def test_sell_reduces_only_its_own_marked_market_value():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL,
+            "initial",
+            {"opening_cash": Decimal("100"), "opening_shares": Decimal("100")},
+        ),
+        _event(
+            NavReplayEventType.TRADE_SETTLEMENT,
+            "buy-a",
+            {
+                "side": "buy",
+                "market": "a_share",
+                "symbol": "000001",
+                "quantity": 10,
+                "price": 10,
+                "amount": 100,
+                "fees": 0,
+            },
+        ),
+        _event(
+            NavReplayEventType.TRADE_SETTLEMENT,
+            "buy-etf",
+            {"side": "buy", "market": "etf", "symbol": "510300", "quantity": 10, "price": 10, "amount": 100, "fees": 0},
+            event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        ),
+        _event(
+            NavReplayEventType.MARKET_VALUATION,
+            "marks",
+            {
+                "total_assets": Decimal("200"),
+                "market_values": {"a_share:000001": Decimal("120"), "etf:510300": Decimal("180")},
+            },
+            event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        ),
+        _event(
+            NavReplayEventType.TRADE_SETTLEMENT,
+            "sell-a",
+            {
+                "side": "sell",
+                "market": "a_share",
+                "symbol": "000001",
+                "quantity": 5,
+                "price": 12,
+                "amount": 60,
+                "fees": 0,
+            },
+            event_at=datetime(2026, 8, 28, tzinfo=timezone.utc),
+        ),
+        _event(
+            NavReplayEventType.CASH_FLOW,
+            "deposit",
+            {"amount": Decimal("30")},
+            event_at=datetime(2026, 8, 29, tzinfo=timezone.utc),
+        ),
+    ]
+
+    point = NavSeriesReplay().replay(events, initial_state={}).points[-1]
+
+    assert point.market_values == {"a_share:000001": Decimal("60"), "etf:510300": Decimal("180")}
+    assert point.total_assets == Decimal("230")
+
+
 def test_replay_consumes_frozen_buy_cash_once_then_releases_remainder():
     events = [
         _event(
