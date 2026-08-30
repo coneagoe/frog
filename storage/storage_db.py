@@ -4431,6 +4431,8 @@ class StorageDb:
         return predicates
 
     def _sqlite_invalid_cash_ledger_accounts(self, conn) -> tuple[int, ...]:
+        from paper_trading.domain.enums import CashEventType
+
         if not inspect(conn).has_table(tb_name_paper_cash_ledger):
             return ()
         columns = self._table_column_names(conn, tb_name_paper_cash_ledger)
@@ -4455,8 +4457,9 @@ class StorageDb:
             )
         )
         invalid_accounts: set[int] = set()
+        valid_event_types = {event_type.value for event_type in CashEventType}
         for account_id, event_type, amount, nav, share_delta, residual, *value_types in rows:
-            if any(value_type != "text" for value_type in value_types):
+            if event_type not in valid_event_types or any(value_type != "text" for value_type in value_types):
                 invalid_accounts.add(account_id)
                 continue
             try:
