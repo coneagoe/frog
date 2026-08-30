@@ -75,6 +75,23 @@ def test_initial_cash_note_with_invalid_allocation_is_not_creation_event(tmp_pat
     engine.dispose()
 
 
+@pytest.mark.parametrize("value", ["not-a-decimal", "NaN", "Infinity"])
+def test_initial_cash_note_invalid_allocation_reaches_replay_repair_path(tmp_path, monkeypatch, value):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("invalid-initial-e2e", Decimal("100.00"))
+    initial = repo.list_cash_ledger(account.id)[0]
+    initial.net_asset_value = value
+    monkeypatch.setattr(repo, "list_cash_ledger", lambda account_id: [initial])
+
+    with session.no_autoflush:
+        events = repo.list_replay_events(account.id)
+        invalid_event = next(event for event in events if event.source_id.endswith(f":{initial.id}"))
+        assert invalid_event.payload.get("pricing_nav") is None
+        with pytest.raises(ValueError, match="allocation requires pricing_nav"):
+            CashService(repo)._replay_from(account, date(2026, 7, 20))
+    engine.dispose()
+
+
 def test_withdraw_reduces_cash_and_redeems_shares_without_changing_nav(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))

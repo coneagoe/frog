@@ -103,6 +103,26 @@ Scoped Ruff: All checks passed.
 git diff --check: passed
 ```
 
+## Remaining Finding Follow-up
+
+- Replay Decimal normalization now converts invalid persisted values into an
+  unprovable `None` fact rather than leaking `decimal.InvalidOperation`.
+  Creation-event detection safely returns `False`; the ordinary ledger then
+  reaches Task 4's allocation repair rejection.
+- Added end-to-end regressions for ordinary `note="initial_cash"` ledger data
+  with invalid strings, `NaN`, and infinity. They exercise
+  `list_replay_events()` and `CashService` rather than only the classifier.
+
+Verification:
+
+```text
+Task 4 focused: 122 passed, 5 warnings
+Task 3 regression: 54 passed, 3 skipped
+PostgreSQL runner: 57 passed
+Scoped Ruff: All checks passed.
+git diff --check: passed
+```
+
 ## Review Follow-up 2
 
 - Initial ledger suppression now requires a matching creation snapshot,

@@ -850,7 +850,12 @@ class PaperTradingRepository:
 
     @staticmethod
     def _replay_decimal(value: Decimal | None, quantizer: Any) -> Decimal | None:
-        return None if value is None else quantizer(Decimal(str(value)))
+        if value is None:
+            return None
+        try:
+            return quantizer(Decimal(str(value)))
+        except (ArithmeticError, TypeError, ValueError):
+            return None
 
     @staticmethod
     def _replay_source_id(source_kind: str, row_id: int) -> str:
