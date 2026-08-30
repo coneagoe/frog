@@ -198,7 +198,10 @@ def _cash_flow_response(result) -> CashFlowResponse:
 
 @router.post("/{account_id}/cash/deposit", response_model=CashFlowResponse)
 def deposit_cash(account_id: int, request: CashFlowRequest, session: Session = Depends(get_session)):
-    service = CashService(PaperTradingRepository(session))
+    repo = PaperTradingRepository(session)
+    has_positions = any(position.total_quantity > 0 for position in repo.get_positions(account_id))
+    market_data = get_market_data_provider() if has_positions else None
+    service = CashService(repo, market_data)
     try:
         result = service.deposit(account_id, request.amount, request.trade_date, request.note, request.occurred_at)
     except KeyError as exc:
@@ -211,7 +214,10 @@ def deposit_cash(account_id: int, request: CashFlowRequest, session: Session = D
 
 @router.post("/{account_id}/cash/withdraw", response_model=CashFlowResponse)
 def withdraw_cash(account_id: int, request: CashFlowRequest, session: Session = Depends(get_session)):
-    service = CashService(PaperTradingRepository(session))
+    repo = PaperTradingRepository(session)
+    has_positions = any(position.total_quantity > 0 for position in repo.get_positions(account_id))
+    market_data = get_market_data_provider() if has_positions else None
+    service = CashService(repo, market_data)
     try:
         result = service.withdraw(account_id, request.amount, request.trade_date, request.note, request.occurred_at)
     except KeyError as exc:

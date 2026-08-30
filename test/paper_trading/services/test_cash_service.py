@@ -132,6 +132,43 @@ def test_cash_flow_after_valid_snapshot_uses_preceding_snapshot_nav(tmp_path):
     engine.dispose()
 
 
+def test_backdated_deposit_replays_existing_trading_snapshot(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("backdated", Decimal("100000.00"))
+    snapshot_at = datetime(2026, 7, 21, 23, tzinfo=timezone.utc)
+    repo.save_trading_snapshot(
+        account_id=account.id,
+        trade_date=snapshot_at.date(),
+        event_at=snapshot_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("100000"), cash_frozen=Decimal("0"), market_value=Decimal("0"),
+        total_assets=Decimal("100000"), realized_pnl=Decimal("0"), unrealized_pnl=Decimal("0"),
+        position_count=0, order_count=0, trade_count=0, net_asset_value=Decimal("1"),
+    )
+
+    class EmptyMarketData:
+        def get_latest_daily_close(self, symbol, trade_date, market=None):
+            return None
+
+        def get_daily_bar(self, symbol, trade_date, market=None):
+            return None
+
+    result = CashService(repo, EmptyMarketData()).deposit(
+        account.id,
+        Decimal("25000.00"),
+        date(2026, 7, 20),
+        occurred_at=datetime(2026, 7, 20, 10, tzinfo=timezone.utc),
+    )
+
+    rebuilt = next(snapshot for snapshot in repo.list_snapshots(account.id) if snapshot.trade_date == date(2026, 7, 21))
+    assert rebuilt.cash_available == Decimal("125000.0000")
+    assert rebuilt.share_count == Decimal("125000.000000")
+    assert result.account.share_count == Decimal("125000.000000")
+    assert len(repo.list_cash_ledger(account.id)) == 2
+    engine.dispose()
+
+
 @pytest.mark.parametrize(
     ("operation", "amount", "nav"),
     [
