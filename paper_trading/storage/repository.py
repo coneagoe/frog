@@ -1052,17 +1052,23 @@ class PaperTradingRepository:
         snapshot_at, snapshot_quality = self._replay_persisted_event_time(
             snapshot.event_at, snapshot.trade_date, snapshot.event_time_provenance
         )
-        return (
-            ledger.note == "initial_cash"
-            and ledger_quality is SnapshotQualityStatus.VALID
-            and snapshot_quality is SnapshotQualityStatus.VALID
-            and ledger_at == snapshot_at
-            and ledger.trade_date == snapshot.trade_date
-            and Decimal(str(ledger.amount)) == Decimal(str(account.initial_cash))
-            and Decimal(str(ledger.net_asset_value)) == Decimal("1")
-            and Decimal(str(ledger.share_delta)) == Decimal(str(snapshot.share_count))
-            and Decimal(str(ledger.rounding_residual)) == Decimal("0")
-        )
+        if (
+            ledger.note != "initial_cash"
+            or ledger_quality is not SnapshotQualityStatus.VALID
+            or snapshot_quality is not SnapshotQualityStatus.VALID
+            or ledger_at != snapshot_at
+            or ledger.trade_date != snapshot.trade_date
+        ):
+            return False
+        try:
+            return (
+                Decimal(str(ledger.amount)) == Decimal(str(account.initial_cash))
+                and Decimal(str(ledger.net_asset_value)) == Decimal("1")
+                and Decimal(str(ledger.share_delta)) == Decimal(str(snapshot.share_count))
+                and Decimal(str(ledger.rounding_residual)) == Decimal("0")
+            )
+        except (ArithmeticError, TypeError, ValueError):
+            return False
 
     def get_replay_events(
         self, account_id: int, start_at: datetime | None = None, end_at: datetime | None = None

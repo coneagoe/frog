@@ -83,6 +83,26 @@ uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/se
 Scoped Ruff: All checks passed.
 ```
 
+## Final Important Finding Follow-up
+
+- `_is_creation_initial_cash_event()` now performs structural checks before
+  Decimal conversion and catches conversion/arithmetic errors. A normal
+  `note="initial_cash"` ledger with missing or invalid allocation fields safely
+  returns `False`, so it remains an ordinary replay event and reaches the
+  unified allocation repair validation.
+- Added regression coverage for missing `net_asset_value`, `share_delta`, or
+  `rounding_residual`, plus invalid allocation strings.
+
+Verification:
+
+```text
+Task 4 focused: 119 passed, 5 warnings
+Task 3 regression: 54 passed, 3 skipped
+PostgreSQL runner: 54 passed
+Scoped Ruff: All checks passed.
+git diff --check: passed
+```
+
 ## Review Follow-up 2
 
 - Initial ledger suppression now requires a matching creation snapshot,

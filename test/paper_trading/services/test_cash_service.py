@@ -51,6 +51,30 @@ def test_deposit_with_initial_cash_note_is_replayed_as_ordinary_cash_flow(tmp_pa
     engine.dispose()
 
 
+@pytest.mark.parametrize("missing_field", ["net_asset_value", "share_delta", "rounding_residual"])
+def test_initial_cash_note_with_incomplete_allocation_is_not_creation_event(tmp_path, missing_field):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("ambiguous-initial-note", Decimal("100.00"))
+    ledger = repo.list_cash_ledger(account.id)[0]
+    setattr(ledger, missing_field, None)
+
+    with session.no_autoflush:
+        assert repo._is_creation_initial_cash_event(account, ledger) is False
+    engine.dispose()
+
+
+@pytest.mark.parametrize("field", ["net_asset_value", "share_delta", "rounding_residual"])
+def test_initial_cash_note_with_invalid_allocation_is_not_creation_event(tmp_path, field):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("invalid-initial-note", Decimal("100.00"))
+    ledger = repo.list_cash_ledger(account.id)[0]
+    setattr(ledger, field, "not-a-decimal")
+
+    with session.no_autoflush:
+        assert repo._is_creation_initial_cash_event(account, ledger) is False
+    engine.dispose()
+
+
 def test_withdraw_reduces_cash_and_redeems_shares_without_changing_nav(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
