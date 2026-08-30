@@ -810,17 +810,32 @@ class PaperTradingRepository:
 
     @staticmethod
     def _replay_event_time(
-        event_at: datetime | None, trade_date: date | None
+        event_at: datetime | None,
+        trade_date: date | None,
+        *,
+        persisted_timezone_aware: bool = False,
     ) -> tuple[datetime, SnapshotQualityStatus]:
-        """Normalize replay event time; legacy missing times remain explicitly invalid."""
+        """Normalize replay time; SQLite's aware-column values are canonical UTC."""
         if event_at is None:
             return (
                 datetime.combine(trade_date or date.min, time.min, tzinfo=timezone.utc),
                 SnapshotQualityStatus.INVALID,
             )
         if event_at.tzinfo is None or event_at.utcoffset() is None:
+            if persisted_timezone_aware:
+                return event_at.replace(tzinfo=timezone.utc), SnapshotQualityStatus.VALID
             return event_at.replace(tzinfo=timezone.utc), SnapshotQualityStatus.INVALID
         return event_at.astimezone(timezone.utc), SnapshotQualityStatus.VALID
+
+    def _replay_persisted_event_time(
+        self, event_at: datetime | None, trade_date: date | None
+    ) -> tuple[datetime, SnapshotQualityStatus]:
+        return self._replay_event_time(
+            event_at,
+            trade_date,
+            persisted_timezone_aware=self.session.bind is not None
+            and self.session.bind.dialect.name == "sqlite",
+        )
 
     @staticmethod
     def _replay_decimal(value: Decimal | None, quantizer: Any) -> Decimal | None:
@@ -856,7 +871,7 @@ class PaperTradingRepository:
             # replaying both would subscribe the opening cash twice.
             if ledger.note == "initial_cash":
                 continue
-            event_at, quality_status = self._replay_event_time(ledger.occurred_at, ledger.trade_date)
+            event_at, quality_status = self._replay_persisted_event_time(ledger.occurred_at, ledger.trade_date)
             # Only external cash movements are CASH_FLOW. Internal ledger rows
             # remain visible as settlement facts, but never mint/burn shares.
             replay_event_type = (
@@ -883,7 +898,7 @@ class PaperTradingRepository:
             )
 
         for trade in self.list_trades(account_id):
-            event_at, quality_status = self._replay_event_time(trade.trade_time, trade.trade_date)
+            event_at, quality_status = self._replay_persisted_event_time(trade.trade_time, trade.trade_date)
             events.append(
                 ReplayEvent(
                     event_at=event_at,
@@ -908,7 +923,7 @@ class PaperTradingRepository:
             )
 
         for action in self.list_corporate_actions(account_id):
-            event_at, quality_status = self._replay_event_time(action.event_at, action.affected_start_date)
+            event_at, quality_status = self._replay_persisted_event_time(action.event_at, action.affected_start_date)
             events.append(
                 ReplayEvent(
                     event_at=event_at,
@@ -942,7 +957,7 @@ class PaperTradingRepository:
             )
 
         for snapshot in self.list_snapshots(account_id):
-            event_at, time_quality = self._replay_event_time(snapshot.event_at, snapshot.trade_date)
+            event_at, time_quality = self._replay_persisted_event_time(snapshot.event_at, snapshot.trade_date)
             quality_status = (
                 time_quality
                 if time_quality is SnapshotQualityStatus.INVALID

@@ -2,9 +2,9 @@
 
 ## Status
 
-Task 2 round 4 final review coverage is complete. The authoritative evidence
-is the focused SQLite/domain run, the PostgreSQL-backed repository run, and
-the scoped Ruff check recorded below.
+Task 2 final review coverage is complete. The authoritative evidence is the
+focused SQLite/domain run, the PostgreSQL-backed repository run, and the
+scoped Ruff check recorded below.
 
 ## Scope
 
@@ -30,7 +30,14 @@ No Task 3+ files and no matching or settlement code were modified.
   canonical paper-trading enum migration. The parity test writes the same
   account, order/trade, cash-ledger, corporate-action, and valuation facts to
   SQLite and PostgreSQL and compares ordered event identity, `event_at`,
-  quality status, and complete payloads.
+  quality status, and complete payloads. SQLite and PostgreSQL signatures must
+  be fully equal.
+- Defined the replay adapter's timestamp compatibility rule: for SQLite rows
+  read from model columns declared `DateTime(timezone=True)`, a driver-returned
+  naive value is interpreted as canonical UTC and marked `VALID`, matching
+  PostgreSQL. Direct naive values passed to the generic time helper and rows
+  with missing event time remain explicitly `INVALID` because their timezone
+  cannot be proven. Creation baselines therefore remain eligible on SQLite.
 - Normalized replay Decimal payloads through the existing account-money,
   NAV, and share quantizers. This removes SQLite binary-float residue while
   preserving the repository's 12-decimal precision contract.
@@ -71,13 +78,15 @@ uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/d
 Output summary:
 
 ```text
-collected 129 items
-======================= 127 passed, 2 skipped in 52.70s =======================
+collected 130 items
+======================= 128 passed, 2 skipped in 50.76s =======================
 ```
 
 The two skipped parameter cases are the PostgreSQL rollback and parity cases
 because this direct command does not provide `TEST_POSTGRESQL_URL`. This is
-expected and is not the PostgreSQL evidence path.
+expected and is not the PostgreSQL evidence path. The direct run also covers
+the explicit unproven-naive timestamp invalid regression and the SQLite
+creation-baseline eligibility regression.
 
 Exit status: `0`.
 
@@ -93,15 +102,15 @@ Relevant runner output:
 
 ```text
 Container issue-82-nav-series-test_db-1 Healthy
-collected 115 items
+collected 116 items
 test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[sqlite_repository] PASSED
 test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[postgres_repository] PASSED
 test/paper_trading/storage/test_repository.py::test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql PASSED
-============================= 115 passed in 54.26s =============================
+============================= 116 passed in 52.71s =============================
 ```
 
-Exit status: `0`. The parity test ran against the isolated PostgreSQL service;
-it was not skipped or blocked.
+Exit status: `0`. Both rollback parameter paths and the parity test ran against
+the isolated PostgreSQL service; none was skipped or blocked.
 
 ### Whitespace
 
@@ -122,13 +131,13 @@ Output: no findings. Exit status: `0`.
   `setlocale: LC_ALL: cannot change locale (en_US.UTF-8)` and Docker's
   `No services to build` warning. Neither affected test execution.
 - The parity assertion compares event ordering identity, `event_at`, quality
-  status, and complete payload values. SQLite timezone-aware columns load as
-  naive datetimes in this project; the test explicitly records SQLite
-  `INVALID` versus PostgreSQL `VALID` quality while comparing the event
-  timestamp value and all other event content.
+  status, and complete payload values with full signature equality. SQLite
+  timezone-aware columns that load as naive are normalized to canonical UTC at
+  the adapter boundary; genuinely unproven naive or missing timestamps remain
+  invalid under the dedicated regression tests.
 
 ## Final result
 
-Task 2 round 4 final review coverage is complete. SQLite and PostgreSQL both
-verified replacement rollback and replay Decimal parity; no requested test is
-blocked under the PostgreSQL runner.
+Task 2 final review coverage is complete. SQLite and PostgreSQL both verified
+replacement rollback, timestamp compatibility, and replay Decimal/payload
+parity; no requested test is blocked under the PostgreSQL runner.

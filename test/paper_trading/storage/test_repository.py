@@ -326,20 +326,36 @@ def test_list_replay_events_adapts_sources_in_stable_utc_order(sqlite_session) -
     events = repo.list_replay_events(account.id, start_at=event_at, end_at=event_at)
 
     assert [(event.event_type, event.source_kind, event.source_id) for event in events] == [
+        (
+            NavReplayEventType.INITIAL,
+            "creation",
+            f"paper_account_snapshots:{repo.list_snapshots(account.id)[0].id}",
+        ),
         (NavReplayEventType.CASH_FLOW, "paper_cash_ledger", f"paper_cash_ledger:{ledger.id}"),
         (NavReplayEventType.TRADE_SETTLEMENT, "paper_trades", f"paper_trades:{trade.id}"),
         (NavReplayEventType.CORPORATE_ACTION, "paper_corporate_actions", f"paper_corporate_actions:{action.id}"),
         (NavReplayEventType.MARKET_VALUATION, "paper_account_snapshots", f"paper_account_snapshots:{snapshot.id}"),
     ]
     assert all(event.event_at.tzinfo is timezone.utc for event in events)
-    assert events[0].payload["amount"] == Decimal("10.000000000000")
-    assert "nav" not in events[0].payload
+    cash_event = next(event for event in events if event.event_type is NavReplayEventType.CASH_FLOW)
+    assert cash_event.payload["amount"] == Decimal("10.000000000000")
+    assert "nav" not in cash_event.payload
 
 
 def test_list_replay_events_marks_legacy_missing_time_invalid(sqlite_session) -> None:
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     event_at, quality_status = repo._replay_event_time(None, date(2026, 8, 25))
+
+    assert event_at == datetime(2026, 8, 25, tzinfo=timezone.utc)
+    assert quality_status is SnapshotQualityStatus.INVALID
+
+
+def test_replay_event_time_keeps_unproven_naive_input_invalid(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    event_at, quality_status = repo._replay_event_time(datetime(2026, 8, 25), date(2026, 8, 25))
 
     assert event_at == datetime(2026, 8, 25, tzinfo=timezone.utc)
     assert quality_status is SnapshotQualityStatus.INVALID
@@ -845,9 +861,7 @@ def test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgres
 
     sqlite_signature = _replay_event_signature(sqlite_events)
     postgres_signature = _replay_event_signature(postgres_events)
-    assert [signature[:-1] for signature in sqlite_signature] == [signature[:-1] for signature in postgres_signature]
-    assert {signature[-1] for signature in sqlite_signature} == {SnapshotQualityStatus.INVALID}
-    assert {signature[-1] for signature in postgres_signature} == {SnapshotQualityStatus.VALID}
+    assert sqlite_signature == postgres_signature
 
 
 def test_get_accounts_for_snapshot_includes_active_cash_only_accounts(sqlite_session) -> None:
