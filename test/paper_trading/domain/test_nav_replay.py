@@ -448,6 +448,36 @@ def test_replay_consumes_frozen_buy_cash_once_then_releases_remainder():
     assert points[2].holdings == {"a_share:000001": Decimal("10")}
 
 
+def test_initial_replay_preserves_persisted_cash_components_and_identity():
+    point = (
+        NavSeriesReplay()
+        .replay(
+            [
+                _event(
+                    NavReplayEventType.INITIAL,
+                    "initial",
+                    {
+                        "opening_cash": Decimal("100"),
+                        "opening_shares": Decimal("100"),
+                        "cash_available": Decimal("70"),
+                        "cash_frozen": Decimal("10"),
+                        "pending_settlement": Decimal("20"),
+                        "total_assets": Decimal("100"),
+                    },
+                )
+            ],
+            initial_state={},
+        )
+        .points[0]
+    )
+
+    assert point.cash == Decimal("70")
+    assert point.cash_frozen == Decimal("10")
+    assert point.pending_settlement == Decimal("20")
+    assert point.total_assets == Decimal("100")
+    assert point.cash + point.cash_frozen + point.pending_settlement == point.total_assets
+
+
 def test_cash_flow_rejects_conflicting_pre_and_post_asset_payload():
     event = _event(
         NavReplayEventType.CASH_FLOW,

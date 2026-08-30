@@ -1,398 +1,44 @@
 # Task 3 Report: Shared Replay and NAV Series
 
-## Modified files
+## Result
 
-- `paper_trading/domain/nav_replay.py`
-  - Replay state now remains authoritative between events rather than allowing
-    valuation payload fields to overwrite state before event application.
-  - Initial events accept both opening-state and legacy total-assets/share-count
-    payload shapes.
-  - Cash flows price share issuance/redemption from the latest valid replay NAV,
-    defaulting to NAV 1 when no valid NAV exists.
-  - Market valuation events require an explicit finite valuation input; missing
-    valuation produces an invalid point instead of carrying a stale NAV.
-  - Settlement and corporate-action cash deltas are replayed against the current
-    state.
+- INITIAL replay preserves persisted `cash_available`, `cash_frozen`,
+  `pending_settlement`, `total_assets`, and cumulative cash-flow fields.
+- Replay and recalculation use explicit `None` checks, preserving persisted
+  `Decimal("0")` values.
+- `NavSeriesBuilder.prepare(account_id)` remains the public replay preparation
+  API used by recalculation.
+- Cash-only requested dates are materialized; invalid valuation points preserve
+  later replay state; expected missing/stale data is unavailable while provider
+  failures are failed errors with rollback.
+- Existing freeze/trade/release, HK expected settlement date, holdings/cost,
+  corporate action, market+symbol, backdated cash-flow, idempotency, and
+  external rollback behavior remains covered.
+- No matching or settlement business files were modified.
 
-- `paper_trading/services/nav_series.py`
-  - Preserved the existing builder API and formatted the date-range filter.
+## Tests
 
-- `paper_trading/services/snapshot_service.py`
-  - Normalizes SQLite-reloaded historical snapshot timestamps to UTC before
-    passing them through the timezone/provenance-enforcing repository API.
-
-- `test/paper_trading/domain/test_nav_replay.py`
-  - Added backdated cash-flow/later-valuation consistency coverage.
-  - Added missing-market-valuation gap coverage.
-
-## Interfaces
-
-- Existing public APIs were preserved:
-  - `NavSeriesReplay.replay(events, initial_state)`
-  - `NavSeriesBuilder.build(account_id, start_date, end_date)`
-  - `SnapshotService.generate_snapshot_or_gap(...)`
-  - `SnapshotRecalculationService.recalculate(...)`
-- No matching or settlement modules were modified.
-
-## Verification
-
-Command:
+Focused local suite:
 
 ```text
-uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py -q
+94 passed, 2 skipped
 ```
 
-Output:
+PostgreSQL-backed Task 3 integration tests:
 
 ```text
-============================= 77 passed in 16.63s ==============================
+tools/run_tests.sh test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py -q
+96 passed
 ```
 
-Command:
-
-```text
-uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-Output:
-
-```text
-All checks passed!
-```
-
-Command:
-
-```text
-git diff --check
-```
-
-Output: passed with no whitespace errors.
+The PostgreSQL tests use isolated schemas and exercise persisted repository
+events, real `SnapshotRecalculationService.recalculate()`, trading snapshots,
+and cleanup. Scoped Ruff format/check and `git diff --check` passed.
 
 ## Concerns
 
-- The existing recalculation service still delegates historical materialization
-  to `SnapshotService.generate_snapshot_or_gap`, which reads current account
-  state. A broader replay-backed snapshot materialization path, including full
-  bounded replacement and cash-only active-date generation, remains for the
-  orchestrator/owner to verify against hidden integration coverage.
-- No database-dependent test runner was invoked; the focused service tests use
-  their existing SQLite fixtures and mocks.
-- Documentation skill review found no README/AGENTS/topic-document changes
-  warranted by this internal implementation.
-
-## Follow-up implementation
-
-- `paper_trading/services/nav_series.py`
-  - The default builder path now requires a repository and calls its
-    `list_replay_events(account_id)` adapter; the explicit `event_loader` test
-    seam remains supported.
-  - Trade settlement facts duplicated in cash-ledger rows are deduplicated by
-    `trade_id` before replay.
-  - Baseline validation accepts the persisted initial snapshot payload shape as
-    well as the opening-state shape.
-
-- `paper_trading/domain/nav_replay.py`
-  - Replay points now carry cash, holdings, costs, valuation quality, and
-    valuation details.
-  - Trade settlements rebuild symbol quantities/costs and cash; corporate
-    actions apply quantity, cost, and cash deltas.
-  - Missing valuation input invalidates only the current NAV point while
-    preserving replay cash/holdings/state for later events.
-
-- `paper_trading/services/snapshot_recalculation_service.py`
-  - Recalculation derives affected dates from replay events, snapshots, gaps,
-    and the requested bounds.
-  - Historical valuation points are generated from replay holdings/cost state,
-    then materialized through bounded `replace_trading_snapshots`.
-  - Existing derived event timestamps are preserved, gaps are resolved only
-    after successful valuation, and any failure rolls back external sessions as
-    well as service-owned sessions.
-
-- `test/paper_trading/services/test_nav_series.py`
-  - Added a real SQLite repository-to-builder integration test.
-
-- `test/paper_trading/services/test_snapshot_recalculation_service.py`
-  - Updated focused service expectations to the replay-backed recalculation
-    contract and its baseline guard.
-
-## Follow-up verification
-
-Command:
-
-```text
-uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-Output:
-
-```text
-============================= 79 passed in 16.36s ==============================
-```
-
-Command:
-
-```text
-uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-Output:
-
-```text
-All checks passed!
-```
-
-Follow-up concerns:
-
-- The replay materializer intentionally remains within the four-file Task 3
-  scope and uses existing repository replacement APIs; full PostgreSQL
-  integration verification remains the orchestrator's responsibility.
-- The focused legacy mock cases now verify the baseline guard rather than
-  invoking the removed per-date snapshot-generation path.
-- Added focused coverage that a replay/baseline failure rolls back a
-  caller-owned SQLAlchemy session.
-
-## Final follow-up implementation
-
-- `paper_trading/services/nav_series.py`
-  - Preserved the legacy positional callable constructor form while making the
-    repository-backed `list_replay_events` path the default when a repository
-    is supplied.
-  - Added deterministic settlement-ledger deduplication and corporate-action
-    ledger exclusion.
-
-- `paper_trading/domain/nav_replay.py`
-  - Added cumulative deposit/withdrawal/net-cash-flow state to every point.
-  - Trade replay now validates sides, tracks market+symbol holdings, includes
-    buy fees in cost, and reduces sell cost using average cost.
-  - Corporate actions update market+symbol quantity/cost/cash state.
-  - Missing valuations leave cash, holdings, costs, shares, and cumulative
-    flow state intact for subsequent events.
-
-- `paper_trading/services/snapshot_recalculation_service.py`
-  - Materialized snapshots now write replay cumulative cash-flow values and
-    preserve stale/gap valuation metadata through replay valuation events.
-  - Existing bounded replacement and external-session rollback behavior remain
-    enforced.
-
-- Tests added for positional/default builder compatibility, gap state
-  preservation, cumulative cash flow, trade average cost and fees, multi-market
-  symbol separation, corporate-action quantity/cost/cash updates, and invalid
-  trade sides.
-
-## Final verification
-
-```text
-uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-```text
-============================= 84 passed in 15.61s ==============================
-```
-
-```text
-uv run ruff format paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py
-uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-```text
-2 files reformatted, 4 files left unchanged
-All checks passed!
-```
-
-`git diff --check`: passed.
-
-## Third-Round Final Audit
-
-- Replay now maintains per-market/per-symbol market values, so a sell only
-  reduces the sold holding's mark and does not alter another holding's value.
-- Added same-day multi-holding sell plus cash-flow regression coverage.
-- Added a PostgreSQL-only repository-to-builder integration test. It is skipped
-  when `TEST_POSTGRESQL_URL` is absent and is executed through the repository
-  PostgreSQL runner when available.
-
-### Verification
-
-Focused command:
-
-```text
-uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-Output:
-
-```text
-======================== 92 passed, 1 skipped in 17.83s ========================
-```
-
-The single skip is the PostgreSQL-only test when run outside the database
-runner.
-
-Scoped Ruff command:
-
-```text
-uv run ruff format paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-Output:
-
-```text
-3 files reformatted, 5 files left unchanged
-Found 1 error (1 fixed, 0 remaining).
-All checks passed!
-```
-
-PostgreSQL evidence command:
-
-```text
-tools/run_tests.sh test/paper_trading/services/test_nav_series.py::test_postgresql_repository_builder_replays_persisted_cash_flow
-```
-
-Output:
-
-```text
-Container issue-82-nav-series-test_db-1 Started
-Container issue-82-nav-series-test_db-1 Healthy
-============================== 1 passed in 1.56s ===============================
-```
-
-`git diff --check`: passed. No Task 4+ or matching/settlement business files
-were modified.
-
-## Final Repair
-
-- `paper_trading/domain/nav_replay.py`
-  - Treats negative FREEZE ledger amounts as transfers from available cash to
-    frozen cash; RELEASE transfers the recorded amount back without changing
-    total assets.
-  - A buy trade consumes `amount + fees` from frozen cash when that freeze fact
-    exists, and does not debit the amount or fees a second time. Legacy direct
-    trade replay remains supported when no freeze fact exists.
-  - Replay maintains the accounting identity
-    `cash_available + cash_frozen + pending_settlement + market_value` and
-    preserves holdings/cost state across invalid valuation points.
-
-- `paper_trading/services/nav_series.py`
-  - Exposes `NavSeriesBuilder.prepare(account_id)`, returning normalized replay
-    events and the proven baseline for recalculation callers.
-  - Normalizes linked HK settlement ledger events to the pending settlement's
-    `expected_settle_date` and end-of-business UTC timestamp after settlement;
-    no matching or settlement business code was changed.
-
-- `paper_trading/services/snapshot_recalculation_service.py`
-  - Uses only the public preparation API and generates every active date in the
-    requested inclusive range, including cash-only dates.
-  - Keeps expected missing/stale valuation conditions visible as unavailable
-    gaps while provider/replay failures remain failed errors with rollback.
-
-## Final Repair Verification
-
-```text
-tools/run_tests.sh test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py -q
-```
-
-```text
-49 passed in 5.76s
-```
-
-The PostgreSQL-backed runner started its isolated `test_db` service. Scoped
-Ruff format/check and `git diff --check` also passed. Added regression coverage
-executes a repository-backed FREEZE -> trade -> RELEASE path and the complete
-`create_pending_settlement -> settle_pending -> list_replay_events -> prepare
--> recalculate` HK settlement path. Existing coverage continues to verify
-initial cumulative cash flow, backdated cash flow, stale/revised valuation,
-holdings/cost, corporate actions, market+symbol keys, idempotency, gap-state
-preservation, failure classification, and external-session rollback.
-
-## Final Concerns
-
-- The new settlement-date normalization is intentionally implemented in the
-  Task 3 NAV preparation layer because settlement storage does not persist a
-  separate processing timestamp/business date on the cash-ledger row.
-- The focused PostgreSQL run covers the Task 3 replay and recalculation tests;
-  unrelated repository-wide tests were not changed or required for this
-  scoped repair.
-
-## Final Audit Follow-up
-
-- Replay now carries `cash_frozen` in addition to available cash and pending
-  settlement. FREEZE and RELEASE ledger projections move cash between available
-  and frozen balances without changing total assets; HK sell execution retains
-  proceeds as pending until the linked settlement cash projection.
-- Recalculated valuation events use the full identity
-  `cash_available + cash_frozen + pending_settlement + market_value`, and
-  snapshot materialization writes each component separately.
-- Repository initial events retain persisted cumulative deposit/withdrawal
-  semantics, and recalculation enriches its baseline from the same data.
-- Expected missing prices remain unavailable valuation gaps; provider errors
-  are collected as failed dates and errors before replacement.
-- Added focused frozen-cash and component-identity regression coverage while
-  retaining all prior Task 3 settlement, builder, replay, gap, cost, stale,
-  idempotency, and rollback tests.
-
-## Final Audit Verification
-
-```text
-uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-```text
-============================= 88 passed in 16.59s ==============================
-```
-
-```text
-uv run ruff format paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-```text
-8 files left unchanged
-All checks passed!
-```
-
-`git diff --check`: passed.
-
-## Settlement and Outcome Follow-up
-
-- HK Connect sell executions now remove holdings at execution while retaining
-  proceeds in replay `pending_settlement`; linked T+2 cash-ledger settlement
-  releases that amount to replay cash without changing total assets.
-- Settlement-ledger deduplication preserves linked HK sell settlement facts and
-  removes only duplicate non-HK execution projections. Corporate-action ledger
-  projections remain excluded when their audited action fact is present.
-- Repository-backed builder initial snapshots are enriched with persisted
-  cumulative deposit, withdrawal, and pending-settlement values before baseline
-  construction; recalculation uses that enriched baseline.
-- Recalculation writes replay pending settlement separately from cash and market
-  value. Provider/system valuation failures are recorded as failed recalculation
-  errors, while expected missing-close conditions remain valuation gaps.
-
-Added focused tests cover HK execution/T+2 release, repository initial
-cumulative-flow preservation, and provider failure classification. Existing
-backdated cash-flow, gap-state, holdings/cost, market-key, corporate-action,
-stale, idempotency, external rollback, and callable-builder tests remain in the
-focused suite.
-
-## Settlement Follow-up Verification
-
-```text
-uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-```text
-============================= 87 passed in 17.23s ==============================
-```
-
-```text
-uv run ruff format paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py
-uv run ruff check --fix test/paper_trading/services/test_snapshot_recalculation_service.py
-uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
-```
-
-```text
-6 files left unchanged
-Found 1 error (1 fixed, 0 remaining).
-All checks passed!
-```
-
-`git diff --check`: passed.
+- The repository settlement cash ledger does not persist a separate processing
+  business date, so HK settlement timing is normalized in the Task 3 NAV
+  preparation layer from `PaperPendingSettlement.expected_settle_date`.
+- Full repository-wide tests remain outside this scoped Task 3 verification.

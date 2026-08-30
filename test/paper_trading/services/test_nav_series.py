@@ -209,6 +209,30 @@ def test_repository_replay_does_not_double_debit_freeze_trade_release(tmp_path):
         engine.dispose()
 
 
+def test_repository_builder_preserves_explicit_zero_initial_cash_flow_fields(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'builder_zero.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("repository-builder-zero", Decimal("100"))
+        initial = next(row for row in repo.list_snapshots(account.id) if row.point_type == "initial")
+        initial.cumulative_deposit = Decimal("0")
+        initial.cumulative_withdrawal = Decimal("0")
+        initial.pending_settlement = Decimal("0")
+
+        events, baseline = NavSeriesBuilder(repo=repo).prepare(account.id)
+
+        assert baseline["cumulative_deposit"] == Decimal("0")
+        assert baseline["cumulative_withdrawal"] == Decimal("0")
+        assert baseline["pending_settlement"] == Decimal("0")
+        assert NavSeriesBuilder(repo=repo).build(account.id).points[0].net_cash_flow == Decimal("0")
+        assert events[0].payload["cumulative_deposit"] == Decimal("0")
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_postgresql_repository_builder_replays_persisted_cash_flow():
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:

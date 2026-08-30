@@ -77,6 +77,9 @@ class NavSeriesBuilder:
                 cumulative_deposit=snapshot.cumulative_deposit,
                 cumulative_withdrawal=snapshot.cumulative_withdrawal,
                 pending_settlement=snapshot.pending_settlement,
+                cash_available=snapshot.cash_available,
+                cash_frozen=snapshot.cash_frozen,
+                total_assets=snapshot.total_assets,
             )
             enriched.append(
                 ReplayEvent(

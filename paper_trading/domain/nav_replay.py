@@ -61,7 +61,10 @@ class ReplayResult:
 class NavSeriesReplay:
     def replay(self, events: list[ReplayEvent], initial_state: Mapping[str, Any]) -> ReplayResult:
         state = dict(initial_state)
-        state.setdefault("cash", self._decimal(state.get("total_assets")) or Decimal("0"))
+        initial_cash = self._decimal(state.get("total_assets"))
+        if initial_cash is None:
+            initial_cash = Decimal("0")
+        state.setdefault("cash", initial_cash)
         state.setdefault("holdings", {})
         state.setdefault("costs", {})
         state.setdefault("cumulative_deposit", Decimal("0"))
@@ -94,10 +97,18 @@ class NavSeriesReplay:
         cash = self._decimal(state.get("cash"))
         holdings = dict(state.get("holdings", {}))
         costs = dict(state.get("costs", {}))
-        cumulative_deposit = self._decimal(state.get("cumulative_deposit")) or Decimal("0")
-        cumulative_withdrawal = self._decimal(state.get("cumulative_withdrawal")) or Decimal("0")
-        pending_settlement = self._decimal(state.get("pending_settlement")) or Decimal("0")
-        cash_frozen = self._decimal(state.get("cash_frozen")) or Decimal("0")
+        cumulative_deposit = self._decimal(state.get("cumulative_deposit"))
+        if cumulative_deposit is None:
+            cumulative_deposit = Decimal("0")
+        cumulative_withdrawal = self._decimal(state.get("cumulative_withdrawal"))
+        if cumulative_withdrawal is None:
+            cumulative_withdrawal = Decimal("0")
+        pending_settlement = self._decimal(state.get("pending_settlement"))
+        if pending_settlement is None:
+            pending_settlement = Decimal("0")
+        cash_frozen = self._decimal(state.get("cash_frozen"))
+        if cash_frozen is None:
+            cash_frozen = Decimal("0")
         market_values = dict(state.get("market_values", {}))
         valuation_quality = event.payload.get("valuation_quality")
         valuation_details = tuple(event.payload.get("valuation_details", ()))
@@ -120,11 +131,13 @@ class NavSeriesReplay:
             pricing_nav = nav if self._valid_nav(nav) else Decimal("1")
             if pricing_nav is None:
                 pricing_nav = Decimal("1")
-            cash_amount = amount or Decimal("0")
-            total_assets = (pre_total_assets or Decimal("0")) + cash_amount
-            share_count = (share_count or Decimal("0")) + cash_amount / pricing_nav
+            cash_amount = amount if amount is not None else Decimal("0")
+            prior_total_assets = pre_total_assets if pre_total_assets is not None else Decimal("0")
+            total_assets = prior_total_assets + cash_amount
+            prior_share_count = share_count if share_count is not None else Decimal("0")
+            share_count = prior_share_count + cash_amount / pricing_nav
             nav = pricing_nav
-            cash = (cash or Decimal("0")) + cash_amount
+            cash = (cash if cash is not None else Decimal("0")) + cash_amount
             if cash_amount >= 0:
                 cumulative_deposit += cash_amount
             else:
@@ -138,7 +151,8 @@ class NavSeriesReplay:
                 payload_values = event.payload.get("market_values")
                 if isinstance(payload_values, Mapping):
                     market_values = {
-                        str(key): self._decimal(value) or Decimal("0") for key, value in payload_values.items()
+                        str(key): (parsed_value if (parsed_value := self._decimal(value)) is not None else Decimal("0"))
+                        for key, value in payload_values.items()
                     }
             if valuation_total is not None and share_count:
                 nav = valuation_total / share_count
@@ -153,28 +167,51 @@ class NavSeriesReplay:
                 nav = total_assets / share_count
             cash = total_assets
             market_values = {}
-            cumulative_deposit = self._decimal(event.payload.get("cumulative_deposit")) or total_assets or Decimal("0")
-            cumulative_withdrawal = self._decimal(event.payload.get("cumulative_withdrawal")) or Decimal("0")
-            pending_settlement = self._decimal(event.payload.get("pending_settlement")) or Decimal("0")
-            cash_frozen = self._decimal(event.payload.get("cash_frozen")) or Decimal("0")
+            persisted_cash = self._decimal(event.payload.get("cash_available"))
+            if persisted_cash is None:
+                persisted_cash = total_assets if total_assets is not None else Decimal("0")
+            cash = persisted_cash
+            persisted_total_assets = self._decimal(event.payload.get("total_assets"))
+            if persisted_total_assets is not None:
+                total_assets = persisted_total_assets
+            cumulative_deposit = self._decimal(event.payload.get("cumulative_deposit"))
+            if cumulative_deposit is None:
+                cumulative_deposit = total_assets if total_assets is not None else Decimal("0")
+            cumulative_withdrawal = self._decimal(event.payload.get("cumulative_withdrawal"))
+            if cumulative_withdrawal is None:
+                cumulative_withdrawal = Decimal("0")
+            pending_settlement = self._decimal(event.payload.get("pending_settlement"))
+            if pending_settlement is None:
+                pending_settlement = Decimal("0")
+            cash_frozen = self._decimal(event.payload.get("cash_frozen"))
+            if cash_frozen is None:
+                cash_frozen = Decimal("0")
         elif event.event_type is NavReplayEventType.TRADE_SETTLEMENT:
-            amount = self._decimal(event.payload.get("amount")) or Decimal("0")
-            fees = self._decimal(event.payload.get("fees")) or Decimal("0")
-            quantity = self._decimal(event.payload.get("quantity")) or Decimal("0")
-            price = self._decimal(event.payload.get("price")) or Decimal("0")
+            amount = self._decimal(event.payload.get("amount"))
+            if amount is None:
+                amount = Decimal("0")
+            fees = self._decimal(event.payload.get("fees"))
+            if fees is None:
+                fees = Decimal("0")
+            quantity = self._decimal(event.payload.get("quantity"))
+            if quantity is None:
+                quantity = Decimal("0")
+            price = self._decimal(event.payload.get("price"))
+            if price is None:
+                price = Decimal("0")
             symbol = str(event.payload.get("symbol", ""))
             side = str(event.payload.get("side", ""))
             is_cash_projection = not symbol and event.source_kind == "paper_cash_ledger"
             if is_cash_projection:
                 ledger_event_type = event.payload.get("ledger_event_type")
                 if ledger_event_type == "freeze":
-                    cash = (cash or Decimal("0")) + amount
+                    cash = (cash if cash is not None else Decimal("0")) + amount
                     cash_frozen -= amount
                 elif ledger_event_type == "release":
-                    cash = (cash or Decimal("0")) + amount
+                    cash = (cash if cash is not None else Decimal("0")) + amount
                     cash_frozen = max(Decimal("0"), cash_frozen - amount)
                 else:
-                    cash = (cash or Decimal("0")) + amount
+                    cash = (cash if cash is not None else Decimal("0")) + amount
                     pending_settlement = max(Decimal("0"), pending_settlement - amount)
                 if total_assets is not None and share_count:
                     nav = total_assets / share_count
@@ -198,9 +235,9 @@ class NavSeriesReplay:
                 if side == "buy":
                     market_values[holding_key] = market_values.get(holding_key, Decimal("0")) + amount
                     if not consumes_frozen:
-                        cash = (cash or Decimal("0")) - frozen_cost
+                        cash = (cash if cash is not None else Decimal("0")) - frozen_cost
                 elif market != "hk_connect":
-                    cash = (cash or Decimal("0")) + sign * amount - fees
+                    cash = (cash if cash is not None else Decimal("0")) + sign * amount - fees
                 else:
                     pending_settlement += amount - fees
                 if side == "buy":
@@ -221,7 +258,7 @@ class NavSeriesReplay:
                     costs[holding_key] = current_cost - reduction
                     market_values[holding_key] = market_values.get(holding_key, Decimal("0")) - market_reduction
                 total_assets = (
-                    (cash or Decimal("0"))
+                    (cash if cash is not None else Decimal("0"))
                     + cash_frozen
                     + pending_settlement
                     + sum(market_values.values(), Decimal("0"))
@@ -229,9 +266,10 @@ class NavSeriesReplay:
                 if share_count:
                     nav = total_assets / share_count
         elif event.event_type is NavReplayEventType.CORPORATE_ACTION:
-            total_assets = (total_assets or Decimal("0")) + (
-                self._decimal(event.payload.get("cash_delta")) or Decimal("0")
-            )
+            cash_delta = self._decimal(event.payload.get("cash_delta"))
+            if cash_delta is None:
+                cash_delta = Decimal("0")
+            total_assets = (total_assets if total_assets is not None else Decimal("0")) + cash_delta
             if share_count:
                 nav = total_assets / share_count
             market = str(event.payload.get("market") or "")
@@ -239,14 +277,15 @@ class NavSeriesReplay:
             if not symbol:
                 raise ValueError("corporate action symbol is required")
             holding_key = f"{market}:{symbol}"
-            holdings[holding_key] = holdings.get(holding_key, Decimal("0")) + (
-                self._decimal(event.payload.get("quantity_delta")) or Decimal("0")
-            )
+            quantity_delta = self._decimal(event.payload.get("quantity_delta"))
+            if quantity_delta is None:
+                quantity_delta = Decimal("0")
+            holdings[holding_key] = holdings.get(holding_key, Decimal("0")) + quantity_delta
             if "after_cost_amount" in event.payload:
-                costs[holding_key] = self._decimal(event.payload.get("after_cost_amount")) or costs.get(
-                    holding_key, Decimal("0")
-                )
-            cash = (cash or Decimal("0")) + (self._decimal(event.payload.get("cash_delta")) or Decimal("0"))
+                after_cost = self._decimal(event.payload.get("after_cost_amount"))
+                if after_cost is not None:
+                    costs[holding_key] = after_cost
+            cash = (cash if cash is not None else Decimal("0")) + cash_delta
         elif total_assets is not None and share_count:
             nav = total_assets / share_count
 

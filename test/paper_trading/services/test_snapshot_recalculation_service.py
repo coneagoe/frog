@@ -1,18 +1,21 @@
+import os
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.domain.enums import OrderSide
 from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService
 from paper_trading.services.snapshot_service import SnapshotService
+from paper_trading.storage.enum_migration import migrate_paper_trading_enums
 from paper_trading.storage.market_data import DailyBar
-from paper_trading.storage.models import PaperValuationGap
+from paper_trading.storage.models import PaperAccount, PaperAccountSnapshot, PaperCashLedger, PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from test.paper_trading.fakes import FakeMarketDataProvider, MarketDataProviderCompatibility
@@ -383,3 +386,46 @@ def test_recalculation_uses_pending_settlement_business_date_after_settlement(tm
         assert snapshots[settle_date].pending_settlement == Decimal("0")
     finally:
         session.close()
+
+
+def test_postgresql_recalculation_persists_snapshots_and_gaps():
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    schema_name = f"task3_recalc_{uuid.uuid4().hex}"
+    engine = create_engine(url, connect_args={"options": f"-csearch_path={schema_name}"})
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+        migrate_paper_trading_enums(connection)
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            PaperAccount.__table__,
+            PaperCashLedger.__table__,
+            PaperAccountSnapshot.__table__,
+            PaperValuationGap.__table__,
+        ],
+    )
+    factory = sessionmaker(bind=engine)
+    session = factory()
+    start_date = date(2026, 8, 25)
+    end_date = date(2026, 8, 26)
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("postgres-recalculation", Decimal("100"))
+        account_id = account.id
+        session.commit()
+        result = SnapshotRecalculationService(factory, FakeMarketDataProvider()).recalculate(
+            account_id, start_date, end_date
+        )
+        assert result.updated_dates == [start_date, end_date]
+        assert result.unavailable_dates == []
+        assert result.failed_dates == []
+        rows = [row for row in repo.list_snapshots(account_id) if row.point_type == "trading"]
+        assert [row.trade_date for row in rows] == [start_date, end_date]
+        assert all(row.total_assets == Decimal("100") for row in rows)
+    finally:
+        session.close()
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        engine.dispose()

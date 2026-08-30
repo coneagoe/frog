@@ -217,7 +217,7 @@ class SnapshotRecalculationService:
                 continue
             market_values = {
                 f"{item.market or ''}:{item.symbol}": holdings[f"{item.market or ''}:{item.symbol}"]
-                * (item.price or Decimal("0"))
+                * (item.price if item.price is not None else Decimal("0"))
                 for item in resolved
             }
             market_value = sum(market_values.values(), Decimal("0"))
@@ -265,9 +265,9 @@ class SnapshotRecalculationService:
     def _snapshot_values(
         repo: PaperTradingRepository, account_id: int, trade_date: date, point: Any, event_at: datetime
     ) -> dict[str, Any]:
-        cash = point.cash or Decimal("0")
+        cash = point.cash if point.cash is not None else Decimal("0")
         cash_frozen = point.cash_frozen
-        total_assets = point.total_assets or Decimal("0")
+        total_assets = point.total_assets if point.total_assets is not None else Decimal("0")
         pending_settlement = point.pending_settlement
         market_value = total_assets - cash - cash_frozen - pending_settlement
         return {
