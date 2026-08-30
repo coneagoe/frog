@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -52,15 +52,11 @@ class SnapshotRecalculationService:
                 for snapshot in repo.list_snapshots(account_id)
                 if snapshot.point_type == SnapshotPointType.TRADING.value
             }
-            all_events = repo.list_replay_events(account_id)
             builder = NavSeriesBuilder(repo=repo)
-            all_events = builder._enrich_initial_events(account_id, all_events)
-            baseline = builder._baseline_from_events(all_events)
-            if baseline is None:
-                raise ValueError("baseline is not provably reconstructible")
+            all_events, baseline = builder.prepare(account_id)
             events = [
                 event
-                for event in builder._deduplicate_trade_settlements(all_events)
+                for event in all_events
                 if event.event_type not in {NavReplayEventType.INITIAL, NavReplayEventType.MARKET_VALUATION}
             ]
             valuation_events, gaps, valuation_failures = self._valuation_events(
@@ -154,7 +150,8 @@ class SnapshotRecalculationService:
             for event in repo.list_replay_events(account_id)
             if event.trade_date is not None and start_date <= event.trade_date <= end_date
         }
-        return sorted(snapshot_dates | gap_dates | event_dates | {start_date})
+        active_dates = {start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)}
+        return sorted(snapshot_dates | gap_dates | event_dates | active_dates)
 
     def _valuation_events(
         self,

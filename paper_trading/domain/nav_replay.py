@@ -67,6 +67,7 @@ class NavSeriesReplay:
         state.setdefault("cumulative_withdrawal", Decimal("0"))
         state.setdefault("pending_settlement", Decimal("0"))
         state.setdefault("cash_frozen", Decimal("0"))
+        state.setdefault("market_value", Decimal("0"))
         points: list[NavPoint] = []
         ordered_events = sorted(events, key=self._sort_key)
         for previous, event in zip(ordered_events, ordered_events[1:]):
@@ -96,6 +97,7 @@ class NavSeriesReplay:
         cumulative_withdrawal = self._decimal(state.get("cumulative_withdrawal")) or Decimal("0")
         pending_settlement = self._decimal(state.get("pending_settlement")) or Decimal("0")
         cash_frozen = self._decimal(state.get("cash_frozen")) or Decimal("0")
+        market_value = self._decimal(state.get("market_value")) or Decimal("0")
         valuation_quality = event.payload.get("valuation_quality")
         valuation_details = tuple(event.payload.get("valuation_details", ()))
 
@@ -132,6 +134,7 @@ class NavSeriesReplay:
                 nav = None
             else:
                 total_assets = valuation_total
+                market_value = total_assets - (cash or Decimal("0")) - cash_frozen - pending_settlement
             if valuation_total is not None and share_count:
                 nav = valuation_total / share_count
         elif event.event_type is NavReplayEventType.INITIAL:
@@ -144,6 +147,7 @@ class NavSeriesReplay:
             if nav is None and total_assets is not None and share_count:
                 nav = total_assets / share_count
             cash = total_assets
+            market_value = Decimal("0")
             cumulative_deposit = self._decimal(event.payload.get("cumulative_deposit")) or total_assets or Decimal("0")
             cumulative_withdrawal = self._decimal(event.payload.get("cumulative_withdrawal")) or Decimal("0")
             pending_settlement = self._decimal(event.payload.get("pending_settlement")) or Decimal("0")
@@ -178,25 +182,36 @@ class NavSeriesReplay:
                 holding_key = f"{market}:{symbol}"
                 sign = Decimal("1") if side == "sell" else Decimal("-1")
                 reduction = Decimal("0")
-                if market != "hk_connect" or side != "sell":
-                    cash = (cash or Decimal("0")) + sign * amount - fees
+                frozen_cost = Decimal("0")
                 current_quantity = holdings.get(holding_key, Decimal("0"))
                 current_cost = costs.get(holding_key, Decimal("0"))
                 if side == "buy":
+                    frozen_cost = amount + fees
+                consumes_frozen = side == "buy" and cash_frozen >= frozen_cost and frozen_cost > 0
+                if side == "buy" and cash_frozen > 0 and not consumes_frozen:
+                    raise ValueError("buy trade exceeds frozen cash")
+                if side == "buy":
+                    market_value += amount
+                    if not consumes_frozen:
+                        cash = (cash or Decimal("0")) - frozen_cost
+                elif market != "hk_connect":
+                    cash = (cash or Decimal("0")) + sign * amount - fees
+                else:
+                    pending_settlement += amount - fees
+                if side == "buy":
                     holdings[holding_key] = current_quantity + quantity
                     costs[holding_key] = current_cost + amount + fees
+                    if consumes_frozen:
+                        cash_frozen -= frozen_cost
                 else:
                     if quantity > current_quantity:
                         raise ValueError("sell quantity exceeds replay holdings")
                     reduction = current_cost * quantity / current_quantity if current_quantity else Decimal("0")
+                    market_reduction = market_value * quantity / current_quantity if current_quantity else Decimal("0")
                     holdings[holding_key] = current_quantity - quantity
                     costs[holding_key] = current_cost - reduction
-                    if market == "hk_connect":
-                        pending_settlement += amount - fees
-                if market == "hk_connect" and side == "sell":
-                    total_assets = (total_assets or Decimal("0")) + amount - fees - reduction
-                else:
-                    total_assets = (total_assets or Decimal("0")) - fees
+                    market_value -= market_reduction
+                total_assets = (cash or Decimal("0")) + cash_frozen + pending_settlement + market_value
                 if share_count:
                     nav = total_assets / share_count
         elif event.event_type is NavReplayEventType.CORPORATE_ACTION:
@@ -218,6 +233,7 @@ class NavSeriesReplay:
                     holding_key, Decimal("0")
                 )
             cash = (cash or Decimal("0")) + (self._decimal(event.payload.get("cash_delta")) or Decimal("0"))
+            market_value = total_assets - (cash or Decimal("0")) - cash_frozen - pending_settlement
         elif total_assets is not None and share_count:
             nav = total_assets / share_count
 
@@ -249,6 +265,7 @@ class NavSeriesReplay:
         state["cumulative_withdrawal"] = cumulative_withdrawal
         state["pending_settlement"] = pending_settlement
         state["cash_frozen"] = cash_frozen
+        state["market_value"] = market_value
         state["total_assets"] = total_assets
         state["share_count"] = share_count
         if valid:

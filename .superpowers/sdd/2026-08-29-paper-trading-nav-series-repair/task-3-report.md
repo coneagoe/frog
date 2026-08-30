@@ -201,6 +201,60 @@ All checks passed!
 
 `git diff --check`: passed.
 
+## Final Repair
+
+- `paper_trading/domain/nav_replay.py`
+  - Treats negative FREEZE ledger amounts as transfers from available cash to
+    frozen cash; RELEASE transfers the recorded amount back without changing
+    total assets.
+  - A buy trade consumes `amount + fees` from frozen cash when that freeze fact
+    exists, and does not debit the amount or fees a second time. Legacy direct
+    trade replay remains supported when no freeze fact exists.
+  - Replay maintains the accounting identity
+    `cash_available + cash_frozen + pending_settlement + market_value` and
+    preserves holdings/cost state across invalid valuation points.
+
+- `paper_trading/services/nav_series.py`
+  - Exposes `NavSeriesBuilder.prepare(account_id)`, returning normalized replay
+    events and the proven baseline for recalculation callers.
+  - Normalizes linked HK settlement ledger events to the pending settlement's
+    `expected_settle_date` and end-of-business UTC timestamp after settlement;
+    no matching or settlement business code was changed.
+
+- `paper_trading/services/snapshot_recalculation_service.py`
+  - Uses only the public preparation API and generates every active date in the
+    requested inclusive range, including cash-only dates.
+  - Keeps expected missing/stale valuation conditions visible as unavailable
+    gaps while provider/replay failures remain failed errors with rollback.
+
+## Final Repair Verification
+
+```text
+tools/run_tests.sh test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py -q
+```
+
+```text
+49 passed in 5.76s
+```
+
+The PostgreSQL-backed runner started its isolated `test_db` service. Scoped
+Ruff format/check and `git diff --check` also passed. Added regression coverage
+executes a repository-backed FREEZE -> trade -> RELEASE path and the complete
+`create_pending_settlement -> settle_pending -> list_replay_events -> prepare
+-> recalculate` HK settlement path. Existing coverage continues to verify
+initial cumulative cash flow, backdated cash flow, stale/revised valuation,
+holdings/cost, corporate actions, market+symbol keys, idempotency, gap-state
+preservation, failure classification, and external-session rollback.
+
+## Final Concerns
+
+- The new settlement-date normalization is intentionally implemented in the
+  Task 3 NAV preparation layer because settlement storage does not persist a
+  separate processing timestamp/business date on the cash-ledger row.
+- The focused PostgreSQL run covers the Task 3 replay and recalculation tests;
+  unrelated repository-wide tests were not changed or required for this
+  scoped repair.
+
 ## Final Audit Follow-up
 
 - Replay now carries `cash_frozen` in addition to available cash and pending

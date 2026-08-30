@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from paper_trading.domain.enums import OrderSide
+from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import DailyBar
@@ -307,3 +308,78 @@ def test_recalculation_classifies_provider_failure_as_failed_not_unavailable(tmp
         SnapshotRecalculationService(factory, ProviderFailure()).recalculate(
             account_id, date(2026, 8, 25), date(2026, 8, 25)
         )
+
+
+def test_recalculation_uses_pending_settlement_business_date_after_settlement(tmp_path):
+    factory = _sqlite_factory(tmp_path)
+    session = factory()
+    trade_date = date.today() - timedelta(days=3)
+    settle_date = date.today() + timedelta(days=2)
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("settlement-business-date", Decimal("1000"))
+        buy = repo.create_trade(
+            1,
+            account.id,
+            "000001",
+            OrderSide.BUY,
+            10,
+            Decimal("10"),
+            Decimal("100"),
+            Decimal("5"),
+            trade_date,
+            market="hk_connect",
+            trade_time=datetime.combine(trade_date, datetime.min.time(), tzinfo=timezone.utc),
+        )
+        sell = repo.create_trade(
+            1,
+            account.id,
+            "000001",
+            OrderSide.SELL,
+            10,
+            Decimal("12"),
+            Decimal("120"),
+            Decimal("1"),
+            trade_date,
+            market="hk_connect",
+            trade_time=datetime.combine(trade_date, datetime.min.time(), tzinfo=timezone.utc).replace(minute=1),
+        )
+        repo.add_cash_event(
+            account.id,
+            "freeze",
+            Decimal("-105"),
+            trade_id=buy.id,
+            trade_date=trade_date,
+            occurred_at=datetime.combine(trade_date, datetime.min.time(), tzinfo=timezone.utc),
+        )
+        pending = repo.create_pending_settlement(account.id, Decimal("119"), settle_date, trade_id=sell.id)
+        repo.settle_pending(pending.id)
+        account_id = account.id
+        session.commit()
+    finally:
+        session.close()
+
+    result = SnapshotRecalculationService(factory, FakeMarketDataProvider()).recalculate(
+        account_id, trade_date, settle_date
+    )
+
+    assert result.updated_dates == [trade_date + timedelta(days=offset) for offset in range(6)]
+    session = factory()
+    try:
+        replay_events = NavSeriesBuilder(repo=PaperTradingRepository(session)).prepare(account_id)[0]
+        settlement = next(
+            event
+            for event in replay_events
+            if event.source_id.startswith("paper_cash_ledger:") and event.payload.get("ledger_event_type") == "trade"
+        )
+        assert settlement.trade_date == settle_date
+        assert settlement.event_at.date() == settle_date
+        snapshots = {
+            row.trade_date: row
+            for row in PaperTradingRepository(session).list_snapshots(account_id)
+            if row.point_type == "trading"
+        }
+        assert snapshots[settle_date].cash_available == Decimal("1014")
+        assert snapshots[settle_date].pending_settlement == Decimal("0")
+    finally:
+        session.close()

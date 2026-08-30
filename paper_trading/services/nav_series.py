@@ -1,10 +1,11 @@
 from collections.abc import Callable, Mapping
-from datetime import date
+from datetime import date, datetime, time, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, cast
 
 from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType, SnapshotQualityStatus
 from paper_trading.domain.nav_replay import NavSeriesReplay, ReplayEvent, ReplayResult
+from paper_trading.storage.models import PaperPendingSettlement
 
 _PROVABLE_BASELINE_SOURCES = frozenset({"creation", "ledger", "history"})
 
@@ -35,13 +36,7 @@ class NavSeriesBuilder:
         start_date: date | None = None,
         end_date: date | None = None,
     ) -> ReplayResult:
-        events = self._event_loader(account_id)
-        if self._repo is not None:
-            events = self._enrich_initial_events(account_id, events)
-        events = self._deduplicate_trade_settlements(events)
-        baseline = self._baseline_from_events(events)
-        if baseline is None:
-            raise ValueError("baseline is not provably reconstructible")
+        events, baseline = self.prepare(account_id)
         replayed = self._replay.replay(events, baseline)
         points = [
             point
@@ -50,6 +45,18 @@ class NavSeriesBuilder:
             and (end_date is None or point.trade_date <= end_date)
         ]
         return ReplayResult(points=tuple(points))
+
+    def prepare(self, account_id: int) -> tuple[list[ReplayEvent], dict[str, Any]]:
+        """Return normalized, deduplicated replay facts and their proven baseline."""
+        events = self._event_loader(account_id)
+        if self._repo is not None:
+            events = self._enrich_initial_events(account_id, events)
+            events = self._normalize_hk_settlement_dates(account_id, events)
+        events = self._deduplicate_trade_settlements(events)
+        baseline = self._baseline_from_events(events)
+        if baseline is None:
+            raise ValueError("baseline is not provably reconstructible")
+        return events, baseline
 
     def _enrich_initial_events(self, account_id: int, events: list[ReplayEvent]) -> list[ReplayEvent]:
         if self._repo is None:
@@ -84,6 +91,44 @@ class NavSeriesBuilder:
             )
         return enriched
 
+    def _normalize_hk_settlement_dates(self, account_id: int, events: list[ReplayEvent]) -> list[ReplayEvent]:
+        if self._repo is None:
+            return events
+        hk_trade_ids = {
+            trade.id
+            for trade in self._repo.list_trades(account_id)
+            if trade.market == "hk_connect" and trade.side == "sell"
+        }
+        settlement_dates = {
+            row.trade_id: row.expected_settle_date
+            for row in self._repo.session.query(PaperPendingSettlement)
+            .filter(PaperPendingSettlement.account_id == account_id)
+            .all()
+            if row.trade_id in hk_trade_ids
+        }
+        normalized: list[ReplayEvent] = []
+        for event in events:
+            settle_date = settlement_dates.get(event.payload.get("trade_id"))
+            if (
+                event.source_kind != "paper_cash_ledger"
+                or event.payload.get("ledger_event_type") != "trade"
+                or settle_date is None
+            ):
+                normalized.append(event)
+                continue
+            normalized.append(
+                ReplayEvent(
+                    event_at=datetime.combine(settle_date, time.max, tzinfo=timezone.utc),
+                    trade_date=settle_date,
+                    event_type=event.event_type,
+                    source_id=event.source_id,
+                    source_kind=event.source_kind,
+                    payload=event.payload,
+                    quality_status=event.quality_status,
+                )
+            )
+        return normalized
+
     @staticmethod
     def _deduplicate_trade_settlements(events: list[ReplayEvent]) -> list[ReplayEvent]:
         trade_ids = {
@@ -105,7 +150,11 @@ class NavSeriesBuilder:
                 event.source_kind == "paper_cash_ledger"
                 and event.event_type is NavReplayEventType.TRADE_SETTLEMENT
                 and (
-                    (event.payload.get("trade_id") in trade_ids and event.payload.get("trade_id") not in hk_trade_ids)
+                    (
+                        event.payload.get("trade_id") in trade_ids
+                        and event.payload.get("trade_id") not in hk_trade_ids
+                        and event.payload.get("ledger_event_type") == "trade"
+                    )
                     or event.payload.get("ledger_event_type") == "corporate_action"
                 )
             )

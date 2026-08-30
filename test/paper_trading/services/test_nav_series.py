@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType, SnapshotQualityStatus
+from paper_trading.domain.enums import NavBaselineEligibility, NavReplayEventType, OrderSide, SnapshotQualityStatus
 from paper_trading.domain.nav_replay import ReplayEvent
 from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.storage.repository import PaperTradingRepository
@@ -153,6 +153,53 @@ def test_repository_builder_preserves_initial_cumulative_cash_flow_fields(tmp_pa
         assert result.points[0].cumulative_deposit == Decimal("125")
         assert result.points[0].cumulative_withdrawal == Decimal("25")
         assert result.points[0].net_cash_flow == Decimal("100")
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_repository_replay_does_not_double_debit_freeze_trade_release(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'builder_freeze.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("repository-builder-freeze", Decimal("100"))
+        occurred_at = datetime.now(timezone.utc) + timedelta(days=1)
+        trade = repo.create_trade(
+            1,
+            account.id,
+            "000001",
+            OrderSide.BUY,
+            10,
+            Decimal("8"),
+            Decimal("80"),
+            Decimal("0"),
+            occurred_at.date(),
+            trade_time=occurred_at,
+        )
+        repo.add_cash_event(
+            account.id,
+            "freeze",
+            Decimal("-100"),
+            trade_id=trade.id,
+            trade_date=occurred_at.date(),
+            occurred_at=occurred_at - timedelta(minutes=2),
+        )
+        repo.add_cash_event(
+            account.id,
+            "release",
+            Decimal("20"),
+            trade_id=trade.id,
+            trade_date=occurred_at.date(),
+            occurred_at=occurred_at + timedelta(minutes=2),
+        )
+
+        point = NavSeriesBuilder(repo=repo).build(account.id).points[-1]
+
+        assert point.cash == Decimal("20")
+        assert point.cash_frozen == Decimal("0")
+        assert point.total_assets == Decimal("100")
     finally:
         session.close()
         engine.dispose()

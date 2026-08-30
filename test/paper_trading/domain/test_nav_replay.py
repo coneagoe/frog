@@ -333,6 +333,58 @@ def test_replay_moves_cash_between_available_and_frozen_without_changing_assets(
     assert points[-1].total_assets == Decimal("100")
 
 
+def test_replay_consumes_frozen_buy_cash_once_then_releases_remainder():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL,
+            "initial",
+            {"opening_cash": Decimal("100"), "opening_shares": Decimal("100")},
+        ),
+        ReplayEvent(
+            event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 26),
+            event_type=NavReplayEventType.TRADE_SETTLEMENT,
+            source_id="freeze",
+            source_kind="paper_cash_ledger",
+            payload={"amount": Decimal("-85"), "ledger_event_type": "freeze"},
+            quality_status=SnapshotQualityStatus.VALID,
+        ),
+        ReplayEvent(
+            event_at=datetime(2026, 8, 26, 0, 1, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 26),
+            event_type=NavReplayEventType.TRADE_SETTLEMENT,
+            source_id="trade",
+            source_kind="paper_trades",
+            payload={
+                "side": "buy",
+                "market": "a_share",
+                "symbol": "000001",
+                "quantity": Decimal("10"),
+                "price": Decimal("8"),
+                "amount": Decimal("80"),
+                "fees": Decimal("5"),
+            },
+            quality_status=SnapshotQualityStatus.VALID,
+        ),
+        ReplayEvent(
+            event_at=datetime(2026, 8, 26, 0, 2, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 26),
+            event_type=NavReplayEventType.TRADE_SETTLEMENT,
+            source_id="release",
+            source_kind="paper_cash_ledger",
+            payload={"amount": Decimal("0"), "ledger_event_type": "release"},
+            quality_status=SnapshotQualityStatus.VALID,
+        ),
+    ]
+
+    points = NavSeriesReplay().replay(events, initial_state={}).points
+
+    assert points[2].cash == Decimal("15")
+    assert points[2].cash_frozen == Decimal("0")
+    assert points[2].total_assets == Decimal("95")
+    assert points[2].holdings == {"a_share:000001": Decimal("10")}
+
+
 def test_cash_flow_rejects_conflicting_pre_and_post_asset_payload():
     event = _event(
         NavReplayEventType.CASH_FLOW,
