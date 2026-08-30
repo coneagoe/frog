@@ -866,6 +866,38 @@ def test_nav_series_migration_marks_unproven_existing_initial_for_repair():
         _drop_isolated_postgres_schema(engine, bound, schema)
 
 
+def test_nav_series_migration_marks_unproven_corporate_action_for_repair():
+    engine, bound, schema = _isolated_postgres_schema()
+    try:
+        with bound.begin() as connection:
+            _create_legacy_schema(connection)
+            connection.execute(
+                text(
+                    "CREATE TABLE paper_corporate_actions (id integer PRIMARY KEY, account_id integer NOT NULL, "
+                    "event_at timestamptz, affected_start_date date, affected_end_date date, "
+                    "event_time_provenance varchar(20))"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at) "
+                    "VALUES (1, 'unproven-corporate-action', 10000, 10000, '2026-01-01 08:00:00+00')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO paper_corporate_actions VALUES "
+                    "(1, 1, '2026-01-02 16:00:00+00', '2026-01-02', '2026-01-01', NULL)"
+                )
+            )
+
+        ensure_paper_trading_schema(bound)
+
+        assert _repair_reasons(bound) == {1: "legacy_ordering_uncertain"}
+    finally:
+        _drop_isolated_postgres_schema(engine, bound, schema)
+
+
 def test_nav_series_migration_marks_pre_creation_snapshot_event_time_and_date():
     engine, bound, schema = _isolated_postgres_schema()
     try:
@@ -1577,6 +1609,115 @@ def test_sqlite_legacy_invalid_cash_allocation_marks_account_for_repair(tmp_path
             text(
                 "INSERT INTO paper_cash_ledger VALUES "
                 "(1, 1, 'deposit', 100, 10, 5, 0, '2026-01-02 16:00:00', '2026-01-02', 'canonical_utc')"
+            )
+        )
+
+    ensure_paper_trading_schema(engine)
+
+    assert _repair_reasons(engine) == {1: "legacy_ordering_uncertain"}
+    engine.dispose()
+
+
+def test_sqlite_legacy_snapshots_without_cash_ledger_mark_account_for_repair(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'missing_ledger.db'}")
+    with engine.begin() as connection:
+        _create_sqlite_legacy_snapshot_schema(connection)
+        connection.execute(
+            text(
+                "INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at) "
+                "VALUES (1, 'missing-ledger', 10000, 10000, '2026-01-01 08:00:00')"
+            )
+        )
+        for column in (
+            "point_type VARCHAR(20) DEFAULT 'trading'",
+            "event_at DATETIME",
+            "quality_status VARCHAR(20) DEFAULT 'valid'",
+            "event_time_provenance VARCHAR(20)",
+        ):
+            connection.execute(text(f"ALTER TABLE paper_account_snapshots ADD COLUMN {column}"))
+        connection.execute(
+            text(
+                """
+                INSERT INTO paper_account_snapshots (
+                    id, account_id, trade_date, point_type, event_at, quality_status, event_time_provenance,
+                    cash_available, cash_frozen, market_value, total_assets, realized_pnl, unrealized_pnl,
+                    position_count, order_count, trade_count, net_asset_value, created_at
+                ) VALUES (1, 1, '2026-01-02', 'trading', '2026-01-02 16:00:00', 'valid', 'canonical_utc',
+                          9000, 0, 0, 9000, 0, 0, 0, 0, 0, 1, '2026-01-02 16:00:00')
+                """
+            )
+        )
+
+    ensure_paper_trading_schema(engine)
+
+    assert _repair_reasons(engine) == {1: "legacy_ordering_uncertain"}
+    engine.dispose()
+
+
+@pytest.mark.parametrize("table_name", ["paper_cash_ledger", "paper_trades"])
+def test_sqlite_legacy_replay_source_without_provenance_marks_account_for_repair(tmp_path, table_name):
+    engine = create_engine(f"sqlite:///{tmp_path / f'{table_name}_provenance.db'}")
+    with engine.begin() as connection:
+        _create_sqlite_legacy_snapshot_schema(connection)
+        connection.execute(
+            text(
+                "INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at) "
+                "VALUES (1, 'unknown-source-provenance', 10000, 10000, '2026-01-01 08:00:00')"
+            )
+        )
+        if table_name == "paper_cash_ledger":
+            connection.execute(
+                text(
+                    "CREATE TABLE paper_cash_ledger (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, "
+                    "event_type VARCHAR(20), amount NUMERIC, net_asset_value NUMERIC, share_delta NUMERIC, "
+                    "rounding_residual NUMERIC, occurred_at DATETIME, trade_date DATE, "
+                    "event_time_provenance VARCHAR(20))"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO paper_cash_ledger VALUES "
+                    "(1, 1, 'deposit', 100, 10, 10, 0, '2026-01-02 16:00:00', '2026-01-02', NULL)"
+                )
+            )
+        else:
+            connection.execute(
+                text(
+                    "CREATE TABLE paper_trades (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, "
+                    "trade_time DATETIME, trade_date DATE, event_time_provenance VARCHAR(20))"
+                )
+            )
+            connection.execute(
+                text("INSERT INTO paper_trades VALUES (1, 1, '2026-01-02 16:00:00', '2026-01-02', NULL)")
+            )
+
+    ensure_paper_trading_schema(engine)
+
+    assert _repair_reasons(engine) == {1: "legacy_ordering_uncertain"}
+    engine.dispose()
+
+
+def test_sqlite_legacy_corporate_action_without_provenance_marks_account_for_repair(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'corporate_action.db'}")
+    with engine.begin() as connection:
+        _create_sqlite_legacy_snapshot_schema(connection)
+        connection.execute(
+            text(
+                "INSERT INTO paper_accounts (id, name, initial_cash, share_count, created_at) "
+                "VALUES (1, 'unknown-corporate-action', 10000, 10000, '2026-01-01 08:00:00')"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE paper_corporate_actions (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, "
+                "event_at DATETIME, affected_start_date DATE, affected_end_date DATE, "
+                "event_time_provenance VARCHAR(20))"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO paper_corporate_actions VALUES "
+                "(1, 1, '2026-01-02 16:00:00', '2026-01-02', '2026-01-02', NULL)"
             )
         )
 

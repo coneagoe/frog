@@ -493,6 +493,7 @@ _LEGACY_CHRONOLOGY_SOURCES = (
     (tb_name_paper_account_snapshots, ("event_at", "created_at"), ("trade_date",)),
     (tb_name_paper_cash_ledger, ("occurred_at",), ("trade_date",)),
     (tb_name_paper_trades, ("trade_time",), ("trade_date",)),
+    (tb_name_paper_corporate_actions, ("event_at",), ("affected_start_date", "affected_end_date")),
     (tb_name_paper_orders, ("created_at",), ("trade_date",)),
     (tb_name_paper_position_lots, (), ("buy_trade_date",)),
     (tb_name_paper_position_round_trips, (), ("open_trade_date", "close_trade_date")),
@@ -4379,6 +4380,13 @@ class StorageDb:
 
     def _sqlite_legacy_source_predicates(self, conn) -> list[str]:
         predicates: list[str] = []
+        if not inspect(conn).has_table(tb_name_paper_cash_ledger) and inspect(
+            conn
+        ).has_table(tb_name_paper_account_snapshots):
+            predicates.append(
+                f"EXISTS (SELECT 1 FROM {tb_name_paper_account_snapshots} AS source "
+                "WHERE source.account_id = account.id AND source.point_type IS NOT 'initial')"
+            )
         for table_name, timestamp_columns, date_columns in _LEGACY_CHRONOLOGY_SOURCES:
             if not inspect(conn).has_table(table_name):
                 continue
@@ -4404,13 +4412,15 @@ class StorageDb:
                     for date_column in date_columns
                 )
             checks = " OR ".join((*timestamp_checks, *date_checks)) + conflict
-            if table_name == tb_name_paper_account_snapshots:
+            if table_name in _SQLITE_PAPER_REPLAY_PROVENANCE_TABLES:
                 provenance = (
                     "source.event_time_provenance IS NOT 'canonical_utc'"
                     if "event_time_provenance" in columns
                     else "1 = 1"
                 )
-                checks = f"{checks} OR {provenance} OR source.quality_status IS NOT 'valid'"
+                checks = f"{checks} OR {provenance}"
+            if table_name == tb_name_paper_account_snapshots:
+                checks = f"{checks} OR source.quality_status IS NOT 'valid'"
             if table_name == tb_name_paper_cash_ledger:
                 checks = f"{checks} OR {self._sqlite_legacy_cash_ledger_invalid(columns)}"
             predicates.append(
