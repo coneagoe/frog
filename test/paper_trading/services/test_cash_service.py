@@ -471,6 +471,44 @@ def test_cash_flow_incomplete_persisted_allocation_requires_repair(tmp_path, mon
     engine.dispose()
 
 
+@pytest.mark.parametrize("field", ["pricing_nav", "share_delta", "rounding_residual"])
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "not-a-decimal"])
+def test_cash_flow_malformed_persisted_allocation_requires_repair(tmp_path, monkeypatch, field, value):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("malformed-allocation", Decimal("100000.00"))
+    event_at = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("10"),
+        trade_date=event_at.date(),
+        net_asset_value=Decimal("1"),
+        share_delta=Decimal("10"),
+        occurred_at=event_at,
+    )
+    original = repo.list_replay_events
+
+    def malformed(account_id, start_at=None, end_at=None):
+        events = original(account_id, start_at, end_at)
+        return [
+            event.__class__(
+                event.event_at,
+                event.trade_date,
+                event.event_type,
+                event.source_id,
+                event.source_kind,
+                {**event.payload, field: value},
+                event.quality_status,
+            )
+            for event in events
+        ]
+
+    monkeypatch.setattr(repo, "list_replay_events", malformed)
+    with pytest.raises(ValueError, match="invalid Decimal values"):
+        CashService(repo)._replay_from(account, event_at.date())
+    engine.dispose()
+
+
 def test_backdated_withdrawal_rejects_invalid_prior_replay_state(tmp_path, monkeypatch):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("invalid-history", Decimal("100.00"))

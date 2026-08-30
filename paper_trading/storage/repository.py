@@ -902,7 +902,11 @@ class PaperTradingRepository:
                         "amount": self._replay_decimal(ledger.amount, quantize_account_money),
                         "pricing_nav": self._replay_decimal(ledger.net_asset_value, quantize_nav),
                         "share_delta": self._replay_decimal(ledger.share_delta, quantize_shares),
-                        "rounding_residual": self._replay_decimal(ledger.rounding_residual, quantize_rounding_residual),
+                        "rounding_residual": (
+                            self._replay_decimal(ledger.rounding_residual, quantize_rounding_residual)
+                            if ledger.net_asset_value is not None or ledger.share_delta is not None
+                            else None
+                        ),
                         "ledger_event_type": ledger_event_type.value,
                         "order_id": ledger.order_id,
                         "trade_id": ledger.trade_id,

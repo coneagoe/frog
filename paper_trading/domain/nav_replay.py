@@ -129,18 +129,37 @@ class NavSeriesReplay:
             if state.get("total_assets") is not None and pre_total_assets != self._decimal(state["total_assets"]):
                 raise ValueError("cash-flow pre_total_assets conflicts with replay state")
             amount = self._decimal(event.payload.get("amount"))
+            allocation = tuple(
+                event.payload.get(name) for name in ("pricing_nav", "share_delta", "rounding_residual")
+            )
+            has_allocation = any(value is not None for value in allocation)
+            if has_allocation and any(value is None for value in allocation):
+                raise ValueError("cash-flow allocation requires pricing_nav, share_delta, and rounding_residual")
             persisted_pricing_nav = self._decimal(event.payload.get("pricing_nav"))
-            pricing_nav = persisted_pricing_nav if self._valid_nav(persisted_pricing_nav) else nav
+            persisted_share_delta = self._decimal(event.payload.get("share_delta"))
+            persisted_residual = self._decimal(event.payload.get("rounding_residual"))
+            if has_allocation and (
+                not self._valid_nav(persisted_pricing_nav)
+                or persisted_share_delta is None
+                or not persisted_share_delta.is_finite()
+                or persisted_residual is None
+                or not persisted_residual.is_finite()
+            ):
+                raise ValueError("cash-flow allocation contains invalid Decimal values")
+            if has_allocation:
+                assert persisted_pricing_nav is not None
+                assert persisted_share_delta is not None
+                assert persisted_residual is not None
+            pricing_nav = persisted_pricing_nav if has_allocation else nav
             pricing_nav = pricing_nav if self._valid_nav(pricing_nav) else Decimal("1")
-            if pricing_nav is None:
-                pricing_nav = Decimal("1")
+            assert pricing_nav is not None
             cash_amount = amount if amount is not None else Decimal("0")
             prior_total_assets = pre_total_assets if pre_total_assets is not None else Decimal("0")
             total_assets = prior_total_assets + cash_amount
             prior_share_count = share_count if share_count is not None else Decimal("0")
-            persisted_share_delta = self._decimal(event.payload.get("share_delta"))
-            persisted_residual = self._decimal(event.payload.get("rounding_residual"))
-            if persisted_share_delta is not None and persisted_residual is not None:
+            if has_allocation:
+                assert persisted_share_delta is not None
+                assert persisted_residual is not None
                 expected_residual = quantize_rounding_residual(cash_amount - persisted_share_delta * pricing_nav)
                 if persisted_residual != expected_residual:
                     raise ValueError("cash-flow rounding residual conflicts with persisted share_delta")

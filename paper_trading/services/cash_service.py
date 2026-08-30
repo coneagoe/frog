@@ -136,10 +136,21 @@ class CashService:
                 Decimal(str(baseline["share_count"])),
                 self._cash_flow_nav(account_id, occurred_at),
             )
-        point = result.points[-1]
-        if point.quality_status.value != "valid" or point.cash is None or point.share_count is None:
+        if any(point.quality_status.value != "valid" for point in result.points):
             raise ValueError("cash-flow replay could not prove pre-withdrawal state")
-        return point.cash, point.share_count, self._cash_flow_nav(account_id, occurred_at)
+        point = result.points[-1]
+        if point.cash is None or point.share_count is None or point.nav is None:
+            raise ValueError("cash-flow replay could not prove pre-withdrawal state")
+        # A persisted trading snapshot may be a legacy valuation projection
+        # whose asset/share fields do not agree with its stored NAV.  Prefer
+        # the replay point for cash-flow history; retain the repository's
+        # valid snapshot NAV only for that legacy valuation-only boundary.
+        pricing_nav = point.nav
+        if prior_events[-1].event_type is NavReplayEventType.MARKET_VALUATION:
+            persisted_nav = self._cash_flow_nav(account_id, occurred_at)
+            if persisted_nav != quantize_nav(Decimal("1")):
+                pricing_nav = persisted_nav
+        return point.cash, point.share_count, pricing_nav
 
     def _replay_from(self, account: PaperAccount, start_date: date) -> None:
         snapshots = self.repo.list_snapshots(account.id)

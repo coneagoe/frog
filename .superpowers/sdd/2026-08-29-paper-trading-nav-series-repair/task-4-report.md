@@ -128,3 +128,27 @@ Task 3 regression: 54 passed, 3 skipped
 PostgreSQL runner: 27 passed
 Scoped Ruff: All checks passed.
 ```
+
+## Final Review Follow-up
+
+- `NavSeriesReplay` now rejects partial or malformed persisted allocation
+  triples. `pricing_nav` must be positive finite Decimal; `share_delta` and
+  `rounding_residual` must be finite Decimal; their residual identity must
+  match. Completely allocation-free legacy replay events retain the existing
+  compatibility path, while Task 4 cash operations reject them for repair.
+- Backdated withdrawal authorization rejects any invalid event-before-time
+  projection and uses the final valid replay point's NAV for pricing. A
+  persisted non-default snapshot NAV is retained only for an established
+  valuation-only legacy boundary.
+- Added malformed `NaN`, infinity, and non-Decimal allocation coverage for all
+  allocation fields. Existing savepoint coverage continues to verify that
+  recalculation failures preserve caller-owned transaction work.
+
+Verification:
+
+```text
+Task 4 focused: 104 passed, 5 warnings
+Task 3 regression: 54 passed, 3 skipped
+PostgreSQL runner: 39 passed
+Scoped Ruff: All checks passed.
+```
