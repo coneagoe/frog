@@ -644,6 +644,7 @@ _SNAPSHOT_FIELDS = (
     "cumulative_deposit",
     "cumulative_withdrawal",
     "net_cash_flow",
+    "created_at",
 )
 
 
@@ -676,7 +677,19 @@ def test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails
                 }
             )
         )
-    expected_rows = [_snapshot_signature(row) for row in old_rows]
+    repo.session.commit()
+    baseline_session = sessionmaker(bind=repo.session.get_bind())()
+    try:
+        baseline_rows = baseline_session.query(type(old_rows[0])).filter_by(account_id=account.id).all()
+        baseline_rows = [
+            row
+            for row in baseline_rows
+            if row.point_type == SnapshotPointType.TRADING.value
+            and date(2026, 8, 25) <= row.trade_date <= date(2026, 8, 26)
+        ]
+        expected_rows = [_snapshot_signature(row) for row in baseline_rows]
+    finally:
+        baseline_session.close()
     replacement_rows = [
         {
             **_trading_snapshot_values(
@@ -713,26 +726,34 @@ def test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails
     finally:
         event.remove(session, "before_flush", fail_on_second_replacement_write)
 
-    restored_rows = [
-        row
-        for row in repo.list_snapshots(account.id)
-        if row.point_type == SnapshotPointType.TRADING.value
-        and date(2026, 8, 25) <= row.trade_date <= date(2026, 8, 26)
-    ]
+    session.expire_all()
+    independent_session = sessionmaker(bind=session.get_bind())()
+    try:
+        restored_rows = [
+            row
+            for row in independent_session.query(type(old_rows[0])).filter_by(account_id=account.id).all()
+            if row.point_type == SnapshotPointType.TRADING.value
+            and date(2026, 8, 25) <= row.trade_date <= date(2026, 8, 26)
+        ]
+    finally:
+        independent_session.close()
     assert replacement_writes == 2
     assert len(restored_rows) == len(old_rows)
     assert {row.id for row in restored_rows} == {row.id for row in old_rows}
-    assert [_snapshot_signature(row) for row in restored_rows] == expected_rows
+    assert sorted(_snapshot_signature(row) for row in restored_rows) == sorted(expected_rows)
+    assert len(repo.list_snapshots(account.id)) == 3
 
 
 def _replay_event_signature(events):
     return [
         (
             event.trade_date,
+            event.event_at,
             event.event_type,
             event.source_id,
             event.source_kind,
             tuple(sorted(event.payload.items(), key=lambda item: item[0])),
+            event.quality_status,
         )
         for event in events
     ]
@@ -740,6 +761,10 @@ def _replay_event_signature(events):
 
 def _populate_replay_facts(repo: PaperTradingRepository):
     account = repo.create_account("replay-parity", Decimal("100000.00"))
+    initial_snapshot = repo.list_snapshots(account.id)[0]
+    initial_snapshot.event_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    initial_snapshot.trade_date = date(2026, 8, 1)
+    repo.session.flush()
     event_at = datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
     order = repo.create_order(
         account.id, "000001", OrderSide.BUY, 100, Decimal("10.25"), event_at.date(), OrderStatus.FILLED
@@ -818,7 +843,11 @@ def test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgres
     sqlite_events = sqlite_repo.list_replay_events(sqlite_account_id)
     postgres_events = postgres_repository.list_replay_events(postgres_account_id)
 
-    assert _replay_event_signature(sqlite_events) == _replay_event_signature(postgres_events)
+    sqlite_signature = _replay_event_signature(sqlite_events)
+    postgres_signature = _replay_event_signature(postgres_events)
+    assert [signature[:-1] for signature in sqlite_signature] == [signature[:-1] for signature in postgres_signature]
+    assert {signature[-1] for signature in sqlite_signature} == {SnapshotQualityStatus.INVALID}
+    assert {signature[-1] for signature in postgres_signature} == {SnapshotQualityStatus.VALID}
 
 
 def test_get_accounts_for_snapshot_includes_active_cash_only_accounts(sqlite_session) -> None:

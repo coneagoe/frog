@@ -22,13 +22,15 @@ No Task 3+ files and no matching or settlement code were modified.
   `replace_trading_snapshots()`. It creates two existing trading snapshots,
   calls the real `save_trading_snapshot()` for replacement writes, injects an
   exception from the second `before_flush` after the first replacement write,
-  and verifies the old range's complete persisted field signatures, count, and
-  ID set are restored.
+  calls `expire_all()`, reloads through an independent Session, and verifies
+  the old range's complete persisted field signatures including `created_at`,
+  count, and ID set are restored. The original Session is queried again to
+  verify it remains usable.
 - Added a PostgreSQL-backed repository fixture using an isolated schema and the
   canonical paper-trading enum migration. The parity test writes the same
   account, order/trade, cash-ledger, corporate-action, and valuation facts to
-  SQLite and PostgreSQL and compares ordered event identity and complete
-  payloads.
+  SQLite and PostgreSQL and compares ordered event identity, `event_at`,
+  quality status, and complete payloads.
 - Normalized replay Decimal payloads through the existing account-money,
   NAV, and share quantizers. This removes SQLite binary-float residue while
   preserving the repository's 12-decimal precision contract.
@@ -70,7 +72,7 @@ Output summary:
 
 ```text
 collected 129 items
-======================= 127 passed, 2 skipped in 47.61s =======================
+======================= 127 passed, 2 skipped in 52.70s =======================
 ```
 
 The two skipped parameter cases are the PostgreSQL rollback and parity cases
@@ -95,7 +97,7 @@ collected 115 items
 test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[sqlite_repository] PASSED
 test/paper_trading/storage/test_repository.py::test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[postgres_repository] PASSED
 test/paper_trading/storage/test_repository.py::test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql PASSED
-============================= 115 passed in 49.08s =============================
+============================= 115 passed in 54.26s =============================
 ```
 
 Exit status: `0`. The parity test ran against the isolated PostgreSQL service;
@@ -119,11 +121,11 @@ Output: no findings. Exit status: `0`.
 - The runner emits the existing locale warning
   `setlocale: LC_ALL: cannot change locale (en_US.UTF-8)` and Docker's
   `No services to build` warning. Neither affected test execution.
-- The parity assertion intentionally compares event ordering identity and
-  complete payload values. SQLite timezone-aware columns load as naive
-  datetimes in this project; timestamp quality behavior remains covered by the
-  dedicated invalid-naive timestamp test rather than being conflated with
-  Decimal/payload parity.
+- The parity assertion compares event ordering identity, `event_at`, quality
+  status, and complete payload values. SQLite timezone-aware columns load as
+  naive datetimes in this project; the test explicitly records SQLite
+  `INVALID` versus PostgreSQL `VALID` quality while comparing the event
+  timestamp value and all other event content.
 
 ## Final result
 
