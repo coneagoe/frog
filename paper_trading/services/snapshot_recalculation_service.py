@@ -223,6 +223,8 @@ class SnapshotRecalculationService:
                 Decimal("0"),
             )
             cash = Decimal("0") if point is None or point.cash is None else point.cash
+            cash_frozen = Decimal("0") if point is None else point.cash_frozen
+            pending_settlement = Decimal("0") if point is None else point.pending_settlement
             stale_details = tuple(
                 snapshot_service._valuation_detail(item) for item in resolved if item.quality == "stale_suspended"
             )
@@ -234,7 +236,7 @@ class SnapshotRecalculationService:
                     source_id=f"recalculation:valuation:{trade_date.isoformat()}",
                     source_kind="recalculation",
                     payload={
-                        "total_assets": cash + market_value,
+                        "total_assets": cash + cash_frozen + pending_settlement + market_value,
                         "valuation_quality": "stale_suspended" if stale_details else "current",
                         "valuation_details": stale_details,
                     },
@@ -250,8 +252,12 @@ class SnapshotRecalculationService:
             (),
             {
                 "cash": Decimal(str(baseline["cash"])),
+                "cash_frozen": Decimal(str(baseline.get("cash_frozen", "0"))),
+                "pending_settlement": Decimal(str(baseline.get("pending_settlement", "0"))),
                 "holdings": {},
                 "costs": {},
+                "cumulative_deposit": Decimal(str(baseline.get("cumulative_deposit", baseline["cash"]))),
+                "cumulative_withdrawal": Decimal(str(baseline.get("cumulative_withdrawal", "0"))),
             },
         )()
 
@@ -260,9 +266,10 @@ class SnapshotRecalculationService:
         repo: PaperTradingRepository, account_id: int, trade_date: date, point: Any, event_at: datetime
     ) -> dict[str, Any]:
         cash = point.cash or Decimal("0")
+        cash_frozen = point.cash_frozen
         total_assets = point.total_assets or Decimal("0")
         pending_settlement = point.pending_settlement
-        market_value = total_assets - cash - pending_settlement
+        market_value = total_assets - cash - cash_frozen - pending_settlement
         return {
             "account_id": account_id,
             "trade_date": trade_date,
@@ -271,7 +278,7 @@ class SnapshotRecalculationService:
             "valuation_quality": point.valuation_quality or "current",
             "valuation_details": list(point.valuation_details) or None,
             "cash_available": cash,
-            "cash_frozen": Decimal("0"),
+            "cash_frozen": cash_frozen,
             "market_value": market_value,
             "total_assets": total_assets,
             "realized_pnl": Decimal("0"),

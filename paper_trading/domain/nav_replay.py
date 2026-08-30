@@ -49,6 +49,7 @@ class NavPoint:
     cumulative_withdrawal: Decimal = Decimal("0")
     net_cash_flow: Decimal = Decimal("0")
     pending_settlement: Decimal = Decimal("0")
+    cash_frozen: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ class NavSeriesReplay:
         state.setdefault("cumulative_deposit", Decimal("0"))
         state.setdefault("cumulative_withdrawal", Decimal("0"))
         state.setdefault("pending_settlement", Decimal("0"))
+        state.setdefault("cash_frozen", Decimal("0"))
         points: list[NavPoint] = []
         ordered_events = sorted(events, key=self._sort_key)
         for previous, event in zip(ordered_events, ordered_events[1:]):
@@ -93,6 +95,7 @@ class NavSeriesReplay:
         cumulative_deposit = self._decimal(state.get("cumulative_deposit")) or Decimal("0")
         cumulative_withdrawal = self._decimal(state.get("cumulative_withdrawal")) or Decimal("0")
         pending_settlement = self._decimal(state.get("pending_settlement")) or Decimal("0")
+        cash_frozen = self._decimal(state.get("cash_frozen")) or Decimal("0")
         valuation_quality = event.payload.get("valuation_quality")
         valuation_details = tuple(event.payload.get("valuation_details", ()))
 
@@ -144,6 +147,7 @@ class NavSeriesReplay:
             cumulative_deposit = self._decimal(event.payload.get("cumulative_deposit")) or total_assets or Decimal("0")
             cumulative_withdrawal = self._decimal(event.payload.get("cumulative_withdrawal")) or Decimal("0")
             pending_settlement = self._decimal(event.payload.get("pending_settlement")) or Decimal("0")
+            cash_frozen = self._decimal(event.payload.get("cash_frozen")) or Decimal("0")
         elif event.event_type is NavReplayEventType.TRADE_SETTLEMENT:
             amount = self._decimal(event.payload.get("amount")) or Decimal("0")
             fees = self._decimal(event.payload.get("fees")) or Decimal("0")
@@ -153,8 +157,16 @@ class NavSeriesReplay:
             side = str(event.payload.get("side", ""))
             is_cash_projection = not symbol and event.source_kind == "paper_cash_ledger"
             if is_cash_projection:
-                cash = (cash or Decimal("0")) + amount
-                pending_settlement = max(Decimal("0"), pending_settlement - amount)
+                ledger_event_type = event.payload.get("ledger_event_type")
+                if ledger_event_type == "freeze":
+                    cash = (cash or Decimal("0")) + amount
+                    cash_frozen -= amount
+                elif ledger_event_type == "release":
+                    cash = (cash or Decimal("0")) + amount
+                    cash_frozen = max(Decimal("0"), cash_frozen - amount)
+                else:
+                    cash = (cash or Decimal("0")) + amount
+                    pending_settlement = max(Decimal("0"), pending_settlement - amount)
                 if total_assets is not None and share_count:
                     nav = total_assets / share_count
             elif side not in {"buy", "sell"}:
@@ -165,6 +177,7 @@ class NavSeriesReplay:
                 market = str(event.payload.get("market") or "")
                 holding_key = f"{market}:{symbol}"
                 sign = Decimal("1") if side == "sell" else Decimal("-1")
+                reduction = Decimal("0")
                 if market != "hk_connect" or side != "sell":
                     cash = (cash or Decimal("0")) + sign * amount - fees
                 current_quantity = holdings.get(holding_key, Decimal("0"))
@@ -180,9 +193,10 @@ class NavSeriesReplay:
                     costs[holding_key] = current_cost - reduction
                     if market == "hk_connect":
                         pending_settlement += amount - fees
-                total_assets = (total_assets or Decimal("0")) + (
-                    -fees if market == "hk_connect" and side == "sell" else -fees
-                )
+                if market == "hk_connect" and side == "sell":
+                    total_assets = (total_assets or Decimal("0")) + amount - fees - reduction
+                else:
+                    total_assets = (total_assets or Decimal("0")) - fees
                 if share_count:
                     nav = total_assets / share_count
         elif event.event_type is NavReplayEventType.CORPORATE_ACTION:
@@ -226,6 +240,7 @@ class NavSeriesReplay:
             cumulative_withdrawal=cumulative_withdrawal,
             net_cash_flow=cumulative_deposit - cumulative_withdrawal,
             pending_settlement=pending_settlement,
+            cash_frozen=cash_frozen,
         )
         state["cash"] = cash
         state["holdings"] = holdings
@@ -233,6 +248,7 @@ class NavSeriesReplay:
         state["cumulative_deposit"] = cumulative_deposit
         state["cumulative_withdrawal"] = cumulative_withdrawal
         state["pending_settlement"] = pending_settlement
+        state["cash_frozen"] = cash_frozen
         state["total_assets"] = total_assets
         state["share_count"] = share_count
         if valid:

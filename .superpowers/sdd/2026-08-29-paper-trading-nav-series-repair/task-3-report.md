@@ -201,6 +201,45 @@ All checks passed!
 
 `git diff --check`: passed.
 
+## Final Audit Follow-up
+
+- Replay now carries `cash_frozen` in addition to available cash and pending
+  settlement. FREEZE and RELEASE ledger projections move cash between available
+  and frozen balances without changing total assets; HK sell execution retains
+  proceeds as pending until the linked settlement cash projection.
+- Recalculated valuation events use the full identity
+  `cash_available + cash_frozen + pending_settlement + market_value`, and
+  snapshot materialization writes each component separately.
+- Repository initial events retain persisted cumulative deposit/withdrawal
+  semantics, and recalculation enriches its baseline from the same data.
+- Expected missing prices remain unavailable valuation gaps; provider errors
+  are collected as failed dates and errors before replacement.
+- Added focused frozen-cash and component-identity regression coverage while
+  retaining all prior Task 3 settlement, builder, replay, gap, cost, stale,
+  idempotency, and rollback tests.
+
+## Final Audit Verification
+
+```text
+uv run pytest test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+```text
+============================= 88 passed in 16.59s ==============================
+```
+
+```text
+uv run ruff format paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+uv run ruff check paper_trading/domain/nav_replay.py paper_trading/services/nav_series.py paper_trading/services/snapshot_service.py paper_trading/services/snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_service.py test/paper_trading/services/test_snapshot_recalculation_service.py
+```
+
+```text
+8 files left unchanged
+All checks passed!
+```
+
+`git diff --check`: passed.
+
 ## Settlement and Outcome Follow-up
 
 - HK Connect sell executions now remove holdings at execution while retaining

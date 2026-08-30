@@ -290,10 +290,47 @@ def test_hk_sell_defers_cash_until_linked_settlement_ledger():
     points = NavSeriesReplay().replay(events, initial_state={}).points
 
     assert points[2].cash == Decimal("50")
-    assert points[2].total_assets == Decimal("98")
+    assert points[2].total_assets == Decimal("128")
     assert points[2].pending_settlement == Decimal("78")
     assert points[-1].cash == Decimal("128")
     assert points[-1].pending_settlement == Decimal("0")
+
+
+def test_replay_moves_cash_between_available_and_frozen_without_changing_assets():
+    events = [
+        _event(
+            NavReplayEventType.INITIAL,
+            "initial",
+            {"opening_cash": Decimal("100"), "opening_shares": Decimal("100")},
+        ),
+        ReplayEvent(
+            event_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 26),
+            event_type=NavReplayEventType.TRADE_SETTLEMENT,
+            source_id="freeze",
+            source_kind="paper_cash_ledger",
+            payload={"amount": Decimal("-40"), "ledger_event_type": "freeze"},
+            quality_status=SnapshotQualityStatus.VALID,
+        ),
+        ReplayEvent(
+            event_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 27),
+            event_type=NavReplayEventType.TRADE_SETTLEMENT,
+            source_id="release",
+            source_kind="paper_cash_ledger",
+            payload={"amount": Decimal("15"), "ledger_event_type": "release"},
+            quality_status=SnapshotQualityStatus.VALID,
+        ),
+    ]
+
+    points = NavSeriesReplay().replay(events, initial_state={}).points
+
+    assert points[1].cash == Decimal("60")
+    assert points[1].cash_frozen == Decimal("40")
+    assert points[1].total_assets == Decimal("100")
+    assert points[-1].cash == Decimal("75")
+    assert points[-1].cash_frozen == Decimal("25")
+    assert points[-1].total_assets == Decimal("100")
 
 
 def test_cash_flow_rejects_conflicting_pre_and_post_asset_payload():
