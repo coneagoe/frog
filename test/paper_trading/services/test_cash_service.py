@@ -429,8 +429,116 @@ def test_cash_flow_share_delta_without_residual_requires_repair(tmp_path, monkey
         ]
 
     monkeypatch.setattr(repo, "list_replay_events", without_residual)
-    with pytest.raises(ValueError, match="requires rounding_residual repair"):
+    with pytest.raises(ValueError, match="pricing_nav, share_delta, and rounding_residual"):
         CashService(repo)._replay_from(account, event_at.date())
+    engine.dispose()
+
+
+@pytest.mark.parametrize("missing", ["pricing_nav", "share_delta", "rounding_residual"])
+def test_cash_flow_incomplete_persisted_allocation_requires_repair(tmp_path, monkeypatch, missing):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("incomplete-allocation", Decimal("100000.00"))
+    event_at = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("10"),
+        trade_date=event_at.date(),
+        net_asset_value=Decimal("1"),
+        share_delta=Decimal("10"),
+        occurred_at=event_at,
+    )
+    original = repo.list_replay_events
+
+    def incomplete(account_id, start_at=None, end_at=None):
+        events = original(account_id, start_at, end_at)
+        return [
+            event.__class__(
+                event.event_at,
+                event.trade_date,
+                event.event_type,
+                event.source_id,
+                event.source_kind,
+                {key: value for key, value in event.payload.items() if key != missing},
+                event.quality_status,
+            )
+            for event in events
+        ]
+
+    monkeypatch.setattr(repo, "list_replay_events", incomplete)
+    with pytest.raises(ValueError, match="pricing_nav, share_delta, and rounding_residual"):
+        CashService(repo)._replay_from(account, event_at.date())
+    engine.dispose()
+
+
+def test_backdated_withdrawal_rejects_invalid_prior_replay_state(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("invalid-history", Decimal("100.00"))
+    service = CashService(repo)
+    original = repo.list_replay_events
+
+    def invalid_history(account_id, start_at=None, end_at=None):
+        events = original(account_id, start_at, end_at)
+        cash_event = next(event for event in events if event.event_type.value == "cash_flow")
+        return [
+            event
+            if event is not cash_event
+            else cash_event.__class__(
+                cash_event.event_at,
+                cash_event.trade_date,
+                cash_event.event_type,
+                cash_event.source_id,
+                cash_event.source_kind,
+                cash_event.payload,
+                SnapshotQualityStatus.INVALID,
+            )
+            for event in events
+        ]
+
+    service.deposit(
+        account.id,
+        Decimal("10"),
+        date(2026, 7, 20),
+        occurred_at=datetime(2026, 7, 20, 9, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(repo, "list_replay_events", invalid_history)
+    with pytest.raises(ValueError, match="could not prove pre-withdrawal state"):
+        service.withdraw(
+            account.id,
+            Decimal("1"),
+            date(2026, 7, 20),
+            occurred_at=datetime(2026, 7, 20, 10, tzinfo=timezone.utc),
+        )
+    engine.dispose()
+
+
+def test_cash_flow_recalculation_failure_preserves_caller_transaction(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("caller-transaction", Decimal("100.00"))
+    snapshot_at = datetime(2026, 7, 20, 23, tzinfo=timezone.utc)
+    repo.save_trading_snapshot(
+        account_id=account.id,
+        trade_date=snapshot_at.date(),
+        event_at=snapshot_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("100"), cash_frozen=Decimal("0"), market_value=Decimal("0"),
+        total_assets=Decimal("100"), realized_pnl=Decimal("0"), unrealized_pnl=Decimal("0"),
+        position_count=0, order_count=0, trade_count=0, net_asset_value=Decimal("1"),
+    )
+    account.name = "caller-change"
+    session.flush()
+
+    monkeypatch.setattr(
+        "paper_trading.services.snapshot_recalculation_service.SnapshotRecalculationService._valuation_events",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("recalculation failed")),
+    )
+    with pytest.raises(RuntimeError, match="recalculation failed"):
+        CashService(repo).deposit(account.id, Decimal("10"), date(2026, 7, 20))
+    session.commit()
+
+    assert repo.get_account(account.id).name == "caller-change"
+    assert len(repo.list_cash_ledger(account.id)) == 1
     engine.dispose()
 
 

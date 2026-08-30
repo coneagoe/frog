@@ -107,3 +107,24 @@ Task 4 focused: 87 passed, 5 warnings
 Task 3 regression: 54 passed, 3 skipped
 Scoped Ruff: All checks passed.
 ```
+
+## Review Follow-up 3
+
+- Backdated withdrawals now reject a non-valid event-before-`occurred_at`
+  replay point instead of relying only on cash and share fields.
+- Cash-flow allocation facts now require persisted `pricing_nav`, `share_delta`,
+  and `rounding_residual` together. Any absent element is repair-required.
+- The cash-flow boundary passes a rollback-shielded caller session to snapshot
+  recalculation. Its outer savepoint still rolls back the failed cash ledger,
+  while unrelated caller transaction changes remain commit-able.
+- Added coverage for invalid prior replay state, each missing allocation member,
+  and recalculation failure preserving caller-owned changes.
+
+Verification:
+
+```text
+Task 4 focused: 92 passed, 5 warnings
+Task 3 regression: 54 passed, 3 skipped
+PostgreSQL runner: 27 passed
+Scoped Ruff: All checks passed.
+```

@@ -137,7 +137,7 @@ class CashService:
                 self._cash_flow_nav(account_id, occurred_at),
             )
         point = result.points[-1]
-        if point.cash is None or point.share_count is None:
+        if point.quality_status.value != "valid" or point.cash is None or point.share_count is None:
             raise ValueError("cash-flow replay could not prove pre-withdrawal state")
         return point.cash, point.share_count, self._cash_flow_nav(account_id, occurred_at)
 
@@ -151,7 +151,7 @@ class CashService:
             end_date = max(max(trading_dates), start_date)
             SnapshotRecalculationService(
                 lambda: self.repo.session, cast(MarketDataProvider, self.market_data)
-            ).recalculate(account.id, start_date, end_date, session=self.repo.session)
+            ).recalculate(account.id, start_date, end_date, session=_NoRollbackSession(self.repo.session))
 
         events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account.id)
         self._require_complete_cash_allocations(events)
@@ -178,6 +178,23 @@ class CashService:
     @staticmethod
     def _require_complete_cash_allocations(events) -> None:
         for event in events:
-            if event.event_type is NavReplayEventType.CASH_FLOW and event.payload.get("share_delta") is not None:
-                if event.payload.get("rounding_residual") is None:
-                    raise ValueError("cash-flow share_delta requires rounding_residual repair")
+            if event.event_type is not NavReplayEventType.CASH_FLOW:
+                continue
+            allocation = (
+                event.payload.get("pricing_nav"),
+                event.payload.get("share_delta"),
+                event.payload.get("rounding_residual"),
+            )
+            if any(value is None for value in allocation):
+                raise ValueError("cash-flow allocation requires pricing_nav, share_delta, and rounding_residual repair")
+
+
+class _NoRollbackSession:
+    def __init__(self, session):
+        self._session = session
+
+    def rollback(self) -> None:
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
