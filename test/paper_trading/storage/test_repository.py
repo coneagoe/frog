@@ -591,8 +591,8 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
         Decimal("100"),
         Decimal("1"),
         event_at.date(),
+        trade_time=event_at,
     )
-    trade.trade_time = event_at
     action = repo.create_corporate_action(
         account_id=account.id, symbol="000001", event_type=CorporateActionType.DIVIDEND,
         event_at=event_at, idempotency_key="mixed-dividend", parameters={"per_share_amount": "1"},
@@ -924,7 +924,7 @@ def _populate_replay_facts(repo: PaperTradingRepository):
     order = repo.create_order(
         account.id, "000001", OrderSide.BUY, 100, Decimal("10.25"), event_at.date(), OrderStatus.FILLED
     )
-    trade = repo.create_trade(
+    repo.create_trade(
         order.id,
         account.id,
         "000001",
@@ -934,8 +934,8 @@ def _populate_replay_facts(repo: PaperTradingRepository):
         Decimal("1025.00"),
         Decimal("5.00"),
         event_at.date(),
+        trade_time=event_at,
     )
-    trade.trade_time = event_at
     repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("12.50"), occurred_at=event_at)
     repo.create_corporate_action(
         account_id=account.id,
@@ -952,6 +952,49 @@ def _populate_replay_facts(repo: PaperTradingRepository):
         after_cost_amount=Decimal("1025.00"),
         before_cash_available=Decimal("100000.0000"),
         after_cash_available=Decimal("100012.5000"),
+    )
+    repo.save_trading_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
+    return account.id
+
+
+def _populate_offset_replay_facts(repo: PaperTradingRepository):
+    account = repo.create_account("offset-replay-parity", Decimal("100000.00"))
+    initial_snapshot = repo.list_snapshots(account.id)[0]
+    initial_snapshot.event_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    initial_snapshot.trade_date = date(2026, 8, 1)
+    repo.session.flush()
+    event_at = datetime(2026, 8, 25, 17, 30, tzinfo=timezone(timedelta(hours=8)))
+    order = repo.create_order(
+        account.id, "000001", OrderSide.BUY, 100, Decimal("10.25"), event_at.date(), OrderStatus.FILLED
+    )
+    repo.create_trade(
+        order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.25"),
+        Decimal("1025.00"),
+        Decimal("5.00"),
+        event_at.date(),
+        trade_time=event_at,
+    )
+    repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("12.50"), occurred_at=event_at)
+    repo.create_corporate_action(
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="offset-parity-dividend",
+        parameters={"per_share_amount": "0.125"},
+        cash_delta=Decimal("12.50"),
+        quantity_delta=Decimal("0"),
+        before_quantity=Decimal("100"),
+        after_quantity=Decimal("100"),
+        before_cost_amount=Decimal("1025"),
+        after_cost_amount=Decimal("1025"),
+        before_cash_available=Decimal("100000"),
+        after_cash_available=Decimal("100012.50"),
     )
     repo.save_trading_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
     return account.id
@@ -1013,6 +1056,32 @@ def test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgres
     sqlite_signature = _replay_event_signature(sqlite_events)
     postgres_signature = _replay_event_signature(postgres_events)
     assert sqlite_signature == postgres_signature
+
+
+def test_offset_replay_events_are_persisted_as_utc_across_sqlite_and_postgresql(sqlite_session, postgres_repository):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    sqlite_repo = PaperTradingRepository(sqlite_session)
+    sqlite_account_id = _populate_offset_replay_facts(sqlite_repo)
+    postgres_account_id = _populate_offset_replay_facts(postgres_repository)
+    sqlite_session.commit()
+    postgres_repository.session.commit()
+    sqlite_session.expire_all()
+    postgres_repository.session.expire_all()
+
+    sqlite_fresh_session = sessionmaker(bind=sqlite_session.get_bind())()
+    postgres_fresh_session = sessionmaker(bind=postgres_repository.session.get_bind())()
+    try:
+        sqlite_events = PaperTradingRepository(sqlite_fresh_session).list_replay_events(sqlite_account_id)
+        postgres_events = PaperTradingRepository(postgres_fresh_session).list_replay_events(postgres_account_id)
+    finally:
+        sqlite_fresh_session.close()
+        postgres_fresh_session.close()
+
+    assert _replay_event_signature(sqlite_events) == _replay_event_signature(postgres_events)
+    expected_event_at = datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
+    assert {event.event_at for event in sqlite_events if event.event_type is not NavReplayEventType.INITIAL} == {
+        expected_event_at
+    }
 
 
 def test_get_accounts_for_snapshot_includes_active_cash_only_accounts(sqlite_session) -> None:

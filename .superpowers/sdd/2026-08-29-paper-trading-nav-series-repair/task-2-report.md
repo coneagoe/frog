@@ -2,7 +2,7 @@
 
 ## Status
 
-Task 2 provenance remediation is complete. This document is the sole
+Task 2 provenance and UTC-write normalization remediation is complete. This document is the sole
 authoritative result for Task 2 verification.
 
 ## Scope
@@ -30,7 +30,8 @@ No matching, settlement, or Task 3+ behavior was modified.
 - `paper_corporate_actions`
 - `paper_account_snapshots`
 
-Normal repository writes mark timestamps as `canonical_utc`. The replay adapter
+Normal repository writes mark timestamps as `canonical_utc` and normalize every
+aware event timestamp to UTC before persistence. The replay adapter
 requires exactly `canonical_utc` for `quality_status=VALID`; NULL or `unknown`
 provenance is always `INVALID`, even when the timestamp is timezone-aware. A
 canonical SQLite naive datetime is interpreted as UTC to cover SQLite's loss of
@@ -83,13 +84,13 @@ uv run pytest test/paper_trading/storage/test_repository.py test/paper_trading/d
 Output summary:
 
 ```text
-collected 139 items
-======================= 135 passed, 4 skipped in 38.68s ========================
+collected 140 items
+======================= 135 passed, 5 skipped in 40.77s ========================
 ```
 
-The four skipped parameter cases are the PostgreSQL/SQLite fixture combinations
-that require `TEST_POSTGRESQL_URL`; the PostgreSQL runner below executes all
-four combinations.
+The five skipped cases include PostgreSQL fixture combinations and the offset
+parity case requiring `TEST_POSTGRESQL_URL`; the PostgreSQL runner below
+executes those cases.
 
 Exit status: `0`.
 
@@ -104,20 +105,25 @@ tools/run_tests.sh test/paper_trading/storage/test_repository.py -v
 Output summary:
 
 ```text
-collected 125 items
+collected 126 items
 test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[sqlite_repository] PASSED
 test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails[postgres_repository] PASSED
 test_list_replay_events_preserves_decimal_payload_across_sqlite_and_postgresql PASSED
+test_offset_replay_events_are_persisted_as_utc_across_sqlite_and_postgresql PASSED
 test_unproven_persisted_aware_replay_event_is_invalid[None-sqlite_repository] PASSED
 test_unproven_persisted_aware_replay_event_is_invalid[None-postgres_repository] PASSED
 test_unproven_persisted_aware_replay_event_is_invalid[unknown-sqlite_repository] PASSED
 test_unproven_persisted_aware_replay_event_is_invalid[unknown-postgres_repository] PASSED
-============================= 125 passed in 47.09s =============================
+============================= 126 passed in 48.93s =============================
 ```
 
 The parity test commits both databases, expires both ORM sessions, creates fresh
 sessions, then compares each replay event's `event_at`, quality status, payload,
 event type, source kind, and source ID for equality.
+
+The offset parity test writes `2026-08-25 17:30 +08:00` through normal
+repository paths and verifies both fresh-session streams contain
+`2026-08-25 09:30 UTC` with equal complete signatures.
 
 Fresh-session legacy tests verify both SQLite and PostgreSQL return `INVALID`
 for NULL/unknown provenance with aware timestamps; the naive legacy case is
@@ -164,7 +170,10 @@ Output: no findings. Exit status: `0`.
 
 ## Final Result
 
-Canonical UTC timestamp provenance is now explicit and auditable across SQLite
-and PostgreSQL. SQLite no longer gains `VALID` solely from its dialect; only
-rows written with `canonical_utc` provenance do. All required verification
+Canonical UTC timestamp provenance and UTC write normalization are now explicit
+and auditable across SQLite and PostgreSQL. All aware repository timestamps are
+converted to UTC before persistence; SQLite no longer gains `VALID` solely from
+its dialect, and only rows written with `canonical_utc` provenance do. The
+offset parity regression uses `+08:00` input and verifies identical UTC replay
+events after commit and fresh-session reload. All required verification
 commands completed with the results above.

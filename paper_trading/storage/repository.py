@@ -332,6 +332,8 @@ class PaperTradingRepository:
             raise RuntimeError("paper account created_at is missing after flush")
         if event_at.tzinfo is None or event_at.utcoffset() is None:
             event_at = event_at.replace(tzinfo=timezone.utc)
+        else:
+            event_at = event_at.astimezone(timezone.utc)
         self.add_cash_event(
             account.id,
             CashEventType.DEPOSIT,
@@ -530,7 +532,7 @@ class PaperTradingRepository:
             net_asset_value=persisted_nav,
             share_delta=persisted_shares,
             rounding_residual=persisted_residual,
-            occurred_at=occurred_at or datetime.now(timezone.utc),
+            occurred_at=(occurred_at or datetime.now(timezone.utc)).astimezone(timezone.utc),
             event_time_provenance=ReplayTimeProvenance.CANONICAL_UTC.value,
             note=note,
         )
@@ -1265,6 +1267,7 @@ class PaperTradingRepository:
             raise ValueError("event_at must include a timezone offset")
         initial_cash = quantize_account_money(Decimal(account.initial_cash))
         initial_shares = quantize_shares(initial_cash)
+        event_at = event_at.astimezone(timezone.utc)
         snapshot = PaperAccountSnapshot(
             account_id=account.id,
             trade_date=event_at.date(),
@@ -1296,6 +1299,8 @@ class PaperTradingRepository:
         event_at = values.get("event_at")
         if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
             raise ValueError("event_at must include a timezone offset")
+        if event_at is not None:
+            values["event_at"] = event_at.astimezone(timezone.utc)
         values["event_time_provenance"] = ReplayTimeProvenance.CANONICAL_UTC.value
         self._quantize_snapshot_values(values)
         snapshot = PaperAccountSnapshot(**values)
@@ -1308,6 +1313,8 @@ class PaperTradingRepository:
         event_at = values.get("event_at")
         if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
             raise ValueError("event_at must include a timezone offset")
+        if event_at is not None:
+            values["event_at"] = event_at.astimezone(timezone.utc)
         values["event_time_provenance"] = ReplayTimeProvenance.CANONICAL_UTC.value
         self._quantize_snapshot_values(values)
         account_id = values["account_id"]
@@ -1526,7 +1533,10 @@ class PaperTradingRepository:
         trade_date: date,
         comment: str | None = None,
         market: str | None = None,
+        trade_time: datetime | None = None,
     ) -> PaperTrade:
+        if trade_time is not None and (trade_time.tzinfo is None or trade_time.utcoffset() is None):
+            raise ValueError("trade_time must include a timezone offset")
         trade = PaperTrade(
             order_id=order_id,
             account_id=account_id,
@@ -1537,6 +1547,7 @@ class PaperTradingRepository:
             amount=quantize_account_money(amount),
             fees=quantize_account_money(fees),
             trade_date=trade_date,
+            trade_time=(trade_time or datetime.now(timezone.utc)).astimezone(timezone.utc),
             comment=self._normalize_comment(comment),
             market=Market(market or Market.A_SHARE).value,
             event_time_provenance=ReplayTimeProvenance.CANONICAL_UTC.value,
