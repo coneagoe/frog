@@ -968,7 +968,7 @@ class PaperTradingRepository:
             and event.quality_status is SnapshotQualityStatus.VALID
             and event.event_at < (start_at or datetime.max.replace(tzinfo=timezone.utc))
         ]
-        baseline = min(baseline_events, key=NavSeriesReplay._sort_key) if baseline_events else None
+        baseline = max(baseline_events, key=NavSeriesReplay._sort_key) if baseline_events else None
         filtered = [
             event
             for event in events

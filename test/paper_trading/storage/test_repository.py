@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -370,13 +371,49 @@ def test_replay_range_retains_valid_initial_baseline(sqlite_session) -> None:
     assert bounded[0].event_at == datetime(2026, 8, 1, tzinfo=timezone.utc)
 
 
+def test_replay_range_retains_latest_provable_baseline_before_start(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("latest-range-baseline", Decimal("100000.00"))
+    snapshots = [
+        SimpleNamespace(
+            id=1,
+            event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 1),
+            point_type=SnapshotPointType.INITIAL.value,
+            quality_status=SnapshotQualityStatus.VALID.value,
+            cash_available=Decimal("100000"),
+            share_count=Decimal("100000"),
+            total_assets=Decimal("100000"),
+            net_asset_value=Decimal("1"),
+        ),
+        SimpleNamespace(
+            id=2,
+            event_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 10),
+            point_type=SnapshotPointType.INITIAL.value,
+            quality_status=SnapshotQualityStatus.VALID.value,
+            cash_available=Decimal("110000"),
+            share_count=Decimal("110000"),
+            total_assets=Decimal("110000"),
+            net_asset_value=Decimal("1"),
+        ),
+    ]
+    repo.list_snapshots = lambda _account_id: snapshots  # type: ignore[method-assign]
+
+    bounded = repo.list_replay_events(account.id, start_at=datetime(2026, 8, 25, tzinfo=timezone.utc))
+
+    baselines = [event for event in bounded if event.event_type is NavReplayEventType.INITIAL]
+    assert [event.event_at for event in baselines] == [datetime(2026, 8, 10, tzinfo=timezone.utc)]
+
+
 def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_session) -> None:
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("mixed-replay-stream", Decimal("100000.00"))
     event_at = account.created_at.replace(tzinfo=timezone.utc) + timedelta(hours=1)
     deposit = repo.add_cash_event(account.id, CashEventType.DEPOSIT, Decimal("100"), occurred_at=event_at)
-    withdrawal = repo.add_cash_event(account.id, CashEventType.WITHDRAWAL, Decimal("25"), occurred_at=event_at)
+    withdrawal = repo.add_cash_event(account.id, CashEventType.WITHDRAWAL, Decimal("-25"), occurred_at=event_at)
     internal = repo.add_cash_event(account.id, CashEventType.FEE, Decimal("5"), occurred_at=event_at)
     order = repo.create_order(account.id, "000001", OrderSide.BUY, 10, Decimal("10"), event_at.date(), OrderStatus.FILLED)
     trade = repo.create_trade(order.id, account.id, "000001", OrderSide.BUY, 10, Decimal("10"), Decimal("100"), Decimal("1"), event_at.date())
@@ -389,7 +426,9 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
         before_cash_available=Decimal("100000"), after_cash_available=Decimal("100010"),
     )
     dividend_ledger = repo.add_cash_event(account.id, CashEventType.CORPORATE_ACTION, Decimal("10"), trade_date=event_at.date(), occurred_at=event_at, note="dividend")
-    valuation = repo.save_trading_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
+    valuation_values = _trading_snapshot_values(account.id, event_at.date(), event_at)
+    valuation_values.update(total_assets=Decimal("100075"), share_count=Decimal("100075"), net_asset_value=Decimal("1"))
+    valuation = repo.save_trading_snapshot(**valuation_values)
     events = repo.list_replay_events(account.id)
     assert {event.source_id for event in events} >= {
         f"paper_cash_ledger:{deposit.id}", f"paper_cash_ledger:{withdrawal.id}",
@@ -398,8 +437,21 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
         f"paper_account_snapshots:{valuation.id}",
     }
     assert sum(event.event_type is NavReplayEventType.CASH_FLOW for event in events) == 2
+    trade_event = next(event for event in events if event.source_id == f"paper_trades:{trade.id}")
+    action_event = next(event for event in events if event.source_id == f"paper_corporate_actions:{action.id}")
+    assert trade_event.payload["quantity"] == 10
+    assert trade_event.payload["price"] == Decimal("10.000000000000")
+    assert trade_event.payload["symbol"] == "000001"
+    assert trade_event.payload["market"] == Market.A_SHARE.value
+    assert trade_event.payload["order_id"] == order.id
+    assert action_event.payload["action_type"] == CorporateActionType.DIVIDEND.value
+    assert action_event.payload["affected_start_date"] is None
+    assert action_event.payload["symbol"] == "000001"
     replay = NavSeriesReplay().replay(events, {"total_assets": Decimal("100000"), "share_count": Decimal("100000")})
-    assert any(point.event_type is NavReplayEventType.INITIAL for point in replay.points)
+    assert replay.points[-1].event_type is NavReplayEventType.MARKET_VALUATION
+    assert replay.points[-1].total_assets == Decimal("100075.000000000000")
+    assert replay.points[-1].share_count == Decimal("100075.000000000000")
+    assert replay.points[-1].nav == Decimal("1")
 
 
 def test_repository_preserves_cash_ledger_event_type_and_internal_events_do_not_flow_shares(sqlite_session) -> None:
