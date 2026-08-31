@@ -255,6 +255,98 @@ def test_order_event_facts_preserve_partial_fill_and_cancelled_reservation(sqlit
     assert release.quantity_delta == Decimal("-60.000000")
 
 
+def test_replay_reset_preserves_cumulative_filled_quantity_from_effective_facts(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("replay-filled-quantity", Decimal("10000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 8, 1),
+        OrderStatus.PARTIALLY_FILLED,
+        frozen_cash=Decimal("1005.01"),
+    )
+    repo.append_order_event(
+        account.id,
+        order.id,
+        order.market,
+        order.symbol,
+        PaperOrderEventType.FILL,
+        datetime.now(timezone.utc),
+        quantity_delta=Decimal("-40"),
+        cash_delta=Decimal("405.01"),
+        idempotency_key=f"order:{order.id}:partial-fill",
+    )
+    order.filled_quantity = 40
+    sqlite_session.flush()
+
+    repo.reset_orders_for_replay(account.id)
+
+    replayed = repo.get_order(order.id)
+    assert replayed.status == OrderStatus.ACCEPTED.value
+    assert replayed.filled_quantity == 40
+
+
+def test_duplicate_accepted_event_is_idempotent_and_conflicting_import_is_rejected(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("accepted-lineage", Decimal("10000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 8, 1),
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.01"),
+    )
+    event_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    key = f"order:{order.id}:replay:1:accepted"
+
+    first = repo.append_order_event(
+        account.id,
+        order.id,
+        order.market,
+        order.symbol,
+        PaperOrderEventType.ACCEPTED,
+        event_at,
+        quantity_delta=Decimal("0"),
+        cash_delta=Decimal("0"),
+        idempotency_key=key,
+    )
+    assert (
+        repo.append_order_event(
+            account.id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.ACCEPTED,
+            event_at,
+            quantity_delta=Decimal("0"),
+            cash_delta=Decimal("0"),
+            idempotency_key=key,
+        )
+        is first
+    )
+    with pytest.raises(ValueError, match="idempotency"):
+        repo.append_order_event(
+            account.id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.ACCEPTED,
+            event_at,
+            quantity_delta=Decimal("1"),
+            cash_delta=Decimal("0"),
+            idempotency_key=key,
+        )
+    assert repo.effective_order_lifecycle_id(account.id, order.id) == first.id
+
+
 def test_effective_order_lifecycle_starts_at_latest_accepted_event(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

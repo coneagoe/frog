@@ -65,12 +65,17 @@
   100-unit replay trade; it now passes with one 60-unit trade and cumulative
   `filled_quantity=100`. The cancel/reject cases pass with a 60-unit release
   and `filled_quantity=40`.
-- `uv run pytest test/paper_trading/services/test_order_delete_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/services/test_order_service.py -q`:
-  `143 passed, 1 failed`. The remaining failure is
-  `test_replay_rejected_order_reconsidered_on_later_delete`; it is outside the
-  partial-fill scenario and needs a separate replay-funding investigation.
-- `uv run pytest test/paper_trading/storage/test_repository.py -q`:
-  `125 passed, 5 skipped, 2 failed`.
+- `uv run pytest test/paper_trading/services/test_order_delete_service.py
+  test/paper_trading/services/test_matching_service.py
+  test/paper_trading/services/test_order_service.py -q`: `144 passed`.
+  This includes `test_replay_rejected_order_reconsidered_on_later_delete`;
+  the failure was lifecycle replay funding residue: a near-zero effective
+  cash balance (`1E-12`) prevented the intended insufficient-cash rejection.
+  Replay cash is now normalized at the lifecycle projection boundary.
+- `uv run pytest test/paper_trading/storage/test_repository.py
+  test/paper_trading/services/test_corporate_action_service.py
+  test/paper_trading/storage/test_corporate_action_migration.py -q`:
+  `162 passed, 7 skipped, 2 broad storage failures` after the lifecycle tests.
 - `tools/run_tests.sh test/paper_trading/storage/test_enum_migration.py test/paper_trading/storage/test_corporate_action_migration.py -q`:
   `44 passed`.
 
@@ -82,7 +87,18 @@ has two established failures, reproduced after this change:
 `test_cash_available_as_of_internal_preserves_adjacent_decimal_boundary`.
 They do not exercise `PaperOrderEvent`.
 
-The broader lifecycle service command also retains
-`test_replay_rejected_order_reconsidered_on_later_delete` as a replay-funding
-failure outside this partial-fill change. It was not modified to avoid widening
-Task 5 beyond order lifecycle reservation reconstruction.
+The two broad storage failures are reproducible relative to the `f7575fb`
+baseline and are outside the lifecycle path:
+`test_mixed_repository_stream_replays_without_cash_flow_double_count` is a
+NavSeries replay expectation, and
+`test_cash_available_as_of_internal_preserves_adjacent_decimal_boundary` is an
+as-of cash precision expectation. They were not changed because Task 5 does
+not own analytics replay or general cash precision. The lifecycle failure
+`test_replay_rejected_order_reconsidered_on_later_delete` is fixed and is not
+classified as preexisting.
+
+Lifecycle boundaries: `PaperOrder.quantity`, filled trade quantities, trade
+prices/amounts/fees, and base lot acquisition facts remain immutable. Replay
+updates mutable order status, cumulative `filled_quantity`, and projected
+remaining reservation fields. Corporate-action projection may update mutable
+position/order projections, but never rewrites order/trade/acquisition facts.

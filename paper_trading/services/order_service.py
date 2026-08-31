@@ -492,6 +492,7 @@ class OrderService:
             position = self.repo.get_position(order.account_id, order.market, order.symbol)
             if position is not None:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(outstanding_quantity)
+        lifecycle_id = self.repo.effective_order_lifecycle_id(order.account_id, order.id) or order.id
         self.repo.append_order_event(
             order.account_id,
             order.id,
@@ -501,7 +502,7 @@ class OrderService:
             datetime.now(timezone.utc),
             quantity_delta=Decimal("0"),
             cash_delta=Decimal("0"),
-            idempotency_key=f"order:{order.id}:cancel",
+            idempotency_key=f"order:{order.id}:lifecycle:{lifecycle_id}:cancel",
         )
         self.repo.append_order_event(
             order.account_id,
@@ -512,7 +513,7 @@ class OrderService:
             datetime.now(timezone.utc),
             quantity_delta=-outstanding_quantity,
             cash_delta=outstanding_cash,
-            idempotency_key=f"order:{order.id}:release:cancel",
+            idempotency_key=f"order:{order.id}:lifecycle:{lifecycle_id}:release:cancel",
         )
         return self.repo.update_order_status(order, OrderStatus.CANCELLED)
 

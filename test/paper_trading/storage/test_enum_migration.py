@@ -266,6 +266,34 @@ def test_adapter_apply_and_rollback_preserve_matching_run_enum_and_index(postgre
         assert _column_type(connection, "paper_accounts", "migration_repair_reason") == "character varying(40)"
 
 
+def test_pre_task5_missing_order_events_is_additive_and_rollback_safe(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert not _table_exists(connection, "paper_order_events")
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        assert _table_exists(connection, "paper_order_events")
+        assert _column_type(connection, "paper_order_events", "event_type") == "paper_order_event_type"
+        assert _index_exists(connection, "ix_paper_order_events_event_type")
+        assert _enum_labels(connection, "paper_order_event_type") == (
+            "accepted",
+            "reserved",
+            "fill",
+            "cancel",
+            "reject",
+            "release",
+        )
+        assert migrate_paper_trading_enums(connection).converted is False
+
+        rollback = migrate_paper_trading_enums(connection, rollback=True)
+
+        assert rollback.rolled_back is True
+        assert not _table_exists(connection, "paper_order_events")
+        assert _enum_types(connection) == set()
+
+
 def test_apply_adds_missing_nullable_migration_repair_reason_column(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:

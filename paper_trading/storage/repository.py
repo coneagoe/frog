@@ -772,6 +772,24 @@ class PaperTradingRepository:
         events = self.list_effective_order_events(account_id, order_id)
         return events[0].id if events and events[0].event_type == PaperOrderEventType.ACCEPTED.value else None
 
+    def cumulative_order_filled_quantity(self, account_id: int, order_id: int) -> int:
+        """Project cumulative executions without mutating append-only facts."""
+        filled = sum(
+            (
+                -Decimal(event.quantity_delta)
+                for event in self.list_order_events(account_id, order_id)
+                if event.event_type == PaperOrderEventType.FILL.value
+            ),
+            Decimal("0"),
+        )
+        return max(0, int(filled))
+
+    def _replay_filled_quantity(self, order: PaperOrder) -> int:
+        cumulative = self.cumulative_order_filled_quantity(order.account_id, order.id)
+        if order.status == OrderStatus.PARTIALLY_FILLED.value and cumulative == 0:
+            return int(order.filled_quantity or 0)
+        return cumulative
+
     def start_order_replay_lifecycle(self, order: PaperOrder) -> None:
         original = self.list_order_events(order.account_id, order.id)
         effective = self.list_effective_order_events(order.account_id, order.id)
@@ -785,6 +803,8 @@ class PaperTradingRepository:
             sum((Decimal(event.quantity_delta) for event in effective), Decimal("0")), Decimal("0")
         )
         remaining_cash = min(sum((Decimal(event.cash_delta) for event in effective), Decimal("0")), Decimal("0"))
+        if abs(remaining_cash) <= Decimal("0.000000000001"):
+            remaining_cash = Decimal("0")
         if OrderSide(order.side) == OrderSide.SELL:
             remaining_cash = Decimal("0")
         if remaining_quantity == 0 and (OrderSide(order.side) == OrderSide.SELL or remaining_cash == 0):
@@ -2251,7 +2271,7 @@ class PaperTradingRepository:
 
     def reset_orders_for_replay(self, account_id: int) -> None:
         # Reset orders that can be replayed (active statuses).
-        self.session.query(PaperOrder).filter(
+        orders = self.session.query(PaperOrder).filter(
             PaperOrder.account_id == account_id,
             PaperOrder.status.in_(
                 [
@@ -2260,46 +2280,36 @@ class PaperTradingRepository:
                     OrderStatus.NEW.value,
                 ]
             ),
-        ).update(
-            {
-                PaperOrder.status: OrderStatus.ACCEPTED.value,
-                PaperOrder.filled_quantity: 0,
-                PaperOrder.rejection_code: None,
-                PaperOrder.rejection_reason: None,
-            },
-            synchronize_session=False,
+        ).all()
+        orders.extend(
+            self.session.query(PaperOrder)
+            .filter(PaperOrder.account_id == account_id, PaperOrder.status == OrderStatus.PARTIALLY_FILLED.value)
+            .all()
         )
-        self.session.query(PaperOrder).filter(
-            PaperOrder.account_id == account_id,
-            PaperOrder.status == OrderStatus.PARTIALLY_FILLED.value,
-        ).update(
-            {
-                PaperOrder.status: OrderStatus.ACCEPTED.value,
-                PaperOrder.rejection_code: None,
-                PaperOrder.rejection_reason: None,
-            },
-            synchronize_session=False,
-        )
+        for order in orders:
+            filled_quantity = self._replay_filled_quantity(order)
+            order.status = OrderStatus.ACCEPTED.value
+            order.filled_quantity = filled_quantity
+            order.rejection_code = None
+            order.rejection_reason = None
         # Also reset REJECTED orders whose rejection was induced by a prior
         # replay (carry the replay marker).  These rejections may become
         # resolvable after a later delete and should be reconsidered.
-        self.session.query(PaperOrder).filter(
+        replay_rejected = self.session.query(PaperOrder).filter(
             PaperOrder.account_id == account_id,
             PaperOrder.status == OrderStatus.REJECTED.value,
             PaperOrder.rejection_reason.like(f"{REPLAY_REJECTION_MARKER}%"),
-        ).update(
-            {
-                PaperOrder.status: OrderStatus.ACCEPTED.value,
-                PaperOrder.filled_quantity: 0,
-                PaperOrder.rejection_code: None,
-                PaperOrder.rejection_reason: None,
-            },
-            synchronize_session=False,
-        )
+        ).all()
+        for order in replay_rejected:
+            filled_quantity = self._replay_filled_quantity(order)
+            order.status = OrderStatus.ACCEPTED.value
+            order.filled_quantity = filled_quantity
+            order.rejection_code = None
+            order.rejection_reason = None
         self.session.flush()
 
     def reset_orders_for_replay_from(self, account_id: int, start_date: date) -> None:
-        self.session.query(PaperOrder).filter(
+        orders = self.session.query(PaperOrder).filter(
             PaperOrder.account_id == account_id,
             PaperOrder.trade_date >= start_date,
             PaperOrder.status.in_(
@@ -2309,41 +2319,29 @@ class PaperTradingRepository:
                     OrderStatus.NEW.value,
                 ]
             ),
-        ).update(
-            {
-                PaperOrder.status: OrderStatus.ACCEPTED.value,
-                PaperOrder.filled_quantity: 0,
-                PaperOrder.rejection_code: None,
-                PaperOrder.rejection_reason: None,
-            },
-            synchronize_session=False,
+        ).all()
+        orders.extend(
+            self.session.query(PaperOrder)
+            .filter(
+                PaperOrder.account_id == account_id,
+                PaperOrder.trade_date >= start_date,
+                PaperOrder.status == OrderStatus.PARTIALLY_FILLED.value,
+            )
+            .all()
         )
-        self.session.query(PaperOrder).filter(
-            PaperOrder.account_id == account_id,
-            PaperOrder.trade_date >= start_date,
-            PaperOrder.status == OrderStatus.PARTIALLY_FILLED.value,
-        ).update(
-            {
-                PaperOrder.status: OrderStatus.ACCEPTED.value,
-                PaperOrder.rejection_code: None,
-                PaperOrder.rejection_reason: None,
-            },
-            synchronize_session=False,
-        )
-        self.session.query(PaperOrder).filter(
+        replay_rejected = self.session.query(PaperOrder).filter(
             PaperOrder.account_id == account_id,
             PaperOrder.trade_date >= start_date,
             PaperOrder.status == OrderStatus.REJECTED.value,
             PaperOrder.rejection_reason.like(f"{REPLAY_REJECTION_MARKER}%"),
-        ).update(
-            {
-                PaperOrder.status: OrderStatus.ACCEPTED.value,
-                PaperOrder.filled_quantity: 0,
-                PaperOrder.rejection_code: None,
-                PaperOrder.rejection_reason: None,
-            },
-            synchronize_session=False,
-        )
+        ).all()
+        orders.extend(replay_rejected)
+        for order in orders:
+            filled_quantity = self._replay_filled_quantity(order)
+            order.status = OrderStatus.ACCEPTED.value
+            order.filled_quantity = filled_quantity
+            order.rejection_code = None
+            order.rejection_reason = None
         self.session.flush()
 
     # ------------------------------------------------------------------
