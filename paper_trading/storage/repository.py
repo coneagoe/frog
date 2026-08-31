@@ -2,7 +2,7 @@ import re
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 from sqlalchemy import String, func, or_
 from sqlalchemy import cast as sa_cast
@@ -1046,7 +1046,7 @@ class PaperTradingRepository:
         return normalized_time, time_quality
 
     @staticmethod
-    def _replay_decimal(value: Decimal | None, quantizer: Any) -> Decimal | None:
+    def _replay_decimal(value: Decimal | None, quantizer: Callable[[Decimal], Decimal]) -> Decimal | None:
         if value is None:
             return None
         try:

@@ -3,6 +3,8 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import cast
 
+from sqlalchemy.orm import Session
+
 from paper_trading.domain.enums import AccountStatus, CashEventType, NavReplayEventType
 from paper_trading.domain.nav_replay import NavSeriesReplay
 from paper_trading.domain.precision import (
@@ -162,7 +164,12 @@ class CashService:
             end_date = max(max(trading_dates), start_date)
             SnapshotRecalculationService(
                 lambda: self.repo.session, cast(MarketDataProvider, self.market_data)
-            ).recalculate(account.id, start_date, end_date, session=_NoRollbackSession(self.repo.session))
+            ).recalculate(
+                account.id,
+                start_date,
+                end_date,
+                session=cast(Session, _NoRollbackSession(self.repo.session)),
+            )
 
         events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account.id)
         self._require_complete_cash_allocations(events)

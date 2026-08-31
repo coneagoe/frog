@@ -404,7 +404,7 @@ class CorporateActionService:
         pending_parameters: Mapping[str, Decimal],
     ) -> Decimal:
         """Rebuild frozen sell quantity from order and action chronology."""
-        actions = [
+        actions: list[tuple[datetime, CorporateActionType, Mapping[str, Decimal]]] = [
             (self._persisted_utc(action.event_at), CorporateActionType(action.event_type), action.parameters)
             for action in self.repo.list_corporate_actions(account_id)
             if action.market == market.value and action.symbol == symbol

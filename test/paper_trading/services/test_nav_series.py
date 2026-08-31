@@ -2,6 +2,7 @@ import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -234,7 +235,7 @@ def test_repository_builder_preserves_explicit_zero_initial_cash_flow_fields(tmp
 
 
 def test_postgresql_repository_builder_replays_persisted_cash_flow():
-    url = os.getenv("TEST_POSTGRESQL_URL")
+    url = cast(str, os.getenv("TEST_POSTGRESQL_URL"))
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
     schema_name = f"task3_nav_{uuid.uuid4().hex}"

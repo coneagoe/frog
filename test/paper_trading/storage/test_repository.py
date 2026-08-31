@@ -912,7 +912,7 @@ def test_replay_range_retains_latest_provable_baseline_before_start(sqlite_sessi
             event_time_provenance=ReplayTimeProvenance.CANONICAL_UTC.value,
         ),
     ]
-    repo.list_snapshots = lambda _account_id: snapshots  # type: ignore[method-assign]
+    setattr(repo, "list_snapshots", cast(Any, lambda _account_id: snapshots))
 
     bounded = repo.list_replay_events(account.id, start_at=datetime(2026, 8, 25, tzinfo=timezone.utc))
 
@@ -1373,7 +1373,7 @@ def _populate_offset_replay_facts(repo: PaperTradingRepository):
 
 @pytest.fixture
 def postgres_repository():
-    url = os.getenv("TEST_POSTGRESQL_URL")
+    url = cast(str, os.getenv("TEST_POSTGRESQL_URL"))
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
     schema_name = f"paper_replay_{uuid.uuid4().hex}"

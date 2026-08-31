@@ -511,7 +511,7 @@ def test_recalculation_restores_initial_position_holdings_and_cost(tmp_path):
 
 
 def test_postgresql_recalculation_persists_snapshots_and_gaps():
-    url = os.getenv("TEST_POSTGRESQL_URL")
+    url = cast(str, os.getenv("TEST_POSTGRESQL_URL"))
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
     schema_name = f"task3_recalc_{uuid.uuid4().hex}"
@@ -560,7 +560,7 @@ def test_postgresql_recalculation_persists_snapshots_and_gaps():
 
 
 def test_postgresql_recalculation_preserves_initial_components_and_imported_holdings():
-    url = os.getenv("TEST_POSTGRESQL_URL")
+    url = cast(str, os.getenv("TEST_POSTGRESQL_URL"))
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
     schema_name = f"task3_recalc_baseline_{uuid.uuid4().hex}"

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone, tzinfo
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from sqlalchemy import create_engine
@@ -8,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus
 from paper_trading.schemas.accounts import CashFlowRequest
 from paper_trading.services.cash_service import CashService
+from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -219,7 +221,7 @@ def test_backdated_deposit_replays_existing_trading_snapshot(tmp_path):
         def get_daily_bar(self, symbol, trade_date, market=None):
             return None
 
-    result = CashService(repo, EmptyMarketData()).deposit(
+    result = CashService(repo, cast(MarketDataProvider, EmptyMarketData())).deposit(
         account.id,
         Decimal("25000.00"),
         date(2026, 7, 20),

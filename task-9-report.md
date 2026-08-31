@@ -41,8 +41,8 @@ facts.
 - Frontend `npm run test -- --run`: `227 passed` across 18 files.
 - Frontend `npm run lint`: passed.
 - Frontend `npm run build`: passed.
-- `uv run pre-commit run --all-files`: formatting and Ruff passed; mypy failed
-  on existing typing/import diagnostics.
+- `uv run pre-commit run --all-files`: all hooks passed, including mypy.
+- `uv run mypy`: no issues found in 234 source files.
 - Full `tools/run_tests.sh`: `2361 passed, 9 skipped`.
 - Replay/repository/recalculation suites after the fixes: `183 passed, 8
   skipped`.
@@ -92,10 +92,12 @@ recalculation.
 
 ## Mypy
 
-The final full `uv run mypy` run reports 16 existing diagnostics, including
-legacy `tools` third-party import stubs and pre-existing paper-trading typing
-issues. The Task 9 reduced-fixture diagnostic was removed; pre-commit stops at
-the existing `paper_trading/storage/repository.py:1053` diagnostic.
+The final full `uv run mypy` run reports no issues in 234 source files. The
+paper-trading replay, migration, corporate-action, cash-service, and test
+fixture diagnostics were resolved with type-only annotations and casts. The
+missing third-party tool imports are covered by narrow `pyproject.toml`
+overrides, and the Airflow override now targets the actually imported
+`airflow.*` modules without an unused-config warning.
 
 ## Scope
 

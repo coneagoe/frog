@@ -847,8 +847,8 @@ def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
             for label in group.labels[len(labels) :]:
                 connection.execute(text(f"ALTER TYPE {group.type_name} ADD VALUE '{label}'"))
         return
-    labels = ", ".join(f"'{label}'" for label in group.labels)
-    connection.execute(text(f"CREATE TYPE {group.type_name} AS ENUM ({labels})"))
+    labels_sql = ", ".join(f"'{label}'" for label in group.labels)
+    connection.execute(text(f"CREATE TYPE {group.type_name} AS ENUM ({labels_sql})"))
 
 
 def _can_extend_replay_time_provenance(group: PaperTradingEnumGroup, labels: tuple[str, ...]) -> bool:
