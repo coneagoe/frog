@@ -773,14 +773,10 @@ class PaperTradingRepository:
         return events[0].id if events and events[0].event_type == PaperOrderEventType.ACCEPTED.value else None
 
     def start_order_replay_lifecycle(self, order: PaperOrder) -> None:
-        original = list(
-            self.session.query(PaperOrderEvent)
-            .filter(PaperOrderEvent.account_id == order.account_id, PaperOrderEvent.order_id == order.id)
-            .order_by(PaperOrderEvent.id.asc())
-            .all()
-        )
+        original = self.list_order_events(order.account_id, order.id)
+        effective = self.list_effective_order_events(order.account_id, order.id)
         reservation = next(
-            (event for event in original if event.event_type == PaperOrderEventType.RESERVED.value),
+            (event for event in effective if event.event_type == PaperOrderEventType.RESERVED.value),
             None,
         )
         if reservation is None:

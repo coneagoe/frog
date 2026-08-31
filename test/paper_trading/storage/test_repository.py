@@ -316,6 +316,52 @@ def test_effective_order_lifecycle_starts_at_latest_accepted_event(sqlite_sessio
     assert sum(event.quantity_delta for event in effective) == Decimal("100.000000")
 
 
+def test_replay_lifecycle_copies_the_current_epoch_reservation(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("replay-current-reservation", Decimal("10000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 8, 27),
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1000"),
+    )
+    repo.start_order_replay_lifecycle(order)
+    replay_at = datetime(2026, 8, 28, 9, tzinfo=timezone.utc)
+    repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.ACCEPTED,
+        replay_at,
+        quantity_delta=Decimal("0"),
+        cash_delta=Decimal("0"),
+        idempotency_key=f"order:{order.id}:accepted:current",
+    )
+    repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.RESERVED,
+        replay_at,
+        quantity_delta=Decimal("0"),
+        cash_delta=Decimal("-1005"),
+        idempotency_key=f"order:{order.id}:reserved:current",
+    )
+
+    repo.start_order_replay_lifecycle(order)
+
+    effective = repo.list_effective_order_events(account.id, order.id)
+    reservation = next(event for event in effective if event.event_type == PaperOrderEventType.RESERVED.value)
+    assert reservation.cash_delta == Decimal("-1005.000000000000")
+
+
 def test_terminal_historical_order_does_not_emit_incomplete_lifecycle(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)

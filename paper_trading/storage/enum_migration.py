@@ -429,7 +429,7 @@ _OPERATIONAL_TABLES = (
     PaperValuationGap.__table__,
     ETFEligibility.__table__,
 )
-_ADDITIVE_GOVERNED_TABLES = frozenset({tb_name_paper_corporate_actions})
+_ADDITIVE_GOVERNED_TABLES = frozenset({tb_name_paper_corporate_actions, tb_name_paper_order_events})
 _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_status", re.IGNORECASE)
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)
 _SNAPSHOT_ENUM_TYPES = frozenset({"paper_snapshot_point_type", "paper_snapshot_quality_status"})
@@ -604,14 +604,15 @@ def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
 
 
 def _adapter_rollback(connection: Connection) -> bool:
+    dropped_additive_tables = _drop_additive_governed_tables(connection)
     _adapter_preflight(connection, rollback=True)
     if all(
         not _table_exists(connection, table.name) for table in _GOVERNED_TABLES
     ) and not _diagnostics_only_market_state(connection):
-        return False
+        return dropped_additive_tables
     _reject_legacy_key_collisions(connection)
     changed = _rollback(connection, PAPER_TRADING_ENUM_GROUPS)
-    return _drop_etf_commission_rate_column(connection) or changed
+    return _drop_etf_commission_rate_column(connection) or changed or dropped_additive_tables
 
 
 def _adapter_audit(connection: Connection, *, rollback: bool):
@@ -703,6 +704,8 @@ def migrate_paper_trading_enums(
     if connection.dialect.name != "postgresql":
         return _result(dry_run=dry_run, rollback=rollback)
 
+    if rollback and not dry_run:
+        _drop_additive_governed_tables(connection)
     PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=rollback)
     if dry_run:
         return _result(dry_run=True, rollback=rollback)
@@ -718,6 +721,15 @@ def migrate_paper_trading_enums(
     converted = PAPER_TRADING_ENUM_ADAPTER.apply(connection)
     PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=False)
     return _result(converted=converted)
+
+
+def _drop_additive_governed_tables(connection: Connection) -> bool:
+    dropped = False
+    for table_name in sorted(_ADDITIVE_GOVERNED_TABLES):
+        if _table_exists(connection, table_name):
+            connection.execute(text(f"DROP TABLE {table_name}"))
+            dropped = True
+    return dropped
 
 
 def _migrate(
@@ -801,7 +813,11 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
             _validate_indexes(connection, column, enum_typed=rollback or enum_typed)
             _validate_default(connection, group, column, rollback=not enum_typed)
         if rollback and labels:
-            dependencies = _type_dependencies(connection, group)
+            dependencies = tuple(
+                dependency
+                for dependency in _type_dependencies(connection, group)
+                if not any(f"table {table_name}" in dependency for table_name in _ADDITIVE_GOVERNED_TABLES)
+            )
             if dependencies:
                 raise PaperTradingEnumMigrationError(f"{group.type_name}: dependencies remain: {dependencies}")
     return missing_tables

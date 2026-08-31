@@ -302,7 +302,10 @@ def test_apply_adds_nullable_replay_time_provenance_without_backfilling_legacy_r
         ):
             assert _column_type(connection, table_name, "event_time_provenance") == "paper_replay_time_provenance"
         assert _enum_labels(connection, "paper_replay_time_provenance") == ("canonical_utc", "unknown")
-        assert connection.execute(text("SELECT event_time_provenance FROM paper_cash_ledger WHERE id = 1")).scalar_one() is None
+        assert (
+            connection.execute(text("SELECT event_time_provenance FROM paper_cash_ledger WHERE id = 1")).scalar_one()
+            is None
+        )
         assert migrate_paper_trading_enums(connection).converted is False
 
 
@@ -414,6 +417,14 @@ def test_dry_run_reports_every_group_without_ddl(postgres_schema):
         assert result.converted is False
         assert {group.type_name for group in result.groups} == EXPECTED_TYPE_NAMES
         assert _enum_types(connection) == set()
+
+
+def test_preflight_allows_missing_additive_order_event_table(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=False)
+
+        assert not _table_exists(connection, "paper_order_events")
 
 
 def test_unknown_legacy_value_aborts_all_groups_without_conversion(postgres_schema):
