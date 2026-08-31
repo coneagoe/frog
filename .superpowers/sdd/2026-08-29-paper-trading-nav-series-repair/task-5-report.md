@@ -7,7 +7,10 @@
   parameters rather than current position state.
 - Initial replay events restore proven imported holdings and cost basis.
 - Mutable position/lot projections are updated only after the replayed pre-action
-  state matches the projection; mismatches are rejected before accounting writes.
+  state is proven. Late actions materialize the complete post-action replay,
+  including later trades, before updating the current projection.
+- Corporate actions sharing a timestamp with a trade are rejected as ambiguous
+  unless chronology is separately proven; no static precedence guess is used.
 - Existing cash-ledger audit rows remain separate from corporate-action replay
   events, preventing duplicate cash application during NAV replay.
 - Existing idempotency, processing metadata, affected range, precision, and
@@ -18,11 +21,13 @@
 ## Verification
 
 - `uv run pytest test/paper_trading/domain/test_corporate_actions.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_corporate_action_service.py test/paper_trading/api/test_corporate_actions_api.py -q`
-  - **93 passed**, 1 existing Starlette/httpx deprecation warning.
+  - **96 passed**, 1 existing Starlette/httpx deprecation warning.
+- `uv run pytest test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py -q`
+  - **29 passed, 3 skipped** (Task 3 regression suite).
+- `tools/run_tests.sh test/paper_trading/services/test_corporate_action_service.py test/paper_trading/api/test_corporate_actions_api.py -q`
+  - **41 passed** with PostgreSQL test database.
 - `uv run ruff check ...` on all Task 5 changed source and test files: **passed**.
 - `git diff --check`: **passed**.
-- PostgreSQL runner: skipped; the assigned focused coverage did not require
-  PostgreSQL integration.
 
 ## Simplification Review
 
@@ -32,5 +37,5 @@ no further behavior-preserving reduction was worthwhile within Task 5 scope.
 ## Concerns
 
 - The working tree includes only Task 5 source/test files plus this report.
-- Full CI and orchestrator-owned PostgreSQL verification remain outside this
-  agent's assigned validation.
+- Two pre-existing analytics test files were already modified in the worktree;
+  they were intentionally not touched or staged for Task 5.

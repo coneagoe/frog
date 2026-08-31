@@ -97,7 +97,9 @@ class CorporateActionService:
         if account.status != AccountStatus.ACTIVE.value:
             raise ValueError(f"paper account is not active: {account_id}")
 
-        quantity, cost, cash = self._replay_state_before_action(account_id, resolved_market, symbol, event_at)
+        quantity, cost, cash, materialized = self._replay_state_before_action(
+            account_id, resolved_market, symbol, event_at, action_type, canonical_parameters
+        )
         impact = calculate_corporate_action_impact(action_type, quantity, cost, cash, canonical_parameters)
         if action_type is CorporateActionType.RIGHTS_ISSUE:
             impact = replace(
@@ -105,7 +107,15 @@ class CorporateActionService:
                 after_cost_amount=quantize_account_money(impact.before_cost_amount - impact.cash_delta),
             )
 
-        self._update_position_projection(account_id, resolved_market, symbol, action_type, canonical_parameters, impact)
+        self._update_position_projection(
+            account_id,
+            resolved_market,
+            symbol,
+            action_type,
+            canonical_parameters,
+            impact,
+            materialized,
+        )
 
         if impact.cash_delta:
             self.repo.add_cash_event(
@@ -154,35 +164,63 @@ class CorporateActionService:
         return CorporateActionResult(event, impact, recalculation)
 
     def _replay_state_before_action(
-        self, account_id: int, market: Market, symbol: str, event_at: datetime
-    ) -> tuple[Decimal, Decimal, Decimal]:
-        """Read the pre-action state only from ordered, reconstructible facts."""
+        self,
+        account_id: int,
+        market: Market,
+        symbol: str,
+        event_at: datetime,
+        action_type: CorporateActionType,
+        parameters: Mapping[str, Decimal],
+    ) -> tuple[Decimal, Decimal, Decimal, object]:
+        """Replay pre-action eligibility and materialize the post-action history."""
         events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account_id)
         if any(event.quality_status.value != "valid" for event in events):
             raise ValueError("replay contains events with unknown chronology; repair historical timestamps first")
+        same_time_trades = [
+            event
+            for event in events
+            if event.event_type is NavReplayEventType.TRADE_SETTLEMENT and event.event_at == event_at
+        ]
+        if same_time_trades:
+            raise ValueError("corporate action and trade chronology is ambiguous; repair event timestamps first")
         synthetic = ReplayEvent(
             event_at=event_at,
             trade_date=event_at.date(),
             event_type=NavReplayEventType.CORPORATE_ACTION,
             source_id="paper_corporate_actions:pending",
             source_kind="paper_corporate_actions",
-            payload={},
+            payload={
+                "market": market.value,
+                "symbol": symbol,
+                "action_type": action_type.value,
+                "parameters": parameters,
+            },
             quality_status=SnapshotQualityStatus.VALID,
         )
-        preceding = [
-            event for event in events if NavSeriesReplay._sort_key(event) < NavSeriesReplay._sort_key(synthetic)
-        ]
-        replay = NavSeriesReplay().replay(preceding, baseline)
+        pending_key = NavSeriesReplay._sort_key(synthetic)
+        preceding = [event for event in events if NavSeriesReplay._sort_key(event) < pending_key]
+        replay = NavSeriesReplay().replay(
+            [event for event in preceding if event.event_type is not NavReplayEventType.INITIAL], baseline
+        )
         state = replay.points[-1] if replay.points else None
         holding_key = f"{market.value}:{symbol}"
         holdings = dict(baseline.get("holdings", {})) if state is None or state.holdings is None else state.holdings
         costs = dict(baseline.get("costs", {})) if state is None or state.costs is None else state.costs
         cash = Decimal(str(baseline.get("cash", "0"))) if state is None or state.cash is None else state.cash
-        return (
+        pre_state = (
             quantize_shares(holdings.get(holding_key, Decimal("0"))),
             quantize_account_money(costs.get(holding_key, Decimal("0"))),
             quantize_account_money(cash),
         )
+        materialized = (
+            NavSeriesReplay()
+            .replay(
+                [event for event in events if event.event_type is not NavReplayEventType.INITIAL] + [synthetic],
+                baseline,
+            )
+            .points[-1]
+        )
+        return (*pre_state, materialized)
 
     def _update_position_projection(
         self,
@@ -192,26 +230,31 @@ class CorporateActionService:
         action_type: CorporateActionType,
         parameters: Mapping[str, Decimal],
         impact: CorporateActionImpact,
+        materialized: object,
     ) -> None:
         """Keep the mutable position projection aligned with the replayed action."""
         position = self.repo.lock_position(account_id, market, symbol)
         lots = self.repo.lock_lots(account_id, market, symbol)
+        current_quantity = Decimal(position.total_quantity or 0) if position is not None else Decimal("0")
+        current_cost = Decimal(position.cost_amount or 0) if position is not None else Decimal("0")
+        self._validate_holding(position, lots, market, symbol, current_quantity, current_cost, Decimal("0"))
         if position is None:
             if impact.before_quantity:
                 raise ValueError("replayed holding has no position projection")
             return
-        current_quantity = Decimal(position.total_quantity or 0)
-        if current_quantity != impact.before_quantity:
-            raise ValueError("position aggregate does not match replay state")
+        final_holdings = getattr(materialized, "holdings", {}) or {}
+        final_costs = getattr(materialized, "costs", {}) or {}
+        holding_key = f"{market.value}:{symbol}"
+        final_quantity = quantize_shares(final_holdings.get(holding_key, Decimal("0")))
+        final_cost = quantize_account_money(final_costs.get(holding_key, Decimal("0")))
         factor = impact.after_quantity / impact.before_quantity if impact.before_quantity else Decimal("0")
-        position.total_quantity = self._integer_quantity(impact.after_quantity)
+        position.total_quantity = self._integer_quantity(final_quantity)
         position.frozen_quantity = self._integer_quantity(
             quantize_shares(Decimal(position.frozen_quantity or 0) * factor)
         )
-        position.cost_amount = quantize_account_money(impact.after_cost_amount)
+        position.cost_amount = final_cost
         for lot in lots:
             old_remaining = Decimal(lot.remaining_quantity or 0)
-            old_cost_price = Decimal(lot.cost_price)
             lot_remaining = quantize_shares(old_remaining * factor) if impact.before_quantity else Decimal("0")
             lot.original_quantity = (
                 self._integer_quantity(quantize_shares(Decimal(lot.original_quantity or 0) * factor))
@@ -219,16 +262,26 @@ class CorporateActionService:
                 else 0
             )
             lot.remaining_quantity = self._integer_quantity(lot_remaining)
-            if not lot_remaining or not impact.after_quantity:
+            if not lot_remaining or not final_quantity:
                 lot.cost_price = Decimal("0")
-            elif action_type is CorporateActionType.RIGHTS_ISSUE:
-                added_cost = old_remaining * parameters["subscription_ratio"] * parameters["subscription_price"]
-                lot.cost_price = quantize_account_money((old_remaining * old_cost_price + added_cost) / lot_remaining)
             else:
-                lot.cost_price = quantize_account_money(old_cost_price * impact.before_quantity / impact.after_quantity)
+                lot.cost_price = quantize_account_money(final_cost / final_quantity)
+        if lots and final_quantity != quantize_shares(
+            sum((Decimal(lot.remaining_quantity) for lot in lots), Decimal("0"))
+        ):
+            remaining_total = sum((Decimal(lot.remaining_quantity) for lot in lots), Decimal("0"))
+            if not remaining_total:
+                lots[0].remaining_quantity = self._integer_quantity(final_quantity)
+            else:
+                lots[-1].remaining_quantity = self._integer_quantity(
+                    quantize_shares(Decimal(lots[-1].remaining_quantity) + final_quantity - remaining_total)
+                )
+        for lot in lots:
+            if final_quantity and lot.remaining_quantity:
+                lot.cost_price = quantize_account_money(final_cost / final_quantity)
         if lots:
             lot_cost = sum((Decimal(lot.remaining_quantity) * Decimal(lot.cost_price) for lot in lots), Decimal("0"))
-            residual = impact.after_cost_amount - quantize_account_money(lot_cost)
+            residual = final_cost - quantize_account_money(lot_cost)
             last = next((lot for lot in reversed(lots) if lot.remaining_quantity), None)
             if last is not None:
                 last.cost_price = quantize_account_money(

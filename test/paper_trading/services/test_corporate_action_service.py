@@ -4,12 +4,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from paper_trading.domain.enums import CashEventType, CorporateActionType, Market
+from paper_trading.domain.enums import CashEventType, CorporateActionType, Market, OrderSide, OrderStatus
 from paper_trading.domain.errors import InsufficientRightsCashError, InvalidCorporateActionParametersError
 from paper_trading.services.corporate_action_service import (
     CorporateActionIdempotencyConflict,
     CorporateActionService,
 )
+from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationResult
 from paper_trading.storage.models import PaperValuationGap
 from paper_trading.storage.repository import PaperTradingRepository
@@ -27,6 +28,15 @@ class _FailedDatesRecalculation:
 
 def _service(session):
     return CorporateActionService(PaperTradingRepository(session), recalculation_service=_NoopRecalculation())
+
+
+def _set_creation_baseline(repo, account_id, event_at):
+    initial_snapshot = next(row for row in repo.list_snapshots(account_id) if row.point_type == "initial")
+    initial_snapshot.event_at = event_at
+    initial_snapshot.trade_date = event_at.date()
+    initial_cash = repo.list_cash_ledger(initial_snapshot.account_id)[0]
+    initial_cash.occurred_at = event_at
+    initial_cash.trade_date = event_at.date()
 
 
 def test_dividend_is_audited_and_credits_cash(sqlite_session):
@@ -433,3 +443,157 @@ def test_recalculation_covers_event_and_later_snapshot_and_gap_dates(sqlite_sess
     assert result.recalculation.updated_dates == [date(2026, 8, 27), date(2026, 8, 28)]
     assert result.recalculation.unavailable_dates == [date(2026, 8, 29)]
     assert repo.get_valuation_gap(account.id, date(2026, 8, 29)) is not None
+
+
+def test_late_split_replays_through_later_sale_and_materializes_current_position(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-late-split", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 50, 0, Decimal("500"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 50, Decimal("10"), source="imported"
+    )
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        50,
+        Decimal("12"),
+        date(2026, 8, 20),
+        OrderStatus.FILLED,
+        market=Market.A_SHARE,
+    )
+    trade = repo.create_trade(
+        order.id,
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        50,
+        Decimal("12"),
+        Decimal("600"),
+        Decimal("0"),
+        date(2026, 8, 20),
+        market=Market.A_SHARE,
+        trade_time=datetime(2026, 8, 20, 10, tzinfo=timezone.utc),
+    )
+    assert trade.id is not None
+
+    result = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.SPLIT,
+        datetime(2026, 8, 10, 10, tzinfo=timezone.utc),
+        "late-split",
+        {"ratio": Decimal("2")},
+    )
+
+    position = repo.get_position(account.id, Market.A_SHARE, "000001")
+    lot = repo.get_lots(account.id, Market.A_SHARE, "000001")[0]
+    assert result.impact.before_quantity == Decimal("100.000000000000")
+    assert result.impact.after_quantity == Decimal("200.000000000000")
+    assert position is not None and position.total_quantity == 150
+    assert lot.remaining_quantity == 150
+    assert repo.get_cash_available(account.id) == Decimal("10000.0000")
+    assert repo.get_order_by_idempotency_key(account.id, "missing") is None
+    assert repo.list_trades(account.id)[0].id == trade.id
+
+
+def test_late_dividend_replays_through_later_sale_and_credits_cash_once(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-late-dividend", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 50, 0, Decimal("500"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 50, Decimal("10"), source="imported"
+    )
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        50,
+        Decimal("12"),
+        date(2026, 8, 20),
+        OrderStatus.FILLED,
+        market=Market.A_SHARE,
+    )
+    repo.create_trade(
+        order.id,
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        50,
+        Decimal("12"),
+        Decimal("600"),
+        Decimal("0"),
+        date(2026, 8, 20),
+        market=Market.A_SHARE,
+        trade_time=datetime(2026, 8, 20, 10, tzinfo=timezone.utc),
+    )
+
+    result = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.DIVIDEND,
+        datetime(2026, 8, 10, 10, tzinfo=timezone.utc),
+        "late-dividend",
+        {"per_share_amount": Decimal("0.25")},
+    )
+
+    assert result.impact.before_quantity == Decimal("100.000000000000")
+    assert result.impact.cash_delta == Decimal("25.000000000000")
+    assert repo.get_cash_available(account.id) == Decimal("10025.0000")
+    assert len([row for row in repo.list_cash_ledger(account.id) if row.event_type == "corporate_action"]) == 1
+    action_point = next(
+        point
+        for point in NavSeriesBuilder(repo=repo).build(account.id).points
+        if point.source_id.startswith("paper_corporate_actions:")
+    )
+    assert action_point.cash == Decimal("10025.000000000000")
+
+
+def test_same_timestamp_trade_and_corporate_action_are_rejected_as_ambiguous(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-ambiguous", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
+    event_at = datetime(2026, 8, 10, 10, tzinfo=timezone.utc)
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        50,
+        Decimal("12"),
+        event_at.date(),
+        OrderStatus.FILLED,
+        market=Market.A_SHARE,
+    )
+    repo.create_trade(
+        order.id,
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        50,
+        Decimal("12"),
+        Decimal("600"),
+        Decimal("0"),
+        event_at.date(),
+        market=Market.A_SHARE,
+        trade_time=event_at,
+    )
+    sqlite_session.commit()
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        _service(sqlite_session).apply(
+            account.id,
+            "000001",
+            CorporateActionType.SPLIT,
+            event_at,
+            "ambiguous-action",
+            {"ratio": Decimal("2")},
+        )
+
+    sqlite_session.rollback()
+    assert repo.list_corporate_actions(account.id) == []
+    assert len(repo.list_trades(account.id)) == 1
