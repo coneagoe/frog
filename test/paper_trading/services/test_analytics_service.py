@@ -1540,7 +1540,7 @@ def test_valid_trading_snapshot_without_nav_is_not_reconstructed_from_assets(tmp
 
 
 @pytest.mark.parametrize("nav", [Decimal("0"), Decimal("-1"), Decimal("NaN"), Decimal("Infinity")])
-def test_replay_non_positive_or_nonfinite_nav_is_unavailable(tmp_path, monkeypatch, nav):
+def test_mocked_builder_non_positive_or_nonfinite_replay_nav_returns_diagnostic_gap(tmp_path, monkeypatch, nav):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("invalid-replay-nav", Decimal("100000.00"))
     initial = NavPoint(
@@ -1569,6 +1569,41 @@ def test_replay_non_positive_or_nonfinite_nav_is_unavailable(tmp_path, monkeypat
 
     assert isinstance(response, AnalyticsUnavailableResponse)
     assert response.reason == "valuation_gap"
+    assert [gap.model_dump() for gap in response.valuation_gaps or []] == [
+        {
+            "trade_date": invalid.trade_date,
+            "missing_symbols": [],
+            "details": [{"reason": "invalid_nav"}],
+            "resolved": False,
+        }
+    ]
+    engine.dispose()
+
+
+def test_real_repository_replay_invalid_snapshot_returns_shared_gap(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("real-replay-shared-gap", Decimal("100000.00"))
+    trading = seed_trading_point(
+        repo,
+        account,
+        nav=None,
+        quality_status=SnapshotQualityStatus.INVALID.value,
+        invalid_reason="missing_nav",
+    )
+    session.flush()
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "valuation_gap"
+    assert [gap.model_dump() for gap in response.valuation_gaps or []] == [
+        {
+            "trade_date": trading.trade_date,
+            "missing_symbols": [],
+            "details": [{"reason": "invalid_nav"}],
+            "resolved": False,
+        }
+    ]
     engine.dispose()
 
 

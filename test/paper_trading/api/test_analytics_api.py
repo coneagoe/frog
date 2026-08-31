@@ -189,11 +189,33 @@ def test_get_account_analytics_returns_date_ordered_valuation_gaps(monkeypatch, 
     response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
 
     assert response.status_code == 200
-    assert response.json()["available"] is False
-    assert response.json()["reason"] == "valuation_gap"
+    assert response.json() == {
+        "available": False,
+        "reason": "valuation_gap",
+        "valuation_gaps": [
+            {
+                "trade_date": "2026-08-25",
+                "missing_symbols": ["000001.SZ"],
+                "details": [{"reason": "earlier"}],
+                "resolved": False,
+            },
+            {
+                "trade_date": "2026-08-26",
+                "missing_symbols": ["000002.SZ"],
+                "details": [{"reason": "later"}],
+                "resolved": False,
+            },
+            {
+                "trade_date": "2026-08-27",
+                "missing_symbols": [],
+                "details": [],
+                "resolved": True,
+            },
+        ],
+    }
 
 
-def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_assets(monkeypatch, sqlite_session):
+def test_get_account_analytics_real_repository_replay_gap_has_diagnostic_gap(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
@@ -214,9 +236,18 @@ def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_asse
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["available"] is False
-    assert payload["reason"] == "valuation_gap"
-    assert payload["valuation_gaps"][0]["details"] == [{"reason": "invalid_nav"}]
+    assert payload == {
+        "available": False,
+        "reason": "valuation_gap",
+        "valuation_gaps": [
+            {
+                "trade_date": repo.list_snapshots(account.id)[-1].trade_date.isoformat(),
+                "missing_symbols": [],
+                "details": [{"reason": "invalid_nav"}],
+                "resolved": False,
+            }
+        ],
+    }
 
 
 def _analytics_client(monkeypatch, sqlite_session):
