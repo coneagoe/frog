@@ -13,6 +13,7 @@ class SnapshotResponse(BaseModel):
     trade_date: date
     point_type: Literal["initial", "trading"]
     event_at: datetime
+    timezone: Literal["UTC"] = "UTC"
     quality_status: Literal["valid", "invalid"]
     invalid_reason: str | None = None
     valuation_quality: Literal["current", "stale_suspended"] | None = None

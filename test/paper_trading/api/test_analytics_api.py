@@ -387,6 +387,8 @@ def test_get_account_analytics_exposes_shared_nav_point_metadata(monkeypatch, sq
     account = repo.create_account("api-shared-nav-metadata", Decimal("100000.00"))
     initial = repo.list_snapshots(account.id)[0]
     initial.event_time_provenance = "canonical_utc"
+    initial.valuation_quality = "current"
+    initial.valuation_details = [{"source": "close", "symbol": "000001.SZ"}]
     sqlite_session.commit()
 
     response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
@@ -396,6 +398,8 @@ def test_get_account_analytics_exposes_shared_nav_point_metadata(monkeypatch, sq
     assert snapshot["point_type"] == "initial"
     assert snapshot["quality"] == "valid"
     assert snapshot["timezone"] == "UTC"
+    assert snapshot["valuation_quality"] == "current"
+    assert snapshot["valuation_details"] == [{"source": "close", "symbol": "000001.SZ"}]
     assert snapshot["nav"] == "1.000000"
     assert snapshot["share"] == "100000.000000"
 

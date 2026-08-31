@@ -3,25 +3,22 @@
 import { useEffect, useMemo, useRef } from "react";
 import { createChart, LineSeries, type UTCTimestamp } from "lightweight-charts";
 import { EmptyState } from "@/components/empty-state";
-import type { AnalyticsEvent, Snapshot } from "@/lib/types";
+import type { AnalyticsEvent } from "@/lib/types";
 
-export function AssetChart({ events }: { events: Array<AnalyticsEvent | Snapshot> }) {
+export function AssetChart({ events }: { events: AnalyticsEvent[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartData = useMemo(
     () => {
       let previousTime: number | null = null;
       return events.flatMap((event) => {
-        if ("event_type" in event && event.event_type !== "snapshot") {
+        if (event.event_type !== "snapshot" || !["initial", "trading"].includes(event.point_type)) {
           return [];
         }
-        const snapshot = event as Snapshot | Extract<AnalyticsEvent, { event_type: "snapshot" }>;
-        const navValue = "event_type" in snapshot ? snapshot.nav : snapshot.net_asset_value;
-        if (!("event_type" in snapshot) && !("net_asset_value" in snapshot)) return [];
-        const nav = Number(navValue);
-        const timestamp = Math.floor(new Date(snapshot.event_at).getTime() / 1000);
+        const nav = Number(event.nav);
+        const timestamp = Math.floor(new Date(event.event_at).getTime() / 1000);
         if (
-          snapshot.quality_status !== "valid"
-          || navValue === null
+          event.quality !== "valid"
+          || event.nav === null
           || !Number.isFinite(nav)
           || nav <= 0
           || !Number.isFinite(timestamp)
@@ -53,7 +50,7 @@ export function AssetChart({ events }: { events: Array<AnalyticsEvent | Snapshot
   }, [chartData]);
 
   if (chartData.length === 0) {
-    return <EmptyState title="No snapshots yet" description="Run matching to generate account valuation snapshots." />;
+    return <EmptyState title="No valid NAV points" description="Run matching to generate account valuation snapshots." />;
   }
 
   return (

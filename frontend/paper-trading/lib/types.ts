@@ -100,11 +100,14 @@ export type SnapshotAnalyticsEvent = {
   event_type: "snapshot";
   id: number;
   event_at: string;
-  point_type: string;
-  quality_status: string;
+  point_type: "initial" | "trading";
+  quality: "valid" | "invalid";
+  timezone: string;
   invalid_reason: string | null;
   nav: string | null;
-  shares: string | null;
+  share: string | null;
+  valuation_quality?: "current" | "stale_suspended" | null;
+  valuation_details?: Array<Record<string, unknown>> | null;
 };
 
 export type CashFlowAnalyticsEvent = {
@@ -175,12 +178,21 @@ export type AvailableAnalyticsResponse = {
   execution: ExecutionAnalytics;
   trade_quality: TradeQualityAnalytics;
   risk: RiskAnalytics;
+  valuation_gaps: ValuationGap[];
   event_series: AnalyticsEvent[];
+};
+
+export type ValuationGap = {
+  trade_date: string;
+  missing_symbols: string[];
+  details: Array<Record<string, unknown>>;
+  resolved: boolean;
 };
 
 export type UnavailableAnalyticsResponse = {
   available: false;
   reason: string;
+  valuation_gaps: ValuationGap[] | null;
 };
 
 export type AnalyticsResponse = AvailableAnalyticsResponse | UnavailableAnalyticsResponse;
@@ -284,6 +296,9 @@ export type Snapshot = {
   event_at: string;
   quality_status: "valid" | "invalid";
   invalid_reason: string | null;
+  valuation_quality: "current" | "stale_suspended" | null;
+  valuation_details: Array<Record<string, unknown>> | null;
+  timezone: string;
   cash_available: string;
   cash_frozen: string;
   market_value: string;

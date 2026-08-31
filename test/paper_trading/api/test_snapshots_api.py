@@ -104,6 +104,7 @@ def test_snapshots_api_returns_ordered_nav_point_metadata(monkeypatch, sqlite_se
         day.replace(hour=10),
         day.replace(hour=15),
     ]
+    assert all(item["timezone"] == "UTC" for item in payload)
     assert payload[1]["net_asset_value"] == "1.100000"
     assert payload[2]["quality_status"] == "invalid"
     assert payload[2]["invalid_reason"] == "missing_nav"

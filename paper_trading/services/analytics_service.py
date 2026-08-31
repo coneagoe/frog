@@ -260,6 +260,10 @@ class AnalyticsService:
                         quality=quality,
                         timezone="UTC",
                         quality_status=quality,
+                        valuation_quality=snapshot.valuation_quality,
+                        valuation_details=list(snapshot.valuation_details)
+                        if snapshot.valuation_details is not None
+                        else None,
                         nav=Decimal(nav).quantize(_QUANTIZE) if nav is not None else None,
                         shares=Decimal(shares).quantize(_QUANTIZE) if shares is not None else None,
                         share=Decimal(shares).quantize(_QUANTIZE) if shares is not None else None,

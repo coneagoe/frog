@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AnalyticsEvent, Snapshot } from "@/lib/types";
+import type { AnalyticsEvent } from "@/lib/types";
 import { AssetChart } from "./asset-chart";
 
 const { addSeriesMock, createChartMock, removeMock, setDataMock } = vi.hoisted(() => ({
@@ -15,29 +15,16 @@ vi.mock("lightweight-charts", () => ({
   createChart: createChartMock
 }));
 
-const initialPoint: Snapshot = {
+const initialPoint: AnalyticsEvent = {
+  event_type: "snapshot",
   id: 1,
-  account_id: 1,
-  trade_date: "2026-09-10",
   point_type: "initial",
   event_at: "2026-09-10T09:30:00Z",
-  quality_status: "valid",
+  quality: "valid",
+  timezone: "UTC",
   invalid_reason: null,
-  cash_available: "100000",
-  cash_frozen: "0",
-  market_value: "0",
-  total_assets: "100000",
-  realized_pnl: "0",
-  unrealized_pnl: "0",
-  net_asset_value: "1",
-  share_count: "100000",
-  cumulative_deposit: "100000",
-  cumulative_withdrawal: "0",
-  net_cash_flow: "100000",
-  pending_settlement: "0",
-  position_count: 0,
-  order_count: 0,
-  trade_count: 0
+  nav: "1",
+  share: "100000"
 };
 
 function toChartTime(eventAt: string) {
@@ -52,27 +39,29 @@ describe("AssetChart", () => {
   });
 
   it("renders only valid NAV values in server order", () => {
-    const invalidPoint: Snapshot = {
+    const invalidPoint: AnalyticsEvent = {
       ...initialPoint,
       id: 2,
       event_at: "2026-09-10T11:00:00Z",
-      quality_status: "invalid",
+      quality: "invalid",
       invalid_reason: "missing_nav",
-      net_asset_value: null,
-      total_assets: "120000"
+      nav: null,
+      share: null
     };
-    const tradingPoint: Snapshot = {
+    const tradingPoint: AnalyticsEvent = {
       ...initialPoint,
       id: 3,
       point_type: "trading",
       event_at: "2026-09-10T15:00:00Z",
-      net_asset_value: "1.1"
+      nav: "1.1",
+      share: "100000"
     };
-    const malformedTimestampPoint: Snapshot = {
+    const malformedTimestampPoint: AnalyticsEvent = {
       ...initialPoint,
       id: 4,
       event_at: "not-a-timestamp",
-      net_asset_value: "1.2"
+      nav: "1.2",
+      share: "100000"
     };
 
     render(<AssetChart events={[initialPoint, invalidPoint, malformedTimestampPoint, tradingPoint]} />);
@@ -90,10 +79,11 @@ describe("AssetChart", () => {
         id: 1,
         event_at: "2026-09-10T09:30:00Z",
         point_type: "initial",
-        quality_status: "valid",
+        quality: "valid",
+        timezone: "UTC",
         invalid_reason: null,
         nav: "1",
-        shares: "100000"
+        share: "100000"
       },
       {
         event_type: "deposit",
@@ -126,20 +116,22 @@ describe("AssetChart", () => {
         id: 3,
         event_at: "2026-09-10T11:00:00Z",
         point_type: "trading",
-        quality_status: "invalid",
+        quality: "invalid",
+        timezone: "UTC",
         invalid_reason: "missing_nav",
         nav: null,
-        shares: null
+        share: null
       },
       {
         event_type: "snapshot",
         id: 4,
         event_at: "2026-09-10T15:00:00Z",
         point_type: "trading",
-        quality_status: "valid",
+        quality: "valid",
+        timezone: "UTC",
         invalid_reason: null,
         nav: "1.1",
-        shares: "150000"
+        share: "150000"
       }
     ];
 
@@ -152,18 +144,19 @@ describe("AssetChart", () => {
   });
 
   it("renders the existing empty state when no valid NAV points exist", () => {
-    render(<AssetChart events={[{ ...initialPoint, net_asset_value: null, total_assets: "100000" }]} />);
+    render(<AssetChart events={[{ ...initialPoint, nav: null }]} />);
 
-    expect(screen.getByText("No snapshots yet")).toBeInTheDocument();
+    expect(screen.getByText("No valid NAV points")).toBeInTheDocument();
     expect(createChartMock).not.toHaveBeenCalled();
   });
 
   it("renders same-second valid NAV points in server order", () => {
-    const sameSecondPoint: Snapshot = {
+    const sameSecondPoint: AnalyticsEvent = {
       ...initialPoint,
       id: 2,
       point_type: "trading",
-      net_asset_value: "1.1"
+      nav: "1.1",
+      share: "100000"
     };
 
     render(<AssetChart events={[initialPoint, sameSecondPoint]} />);

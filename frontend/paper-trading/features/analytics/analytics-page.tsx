@@ -3,8 +3,8 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ErrorBanner } from "@/components/error-banner";
-import { getAnalytics, listAccounts, listSnapshots } from "@/lib/api-client";
-import type { Account, AnalyticsResponse, Snapshot } from "@/lib/types";
+import { getAnalytics, listAccounts } from "@/lib/api-client";
+import type { Account, AnalyticsResponse } from "@/lib/types";
 import { AnalyticsSummary } from "./analytics-summary";
 import { AssetChart } from "./asset-chart";
 import {
@@ -12,14 +12,14 @@ import {
   AnalyticsCorporateActionsSection,
   AnalyticsExecutionSection,
   AnalyticsRiskSection,
-  AnalyticsTradeQualitySection
+  AnalyticsTradeQualitySection,
+  ValuationGapsSection
 } from "./analytics-tables";
 
 export function AnalyticsPage() {
   const searchParams = useSearchParams();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,26 +29,19 @@ export function AnalyticsPage() {
     const requestId = ++requestIdRef.current;
     setError(null);
     if (clearExisting) {
-      setSnapshots([]);
       setAnalytics(null);
     }
-    const [nextSnapshots, nextAnalytics] = await Promise.allSettled([
-      listSnapshots(accountId),
-      getAnalytics(accountId)
-    ]);
+    const [nextAnalytics] = await Promise.allSettled([getAnalytics(accountId)]);
 
     if (requestId !== requestIdRef.current) {
       return;
     }
 
-    if (nextSnapshots.status === "fulfilled") {
-      setSnapshots(nextSnapshots.value);
-    }
     if (nextAnalytics.status === "fulfilled") {
       setAnalytics(nextAnalytics.value);
     }
 
-    const failed = [nextSnapshots, nextAnalytics].find((result) => result.status === "rejected");
+    const failed = [nextAnalytics].find((result) => result.status === "rejected");
     if (failed?.status === "rejected") {
       setError(failed.reason instanceof Error ? failed.reason.message : "Some analytics panels failed to load");
     }
@@ -76,13 +69,6 @@ export function AnalyticsPage() {
     }
     void load();
   }, [searchParams]);
-
-  const latestSnapshot = snapshots.reduce<Snapshot | null>((latest, snapshot) => {
-    if (!latest || snapshot.trade_date > latest.trade_date) {
-      return snapshot;
-    }
-    return latest;
-  }, null);
 
   return (
     <section className="page">
@@ -114,14 +100,21 @@ export function AnalyticsPage() {
       <section className="panel">
         <h2>Overview</h2>
         {analytics?.available === false ? (
-          <div className="panel">
-            Historical ordering requires account repair before performance analytics are available.
+          <div className="empty-state">
+            <strong>Performance analytics unavailable</strong>
+            <br />
+            {analytics.reason.replaceAll("_", " ")} - repair the account or resolve the valuation gaps before viewing performance.
           </div>
-        ) : (
-          <AnalyticsSummary analytics={analytics} snapshot={latestSnapshot} />
-        )}
-        <AssetChart events={analytics?.available ? analytics.event_series : snapshots} />
+        ) : null}
+        {analytics?.available ? <AnalyticsSummary analytics={analytics} /> : null}
+        {analytics?.available ? <AssetChart events={analytics.event_series} /> : null}
       </section>
+      {analytics?.available === false && analytics.valuation_gaps?.length ? (
+        <section className="panel">
+          <h2>Valuation Gaps</h2>
+          <ValuationGapsSection gaps={analytics.valuation_gaps} />
+        </section>
+      ) : null}
       {analytics?.available !== false ? (
         <>
           <section className="panel">

@@ -115,6 +115,8 @@ class SnapshotAnalyticsEvent(BaseModel):
     timezone: str
     quality_status: str
     invalid_reason: str | None = None
+    valuation_quality: Literal["current", "stale_suspended"] | None = None
+    valuation_details: list[dict[str, Any]] | None = None
     nav: Decimal | None = None
     shares: Decimal | None = None
     share: Decimal | None = None

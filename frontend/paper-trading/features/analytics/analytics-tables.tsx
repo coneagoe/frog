@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { DataTable, type Column } from "@/components/data-table";
 import { MoneyText } from "@/components/money-text";
 import { formatBackendLabel, formatDate, formatPercent, formatQuantity, labelStatus } from "@/lib/format";
-import type { ActivitySummary, AvailableAnalyticsResponse, AnalyticsCorporateActionEvent, RoundTrip } from "@/lib/types";
+import type { ActivitySummary, AvailableAnalyticsResponse, AnalyticsCorporateActionEvent, RoundTrip, ValuationGap } from "@/lib/types";
 import { MetricValueText } from "./analytics-summary";
 
 function MetricCard({ label, value }: { label: string; value: ReactNode }) {
@@ -165,4 +165,25 @@ export function AnalyticsCorporateActionsSection({ analytics }: { analytics: Ava
     { key: "parameters", header: "Parameters", render: (row) => Object.entries(row.parameters).map(([key, value], index) => <span key={key}>{index > 0 ? ", " : null}{formatBackendLabel(key)} {formatImpactValue(key, value)}</span>) },
     { key: "impact", header: "Impact", render: (row) => <span>Qty {formatQuantity(Number(row.impact.before_quantity))} → {formatQuantity(Number(row.impact.after_quantity))}; Cash <MoneyText value={row.impact.before_cash_available} /> → <MoneyText value={row.impact.after_cash_available} /></span> },
   ]} emptyTitle="No corporate actions yet" getRowKey={(row) => row.id} rows={rows} />;
+}
+
+function formatGapDetails(details: ValuationGap["details"]) {
+  if (!details.length) return "—";
+  return details
+    .map((detail) => Object.entries(detail).map(([key, value]) => `${formatBackendLabel(key)}: ${String(value)}`).join(" · "))
+    .join("; ");
+}
+
+export function ValuationGapsSection({ gaps }: { gaps: ValuationGap[] }) {
+  return <DataTable
+    columns={[
+      { key: "date", header: "Date", render: (row) => formatDate(row.trade_date) },
+      { key: "symbols", header: "Missing Symbols", render: (row) => row.missing_symbols.length ? row.missing_symbols.join(", ") : "—" },
+      { key: "details", header: "Details", render: (row) => formatGapDetails(row.details) },
+      { key: "resolved", header: "Status", render: (row) => row.resolved ? "Resolved" : "Unresolved" }
+    ]}
+    emptyTitle="No valuation gaps"
+    getRowKey={(row) => `${row.trade_date}-${row.missing_symbols.join(",")}`}
+    rows={gaps}
+  />;
 }
