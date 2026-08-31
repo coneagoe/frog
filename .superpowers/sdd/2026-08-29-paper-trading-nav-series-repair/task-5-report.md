@@ -31,6 +31,8 @@
 - Late materialization advances cash through later trades and actions so rights
   eligibility is evaluated at the event time; original order/trade fields remain
   unchanged.
+- Corporate-action derived frozen state is kept on the position/replay
+  projection; `PaperOrder` and `PaperTrade` rows are not mutated.
 - Existing cash-ledger audit rows remain separate from corporate-action replay
   events, preventing duplicate cash application during NAV replay.
 - Existing idempotency, processing metadata, affected range, precision, and
