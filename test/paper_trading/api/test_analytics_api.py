@@ -288,6 +288,68 @@ def test_get_account_analytics_returns_unavailable_for_repair_marked_account(mon
     }
 
 
+def test_get_account_analytics_returns_persisted_gaps_for_repair_marked_account(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-repair-gaps", Decimal("100000.00"))
+    account.migration_repair_reason = MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
+    repo.upsert_valuation_gap(
+        account.id,
+        date(2026, 8, 25),
+        ["000001.SZ"],
+        [{"reason": "missing_bar", "source": "persisted"}],
+    )
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": False,
+        "reason": "legacy_ordering_uncertain",
+        "valuation_gaps": [
+            {
+                "trade_date": "2026-08-25",
+                "missing_symbols": ["000001.SZ"],
+                "details": [{"reason": "missing_bar", "source": "persisted"}],
+                "resolved": False,
+            }
+        ],
+    }
+
+
+def test_get_account_analytics_returns_persisted_gaps_when_replay_is_unavailable(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-replay-gaps", Decimal("100000.00"))
+    repo.upsert_valuation_gap(
+        account.id,
+        date(2026, 8, 25),
+        ["000001.SZ"],
+        [{"reason": "missing_bar", "source": "persisted"}],
+    )
+    monkeypatch.setattr(analytics_router, "AnalyticsService", lambda repo: AnalyticsService(repo))
+    monkeypatch.setattr(
+        "paper_trading.services.analytics_service.NavSeriesBuilder.build",
+        lambda self, account_id: (_ for _ in ()).throw(ValueError("builder unavailable")),
+    )
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": False,
+        "reason": "replay_unavailable",
+        "valuation_gaps": [
+            {
+                "trade_date": "2026-08-25",
+                "missing_symbols": ["000001.SZ"],
+                "details": [{"reason": "missing_bar", "source": "persisted"}],
+                "resolved": False,
+            }
+        ],
+    }
+
+
 @pytest.mark.parametrize(
     ("reason", "expected_gaps"),
     [

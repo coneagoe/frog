@@ -678,9 +678,11 @@ market prices; those are documented data-quality limitations.
 The payload is a discriminated union on `available`. A normal account returns
 HTTP 200 with `available: true` and the overview, activity, execution, trade
 quality, and risk fields below. An account whose `migration_repair_reason` is
-set returns HTTP 200 with
-`{"available": false, "reason": "legacy_ordering_uncertain"}` immediately after
-account lookup, before any metric computation. Unknown accounts remain HTTP 404.
+set returns HTTP 200 with `available: false`, reason
+`legacy_ordering_uncertain`, and any persisted `valuation_gaps`, without metric
+computation. A replay-unavailable response likewise retains persisted
+`valuation_gaps`; unavailable responses use `valuation_gaps: null` when none
+exist. Unknown accounts remain HTTP 404.
 
 The Analytics frontend keeps account selection, loading and error handling, the
 Overview container, and the stored snapshot chart. When `available` is false it

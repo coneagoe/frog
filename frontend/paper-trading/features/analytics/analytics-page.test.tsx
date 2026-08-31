@@ -248,6 +248,21 @@ describe("AnalyticsPage", () => {
     expect(document.querySelector(".chart-surface")).not.toBeInTheDocument();
   });
 
+  it("shows persisted valuation gaps for repair-unavailable analytics", async () => {
+    getAnalyticsMock.mockResolvedValue({
+      available: false,
+      reason: "legacy_ordering_uncertain",
+      valuation_gaps: [{ trade_date: "2026-09-10", missing_symbols: ["000001.SZ"], details: [{ reason: "missing_bar" }], resolved: false }]
+    });
+    render(<AnalyticsPage />);
+
+    expect(await screen.findByText("Performance analytics unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Valuation Gaps" })).toBeInTheDocument();
+    expect(screen.getByText("000001.SZ")).toBeInTheDocument();
+    expect(screen.getByText("Reason: missing_bar")).toBeInTheDocument();
+    expect(document.querySelector(".chart-surface")).not.toBeInTheDocument();
+  });
+
   it("shows valuation gaps for available analytics too", async () => {
     getAnalyticsMock.mockResolvedValueOnce({
       ...analyticsPayload,

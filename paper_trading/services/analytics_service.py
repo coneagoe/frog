@@ -54,13 +54,16 @@ class AnalyticsService:
         account = self.repo.get_account(account_id)
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
+        persisted_gaps = self._valuation_gaps(account_id)
         if account.migration_repair_reason is not None:
-            return AnalyticsUnavailableResponse(reason=MigrationRepairReason(account.migration_repair_reason))
+            return AnalyticsUnavailableResponse(
+                reason=MigrationRepairReason(account.migration_repair_reason),
+                valuation_gaps=persisted_gaps or None,
+            )
         orders = self.repo.list_orders(account_id)
         snapshots = self.repo.list_snapshots(account_id)
         if not hasattr(self.repo, "list_replay_events"):
-            return AnalyticsUnavailableResponse(reason="replay_unavailable")
-        persisted_gaps = self._valuation_gaps(account_id)
+            return AnalyticsUnavailableResponse(reason="replay_unavailable", valuation_gaps=persisted_gaps or None)
         initial_snapshots = [
             snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.INITIAL.value
         ]

@@ -8,8 +8,9 @@ Implemented the paper-trading analytics API/frontend contract repair.
 
 - Made analytics snapshot serialization compatible with legacy snapshot fixtures that
   do not carry valuation metadata.
-- Merged persisted and replay-derived valuation gaps on replay and invalid-response
-  paths, so diagnostics are retained when analytics is unavailable.
+- Reads persisted valuation gaps before every early unavailable response,
+  including migration-repair and replay-unavailable paths, so diagnostics are
+  retained when analytics is unavailable.
 - Rendered valuation-gap diagnostics for both available and unavailable analytics
   payloads.
 - Narrowed the analytics snapshot event contract to UTC timestamps and closed
@@ -26,16 +27,16 @@ Implemented the paper-trading analytics API/frontend contract repair.
   resolved/unresolved status; gaps are not plotted.
 - Propagated valuation metadata through the analytics API and exposed UTC on the
   snapshots API.
-- Updated available, repair, gap, chart filtering, and API contract tests.
+- Updated available, repair, gap, chart filtering, and API contract tests,
+  including persisted gaps on repair and replay-unavailable payloads.
 
 ## Validation
 
-- `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py` — 91 tests passed.
-- `npm run test -- --run features/analytics/analytics-page.test.tsx` — 11 tests passed.
-- `npm run test` — 225 tests passed.
+- `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py test/paper_trading/api/test_snapshots_api.py` — 98 tests passed.
+- `npm run test -- --run features/analytics/analytics-page.test.tsx` — 12 tests passed.
+- `npm run test` — 227 tests passed.
 - `npm run lint` — passed.
 - `npm run build` — passed.
-- `uv run pytest test/paper_trading/api/test_analytics_api.py test/paper_trading/api/test_snapshots_api.py` — 25 tests passed.
 - `uv run ruff check paper_trading/services/analytics_service.py paper_trading/schemas/analytics.py test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py` — passed.
 - `git diff --check` — passed.
 
