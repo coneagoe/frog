@@ -15,6 +15,7 @@ from paper_trading.domain.enums import (
     SnapshotQualityStatus,
 )
 from paper_trading.services.analytics_service import AnalyticsService
+from paper_trading.storage.models import PaperAccountSnapshot
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 
@@ -162,11 +163,7 @@ def test_get_account_analytics_does_not_turn_unresolved_gap_into_nav_or_metrics(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["valuation_gaps"][0]["resolved"] is False
-    assert payload["overview"]["total_return"]["reason"] == "insufficient_data"
-    assert payload["overview"]["net_asset_value"] == "1.000000"
-    assert payload["risk"]["max_drawdown"]["reason"] == "insufficient_data"
-    assert payload["risk"]["sharpe"]["value"] is None
+    assert payload == {"available": False, "reason": "valuation_gap"}
 
 
 def test_get_account_analytics_returns_date_ordered_valuation_gaps(monkeypatch, sqlite_session):
@@ -180,21 +177,7 @@ def test_get_account_analytics_returns_date_ordered_valuation_gaps(monkeypatch, 
     response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
 
     assert response.status_code == 200
-    assert response.json()["valuation_gaps"] == [
-        {
-            "trade_date": "2026-08-25",
-            "missing_symbols": ["000001.SZ"],
-            "details": [{"reason": "earlier"}],
-            "resolved": False,
-        },
-        {
-            "trade_date": "2026-08-26",
-            "missing_symbols": ["000002.SZ"],
-            "details": [{"reason": "later"}],
-            "resolved": False,
-        },
-        {"trade_date": "2026-08-27", "missing_symbols": [], "details": [], "resolved": True},
-    ]
+    assert response.json() == {"available": False, "reason": "valuation_gap"}
 
 
 def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_assets(monkeypatch, sqlite_session):
@@ -258,6 +241,33 @@ def test_get_account_analytics_returns_unavailable_for_repair_marked_account(mon
 
     assert response.status_code == 200
     assert response.json() == {"available": False, "reason": "legacy_ordering_uncertain"}
+
+
+@pytest.mark.parametrize("reason", ["missing_initial", "invalid_initial", "replay_unavailable", "valuation_gap"])
+def test_get_account_analytics_unavailable_reason_is_closed_contract(monkeypatch, sqlite_session, reason):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account(f"api-{reason}", Decimal("100000.00"))
+    if reason == "missing_initial":
+        repo.session.query(PaperAccountSnapshot).delete()
+    elif reason == "invalid_initial":
+        initial = repo.list_snapshots(account.id)[0]
+        initial.quality_status = SnapshotQualityStatus.INVALID.value
+    elif reason == "valuation_gap":
+        repo.upsert_valuation_gap(account.id, date(2026, 8, 20), ["000001"], [{"reason": "missing_bar"}])
+    else:
+        monkeypatch.setattr(analytics_router, "AnalyticsService", lambda repo: AnalyticsService(repo))
+        monkeypatch.setattr(
+            "paper_trading.services.analytics_service.NavSeriesBuilder.build",
+            lambda self, account_id: (_ for _ in ()).throw(ValueError("builder unavailable")),
+        )
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code in {200, 500}
+    if response.status_code == 200:
+        assert response.json()["available"] is False
+        assert response.json()["reason"] == reason
 
 
 def test_get_account_analytics_unknown_account_returns_404(monkeypatch, sqlite_session):

@@ -10,6 +10,8 @@ Task 7 changes are limited to analytics schemas/service and analytics service/AP
 - Performance and risk metrics consume the same replay-derived NAV series, excluding cash-flow replay points from return sampling.
 - Missing and invalid initial points return `available=false` with distinct `missing_initial` and `invalid_initial` reasons; replay failures return `replay_unavailable`.
 - Any invalid replay point surfaces `valuation_gap` for all performance/risk metrics; no NAV or return is synthesized across a gap.
+- Any unresolved persisted valuation gap also returns an unavailable analytics payload; resolved gaps remain non-blocking.
+- `AnalyticsUnavailableReason` is a closed enum covering replay, repair, valuation-gap, and insufficient-data discriminators.
 - Replay-produced `NavPoint.nav` is the sole performance-series authority; persisted snapshots remain display/audit inputs only.
 - Event series preserves snapshot, cash-flow, and corporate-action audit events and uses replay order where available.
 - Snapshot API events now expose `quality`, `point_type`, `timezone`, `nav`, `share`, and the existing invalid reason fields.
@@ -23,7 +25,7 @@ Task 7 changes are limited to analytics schemas/service and analytics service/AP
 
 ## Verification
 
-- Focused analytics service/API tests: `78 passed, 1 warning`
+- Focused analytics service/API tests: `84 passed, 1 warning`
 - Scoped Ruff: passed for analytics service/schema and analytics service/API tests
 - `git diff --check`: passed
 - Warning: installed Starlette emits an `httpx` deprecation warning from `TestClient`; unrelated to Task 7.

@@ -546,8 +546,8 @@ def test_analytics_includes_unresolved_gap_without_assets_as_nav(tmp_path):
 
     payload = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert payload.valuation_gaps[0].trade_date == date(2026, 8, 25)
-    assert payload.valuation_gaps[0].resolved is False
+    assert isinstance(payload, AnalyticsUnavailableResponse)
+    assert payload.reason == "valuation_gap"
     assert AnalyticsService._nav_series(repo.list_snapshots(account.id)) == [Decimal("1.000000")]
     engine.dispose()
 
@@ -1595,4 +1595,41 @@ def test_replay_gap_details_are_exposed_as_valuation_gap(tmp_path, monkeypatch):
     assert isinstance(response, AnalyticsResponse)
     assert response.valuation_gaps[0].details == [{"symbol": "000001", "reason": "no_bar"}]
     assert response.valuation_gaps[0].resolved is False
+    engine.dispose()
+
+
+def test_unresolved_persisted_gap_blocks_valid_replay_metrics(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("persisted-gap-blocks", Decimal("100000.00"))
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 2), ["000001"], [{"reason": "missing_bar"}])
+    initial = NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1), "initial", NavReplayEventType.INITIAL,
+        Decimal("100"), Decimal("100"), Decimal("1"), SnapshotQualityStatus.VALID,
+    )
+    first = NavPoint(
+        datetime(2026, 8, 2, tzinfo=timezone.utc), date(2026, 8, 2), "valuation-1", NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"), Decimal("100"), Decimal("1.1"), SnapshotQualityStatus.VALID,
+    )
+    second = NavPoint(
+        datetime(2026, 8, 3, tzinfo=timezone.utc), date(2026, 8, 3), "valuation-2", NavReplayEventType.MARKET_VALUATION,
+        Decimal("120"), Decimal("100"), Decimal("1.2"), SnapshotQualityStatus.VALID,
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, first, second)))
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "valuation_gap"
+    engine.dispose()
+
+
+def test_resolved_persisted_gap_does_not_block_valid_replay_metrics(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("resolved-gap-allows", Decimal("100000.00"))
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 2), [], [], resolved=True)
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsResponse)
+    assert response.overview.total_return.reason == "insufficient_data"
     engine.dispose()

@@ -17,6 +17,7 @@ from paper_trading.schemas.analytics import (
     ActivitySummary,
     AnalyticsEvent,
     AnalyticsResponse,
+    AnalyticsUnavailableReason,
     AnalyticsUnavailableResponse,
     CashFlowAnalyticsEvent,
     CorporateActionAnalyticsEvent,
@@ -83,6 +84,9 @@ class AnalyticsService:
             for snapshot in snapshots
         ):
             return AnalyticsUnavailableResponse(reason="valuation_gap")
+        unresolved_gaps = self._valuation_gaps(account_id)
+        if any(not gap.resolved for gap in unresolved_gaps):
+            return AnalyticsUnavailableResponse(reason=AnalyticsUnavailableReason.VALUATION_GAP)
         invalid_replay_nav = next(
             (
                 point
@@ -109,7 +113,7 @@ class AnalyticsService:
             execution=self._execution(orders),
             trade_quality=self._trade_quality(round_trips),
             risk=self._risk(replay if replay is not None else snapshots, snapshots),
-            valuation_gaps=self._valuation_gaps(account_id) + self._replay_valuation_gaps(replay),
+            valuation_gaps=unresolved_gaps + self._replay_valuation_gaps(replay),
             event_series=self._event_series(snapshots, ledger_entries, corporate_actions, replay),
         )
 

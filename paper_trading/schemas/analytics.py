@@ -1,15 +1,25 @@
 from datetime import date, datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from paper_trading.domain.enums import CorporateActionType, MigrationRepairReason
+from paper_trading.domain.enums import CorporateActionType
 
 
 class MetricValue(BaseModel):
     value: Decimal | None = None
     reason: str | None = None
+
+
+class AnalyticsUnavailableReason(StrEnum):
+    MISSING_INITIAL = "missing_initial"
+    INVALID_INITIAL = "invalid_initial"
+    REPLAY_UNAVAILABLE = "replay_unavailable"
+    VALUATION_GAP = "valuation_gap"
+    INSUFFICIENT_DATA = "insufficient_data"
+    LEGACY_ORDERING_UNCERTAIN = "legacy_ordering_uncertain"
 
 
 class ActivitySummary(BaseModel):
@@ -149,4 +159,4 @@ class AnalyticsResponse(BaseModel):
 
 class AnalyticsUnavailableResponse(BaseModel):
     available: Literal[False] = False
-    reason: str | MigrationRepairReason
+    reason: AnalyticsUnavailableReason
