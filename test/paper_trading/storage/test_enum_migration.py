@@ -427,6 +427,20 @@ def test_preflight_allows_missing_additive_order_event_table(postgres_schema):
         assert not _table_exists(connection, "paper_order_events")
 
 
+def test_apply_installs_and_reruns_additive_order_event_table_with_native_enum_and_index(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert not _table_exists(connection, "paper_order_events")
+
+        result = migrate_paper_trading_enums(connection)
+
+        assert result.converted is True
+        assert _table_exists(connection, "paper_order_events")
+        assert _column_type(connection, "paper_order_events", "event_type") == "paper_order_event_type"
+        assert _index_exists(connection, "ix_paper_order_events_event_type")
+        assert migrate_paper_trading_enums(connection).converted is False
+
+
 def test_unknown_legacy_value_aborts_all_groups_without_conversion(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:

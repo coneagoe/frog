@@ -151,12 +151,15 @@ class MatchingService:
 
     def _reject_order(self, order: PaperOrder, code: str, reason: str) -> None:
         now = datetime.now(timezone.utc)
+        side = OrderSide(order.side)
         lifecycle = self.repo.list_effective_order_events(order.account_id, order.id)
         lifecycle_id = lifecycle[0].id if lifecycle else order.id
         outstanding_quantity = max(
             sum((Decimal(event.quantity_delta) for event in lifecycle), Decimal("0")), Decimal("0")
         )
         outstanding_cash = max(-sum((Decimal(event.cash_delta) for event in lifecycle), Decimal("0")), Decimal("0"))
+        if side == OrderSide.SELL:
+            order.filled_quantity = int(order.quantity) - int(outstanding_quantity)
         if outstanding_cash > 0:
             self.repo.add_cash_event(
                 order.account_id,
@@ -235,7 +238,17 @@ class MatchingService:
     def _fill_order(self, order: PaperOrder) -> None:
         side = OrderSide(order.side)
         price = Decimal(order.limit_price)
-        quantity = int(order.quantity)
+        previous_filled_quantity = int(order.filled_quantity or 0)
+        lifecycle = self.repo.list_effective_order_events(order.account_id, order.id)
+        outstanding_quantity = max(
+            sum((Decimal(event.quantity_delta) for event in lifecycle), Decimal("0")), Decimal("0")
+        )
+        outstanding_cash = max(-sum((Decimal(event.cash_delta) for event in lifecycle), Decimal("0")), Decimal("0"))
+        quantity = int(outstanding_quantity)
+        if quantity == 0:
+            quantity = int(order.quantity) - int(order.filled_quantity)
+        if quantity <= 0:
+            raise ValueError(f"order {order.id} has no remaining reservation")
         account = self.repo.get_account(order.account_id)
         if account is None:
             raise ValueError(f"paper account not found: {order.account_id}")
@@ -264,8 +277,6 @@ class MatchingService:
             market=order.market,
         )
         actual_cost = amount + fees
-        lifecycle = self.repo.list_effective_order_events(order.account_id, order.id)
-        outstanding_cash = max(-sum((Decimal(event.cash_delta) for event in lifecycle), Decimal("0")), Decimal("0"))
         release_cash = outstanding_cash - actual_cost
         lifecycle_id = self.repo.effective_order_lifecycle_id(order.account_id, order.id) or order.id
         self.repo.append_order_event(
@@ -275,7 +286,7 @@ class MatchingService:
             order.symbol,
             PaperOrderEventType.FILL,
             trade.trade_time if trade.trade_time.tzinfo else trade.trade_time.replace(tzinfo=timezone.utc),
-            quantity_delta=-Decimal(quantity) if side == OrderSide.SELL else Decimal("0"),
+            quantity_delta=-Decimal(quantity),
             cash_delta=actual_cost if side == OrderSide.BUY else Decimal("0"),
             idempotency_key=f"order:{order.id}:lifecycle:{lifecycle_id}:fill:{trade.id}",
             trade_id=trade.id,
@@ -293,14 +304,14 @@ class MatchingService:
             trade_id=trade.id,
         )
         if side == OrderSide.BUY:
-            self._settle_buy(order, trade.id, amount, fees, release_cash)
+            self._settle_buy(order, trade.id, quantity, amount, fees, release_cash)
             position = self.repo.get_position(order.account_id, order.market, order.symbol)
             self.round_trip_service.record_fill(
                 trade,
                 post_position_quantity=0 if position is None else int(position.total_quantity or 0),
             )
         else:
-            self._settle_sell(order, trade.id, amount, fees)
+            self._settle_sell(order, trade.id, quantity, amount, fees)
             # HK sells create pending settlement (T+2) instead of immediate cash credit
             if order.market == "hk_connect":
                 settle_date = self._next_trade_date(order.trade_date, 2)
@@ -322,11 +333,11 @@ class MatchingService:
                 and int(position.frozen_quantity or 0) == 0
             ):
                 self.repo.delete_position(position)
-        order.filled_quantity = quantity
+        order.filled_quantity = previous_filled_quantity + quantity
         self.repo.update_order_status(order, OrderStatus.FILLED)
 
     def _settle_buy(
-        self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal, release_cash: Decimal
+        self, order: PaperOrder, trade_id: int, quantity: int, amount: Decimal, fees: Decimal, release_cash: Decimal
     ) -> None:
         actual_cost = amount + fees
         if release_cash:
@@ -345,7 +356,7 @@ class MatchingService:
             order.account_id,
             order.market,
             order.symbol,
-            total_quantity=current_quantity + int(order.quantity),
+            total_quantity=current_quantity + quantity,
             frozen_quantity=(0 if position is None else int(position.frozen_quantity or 0)),
             cost_amount=quantize_account_money(current_cost + actual_cost),
         )
@@ -354,12 +365,12 @@ class MatchingService:
             order.market,
             order.symbol,
             order.trade_date,
-            int(order.quantity),
-            int(order.quantity),
+            quantity,
+            quantity,
             Decimal(order.limit_price),
         )
 
-    def _settle_sell(self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal) -> None:
+    def _settle_sell(self, order: PaperOrder, trade_id: int, quantity: int, amount: Decimal, fees: Decimal) -> None:
         # HK sells skip immediate cash credit — pending settlement is created in _fill_order
         if order.market != "hk_connect":
             self.repo.add_cash_event(
@@ -373,7 +384,7 @@ class MatchingService:
         position = self.repo.get_position(order.account_id, order.market, order.symbol)
         if position is None:
             return
-        quantity_to_sell = int(order.quantity)
+        quantity_to_sell = quantity
         remaining = quantity_to_sell
         cost_reduction = Decimal("0")
         for lot in self.repo.get_lots(order.account_id, order.market, order.symbol):

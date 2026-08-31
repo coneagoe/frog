@@ -478,6 +478,8 @@ class OrderService:
         if order.status not in {OrderStatus.ACCEPTED.value, OrderStatus.PARTIALLY_FILLED.value}:
             raise ValueError("Only accepted or partially filled orders can be cancelled")
         outstanding_quantity, outstanding_cash = self._outstanding_reservation(order)
+        if OrderSide(order.side) == OrderSide.SELL:
+            order.filled_quantity = int(order.quantity) - int(outstanding_quantity)
         if outstanding_cash > 0:
             self.repo.add_cash_event(
                 order.account_id,

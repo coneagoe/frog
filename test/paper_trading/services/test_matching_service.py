@@ -176,7 +176,7 @@ def test_fill_order_appends_trade_linked_lifecycle_facts(tmp_path):
         PaperOrderEventType.RELEASE.value,
     ]
     assert events[2].trade_id == trade.id
-    assert events[2].quantity_delta == Decimal("0.000000000000")
+    assert events[2].quantity_delta == Decimal("-100.000000000000")
     assert events[2].cash_delta == Decimal("1005.010000000000")
     assert events[3].cash_delta == Decimal("0.000000000000")
     session.commit()

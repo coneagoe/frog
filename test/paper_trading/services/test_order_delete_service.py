@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Self
 
@@ -12,6 +12,7 @@ from paper_trading.domain.enums import (
     MatchingRunStatus,
     OrderSide,
     OrderStatus,
+    PaperOrderEventType,
     SnapshotPointType,
 )
 from paper_trading.services.matching_service import MatchingService
@@ -468,6 +469,118 @@ def test_repeated_rebuild_preserves_source_facts_and_current_derived_counts(sess
     assert repo.get_order(sell.id).status == OrderStatus.FILLED.value
     assert repo.get_order(cancelled.id).status == OrderStatus.CANCELLED.value
     assert [event.note for event in repo.list_cash_ledger(account.id)].count("manual") == 1
+
+
+def _seed_partially_filled_buy(repo, account_id, trade_date):
+    order = repo.create_order(
+        account_id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0100"),
+    )
+    repo.append_order_event(
+        account_id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.FILL,
+        datetime.now(timezone.utc),
+        quantity_delta=Decimal("-40"),
+        cash_delta=Decimal("405.0100"),
+        idempotency_key=f"order:{order.id}:partial-fill",
+    )
+    order.status = OrderStatus.PARTIALLY_FILLED.value
+    order.filled_quantity = 40
+    repo.session.flush()
+    return order
+
+
+def test_rebuild_replays_only_partially_filled_buy_remainder(session):
+    repo = PaperTradingRepository(session)
+    market_data = FakeMarketDataProvider()
+    account = repo.create_account("partial-rebuild-fill", Decimal("100000"))
+    trade_date = date(2026, 7, 17)
+    order = _seed_partially_filled_buy(repo, account.id, trade_date)
+
+    OrderDeleteService(repo, market_data).rebuild_account_from(account.id, trade_date, [order.id])
+
+    rebuilt = repo.get_order(order.id)
+    trades = repo.list_trades(account.id)
+    position = repo.get_position(account.id, Market.A_SHARE, order.symbol)
+    assert rebuilt.status == OrderStatus.FILLED.value
+    assert rebuilt.filled_quantity == 100
+    assert [trade.quantity for trade in trades] == [60]
+    assert position is not None
+    assert position.total_quantity == 60
+    assert sum(event.cash_delta for event in repo.list_effective_order_events(account.id, order.id)) == Decimal("0")
+
+
+def test_rebuild_then_cancel_releases_only_partially_filled_buy_remainder(session):
+    repo = PaperTradingRepository(session)
+    trade_date = date(2026, 7, 17)
+    account = repo.create_account("partial-rebuild-cancel", Decimal("100000"))
+    order = _seed_partially_filled_buy(repo, account.id, trade_date)
+    market_data = FakeMarketDataProvider(
+        {
+            (order.symbol, trade_date): DailyBar(
+                symbol=order.symbol,
+                trade_date=trade_date,
+                open=Decimal("10"),
+                high=Decimal("9"),
+                low=Decimal("1"),
+                close=Decimal("5"),
+            )
+        }
+    )
+
+    OrderDeleteService(repo, market_data).rebuild_account_from(account.id, trade_date, [order.id])
+    OrderService(repo, market_data).cancel_order(order.id)
+
+    rebuilt = repo.get_order(order.id)
+    events = repo.list_effective_order_events(account.id, order.id)
+    assert rebuilt.status == OrderStatus.CANCELLED.value
+    assert rebuilt.filled_quantity == 40
+    assert sum(event.quantity_delta for event in events) == Decimal("0")
+    assert sum(event.cash_delta for event in events) == Decimal("0")
+    release = events[-1]
+    assert release.event_type == PaperOrderEventType.RELEASE.value
+    assert release.cash_delta == Decimal("600.000000000000")
+
+
+def test_rebuild_then_reject_releases_only_partially_filled_buy_remainder(session):
+    repo = PaperTradingRepository(session)
+    trade_date = date(2026, 7, 17)
+    account = repo.create_account("partial-rebuild-reject", Decimal("100000"))
+    order = _seed_partially_filled_buy(repo, account.id, trade_date)
+    market_data = FakeMarketDataProvider(
+        {
+            (order.symbol, trade_date): DailyBar(
+                symbol=order.symbol,
+                trade_date=trade_date,
+                open=Decimal("10"),
+                high=Decimal("11"),
+                low=Decimal("9"),
+                close=Decimal("10"),
+                suspended=True,
+            )
+        }
+    )
+
+    OrderDeleteService(repo, market_data).rebuild_account_from(account.id, trade_date, [order.id])
+
+    rebuilt = repo.get_order(order.id)
+    events = repo.list_effective_order_events(account.id, order.id)
+    assert rebuilt.status == OrderStatus.REJECTED.value
+    assert rebuilt.filled_quantity == 40
+    assert sum(event.quantity_delta for event in events) == Decimal("0")
+    assert sum(event.cash_delta for event in events) == Decimal("0")
+    release = events[-1]
+    assert release.event_type == PaperOrderEventType.RELEASE.value
+    assert release.cash_delta == Decimal("600.000000000000")
 
 
 def test_rebuild_isolates_missing_untouched_and_suspended_orders(session):

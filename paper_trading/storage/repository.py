@@ -694,7 +694,7 @@ class PaperTradingRepository:
                 symbol,
                 PaperOrderEventType.RESERVED,
                 event_at,
-                quantity_delta=Decimal(frozen_quantity),
+                quantity_delta=Decimal(quantity if side == OrderSide.BUY else frozen_quantity),
                 cash_delta=-Decimal(frozen_cash),
                 idempotency_key=f"order:{order.id}:reserved",
                 event_time_provenance=lifecycle_time_provenance,
@@ -781,6 +781,15 @@ class PaperTradingRepository:
         )
         if reservation is None:
             return
+        remaining_quantity = max(
+            sum((Decimal(event.quantity_delta) for event in effective), Decimal("0")), Decimal("0")
+        )
+        remaining_cash = min(sum((Decimal(event.cash_delta) for event in effective), Decimal("0")), Decimal("0"))
+        if OrderSide(order.side) == OrderSide.SELL:
+            remaining_cash = Decimal("0")
+        if remaining_quantity == 0 and (OrderSide(order.side) == OrderSide.SELL or remaining_cash == 0):
+            remaining_quantity = Decimal(reservation.quantity_delta)
+            remaining_cash = Decimal(reservation.cash_delta)
         replay_number = len([event for event in original if event.event_type == PaperOrderEventType.ACCEPTED.value])
         replay_key = f"order:{order.id}:replay:{replay_number}"
         event_at = reservation.event_at.replace(tzinfo=timezone.utc)
@@ -804,8 +813,8 @@ class PaperTradingRepository:
             order.symbol,
             PaperOrderEventType.RESERVED,
             event_at,
-            quantity_delta=Decimal(reservation.quantity_delta),
-            cash_delta=Decimal(reservation.cash_delta),
+            quantity_delta=remaining_quantity,
+            cash_delta=remaining_cash,
             idempotency_key=f"{replay_key}:reserved",
             event_time_provenance=provenance,
         )
@@ -2248,7 +2257,6 @@ class PaperTradingRepository:
                 [
                     OrderStatus.ACCEPTED.value,
                     OrderStatus.FILLED.value,
-                    OrderStatus.PARTIALLY_FILLED.value,
                     OrderStatus.NEW.value,
                 ]
             ),
@@ -2256,6 +2264,17 @@ class PaperTradingRepository:
             {
                 PaperOrder.status: OrderStatus.ACCEPTED.value,
                 PaperOrder.filled_quantity: 0,
+                PaperOrder.rejection_code: None,
+                PaperOrder.rejection_reason: None,
+            },
+            synchronize_session=False,
+        )
+        self.session.query(PaperOrder).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.status == OrderStatus.PARTIALLY_FILLED.value,
+        ).update(
+            {
+                PaperOrder.status: OrderStatus.ACCEPTED.value,
                 PaperOrder.rejection_code: None,
                 PaperOrder.rejection_reason: None,
             },
@@ -2287,7 +2306,6 @@ class PaperTradingRepository:
                 [
                     OrderStatus.ACCEPTED.value,
                     OrderStatus.FILLED.value,
-                    OrderStatus.PARTIALLY_FILLED.value,
                     OrderStatus.NEW.value,
                 ]
             ),
@@ -2295,6 +2313,18 @@ class PaperTradingRepository:
             {
                 PaperOrder.status: OrderStatus.ACCEPTED.value,
                 PaperOrder.filled_quantity: 0,
+                PaperOrder.rejection_code: None,
+                PaperOrder.rejection_reason: None,
+            },
+            synchronize_session=False,
+        )
+        self.session.query(PaperOrder).filter(
+            PaperOrder.account_id == account_id,
+            PaperOrder.trade_date >= start_date,
+            PaperOrder.status == OrderStatus.PARTIALLY_FILLED.value,
+        ).update(
+            {
+                PaperOrder.status: OrderStatus.ACCEPTED.value,
                 PaperOrder.rejection_code: None,
                 PaperOrder.rejection_reason: None,
             },

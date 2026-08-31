@@ -30,7 +30,9 @@ from paper_trading.domain.enums import (
     PaperOrderEventType,
 )
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
+from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_service import OrderService
+from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
@@ -146,7 +148,52 @@ def test_place_and_cancel_buy_order_append_lifecycle_facts(tmp_path):
     ]
     assert events[1].cash_delta == Decimal("-1005.010000000000")
     assert events[3].cash_delta == Decimal("1005.010000000000")
-    assert events[3].quantity_delta == Decimal("0E-12")
+    assert events[3].quantity_delta == Decimal("-100.000000000000")
+    engine.dispose()
+
+
+@pytest.mark.parametrize("terminal_event", [PaperOrderEventType.CANCEL, PaperOrderEventType.REJECT])
+def test_partial_buy_terminal_release_uses_only_remaining_reservation(tmp_path, terminal_event):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("partial-terminal-release", Decimal("100000.00"))
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    repo.append_order_event(
+        account.id,
+        order.id,
+        order.market,
+        order.symbol,
+        PaperOrderEventType.FILL,
+        datetime.now(timezone.utc),
+        quantity_delta=Decimal("-40"),
+        cash_delta=Decimal("405.0100"),
+        idempotency_key=f"order:{order.id}:partial-fill",
+    )
+    order.status = OrderStatus.PARTIALLY_FILLED.value
+    order.filled_quantity = 40
+    if terminal_event == PaperOrderEventType.CANCEL:
+        service.cancel_order(order.id)
+    else:
+        market_data = FakeMarketDataProvider()
+        MatchingService(repo, market_data, SnapshotService(repo, market_data))._reject_order(
+            order, "SUSPENDED_SYMBOL", "Symbol is suspended"
+        )
+
+    release = repo.list_order_events(account.id, order.id)[-1]
+    assert release.event_type == PaperOrderEventType.RELEASE.value
+    assert release.cash_delta == Decimal("600.000000000000")
+    assert repo.get_order(order.id).filled_quantity == 40
+    releases = [event for event in repo.list_cash_ledger(account.id) if event.order_id == order.id]
+    assert [(event.event_type, event.amount) for event in releases] == [
+        (CashEventType.FREEZE.value, Decimal("-1005.0100")),
+        (CashEventType.RELEASE.value, Decimal("600.0000")),
+    ]
     engine.dispose()
 
 
