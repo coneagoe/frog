@@ -2,7 +2,9 @@
 
 ## Scope
 
-Task 7 changes are limited to analytics schemas/service and analytics service/API tests. No frontend, corporate-action service, or Task 8 files were modified. Existing external modifications in `paper_trading/services/corporate_action_service.py` and its test were left untouched and unstaged.
+Task 7 changes are limited to `paper_trading/schemas/analytics.py`, `paper_trading/services/analytics_service.py`, `test/paper_trading/services/test_analytics_service.py`, `test/paper_trading/api/test_analytics_api.py`, and this report. No frontend, corporate-action service, corporate-action tests, or Task 5 report files are part of Task 7.
+
+Task 7 replay commits are `a10e46f`, `6dcd630`, `eae607b`, `0bd8fd8`, `02a0f26`, and `8a38c92`; Task 5 corporate-action commits are deliberately excluded from this report.
 
 ## Implementation
 
@@ -21,15 +23,16 @@ Task 7 changes are limited to analytics schemas/service and analytics service/AP
 
 - Added a failing test proving analytics ignored a replay-only result before implementation.
 - Added failing tests for replay-only NAV authority, gaps after multiple valid NAV points, structured availability reasons, and same-time replay ordering.
+- Added real repository/API coverage for cash-only replay, backdated cash flow, same-time cash/corporate-action ordering, and unresolved/resolved persisted gaps.
 - Implemented the shared replay path, then verified the new review-finding tests and the complete focused suites passed.
 
 ## Verification
 
-- Focused analytics service/API tests: `85 passed, 1 warning`
+- Focused analytics service/API tests: `88 passed, 1 warning`
 - Scoped Ruff: passed for analytics service/schema and analytics service/API tests
 - `git diff --check`: passed
 - Warning: installed Starlette emits an `httpx` deprecation warning from `TestClient`; unrelated to Task 7.
 
 ## Review
 
-The `simplify` review found no safe simplification worth applying without changing the shared replay analytics boundary.
+The `simplify` review removed the duplicate trading-snapshot NAV validation and duplicate `@staticmethod` decorator while preserving the shared replay analytics boundary.

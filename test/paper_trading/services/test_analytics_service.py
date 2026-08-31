@@ -1641,3 +1641,54 @@ def test_resolved_persisted_gap_does_not_block_valid_replay_metrics(tmp_path):
     assert isinstance(response, AnalyticsResponse)
     assert response.overview.total_return.reason == "insufficient_data"
     engine.dispose()
+
+
+def test_analytics_replays_backdated_cash_flow_before_later_valuation(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("analytics-backdated-cash", Decimal("100000.00"))
+    initial = repo.list_snapshots(account.id)[0]
+    initial_at = datetime(2026, 8, 1, 9, tzinfo=timezone.utc)
+    initial.event_at = initial_at
+    initial.trade_date = initial_at.date()
+    creation_ledger = repo.list_cash_ledger(account.id)[0]
+    creation_ledger.occurred_at = initial_at
+    creation_ledger.trade_date = initial_at.date()
+    cash_at = initial_at + timedelta(days=1)
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("10000.00"),
+        trade_date=cash_at.date(),
+        net_asset_value=Decimal("1.000000"),
+        share_delta=Decimal("10000.000000"),
+        occurred_at=cash_at,
+    )
+    valuation_at = initial_at + timedelta(days=2)
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=valuation_at.date(),
+        event_at=valuation_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("110000.0000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("110000.0000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=Decimal("1.000000"),
+        share_count=Decimal("110000.000000"),
+    )
+    session.commit()
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsResponse)
+    assert response.overview.total_return.value == Decimal("0.000000")
+    assert [event.event_type for event in response.event_series] == ["snapshot", "deposit", "snapshot"]
+    deposit = response.event_series[1]
+    assert deposit.effective_nav == Decimal("1.000000")
+    engine.dispose()

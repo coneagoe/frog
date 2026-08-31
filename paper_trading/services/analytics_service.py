@@ -92,13 +92,6 @@ class AnalyticsService:
             for snapshot in snapshots
         ):
             return AnalyticsUnavailableResponse(reason="valuation_gap")
-        if any(
-            snapshot.point_type == SnapshotPointType.TRADING.value
-            and snapshot.quality_status == SnapshotQualityStatus.VALID.value
-            and self._snapshot_nav(snapshot) is None
-            for snapshot in snapshots
-        ):
-            return AnalyticsUnavailableResponse(reason="valuation_gap")
         unresolved_gaps = self._valuation_gaps(account_id)
         if any(not gap.resolved for gap in unresolved_gaps):
             return AnalyticsUnavailableResponse(
@@ -183,7 +176,6 @@ class AnalyticsService:
             return None
         return nav.quantize(_QUANTIZE)
 
-    @staticmethod
     @staticmethod
     def _replay_nav_series(replay: ReplayResult) -> tuple[list[Decimal], str | None]:
         if not replay.points:

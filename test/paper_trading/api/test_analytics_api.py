@@ -8,6 +8,7 @@ from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
 from paper_trading.api.routers import analytics as analytics_router
 from paper_trading.domain.enums import (
+    CorporateActionType,
     MigrationRepairReason,
     OrderSide,
     OrderStatus,
@@ -256,8 +257,28 @@ def test_get_account_analytics_returns_unavailable_for_repair_marked_account(mon
     }
 
 
-@pytest.mark.parametrize("reason", ["missing_initial", "invalid_initial", "replay_unavailable", "valuation_gap"])
-def test_get_account_analytics_unavailable_reason_is_closed_contract(monkeypatch, sqlite_session, reason):
+@pytest.mark.parametrize(
+    ("reason", "expected_gaps"),
+    [
+        ("missing_initial", None),
+        ("invalid_initial", None),
+        ("replay_unavailable", None),
+        (
+            "valuation_gap",
+            [
+                {
+                    "trade_date": "2026-08-20",
+                    "missing_symbols": ["000001"],
+                    "details": [{"reason": "missing_bar"}],
+                    "resolved": False,
+                }
+            ],
+        ),
+    ],
+)
+def test_get_account_analytics_unavailable_reason_is_closed_contract(
+    monkeypatch, sqlite_session, reason, expected_gaps
+):
     client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
     account = repo.create_account(f"api-{reason}", Decimal("100000.00"))
     if reason == "missing_initial":
@@ -277,10 +298,8 @@ def test_get_account_analytics_unavailable_reason_is_closed_contract(monkeypatch
 
     response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
 
-    assert response.status_code in {200, 500}
-    if response.status_code == 200:
-        assert response.json()["available"] is False
-        assert response.json()["reason"] == reason
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "reason": reason, "valuation_gaps": expected_gaps}
 
 
 def test_get_account_analytics_unknown_account_returns_404(monkeypatch, sqlite_session):
@@ -348,3 +367,75 @@ def test_get_account_analytics_exposes_shared_nav_point_metadata(monkeypatch, sq
     assert snapshot["timezone"] == "UTC"
     assert snapshot["nav"] == "1.000000"
     assert snapshot["share"] == "100000.000000"
+
+
+def test_get_account_analytics_replays_cash_only_account_from_shared_series(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-cash-only-replay", Decimal("100000.00"))
+    initial = repo.list_snapshots(account.id)[0]
+    occurred_at = initial.event_at.replace(tzinfo=timezone.utc) + timedelta(days=1)
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("10000.00"),
+        trade_date=occurred_at.date(),
+        net_asset_value=Decimal("1.000000"),
+        share_delta=Decimal("10000.000000"),
+        occurred_at=occurred_at,
+    )
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert [(event["event_type"], event.get("effective_nav")) for event in payload["event_series"]] == [
+        ("snapshot", None),
+        ("deposit", "1.000000"),
+    ]
+
+
+def test_get_account_analytics_orders_same_time_cash_and_corporate_action_by_replay(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-replay-ordering", Decimal("100000.00"))
+    initial = repo.list_snapshots(account.id)[0]
+    event_at = initial.event_at.replace(tzinfo=timezone.utc) + timedelta(days=1)
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("1000.00"),
+        trade_date=event_at.date(),
+        net_asset_value=Decimal("1.000000"),
+        share_delta=Decimal("1000.000000"),
+        occurred_at=event_at,
+    )
+    repo.create_corporate_action(
+        account_id=account.id,
+        market="a_share",
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="api-ordering-dividend",
+        parameters={"per_share_amount": "1"},
+        cash_delta=Decimal("0"),
+        quantity_delta=Decimal("0"),
+        before_quantity=Decimal("0"),
+        after_quantity=Decimal("0"),
+        before_cost_amount=Decimal("0"),
+        after_cost_amount=Decimal("0"),
+        before_cash_available=Decimal("101000"),
+        after_cash_available=Decimal("101000"),
+    )
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert [event["event_type"] for event in payload["event_series"]] == [
+        "snapshot",
+        "deposit",
+        "corporate_action",
+    ]
