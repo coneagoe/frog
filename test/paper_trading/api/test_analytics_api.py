@@ -191,8 +191,50 @@ def test_get_account_analytics_returns_date_ordered_valuation_gaps(monkeypatch, 
     response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
 
     assert response.status_code == 200
-    assert response.json()["available"] is False
-    assert response.json()["reason"] == "valuation_gap"
+    assert response.json() == {
+        "available": False,
+        "reason": "valuation_gap",
+        "valuation_gaps": [
+            {
+                "trade_date": "2026-08-25",
+                "missing_symbols": ["000001.SZ"],
+                "details": [{"reason": "earlier"}],
+                "resolved": False,
+            },
+            {
+                "trade_date": "2026-08-26",
+                "missing_symbols": ["000002.SZ"],
+                "details": [{"reason": "later"}],
+                "resolved": False,
+            },
+            {
+                "trade_date": "2026-08-27",
+                "missing_symbols": [],
+                "details": [],
+                "resolved": True,
+            },
+        ],
+    }
+
+
+def test_get_account_analytics_resolved_persisted_gap_does_not_block(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-resolved-gap", Decimal("100000.00"))
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 25), ["000001.SZ"], [{"reason": "recovered"}], resolved=True)
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["valuation_gaps"] == [
+        {
+            "trade_date": "2026-08-25",
+            "missing_symbols": ["000001.SZ"],
+            "details": [{"reason": "recovered"}],
+            "resolved": True,
+        }
+    ]
 
 
 def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_assets(monkeypatch, sqlite_session):
@@ -264,6 +306,58 @@ def test_get_account_analytics_invalid_replay_nav_returns_diagnostic_gap(monkeyp
             }
         ],
     }
+
+
+def test_get_account_analytics_replays_backdated_cash_flow(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-backdated-cash", Decimal("100000.00"))
+    initial_at = datetime(2026, 8, 1, 9, tzinfo=timezone.utc)
+    initial = repo.list_snapshots(account.id)[0]
+    initial.event_at = initial_at
+    initial.trade_date = initial_at.date()
+    creation_ledger = repo.list_cash_ledger(account.id)[0]
+    creation_ledger.occurred_at = initial_at
+    creation_ledger.trade_date = initial_at.date()
+    cash_at = initial_at + timedelta(days=1)
+    repo.add_cash_event(
+        account.id,
+        "deposit",
+        Decimal("10000.00"),
+        trade_date=cash_at.date(),
+        net_asset_value=Decimal("1.000000"),
+        share_delta=Decimal("10000.000000"),
+        occurred_at=cash_at,
+    )
+    valuation_at = initial_at + timedelta(days=2)
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=valuation_at.date(),
+        event_at=valuation_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("110000.0000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("110000.0000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=Decimal("1.000000"),
+        share_count=Decimal("110000.000000"),
+    )
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["overview"]["net_asset_value"] == "1.000000"
+    assert payload["overview"]["total_return"]["value"] == "0.000000"
+    assert [event["event_type"] for event in payload["event_series"]] == ["snapshot", "deposit", "snapshot"]
+    assert payload["event_series"][1]["effective_nav"] == "1.000000"
 
 
 def _analytics_client(monkeypatch, sqlite_session):

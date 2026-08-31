@@ -24,12 +24,14 @@ Task 7 replay commits are `a10e46f`, `6dcd630`, `eae607b`, `0bd8fd8`, `02a0f26`,
 - Added a failing test proving analytics ignored a replay-only result before implementation.
 - Added failing tests for replay-only NAV authority, gaps after multiple valid NAV points, structured availability reasons, and same-time replay ordering.
 - Added real repository/API coverage for cash-only replay, backdated cash flow, same-time cash/corporate-action ordering, and unresolved/resolved persisted gaps.
-- Added a route-level mocked-builder contract test verifying HTTP 200 and the complete invalid-replay-NAV valuation-gap JSON payload.
+- Real integration coverage uses persisted snapshots and cash ledger entries through `PaperTradingRepository -> NavSeriesBuilder -> AnalyticsService`: an invalid/missing valuation produces an unavailable shared replay gap, and a backdated deposit preserves replay event order, effective NAV, and replay-derived overview metrics at the API route.
+- API persisted-gap coverage asserts complete date-ordered JSON for unresolved and resolved gaps; unresolved gaps block analytics while resolved-only gaps remain available.
+- The valid-quality invalid replay NAV and `NavSeriesBuilder.build()` `ValueError` cases are mocked builder-contract boundaries. The latter maps only `ValueError` to `replay_unavailable`; other exceptions are not normalized.
 - Implemented the shared replay path, then verified the new review-finding tests and the complete focused suites passed.
 
 ## Verification
 
-- Focused analytics service/API tests: `89 passed, 1 warning`
+- Focused analytics service/API tests: `91 passed, 1 warning`
 - Scoped Ruff: passed for analytics service and analytics service/API tests
 - `git diff --check`: passed
 - Warning: installed Starlette emits an `httpx` deprecation warning from `TestClient`; unrelated to Task 7.

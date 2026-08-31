@@ -91,7 +91,7 @@ class AnalyticsService:
             and self._snapshot_nav(snapshot) is None
             for snapshot in snapshots
         ):
-            return AnalyticsUnavailableResponse(reason="valuation_gap")
+            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=replay_gaps)
         unresolved_gaps = self._valuation_gaps(account_id)
         if any(not gap.resolved for gap in unresolved_gaps):
             return AnalyticsUnavailableResponse(
