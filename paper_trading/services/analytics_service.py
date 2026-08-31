@@ -77,11 +77,26 @@ class AnalyticsService:
         if replay.points[0].quality_status is not SnapshotQualityStatus.VALID or replay.points[0].nav is None:
             return AnalyticsUnavailableResponse(reason="invalid_initial")
         if any(
-            snapshot.quality_status == SnapshotQualityStatus.VALID.value
+            snapshot.point_type == SnapshotPointType.TRADING.value
+            and snapshot.quality_status == SnapshotQualityStatus.VALID.value
             and self._snapshot_nav(snapshot) is None
             for snapshot in snapshots
-            if snapshot.point_type != SnapshotPointType.INITIAL.value
         ):
+            return AnalyticsUnavailableResponse(reason="valuation_gap")
+        invalid_replay_nav = next(
+            (
+                point
+                for point in replay.points
+                if point.quality_status is SnapshotQualityStatus.VALID
+                and (
+                    point.nav is None
+                    or not point.nav.is_finite()
+                    or point.nav <= 0
+                )
+            ),
+            None,
+        )
+        if invalid_replay_nav is not None:
             return AnalyticsUnavailableResponse(reason="valuation_gap")
         ledger_entries = self.repo.list_cash_ledger(account_id)
         corporate_actions = (
@@ -94,7 +109,7 @@ class AnalyticsService:
             execution=self._execution(orders),
             trade_quality=self._trade_quality(round_trips),
             risk=self._risk(replay if replay is not None else snapshots, snapshots),
-            valuation_gaps=self._valuation_gaps(account_id),
+            valuation_gaps=self._valuation_gaps(account_id) + self._replay_valuation_gaps(replay),
             event_series=self._event_series(snapshots, ledger_entries, corporate_actions, replay),
         )
 
@@ -113,6 +128,25 @@ class AnalyticsService:
                 resolved=gap.resolved,
             )
             for gap in gaps
+        ]
+
+    @staticmethod
+    def _replay_valuation_gaps(replay: ReplayResult) -> list[ValuationGapResponse]:
+        return [
+            ValuationGapResponse(
+                trade_date=point.trade_date,
+                missing_symbols=sorted(
+                    str(detail["symbol"])
+                    for detail in point.valuation_details
+                    if "symbol" in detail
+                ),
+                details=[dict(detail) for detail in point.valuation_details]
+                or [{"reason": point.valuation_quality or "invalid_nav"}],
+                resolved=False,
+            )
+            for point in replay.points
+            if point.quality_status is not SnapshotQualityStatus.VALID
+            or point.nav is None
         ]
 
     # ------------------------------------------------------------------
@@ -168,7 +202,7 @@ class AnalyticsService:
         for point in points:
             if point.quality_status is not SnapshotQualityStatus.VALID:
                 return navs, "valuation_gap" if navs else "invalid_initial"
-            if point.nav is None:
+            if point.nav is None or not point.nav.is_finite() or point.nav <= 0:
                 return navs, "valuation_gap" if navs else "invalid_initial"
             navs.append(Decimal(point.nav).quantize(_QUANTIZE))
         return navs, None
@@ -218,9 +252,9 @@ class AnalyticsService:
             }:
                 continue
             point = replay_by_snapshot.get(f"paper_account_snapshots:{snapshot.id}")
-            quality = point.quality_status.value if point is not None else snapshot.quality_status
-            nav = point.nav if point is not None else snapshot.net_asset_value
-            shares = point.share_count if point is not None else snapshot.share_count
+            quality = point.quality_status.value if point is not None else "invalid"
+            nav = point.nav if point is not None else None
+            shares = point.share_count if point is not None else None
             events.append(
                 (
                     AnalyticsService._utc(snapshot.event_at),
@@ -339,6 +373,14 @@ class AnalyticsService:
             return OverviewAnalytics(total_return=MetricValue(value=None, reason="insufficient_data"))
 
         latest = snapshots[-1]
+        latest_point = next(
+            (
+                point
+                for point in reversed(replay.points)
+                if point.nav is not None and point.nav.is_finite() and point.nav > 0
+            ),
+            None,
+        ) if replay is not None else None
         total_return = self._linked_total_return(snapshots, replay)
         simple_asset_return = MetricValue(value=None, reason="invalid_initial_cash")
         if initial_cash and initial_cash > 0:
@@ -352,10 +394,12 @@ class AnalyticsService:
             market_value=Decimal(latest.market_value).quantize(Decimal("0.0001")),
             realized_pnl=Decimal(latest.realized_pnl).quantize(Decimal("0.0001")),
             unrealized_pnl=Decimal(latest.unrealized_pnl).quantize(Decimal("0.0001")),
-            net_asset_value=Decimal(latest.net_asset_value).quantize(_QUANTIZE)
-            if latest.net_asset_value is not None
+            net_asset_value=Decimal(latest_point.nav).quantize(_QUANTIZE)
+            if latest_point is not None and latest_point.nav is not None
             else None,
-            share_count=Decimal(latest.share_count).quantize(_QUANTIZE) if latest.share_count is not None else None,
+            share_count=Decimal(latest_point.share_count).quantize(_QUANTIZE)
+            if latest_point is not None and latest_point.share_count is not None
+            else None,
             total_return=total_return,
             simple_asset_return=simple_asset_return,
         )

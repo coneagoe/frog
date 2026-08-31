@@ -18,7 +18,7 @@ from paper_trading.domain.enums import (
     SnapshotQualityStatus,
 )
 from paper_trading.domain.nav_replay import NavPoint, ReplayResult
-from paper_trading.schemas.analytics import AnalyticsUnavailableResponse
+from paper_trading.schemas.analytics import AnalyticsResponse, AnalyticsUnavailableResponse
 from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger, PaperCorporateAction
@@ -764,7 +764,7 @@ def test_overview_keeps_latest_persisted_fields_when_latest_nav_is_invalid(tmp_p
 
     assert analytics.overview.total_return.value is None
     assert analytics.overview.total_return.reason == "valuation_gap"
-    assert analytics.overview.net_asset_value is None
+    assert analytics.overview.net_asset_value == Decimal("1.100000")
     assert analytics.overview.total_assets == Decimal("80000.0000")
     assert analytics.overview.cash_available == Decimal("50000.0000")
     assert analytics.overview.market_value == Decimal("30000.0000")
@@ -948,8 +948,8 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
 
     assert [event.event_type for event in events] == ["snapshot", "snapshot", "withdrawal"]
     assert events[0].id == 1
-    assert events[1].nav == Decimal("1.100000")
-    assert events[1].shares == Decimal("110.000000")
+    assert events[1].nav is None
+    assert events[1].shares is None
     assert events[2].amount == Decimal("-10.0000")
     assert events[2].effective_nav == Decimal("1.100000")
     assert events[2].share_delta == Decimal("-9.090909")
@@ -1527,4 +1527,72 @@ def test_valid_trading_snapshot_without_nav_is_not_reconstructed_from_assets(tmp
 
     assert isinstance(response, AnalyticsUnavailableResponse)
     assert response.reason == "valuation_gap"
+    engine.dispose()
+
+
+@pytest.mark.parametrize("nav", [Decimal("0"), Decimal("-1"), Decimal("NaN"), Decimal("Infinity")])
+def test_replay_non_positive_or_nonfinite_nav_is_unavailable(tmp_path, monkeypatch, nav):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("invalid-replay-nav", Decimal("100000.00"))
+    initial = NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    invalid = NavPoint(
+        datetime(2026, 8, 2, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:valuation",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("100"),
+        Decimal("100"),
+        nav,
+        SnapshotQualityStatus.VALID,
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, invalid)))
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "valuation_gap"
+    engine.dispose()
+
+
+def test_replay_gap_details_are_exposed_as_valuation_gap(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("replay-gap-details", Decimal("100000.00"))
+    initial = NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    gap = NavPoint(
+        datetime(2026, 8, 2, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:gap",
+        NavReplayEventType.MARKET_VALUATION,
+        None,
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+        valuation_quality="missing_bar",
+        valuation_details=({"symbol": "000001", "reason": "no_bar"},),
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, gap)))
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsResponse)
+    assert response.valuation_gaps[0].details == [{"symbol": "000001", "reason": "no_bar"}]
+    assert response.valuation_gaps[0].resolved is False
     engine.dispose()

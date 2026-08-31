@@ -221,7 +221,7 @@ def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_asse
     assert payload["overview"]["total_return"]["reason"] == "valuation_gap"
     assert payload["overview"]["simple_asset_return"]["value"] == "-0.200000"
     assert payload["risk"]["max_drawdown"]["reason"] == "valuation_gap"
-    assert payload["overview"]["net_asset_value"] is None
+    assert payload["overview"]["net_asset_value"] == "1.000000"
     assert payload["overview"]["total_assets"] == "80000.0000"
     assert payload["overview"]["cash_available"] == "80000.0000"
 
