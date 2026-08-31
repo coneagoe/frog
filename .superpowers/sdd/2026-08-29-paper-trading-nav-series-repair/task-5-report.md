@@ -19,6 +19,10 @@
 - Late action materialization uses the exact effective timestamp and reconstructs
   lot inventory through subsequent trades, so later buy lots retain their own
   quantity and cost basis.
+- Frozen sell quantity is reconstructed from order chronology and the action
+  chain rather than scaled from the current aggregate position.
+- Existing corporate actions after a late action are replayed in sequence, with
+  cash eligibility advanced through each event and per-lot cost basis preserved.
 - Existing cash-ledger audit rows remain separate from corporate-action replay
   events, preventing duplicate cash application during NAV replay.
 - Existing idempotency, processing metadata, affected range, precision, and
@@ -36,6 +40,9 @@
   - **47 passed** with PostgreSQL test database.
 - `uv run ruff check ...` on all Task 5 changed source and test files: **passed**.
 - `git diff --check`: **passed**.
+
+The latest review fix was verified by the same focused suite, Task 3 regression,
+PostgreSQL runner, scoped Ruff, and diff checks; all passed with the counts above.
 
 ## Simplification Review
 

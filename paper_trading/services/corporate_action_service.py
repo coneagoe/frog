@@ -261,10 +261,9 @@ class CorporateActionService:
         holding_key = f"{market.value}:{symbol}"
         final_quantity = quantize_shares(final_holdings.get(holding_key, Decimal("0")))
         final_cost = quantize_account_money(final_costs.get(holding_key, Decimal("0")))
-        factor = impact.after_quantity / impact.before_quantity if impact.before_quantity else Decimal("0")
         position.total_quantity = self._integer_quantity(final_quantity)
         position.frozen_quantity = self._integer_quantity(
-            quantize_shares(Decimal(position.frozen_quantity or 0) * factor)
+            self._materialized_frozen_quantity(account_id, market, symbol, effective_at, action_type, parameters)
         )
         position.cost_amount = final_cost
         materialized_lots = self._materialize_lots(
@@ -329,6 +328,7 @@ class CorporateActionService:
                 (action_type, parameters),
             )
         )
+        running_cash = cash_available
         for event_at, source_id, kind, payload in sorted(events, key=lambda item: (item[0], item[1], item[2])):
             if kind == "trade":
                 trade = payload
@@ -343,8 +343,11 @@ class CorporateActionService:
                             "buy_trade_date": trade.trade_date,
                         }
                     )
+                    running_cash -= Decimal(trade.amount) + Decimal(trade.fees)
                 else:
                     self._consume_lot_inventory(simulated, Decimal(trade.quantity))
+                    if trade.market != Market.HK_CONNECT.value:
+                        running_cash += Decimal(trade.amount) - Decimal(trade.fees)
                 continue
             if kind == "action":
                 action = payload
@@ -352,8 +355,6 @@ class CorporateActionService:
                 current_parameters = action.parameters
             else:
                 current_type, current_parameters = payload
-            if event_at > effective_at:
-                continue
             before_quantity = sum((item["remaining"] for item in simulated), Decimal("0"))
             before_cost = sum((item["remaining"] * item["cost_price"] for item in simulated), Decimal("0"))
             action_impact = calculate_corporate_action_impact(
@@ -373,7 +374,53 @@ class CorporateActionService:
                         if action_impact.after_quantity
                         else Decimal("0")
                     )
+            running_cash += action_impact.cash_delta
+            cash_available = running_cash
         return simulated
+
+    def _materialized_frozen_quantity(
+        self,
+        account_id: int,
+        market: Market,
+        symbol: str,
+        effective_at: datetime,
+        pending_type: CorporateActionType,
+        pending_parameters: Mapping[str, Decimal],
+    ) -> Decimal:
+        """Rebuild frozen sell quantity from order and action chronology."""
+        actions = [
+            (self._persisted_utc(action.event_at), CorporateActionType(action.event_type), action.parameters)
+            for action in self.repo.list_corporate_actions(account_id)
+            if action.market == market.value and action.symbol == symbol
+        ]
+        actions.append((effective_at, pending_type, pending_parameters))
+        frozen = Decimal("0")
+        for order in self.repo.list_orders(account_id):
+            if (
+                order.market != market.value
+                or order.symbol != symbol
+                or order.side != "sell"
+                or order.status not in {"accepted", "partially_filled"}
+            ):
+                continue
+            order_frozen = Decimal(order.frozen_quantity or 0)
+            if not order_frozen:
+                continue
+            factor = Decimal("1")
+            order_at = self._persisted_utc(order.created_at)
+            for action_at, action_type, parameters in sorted(actions, key=lambda item: item[0]):
+                if action_at > effective_at or action_at < order_at:
+                    continue
+                if action_type is CorporateActionType.SPLIT:
+                    factor *= parameters["ratio"]
+                elif action_type is CorporateActionType.REVERSE_SPLIT:
+                    factor *= parameters["ratio"]
+                elif action_type is CorporateActionType.BONUS_SHARE:
+                    factor *= Decimal("1") + parameters["bonus_ratio"]
+                elif action_type is CorporateActionType.RIGHTS_ISSUE:
+                    factor *= Decimal("1") + parameters["subscription_ratio"]
+            frozen += quantize_shares(order_frozen * factor)
+        return quantize_shares(frozen)
 
     @staticmethod
     def _consume_lot_inventory(lots: list[dict[str, Any]], quantity: Decimal) -> None:
