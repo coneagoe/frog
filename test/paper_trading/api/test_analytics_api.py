@@ -87,6 +87,8 @@ def test_get_account_analytics_returns_activity_contract_for_populated_account(m
 
 def _seed_trading_snapshot(repo, account, *, nav: Decimal | None, total_assets: Decimal, quality_status: str) -> None:
     event_at = repo.list_snapshots(account.id)[-1].event_at + timedelta(days=1)
+    if event_at.tzinfo is None:
+        event_at = event_at.replace(tzinfo=timezone.utc)
     repo.save_snapshot(
         account_id=account.id,
         trade_date=event_at.date(),
@@ -216,9 +218,9 @@ def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_asse
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["overview"]["total_return"]["reason"] == "insufficient_data"
+    assert payload["overview"]["total_return"]["reason"] == "valuation_gap"
     assert payload["overview"]["simple_asset_return"]["value"] == "-0.200000"
-    assert payload["risk"]["max_drawdown"]["reason"] == "insufficient_data"
+    assert payload["risk"]["max_drawdown"]["reason"] == "valuation_gap"
     assert payload["overview"]["net_asset_value"] is None
     assert payload["overview"]["total_assets"] == "80000.0000"
     assert payload["overview"]["cash_available"] == "80000.0000"
@@ -305,3 +307,21 @@ def test_get_account_analytics_exposes_typed_event_series(monkeypatch, sqlite_se
     assert [event["event_type"] for event in series] == ["snapshot", "deposit"]
     assert series[0]["point_type"] == "initial"
     assert series[1]["effective_nav"] == "1.000000"
+
+
+def test_get_account_analytics_exposes_shared_nav_point_metadata(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-shared-nav-metadata", Decimal("100000.00"))
+    initial = repo.list_snapshots(account.id)[0]
+    initial.event_time_provenance = "canonical_utc"
+    sqlite_session.commit()
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    snapshot = response.json()["event_series"][0]
+    assert snapshot["point_type"] == "initial"
+    assert snapshot["quality"] == "valid"
+    assert snapshot["timezone"] == "UTC"
+    assert snapshot["nav"] == "1.000000"
+    assert snapshot["share"] == "100000.000000"

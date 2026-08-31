@@ -101,10 +101,13 @@ class SnapshotAnalyticsEvent(BaseModel):
     id: int
     event_at: datetime
     point_type: str
+    quality: str
+    timezone: str
     quality_status: str
     invalid_reason: str | None = None
     nav: Decimal | None = None
     shares: Decimal | None = None
+    share: Decimal | None = None
 
 
 class CashFlowAnalyticsEvent(BaseModel):
@@ -146,4 +149,4 @@ class AnalyticsResponse(BaseModel):
 
 class AnalyticsUnavailableResponse(BaseModel):
     available: Literal[False] = False
-    reason: MigrationRepairReason
+    reason: str | MigrationRepairReason

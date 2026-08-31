@@ -11,13 +11,16 @@ from paper_trading.domain.enums import (
     CorporateActionType,
     Market,
     MigrationRepairReason,
+    NavReplayEventType,
     OrderSide,
     OrderStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
 )
+from paper_trading.domain.nav_replay import NavPoint, ReplayResult
 from paper_trading.schemas.analytics import AnalyticsUnavailableResponse
 from paper_trading.services.analytics_service import AnalyticsService
+from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger, PaperCorporateAction
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
@@ -58,6 +61,8 @@ def seed_trading_point(
     if event_at is None:
         last = repo.list_snapshots(account.id)[-1]
         event_at = last.event_at + timedelta(days=1)
+    if event_at.tzinfo is None:
+        event_at = event_at.replace(tzinfo=timezone.utc)
     if trade_date is None:
         trade_date = event_at.date()
     return repo.save_snapshot(
@@ -523,12 +528,12 @@ def test_analytics_insufficient_valid_points_keep_established_metric_reasons(tmp
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.reason == "insufficient_data"
-    assert analytics.risk.max_drawdown.reason == "insufficient_data"
-    assert analytics.risk.current_drawdown.reason == "insufficient_data"
-    assert analytics.risk.sharpe.reason == "insufficient_data"
-    assert analytics.risk.sortino.reason == "insufficient_data"
-    assert analytics.risk.calmar.reason == "insufficient_data"
+    assert analytics.overview.total_return.reason == "valuation_gap"
+    assert analytics.risk.max_drawdown.reason == "valuation_gap"
+    assert analytics.risk.current_drawdown.reason == "valuation_gap"
+    assert analytics.risk.sharpe.reason == "valuation_gap"
+    assert analytics.risk.sortino.reason == "valuation_gap"
+    assert analytics.risk.calmar.reason == "valuation_gap"
     assert analytics.risk.calmar.value is None
     engine.dispose()
 
@@ -720,8 +725,10 @@ def test_invalid_nav_points_are_ignored_by_total_return_and_risk(tmp_path):
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value == Decimal("0.100000")
-    assert analytics.risk.max_drawdown.value == Decimal("0.000000")
+    assert analytics.overview.total_return.value is None
+    assert analytics.overview.total_return.reason == "valuation_gap"
+    assert analytics.risk.max_drawdown.value is None
+    assert analytics.risk.max_drawdown.reason == "valuation_gap"
     assert analytics.overview.simple_asset_return is not None
     assert analytics.overview.simple_asset_return.value == Decimal("-1.000000")
     engine.dispose()
@@ -779,16 +786,8 @@ def test_invalid_initial_nav_does_not_anchor_total_return_or_risk_on_later_tradi
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value is None
-    assert analytics.overview.total_return.reason == "invalid_nav"
-    assert analytics.risk.max_drawdown.value is None
-    assert analytics.risk.max_drawdown.reason == "insufficient_data"
-    assert analytics.risk.current_drawdown.reason == "insufficient_data"
-    assert analytics.risk.sharpe.reason == "insufficient_data"
-    assert analytics.risk.sortino.reason == "insufficient_data"
-    assert analytics.risk.calmar.reason == "insufficient_data"
-    assert analytics.overview.simple_asset_return is not None
-    assert analytics.overview.simple_asset_return.value == Decimal("0.000000")
+    assert isinstance(analytics, AnalyticsUnavailableResponse)
+    assert analytics.reason == "missing_initial"
     engine.dispose()
 
 
@@ -1179,4 +1178,70 @@ def test_risk_is_unchanged_when_cash_flows_are_added(tmp_path):
     with_cash_flows = AnalyticsService(repo).get_account_analytics(account.id).risk
 
     assert with_cash_flows.model_dump() == baseline.model_dump()
+    engine.dispose()
+
+
+def test_analytics_metrics_consume_replay_result_not_persisted_snapshot_nav(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("shared-replay-analytics", Decimal("100000.00"))
+    point = NavPoint(
+        event_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+        trade_date=date(2026, 8, 2),
+        source_id="replay:2",
+        event_type=NavReplayEventType.MARKET_VALUATION,
+        total_assets=Decimal("120000"),
+        share_count=Decimal("100000"),
+        nav=Decimal("1.2"),
+        quality_status=SnapshotQualityStatus.VALID,
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult(points=(point,)))
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert analytics.overview.total_return.value is None
+    assert analytics.overview.total_return.reason == "missing_initial"
+    engine.dispose()
+
+
+def test_gap_breaks_shared_nav_return_series(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("gap-breaks-analytics", Decimal("100000.00"))
+    def point(day: int, nav: Decimal | None, quality: SnapshotQualityStatus) -> NavPoint:
+        return NavPoint(
+            event_at=datetime(2026, 8, day, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, day),
+            source_id=f"replay:{day}",
+            event_type=NavReplayEventType.MARKET_VALUATION,
+            total_assets=nav,
+            share_count=Decimal("100"),
+            nav=nav,
+            quality_status=quality,
+        )
+
+    monkeypatch.setattr(
+        NavSeriesBuilder,
+        "build",
+        lambda self, account_id: ReplayResult(
+            points=(
+                NavPoint(
+                    event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+                    trade_date=date(2026, 8, 1),
+                    source_id="replay:initial",
+                    event_type=NavReplayEventType.INITIAL,
+                    total_assets=Decimal("100"),
+                    share_count=Decimal("100"),
+                    nav=Decimal("1"),
+                    quality_status=SnapshotQualityStatus.VALID,
+                ),
+                point(2, None, SnapshotQualityStatus.INVALID),
+                point(3, Decimal("2"), SnapshotQualityStatus.VALID),
+            )
+        ),
+    )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert analytics.overview.total_return.value is None
+    assert analytics.overview.total_return.reason == "valuation_gap"
+    assert analytics.risk.max_drawdown.value is None
     engine.dispose()
