@@ -4031,6 +4031,20 @@ class StorageDb:
                     {column_name: "NUMERIC(30, 12)" for column_name in column_names},
                 )
 
+        if inspect(self.engine).has_table(tb_name_paper_position_lots):
+            lot_columns = {c["name"] for c in inspect(self.engine).get_columns(tb_name_paper_position_lots)}
+            if "projected_cost_price" not in lot_columns:
+                with self.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {tb_name_paper_position_lots} "
+                            "ADD COLUMN projected_cost_price NUMERIC(30, 12) NOT NULL DEFAULT 0"
+                        )
+                    )
+                    conn.execute(
+                        text(f"UPDATE {tb_name_paper_position_lots} SET projected_cost_price = cost_price")
+                    )
+
         if not has_paper_orders:
             self._ensure_paper_account_repair_without_orders()
             return

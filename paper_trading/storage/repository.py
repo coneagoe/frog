@@ -1304,6 +1304,7 @@ class PaperTradingRepository:
             original_quantity=_whole_quantity(original_quantity, "original_quantity"),
             remaining_quantity=_whole_quantity(remaining_quantity, "remaining_quantity"),
             cost_price=quantize_account_money(cost_price),
+            projected_cost_price=quantize_account_money(cost_price),
             source=PositionSource(source).value,
             market=market,
         )

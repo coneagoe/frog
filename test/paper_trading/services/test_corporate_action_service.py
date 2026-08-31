@@ -983,3 +983,77 @@ def test_late_action_chain_advances_rights_cash_and_preserves_distinct_lot_costs
     assert first_lot.cost_price != second_lot.cost_price
     assert sum(lot.remaining_quantity for lot in lots) == 110
     assert len(repo.list_corporate_actions(account.id)) == 2
+
+
+def test_consecutive_actions_preserve_lot_acquisition_facts_and_post_action_buy(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-immutable-lot-facts", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    imported_lot = repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
+    service = _service(sqlite_session)
+
+    service.apply(
+        account.id,
+        "000001",
+        CorporateActionType.SPLIT,
+        datetime(2026, 8, 10, 10, tzinfo=timezone.utc),
+        "immutable-split-2",
+        {"ratio": Decimal("2")},
+    )
+    sqlite_session.commit()
+
+    buy_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        10,
+        Decimal("8"),
+        date(2026, 8, 11),
+        OrderStatus.FILLED,
+        market=Market.A_SHARE,
+    )
+    buy_lot = repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 11), 10, 10, Decimal("8"), source="trade"
+    )
+    buy_trade = repo.create_trade(
+        buy_order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        10,
+        Decimal("8"),
+        Decimal("80"),
+        Decimal("0"),
+        date(2026, 8, 11),
+        market=Market.A_SHARE,
+        trade_time=datetime(2026, 8, 11, 10, tzinfo=timezone.utc),
+    )
+    order_facts = {column.name: getattr(buy_order, column.name) for column in buy_order.__table__.columns}
+    trade_facts = {column.name: getattr(buy_trade, column.name) for column in buy_trade.__table__.columns}
+
+    service.apply(
+        account.id,
+        "000001",
+        CorporateActionType.SPLIT,
+        datetime(2026, 8, 12, 10, tzinfo=timezone.utc),
+        "immutable-split-1-5",
+        {"ratio": Decimal("1.5")},
+    )
+
+    lots = repo.get_lots(account.id, Market.A_SHARE, "000001")
+    assert imported_lot.original_quantity == 100
+    assert imported_lot.cost_price == Decimal("10.000000000000")
+    assert imported_lot.projected_cost_price == Decimal("3.333333333333")
+    assert imported_lot.remaining_quantity == 300
+    assert buy_lot.original_quantity == 10
+    assert buy_lot.cost_price == Decimal("8.000000000000")
+    assert buy_lot.projected_cost_price == Decimal("5.333333333333")
+    assert buy_lot.remaining_quantity == 15
+    assert sum(lot.remaining_quantity for lot in lots) == 315
+    assert {
+        column.name: getattr(buy_order, column.name) for column in buy_order.__table__.columns
+    } == order_facts
+    assert {column.name: getattr(buy_trade, column.name) for column in buy_trade.__table__.columns} == trade_facts

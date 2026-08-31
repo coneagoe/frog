@@ -229,6 +229,7 @@ class PaperPositionLot(Base):
     original_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     remaining_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     cost_price: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    projected_cost_price: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
     source: Mapped[str] = mapped_column(
         _value_enum(PositionSource, "paper_position_source"), nullable=False, server_default="trade"
     )
