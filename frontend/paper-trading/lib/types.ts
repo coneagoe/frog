@@ -194,11 +194,19 @@ export type ValuationGap = {
 
 export type UnavailableAnalyticsResponse = {
   available: false;
-  reason: string;
+  reason: AnalyticsUnavailableReason;
   valuation_gaps: ValuationGap[] | null;
 };
 
 export type AnalyticsResponse = AvailableAnalyticsResponse | UnavailableAnalyticsResponse;
+
+export type AnalyticsUnavailableReason =
+  | "missing_initial"
+  | "invalid_initial"
+  | "replay_unavailable"
+  | "valuation_gap"
+  | "insufficient_data"
+  | "legacy_ordering_uncertain";
 
 export type Position = {
   symbol: string;

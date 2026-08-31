@@ -28,6 +28,8 @@ from paper_trading.schemas.analytics import (
     RiskAnalytics,
     RoundTripResponse,
     SnapshotAnalyticsEvent,
+    SnapshotPointTypeValue,
+    SnapshotQualityValue,
     TradeQualityAnalytics,
     ValuationGapResponse,
 )
@@ -43,6 +45,9 @@ from paper_trading.storage.models import (
 from paper_trading.storage.repository import PaperTradingRepository
 
 _QUANTIZE = Decimal("0.000001")
+_MIGRATION_REPAIR_ANALYTICS_REASONS: dict[MigrationRepairReason, AnalyticsUnavailableReason] = {
+    MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN: AnalyticsUnavailableReason.LEGACY_ORDERING_UNCERTAIN,
+}
 
 
 class AnalyticsService:
@@ -57,46 +62,73 @@ class AnalyticsService:
         persisted_gaps = self._valuation_gaps(account_id)
         if account.migration_repair_reason is not None:
             return AnalyticsUnavailableResponse(
-                reason=MigrationRepairReason(account.migration_repair_reason),
+                reason=_MIGRATION_REPAIR_ANALYTICS_REASONS[MigrationRepairReason(account.migration_repair_reason)],
                 valuation_gaps=persisted_gaps or None,
             )
         orders = self.repo.list_orders(account_id)
         snapshots = self.repo.list_snapshots(account_id)
         if not hasattr(self.repo, "list_replay_events"):
-            return AnalyticsUnavailableResponse(reason="replay_unavailable", valuation_gaps=persisted_gaps or None)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.REPLAY_UNAVAILABLE,
+                valuation_gaps=persisted_gaps or None,
+            )
         initial_snapshots = [
             snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.INITIAL.value
         ]
         if not initial_snapshots:
-            return AnalyticsUnavailableResponse(reason="missing_initial", valuation_gaps=persisted_gaps or None)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.MISSING_INITIAL,
+                valuation_gaps=persisted_gaps or None,
+            )
         if any(snapshot.quality_status != SnapshotQualityStatus.VALID.value for snapshot in initial_snapshots):
-            return AnalyticsUnavailableResponse(reason="invalid_initial", valuation_gaps=persisted_gaps or None)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.INVALID_INITIAL,
+                valuation_gaps=persisted_gaps or None,
+            )
         if any(self._snapshot_nav(snapshot) is None for snapshot in initial_snapshots):
-            return AnalyticsUnavailableResponse(reason="invalid_initial", valuation_gaps=persisted_gaps or None)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.INVALID_INITIAL,
+                valuation_gaps=persisted_gaps or None,
+            )
         try:
             replay = NavSeriesBuilder(repo=self.repo).build(account_id)
         except ValueError:
-            return AnalyticsUnavailableResponse(reason="replay_unavailable", valuation_gaps=persisted_gaps or None)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.REPLAY_UNAVAILABLE,
+                valuation_gaps=persisted_gaps or None,
+            )
         replay_gaps = self._replay_valuation_gaps(replay)
         valuation_gaps = persisted_gaps + replay_gaps
         if not replay.points or replay.points[0].event_type.value != SnapshotPointType.INITIAL.value:
-            return AnalyticsUnavailableResponse(reason="missing_initial", valuation_gaps=valuation_gaps or None)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.MISSING_INITIAL,
+                valuation_gaps=valuation_gaps or None,
+            )
         if (
             replay.points[0].quality_status is not SnapshotQualityStatus.VALID
             or replay.points[0].nav is None
             or not replay.points[0].nav.is_finite()
             or replay.points[0].nav <= 0
         ):
-            return AnalyticsUnavailableResponse(reason="invalid_initial", valuation_gaps=valuation_gaps or None)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.INVALID_INITIAL,
+                valuation_gaps=valuation_gaps or None,
+            )
         if any(point.quality_status is not SnapshotQualityStatus.VALID for point in replay.points[1:]):
-            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=valuation_gaps)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.VALUATION_GAP,
+                valuation_gaps=valuation_gaps,
+            )
         if any(
             snapshot.point_type == SnapshotPointType.TRADING.value
             and snapshot.quality_status == SnapshotQualityStatus.VALID.value
             and self._snapshot_nav(snapshot) is None
             for snapshot in snapshots
         ):
-            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=valuation_gaps)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.VALUATION_GAP,
+                valuation_gaps=valuation_gaps,
+            )
         if any(not gap.resolved for gap in persisted_gaps):
             return AnalyticsUnavailableResponse(
                 reason=AnalyticsUnavailableReason.VALUATION_GAP,
@@ -107,16 +139,15 @@ class AnalyticsService:
                 point
                 for point in replay.points
                 if point.quality_status is SnapshotQualityStatus.VALID
-                and (
-                    point.nav is None
-                    or not point.nav.is_finite()
-                    or point.nav <= 0
-                )
+                and (point.nav is None or not point.nav.is_finite() or point.nav <= 0)
             ),
             None,
         )
         if invalid_replay_nav is not None:
-            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=valuation_gaps)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.VALUATION_GAP,
+                valuation_gaps=valuation_gaps,
+            )
         ledger_entries = self.repo.list_cash_ledger(account_id)
         corporate_actions = (
             self.repo.list_corporate_actions(account_id) if hasattr(self.repo, "list_corporate_actions") else []
@@ -155,9 +186,7 @@ class AnalyticsService:
             ValuationGapResponse(
                 trade_date=point.trade_date,
                 missing_symbols=sorted(
-                    str(detail["symbol"])
-                    for detail in point.valuation_details
-                    if "symbol" in detail
+                    str(detail["symbol"]) for detail in point.valuation_details if "symbol" in detail
                 ),
                 details=[dict(detail) for detail in point.valuation_details]
                 or [{"reason": point.valuation_quality or "invalid_nav"}],
@@ -192,11 +221,7 @@ class AnalyticsService:
             return [], "invalid_initial"
         if any(point.quality_status is not SnapshotQualityStatus.VALID for point in replay.points[1:]):
             return [], "valuation_gap"
-        points = [
-            point
-            for point in replay.points
-            if point.event_type.value in {"initial", "market_valuation"}
-        ]
+        points = [point for point in replay.points if point.event_type.value in {"initial", "market_valuation"}]
         initial = points[0]
         if initial.quality_status is not SnapshotQualityStatus.VALID or initial.nav is None:
             return [], "invalid_initial"
@@ -245,7 +270,11 @@ class AnalyticsService:
             }:
                 continue
             point = replay_by_snapshot.get(f"paper_account_snapshots:{snapshot.id}")
-            quality = point.quality_status.value if point is not None else "invalid"
+            point_type = cast(SnapshotPointTypeValue, snapshot.point_type)
+            quality = cast(
+                SnapshotQualityValue,
+                str((point.quality_status if point is not None else SnapshotQualityStatus.INVALID).value),
+            )
             nav = point.nav if point is not None else (snapshot.net_asset_value if replay is None else None)
             shares = point.share_count if point is not None else (snapshot.share_count if replay is None else None)
             events.append(
@@ -260,7 +289,7 @@ class AnalyticsService:
                     SnapshotAnalyticsEvent(
                         id=snapshot.id,
                         event_at=AnalyticsService._utc(snapshot.event_at),
-                        point_type=snapshot.point_type,
+                        point_type=point_type,
                         quality=quality,
                         timezone="UTC",
                         quality_status=quality,

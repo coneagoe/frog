@@ -40,6 +40,12 @@ Implemented the paper-trading analytics API/frontend contract repair.
   `SnapshotAnalyticsEvent` and `Account` contracts, including `quality_status`
   and strict UTC snapshot metadata; chart fixtures now preserve literal
   `initial`/`trading` and `valid`/`invalid` fields.
+- Closed the unavailable-reason contract in Python and TypeScript. Migration
+  repair reasons are explicitly translated to analytics reasons, and analytics
+  snapshot events only receive validated narrow point and quality values.
+- Enforced the `shares`/`share` compatibility invariant in the Python schema:
+  both values must be null or equal. Added negative Pydantic coverage and an
+  API assertion for equal serialized aliases.
 
 ## Validation
 
@@ -47,7 +53,7 @@ Implemented the paper-trading analytics API/frontend contract repair.
   build generated `.next` types. The command still exits non-zero for unrelated
   existing account/trading fixture contracts: incomplete `Account`/`Order`
   mocks, `Position.price_source` literal widening, and mock callback typing.
-- `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py test/paper_trading/api/test_snapshots_api.py` — 99 tests passed.
+- `uv run pytest test/paper_trading/schemas/test_analytics.py test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py test/paper_trading/api/test_snapshots_api.py` — 103 tests passed.
 - `npm run test -- --run features/analytics` — 16 tests passed across the
   analytics-page and asset-chart suites.
 - `npm run test -- --run` — 227 tests passed across 18 test files.
@@ -60,6 +66,7 @@ Implemented the paper-trading analytics API/frontend contract repair.
 - `uv run ruff check paper_trading/schemas/snapshots.py paper_trading/schemas/analytics.py test/paper_trading/api/test_snapshots_api.py` — passed.
 - The analytics snapshot JSON contract test asserts the full key set and equal
   `shares`/`share` compatibility values.
+- `uv run mypy paper_trading/schemas/analytics.py paper_trading/schemas/snapshots.py paper_trading/services/analytics_service.py` — Task 8 files have no remaining errors. The command still reports four pre-existing errors in `paper_trading/domain/nav_replay.py`, `paper_trading/storage/repository.py`, and `paper_trading/storage/enum_migration.py`; no Task 8 scope expansion was made.
 
 ## Simplify Review
 

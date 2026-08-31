@@ -3,7 +3,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from paper_trading.domain.enums import CorporateActionType
 
@@ -20,6 +20,10 @@ class AnalyticsUnavailableReason(StrEnum):
     VALUATION_GAP = "valuation_gap"
     INSUFFICIENT_DATA = "insufficient_data"
     LEGACY_ORDERING_UNCERTAIN = "legacy_ordering_uncertain"
+
+
+SnapshotPointTypeValue = Literal["initial", "trading"]
+SnapshotQualityValue = Literal["valid", "invalid"]
 
 
 class ActivitySummary(BaseModel):
@@ -110,10 +114,10 @@ class SnapshotAnalyticsEvent(BaseModel):
     event_type: Literal["snapshot"] = "snapshot"
     id: int
     event_at: datetime
-    point_type: Literal["initial", "trading"]
-    quality: Literal["valid", "invalid"]
+    point_type: SnapshotPointTypeValue
+    quality: SnapshotQualityValue
     timezone: Literal["UTC"]
-    quality_status: Literal["valid", "invalid"]
+    quality_status: SnapshotQualityValue
     invalid_reason: str | None = None
     valuation_quality: Literal["current", "stale_suspended"] | None = None
     valuation_details: list[dict[str, Any]] | None = None
@@ -127,6 +131,12 @@ class SnapshotAnalyticsEvent(BaseModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("event_at must include a timezone offset")
         return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def shares_alias_must_match(self) -> "SnapshotAnalyticsEvent":
+        if self.shares != self.share:
+            raise ValueError("shares and share must both be null or equal")
+        return self
 
 
 class CashFlowAnalyticsEvent(BaseModel):

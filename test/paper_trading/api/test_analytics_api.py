@@ -480,6 +480,7 @@ def test_get_account_analytics_exposes_shared_nav_point_metadata(monkeypatch, sq
     }
     assert snapshot["shares"] == "100000.000000"
     assert snapshot["share"] == "100000.000000"
+    assert snapshot["shares"] == snapshot["share"]
 
 
 def test_get_account_analytics_replays_cash_only_account_from_shared_series(monkeypatch, sqlite_session):
