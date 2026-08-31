@@ -801,8 +801,149 @@ def test_late_action_rebuilds_frozen_sell_quantity_without_scaling_post_action_b
     assert result.impact.before_quantity == Decimal("120.000000000000")
     assert position is not None and position.total_quantity == 240
     assert position.frozen_quantity == 60
-    assert refreshed_sell is not None and refreshed_sell.frozen_quantity == 60
+    assert refreshed_sell is not None and refreshed_sell.frozen_quantity == 30
     assert refreshed_buy is not None and refreshed_buy.frozen_cash == Decimal("80.000000000000")
+
+
+def test_repeated_action_chain_rebuilds_frozen_quantity_from_immutable_order_base(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-frozen-chain-repeat", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 30, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        30,
+        Decimal("12"),
+        date(2026, 8, 5),
+        OrderStatus.ACCEPTED,
+        frozen_quantity=30,
+        market=Market.A_SHARE,
+        comment="immutable-order",
+    )
+    sqlite_session.commit()
+    original_order = {
+        "frozen_quantity": order.frozen_quantity,
+        "frozen_cash": order.frozen_cash,
+        "status": order.status,
+        "comment": order.comment,
+        "quantity": order.quantity,
+        "limit_price": order.limit_price,
+    }
+
+    first = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.SPLIT,
+        datetime(2026, 8, 10, 10, tzinfo=timezone.utc),
+        "frozen-split-1",
+        {"ratio": Decimal("2")},
+    )
+    assert first.event.id is not None
+    sqlite_session.commit()
+
+    second = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.SPLIT,
+        datetime(2026, 8, 11, 10, tzinfo=timezone.utc),
+        "frozen-split-2",
+        {"ratio": Decimal("1.5")},
+    )
+
+    refreshed = sqlite_session.get(type(order), order.id)
+    position = repo.get_position(account.id, Market.A_SHARE, "000001")
+    assert second.event.id != first.event.id
+    assert position is not None and position.frozen_quantity == 90
+    assert refreshed is not None
+    assert {
+        "frozen_quantity": refreshed.frozen_quantity,
+        "frozen_cash": refreshed.frozen_cash,
+        "status": refreshed.status,
+        "comment": refreshed.comment,
+        "quantity": refreshed.quantity,
+        "limit_price": refreshed.limit_price,
+    } == original_order
+
+
+def test_late_action_replays_later_buy_sell_and_rights_cash_in_event_order(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-late-cash-chain", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 120, 0, Decimal("1200"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
+    buy_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        20,
+        Decimal("10"),
+        date(2026, 8, 20),
+        OrderStatus.FILLED,
+        market=Market.A_SHARE,
+    )
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 20), 20, 20, Decimal("10"), source="trade"
+    )
+    repo.create_trade(
+        buy_order.id,
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        20,
+        Decimal("10"),
+        Decimal("200"),
+        Decimal("0"),
+        date(2026, 8, 20),
+        market=Market.A_SHARE,
+        trade_time=datetime(2026, 8, 20, 10, tzinfo=timezone.utc),
+    )
+    sell_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        30,
+        Decimal("12"),
+        date(2026, 8, 25),
+        OrderStatus.FILLED,
+        market=Market.A_SHARE,
+    )
+    repo.create_trade(
+        sell_order.id,
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        30,
+        Decimal("12"),
+        Decimal("360"),
+        Decimal("0"),
+        date(2026, 8, 25),
+        market=Market.A_SHARE,
+        trade_time=datetime(2026, 8, 25, 10, tzinfo=timezone.utc),
+    )
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
+
+    result = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.RIGHTS_ISSUE,
+        datetime(2026, 8, 10, 10, tzinfo=timezone.utc),
+        "late-rights-cash-chain",
+        {"subscription_ratio": Decimal("0.1"), "subscription_price": Decimal("2")},
+    )
+
+    assert result.impact.before_quantity == Decimal("100.000000000000")
+    assert result.impact.cash_delta == Decimal("-20.000000000000")
+    assert result.impact.after_quantity == Decimal("110.000000000000")
+    assert repo.get_cash_available(account.id) == Decimal("9980.0000")
+    assert len(repo.list_corporate_actions(account.id)) == 1
+    assert len(repo.list_trades(account.id)) == 2
 
 
 def test_late_action_chain_advances_rights_cash_and_preserves_distinct_lot_costs(sqlite_session):

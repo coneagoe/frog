@@ -26,6 +26,11 @@
 - Frozen sell quantities are materialized from historical order/action chronology;
   post-action frozen buys retain their own frozen cash and are not scaled by an
   earlier action.
+- Repeated action chains rebuild frozen quantities from the original order
+  frozen base, avoiding repeated multiplication of already-derived values.
+- Late materialization advances cash through later trades and actions so rights
+  eligibility is evaluated at the event time; original order/trade fields remain
+  unchanged.
 - Existing cash-ledger audit rows remain separate from corporate-action replay
   events, preventing duplicate cash application during NAV replay.
 - Existing idempotency, processing metadata, affected range, precision, and
@@ -36,11 +41,11 @@
 ## Verification
 
 - `uv run pytest test/paper_trading/domain/test_corporate_actions.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_corporate_action_service.py test/paper_trading/api/test_corporate_actions_api.py -q`
-  - **104 passed**, 1 existing Starlette/httpx deprecation warning.
+  - **106 passed**, 1 existing Starlette/httpx deprecation warning.
 - `uv run pytest test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py -q`
   - **29 passed, 3 skipped** (Task 3 regression suite).
 - `tools/run_tests.sh test/paper_trading/services/test_corporate_action_service.py test/paper_trading/api/test_corporate_actions_api.py -q`
-  - **49 passed** with PostgreSQL test database.
+  - **51 passed** with PostgreSQL test database.
 - `uv run ruff check ...` on all Task 5 changed source and test files: **passed**.
 - `git diff --check`: **passed**.
 

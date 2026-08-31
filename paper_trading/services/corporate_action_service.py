@@ -97,7 +97,7 @@ class CorporateActionService:
         if account.status != AccountStatus.ACTIVE.value:
             raise ValueError(f"paper account is not active: {account_id}")
 
-        quantity, cost, cash, materialized = self._replay_state_before_action(
+        quantity, cost, cash, materialized, baseline_cash = self._replay_state_before_action(
             account_id, resolved_market, symbol, event_at, action_type, canonical_parameters
         )
         impact = calculate_corporate_action_impact(action_type, quantity, cost, cash, canonical_parameters)
@@ -116,6 +116,7 @@ class CorporateActionService:
             impact,
             materialized,
             event_at,
+            baseline_cash,
         )
 
         if impact.cash_delta:
@@ -172,7 +173,7 @@ class CorporateActionService:
         event_at: datetime,
         action_type: CorporateActionType,
         parameters: Mapping[str, Decimal],
-    ) -> tuple[Decimal, Decimal, Decimal, object]:
+    ) -> tuple[Decimal, Decimal, Decimal, object, Decimal]:
         """Replay pre-action eligibility and materialize the post-action history."""
         events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account_id)
         if any(
@@ -233,7 +234,7 @@ class CorporateActionService:
             )
             .points[-1]
         )
-        return (*pre_state, materialized)
+        return (*pre_state, materialized, quantize_account_money(Decimal(str(baseline["cash"]))))
 
     def _update_position_projection(
         self,
@@ -245,6 +246,7 @@ class CorporateActionService:
         impact: CorporateActionImpact,
         materialized: object,
         effective_at: datetime,
+        baseline_cash: Decimal,
     ) -> None:
         """Keep the mutable position projection aligned with the replayed action."""
         position = self.repo.lock_position(account_id, market, symbol)
@@ -273,7 +275,7 @@ class CorporateActionService:
             effective_at,
             action_type,
             parameters,
-            impact.before_cash_available,
+            baseline_cash,
         )
         if len(materialized_lots) != len(lots):
             raise ValueError("replay lot count does not match position projection")
@@ -345,11 +347,10 @@ class CorporateActionService:
                             "buy_trade_at": self._persisted_utc(trade.trade_time),
                         }
                     )
-                    if event_at >= effective_at:
-                        running_cash -= Decimal(trade.amount) + Decimal(trade.fees)
+                    running_cash -= Decimal(trade.amount) + Decimal(trade.fees)
                 else:
                     self._consume_lot_inventory(simulated, Decimal(trade.quantity))
-                    if event_at >= effective_at and trade.market != Market.HK_CONNECT.value:
+                    if trade.market != Market.HK_CONNECT.value:
                         running_cash += Decimal(trade.amount) - Decimal(trade.fees)
                 continue
             if kind == "action":
@@ -391,9 +392,8 @@ class CorporateActionService:
                         CorporateActionType.BONUS_SHARE,
                     }:
                         item["cost_price"] = quantize_account_money(old_cost / action_factor)
-            if event_at >= effective_at:
-                running_cash += action_impact.cash_delta
-                cash_available = running_cash
+            running_cash += action_impact.cash_delta
+            cash_available = running_cash
         return simulated
 
     def _materialized_frozen_quantity(
@@ -433,15 +433,14 @@ class CorporateActionService:
                 if action_at < order_at:
                     continue
                 if action_type is CorporateActionType.SPLIT:
-                    factor *= parameters["ratio"]
+                    factor *= Decimal(parameters["ratio"])
                 elif action_type is CorporateActionType.REVERSE_SPLIT:
-                    factor *= parameters["ratio"]
+                    factor *= Decimal(parameters["ratio"])
                 elif action_type is CorporateActionType.BONUS_SHARE:
-                    factor *= Decimal("1") + parameters["bonus_ratio"]
+                    factor *= Decimal("1") + Decimal(parameters["bonus_ratio"])
                 elif action_type is CorporateActionType.RIGHTS_ISSUE:
-                    factor *= Decimal("1") + parameters["subscription_ratio"]
+                    factor *= Decimal("1") + Decimal(parameters["subscription_ratio"])
             frozen += quantize_shares(order_frozen * factor)
-            order.frozen_quantity = self._integer_quantity(quantize_shares(order_frozen * factor))
         return quantize_shares(frozen)
 
     @staticmethod
