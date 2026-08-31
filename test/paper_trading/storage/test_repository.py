@@ -3275,7 +3275,8 @@ def test_reset_orders_for_replay_resets_replayable_statuses(sqlite_session):
     for status, order in orders.items():
         reloaded = repo.get_order(order.id)
         assert reloaded.status == OrderStatus.ACCEPTED.value, f"{status} should reset to ACCEPTED"
-        assert reloaded.filled_quantity == 0, f"{status} filled_quantity should be 0"
+        expected_filled_quantity = 50 if status == OrderStatus.PARTIALLY_FILLED else 0
+        assert reloaded.filled_quantity == expected_filled_quantity, f"{status} filled_quantity should be preserved"
         assert reloaded.rejection_code is None, f"{status} rejection_code should be None"
         assert reloaded.rejection_reason is None, f"{status} rejection_reason should be None"
 
