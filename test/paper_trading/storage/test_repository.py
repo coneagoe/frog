@@ -23,6 +23,7 @@ from paper_trading.domain.enums import (
     NavReplayEventType,
     OrderSide,
     OrderStatus,
+    PaperOrderEventType,
     ReplayTimeProvenance,
     SnapshotPointType,
     SnapshotQualityStatus,
@@ -35,6 +36,7 @@ from paper_trading.storage.models import (
     PaperCashLedger,
     PaperCorporateAction,
     PaperOrder,
+    PaperOrderEvent,
     PaperPendingSettlement,
     PaperTrade,
     PaperTradeValidityCheck,
@@ -139,6 +141,136 @@ def test_create_account_initializes_nav_share_state(sqlite_session):
     assert ledger[0].event_type == "deposit"
     assert ledger[0].net_asset_value == Decimal("1.000000")
     assert ledger[0].share_delta == Decimal("100000.000000")
+
+
+def test_order_events_are_idempotent_ordered_and_immutable(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("order-event-facts", Decimal("10000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 8, 27),
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1000"),
+    )
+    accepted_at = datetime(2026, 8, 27, 9, tzinfo=timezone.utc)
+    accepted = repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.ACCEPTED,
+        accepted_at,
+        quantity_delta=Decimal("0"),
+        cash_delta=Decimal("0"),
+        idempotency_key="explicit:order:1:accepted",
+    )
+    reserved = repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.RESERVED,
+        accepted_at + timedelta(seconds=1),
+        quantity_delta=Decimal("0"),
+        cash_delta=Decimal("-1000"),
+        idempotency_key="explicit:order:1:reserved",
+    )
+
+    assert repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.ACCEPTED,
+        accepted_at,
+        quantity_delta=Decimal("0"),
+        cash_delta=Decimal("0"),
+        idempotency_key="explicit:order:1:accepted",
+    ).id == accepted.id
+    with pytest.raises(ValueError, match="idempotency"):
+        repo.append_order_event(
+            account.id,
+            order.id,
+            Market.A_SHARE,
+            order.symbol,
+            PaperOrderEventType.ACCEPTED,
+            accepted_at,
+            quantity_delta=Decimal("1"),
+            cash_delta=Decimal("0"),
+            idempotency_key="explicit:order:1:accepted",
+        )
+
+    order.frozen_cash = Decimal("0")
+    events = repo.list_order_events(account.id)
+    explicit_events = [event for event in events if event.id in {accepted.id, reserved.id}]
+    assert [event.id for event in explicit_events] == [accepted.id, reserved.id]
+    assert explicit_events[1].cash_delta == Decimal("-1000.000000000000")
+    assert sqlite_session.query(PaperOrderEvent).count() == 4
+
+
+def test_order_event_facts_preserve_partial_fill_and_cancelled_reservation(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("partial-order-event-facts", Decimal("10000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        100,
+        Decimal("10"),
+        date(2026, 8, 27),
+        OrderStatus.ACCEPTED,
+        frozen_quantity=100,
+    )
+    accepted_at = datetime(2026, 8, 27, 9, tzinfo=timezone.utc)
+    for event_type, quantity_delta, key in (
+        (PaperOrderEventType.FILL, Decimal("-40"), "fill"),
+        (PaperOrderEventType.CANCEL, Decimal("0"), "cancel"),
+        (PaperOrderEventType.RELEASE, Decimal("-60"), "release"),
+    ):
+        repo.append_order_event(
+            account.id,
+            order.id,
+            Market.A_SHARE,
+            order.symbol,
+            event_type,
+            accepted_at + timedelta(seconds=len(repo.list_order_events(account.id)) + 1),
+            quantity_delta=quantity_delta,
+            cash_delta=Decimal("0"),
+            idempotency_key=f"order:{order.id}:{key}",
+        )
+
+    order.frozen_quantity = 999
+    events = repo.list_order_events(account.id, order.id)
+    assert sum(event.quantity_delta for event in events) == Decimal("0")
+    release = next(event for event in events if event.event_type == PaperOrderEventType.RELEASE.value)
+    assert release.quantity_delta == Decimal("-60.000000")
+
+
+def test_deleting_order_keeps_append_only_order_events(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("order-event-delete", Decimal("10000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 8, 27),
+        OrderStatus.ACCEPTED,
+    )
+    assert repo.list_order_events(account.id, order.id)
+
+    repo.delete_order(order.id)
+    sqlite_session.flush()
+
+    assert sqlite_session.query(PaperOrderEvent).filter_by(order_id=order.id).count() == 2
 
 
 def test_create_account_persists_etf_commission_rate(sqlite_session):

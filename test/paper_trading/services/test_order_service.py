@@ -21,7 +21,14 @@ from common.const import (
     COL_STOCK_ID,
     COL_UP_LIMIT,
 )
-from paper_trading.domain.enums import CashEventType, ETFEligibilityStatus, Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import (
+    CashEventType,
+    ETFEligibilityStatus,
+    Market,
+    OrderSide,
+    OrderStatus,
+    PaperOrderEventType,
+)
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.order_service import OrderService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
@@ -112,6 +119,34 @@ def test_place_buy_order_freezes_estimated_cash(tmp_path):
     assert order.status == OrderStatus.ACCEPTED.value
     assert order.frozen_cash == Decimal("1005.0100")
     assert repo.get_cash_available(account.id) == Decimal("98994.9900")
+    engine.dispose()
+
+
+def test_place_and_cancel_buy_order_append_lifecycle_facts(tmp_path):
+    engine, session, repo, service = _repo_and_service(tmp_path)
+    account = repo.create_account("order-event-lifecycle", Decimal("100000.00"))
+
+    order = service.place_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 6, 16),
+    )
+    service.cancel_order(order.id)
+    session.commit()
+
+    events = repo.list_order_events(account.id, order.id)
+    assert [event.event_type for event in events] == [
+        PaperOrderEventType.ACCEPTED.value,
+        PaperOrderEventType.RESERVED.value,
+        PaperOrderEventType.CANCEL.value,
+        PaperOrderEventType.RELEASE.value,
+    ]
+    assert events[1].cash_delta == Decimal("-1005.010000000000")
+    assert events[3].cash_delta == Decimal("1005.010000000000")
+    assert events[3].quantity_delta == Decimal("0E-12")
     engine.dispose()
 
 

@@ -34,6 +34,7 @@ from paper_trading.domain.enums import (
     MigrationRepairReason,
     OrderSide,
     OrderStatus,
+    PaperOrderEventType,
     PendingSettlementSource,
     PositionSource,
     ReplayTimeProvenance,
@@ -55,6 +56,7 @@ tb_name_paper_corporate_actions = "paper_corporate_actions"
 tb_name_paper_positions = "paper_positions"
 tb_name_paper_position_lots = "paper_position_lots"
 tb_name_paper_orders = "paper_orders"
+tb_name_paper_order_events = "paper_order_events"
 tb_name_paper_trades = "paper_trades"
 tb_name_paper_position_round_trips = "paper_position_round_trips"
 tb_name_paper_account_snapshots = "paper_account_snapshots"
@@ -229,6 +231,7 @@ class PaperPositionLot(Base):
     original_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     remaining_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     cost_price: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
+    projected_cost_price: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
     source: Mapped[str] = mapped_column(
         _value_enum(PositionSource, "paper_position_source"), nullable=False, server_default="trade"
     )
@@ -277,6 +280,38 @@ class PaperOrder(Base):
     market: Mapped[str] = mapped_column(
         _value_enum(Market, "paper_market"), nullable=False, server_default="a_share", index=True
     )
+
+
+class PaperOrderEvent(Base):
+    __tablename__ = tb_name_paper_order_events
+    __table_args__ = (
+        Index("uq_paper_order_events_idempotency", "account_id", "idempotency_key", unique=True),
+        Index("ix_paper_order_events_account_event", "account_id", "event_at", "id"),
+        Index("ix_paper_order_events_order_event", "order_id", "event_at", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False, index=True
+    )
+    # Keep the identifier after operational orders are deleted; lifecycle facts are append-only.
+    order_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    market: Mapped[str] = mapped_column(
+        _value_enum(Market, "paper_market"), nullable=False, server_default="a_share", index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(
+        _value_enum(PaperOrderEventType, "paper_order_event_type"), nullable=False, index=True
+    )
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    event_time_provenance: Mapped[str] = mapped_column(
+        _value_enum(ReplayTimeProvenance, "paper_replay_time_provenance"), nullable=False
+    )
+    quantity_delta: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    cash_delta: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class PaperTradeValidityCheck(Base):

@@ -24,6 +24,7 @@ from paper_trading.domain.enums import (
     NavReplayEventType,
     OrderSide,
     OrderStatus,
+    PaperOrderEventType,
     PendingSettlementSource,
     PositionSource,
     ReplayTimeProvenance,
@@ -52,6 +53,7 @@ from paper_trading.storage.models import (
     PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
+    PaperOrderEvent,
     PaperPendingSettlement,
     PaperPosition,
     PaperPositionLot,
@@ -467,6 +469,9 @@ class PaperTradingRepository:
         self.session.query(PaperTradeValidityCheck).filter(PaperTradeValidityCheck.account_id == account_id).delete(
             synchronize_session=False
         )
+        self.session.query(PaperOrderEvent).filter(PaperOrderEvent.account_id == account_id).delete(
+            synchronize_session=False
+        )
         self.session.query(PaperCashLedger).filter(PaperCashLedger.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -642,6 +647,8 @@ class PaperTradingRepository:
         rejection_reason: str | None = None,
         comment: str | None = None,
         market: str | None = None,
+        lifecycle_event_at: datetime | None = None,
+        lifecycle_time_provenance: ReplayTimeProvenance = ReplayTimeProvenance.CANONICAL_UTC,
     ) -> PaperOrder:
         normalized_idempotency_key = idempotency_key.strip() if idempotency_key and idempotency_key.strip() else None
         order = PaperOrder(
@@ -662,7 +669,91 @@ class PaperTradingRepository:
         )
         self.session.add(order)
         self.session.flush()
+        event_at = lifecycle_event_at or (
+            order.created_at.replace(tzinfo=timezone.utc)
+            if order.created_at.tzinfo is None or order.created_at.utcoffset() is None
+            else order.created_at.astimezone(timezone.utc)
+        )
+        self.append_order_event(
+            account_id,
+            order.id,
+            market or Market.A_SHARE,
+            symbol,
+            PaperOrderEventType.ACCEPTED,
+            event_at,
+            quantity_delta=Decimal("0"),
+            cash_delta=Decimal("0"),
+            idempotency_key=f"order:{order.id}:accepted",
+            event_time_provenance=lifecycle_time_provenance,
+        )
+        self.append_order_event(
+            account_id,
+            order.id,
+            market or Market.A_SHARE,
+            symbol,
+            PaperOrderEventType.RESERVED,
+            event_at,
+            quantity_delta=Decimal(frozen_quantity),
+            cash_delta=-Decimal(frozen_cash),
+            idempotency_key=f"order:{order.id}:reserved",
+            event_time_provenance=lifecycle_time_provenance,
+        )
         return order
+
+    def append_order_event(
+        self,
+        account_id: int,
+        order_id: int,
+        market: Market | str,
+        symbol: str,
+        event_type: PaperOrderEventType | str,
+        event_at: datetime,
+        *,
+        quantity_delta: Decimal,
+        cash_delta: Decimal,
+        idempotency_key: str,
+        trade_id: int | None = None,
+        event_time_provenance: ReplayTimeProvenance = ReplayTimeProvenance.CANONICAL_UTC,
+    ) -> PaperOrderEvent:
+        if event_at.tzinfo is None or event_at.utcoffset() is None:
+            raise ValueError("event_at must include a timezone offset")
+        key = idempotency_key.strip()
+        if not key:
+            raise ValueError("idempotency_key is required")
+        values = {
+            "account_id": account_id,
+            "order_id": order_id,
+            "trade_id": trade_id,
+            "market": Market(market).value,
+            "symbol": symbol,
+            "event_type": PaperOrderEventType(event_type).value,
+            "event_at": event_at.astimezone(timezone.utc),
+            "event_time_provenance": ReplayTimeProvenance(event_time_provenance).value,
+            "quantity_delta": quantize_shares(require_finite(Decimal(quantity_delta), "quantity_delta")),
+            "cash_delta": quantize_account_money(require_finite(Decimal(cash_delta), "cash_delta")),
+            "idempotency_key": key,
+        }
+        existing = (
+            self.session.query(PaperOrderEvent)
+            .filter(PaperOrderEvent.account_id == account_id, PaperOrderEvent.idempotency_key == key)
+            .one_or_none()
+        )
+        if existing is not None:
+            if all(getattr(existing, field) == value for field, value in values.items() if field != "event_at") and (
+                existing.event_at.replace(tzinfo=timezone.utc) == values["event_at"]
+            ):
+                return existing
+            raise ValueError("order event idempotency key conflicts with a different fact")
+        event = PaperOrderEvent(**values)
+        self.session.add(event)
+        self.session.flush()
+        return event
+
+    def list_order_events(self, account_id: int, order_id: int | None = None) -> list[PaperOrderEvent]:
+        query = self.session.query(PaperOrderEvent).filter(PaperOrderEvent.account_id == account_id)
+        if order_id is not None:
+            query = query.filter(PaperOrderEvent.order_id == order_id)
+        return list(query.order_by(PaperOrderEvent.event_at.asc(), PaperOrderEvent.id.asc()).all())
 
     def get_order_by_idempotency_key(self, account_id: int, idempotency_key: str) -> PaperOrder | None:
         return (
@@ -1304,6 +1395,7 @@ class PaperTradingRepository:
             original_quantity=_whole_quantity(original_quantity, "original_quantity"),
             remaining_quantity=_whole_quantity(remaining_quantity, "remaining_quantity"),
             cost_price=quantize_account_money(cost_price),
+            projected_cost_price=quantize_account_money(cost_price),
             source=PositionSource(source).value,
             market=market,
         )
@@ -1449,9 +1541,18 @@ class PaperTradingRepository:
             if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
                 raise ValueError("snapshot event_at must include a timezone offset")
             for field_name in (
-                "cash_available", "cash_frozen", "market_value", "total_assets",
-                "realized_pnl", "unrealized_pnl", "net_asset_value", "share_count",
-                "cumulative_deposit", "cumulative_withdrawal", "net_cash_flow", "pending_settlement",
+                "cash_available",
+                "cash_frozen",
+                "market_value",
+                "total_assets",
+                "realized_pnl",
+                "unrealized_pnl",
+                "net_asset_value",
+                "share_count",
+                "cumulative_deposit",
+                "cumulative_withdrawal",
+                "net_cash_flow",
+                "pending_settlement",
             ):
                 if field_name in values and values[field_name] is not None:
                     require_finite(Decimal(values[field_name]), field_name)

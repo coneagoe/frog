@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -8,6 +8,7 @@ from paper_trading.domain.enums import (
     MatchingRunStatus,
     OrderSide,
     OrderStatus,
+    PaperOrderEventType,
 )
 from paper_trading.domain.fees import (
     calculate_a_share_fees,
@@ -149,6 +150,14 @@ class MatchingService:
             return "failed"  # stays ACCEPTED (run() outer except → failed)
 
     def _reject_order(self, order: PaperOrder, code: str, reason: str) -> None:
+        now = datetime.now(timezone.utc)
+        lifecycle = self.repo.list_order_events(order.account_id, order.id)
+        outstanding_quantity = max(
+            sum((Decimal(event.quantity_delta) for event in lifecycle), Decimal("0")), Decimal("0")
+        )
+        outstanding_cash = max(
+            -sum((Decimal(event.cash_delta) for event in lifecycle), Decimal("0")), Decimal("0")
+        )
         if Decimal(order.frozen_cash or 0) > 0:
             self.repo.add_cash_event(
                 order.account_id,
@@ -162,6 +171,28 @@ class MatchingService:
             position = self.repo.get_position(order.account_id, order.market, order.symbol)
             if position is not None:
                 position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
+        self.repo.append_order_event(
+            order.account_id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.REJECT,
+            now,
+            quantity_delta=Decimal("0"),
+            cash_delta=Decimal("0"),
+            idempotency_key=f"order:{order.id}:reject:{code}",
+        )
+        self.repo.append_order_event(
+            order.account_id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.RELEASE,
+            now,
+            quantity_delta=-outstanding_quantity,
+            cash_delta=outstanding_cash,
+            idempotency_key=f"order:{order.id}:release:reject",
+        )
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
 
     def _record_missing_exact_date_diagnostic(self, order: PaperOrder, error: Exception) -> None:
@@ -232,6 +263,32 @@ class MatchingService:
             order.trade_date,
             comment=order.comment,
             market=order.market,
+        )
+        actual_cost = amount + fees
+        release_cash = Decimal(order.frozen_cash or 0) - actual_cost
+        self.repo.append_order_event(
+            order.account_id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.FILL,
+            trade.trade_time if trade.trade_time.tzinfo else trade.trade_time.replace(tzinfo=timezone.utc),
+            quantity_delta=-Decimal(quantity) if side == OrderSide.SELL else Decimal("0"),
+            cash_delta=actual_cost if side == OrderSide.BUY else Decimal("0"),
+            idempotency_key=f"order:{order.id}:fill:{trade.id}",
+            trade_id=trade.id,
+        )
+        self.repo.append_order_event(
+            order.account_id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.RELEASE,
+            trade.trade_time if trade.trade_time.tzinfo else trade.trade_time.replace(tzinfo=timezone.utc),
+            quantity_delta=Decimal("0"),
+            cash_delta=release_cash,
+            idempotency_key=f"order:{order.id}:release:fill:{trade.id}",
+            trade_id=trade.id,
         )
         if side == OrderSide.BUY:
             self._settle_buy(order, trade.id, amount, fees)
@@ -324,7 +381,7 @@ class MatchingService:
             cost_reduction += Decimal(used) * Decimal(lot.cost_price)
             remaining -= used
         position.total_quantity = int(position.total_quantity or 0) - quantity_to_sell
-        position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
+        position.frozen_quantity = int(position.frozen_quantity or 0) - quantity_to_sell
         position.cost_amount = quantize_account_money(Decimal(position.cost_amount or 0) - cost_reduction)
         realized_pnl = quantize_account_money(amount - fees - cost_reduction)
         position.realized_pnl = quantize_account_money(Decimal(position.realized_pnl or 0) + realized_pnl)

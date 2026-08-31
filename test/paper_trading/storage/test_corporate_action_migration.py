@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from paper_trading.domain.enums import CashEventType, CorporateActionProcessingStatus, CorporateActionType
 from paper_trading.storage.enum_migration import _GOVERNED_TABLES, migrate_paper_trading_enums
+from paper_trading.storage.models import PaperOrderEvent, tb_name_paper_order_events
 from storage.model import Base
 from storage.storage_db import StorageDb
 
@@ -140,9 +141,11 @@ def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_pat
     cost_amount = cast(Numeric, position_columns["cost_amount"])
     realized_pnl = cast(Numeric, position_columns["realized_pnl"])
     cost_price = cast(Numeric, lot_columns["cost_price"])
+    projected_cost_price = cast(Numeric, lot_columns["projected_cost_price"])
     assert (cost_amount.precision, cost_amount.scale) == (30, 12)
     assert (realized_pnl.precision, realized_pnl.scale) == (30, 12)
     assert (cost_price.precision, cost_price.scale) == (30, 12)
+    assert (projected_cost_price.precision, projected_cost_price.scale) == (30, 12)
     assert engine.connect().execute(
         text("SELECT cost_amount, realized_pnl FROM paper_positions WHERE id = 1")
     ).one() == (
@@ -152,6 +155,45 @@ def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_pat
     assert (
         engine.connect().execute(text("SELECT cost_price FROM paper_position_lots WHERE id = 1")).scalar_one() == 1.2345
     )
+    assert (
+        engine.connect()
+        .execute(text("SELECT projected_cost_price FROM paper_position_lots WHERE id = 1"))
+        .scalar_one()
+        == 1.2345
+    )
+    engine.dispose()
+
+
+def test_sqlite_startup_adds_order_event_table_and_is_repeatable(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'order_events.db'}")
+    with engine.begin() as connection:
+        Base.metadata.create_all(
+            connection,
+            tables=[table for table in _GOVERNED_TABLES if table.name != tb_name_paper_order_events],
+        )
+        connection.execute(text("INSERT INTO paper_accounts (name, initial_cash) VALUES ('legacy-events', 1000)"))
+
+    storage = _storage(engine)
+    storage.ensure_paper_trading_schema()
+    first_columns = {column["name"] for column in inspect(engine).get_columns(tb_name_paper_order_events)}
+    first_indexes = {index["name"] for index in inspect(engine).get_indexes(tb_name_paper_order_events)}
+    storage.ensure_paper_trading_schema()
+    second_columns = {column["name"] for column in inspect(engine).get_columns(tb_name_paper_order_events)}
+    second_indexes = {index["name"] for index in inspect(engine).get_indexes(tb_name_paper_order_events)}
+
+    assert first_columns == second_columns == set(PaperOrderEvent.__table__.columns.keys())
+    assert first_indexes == second_indexes == {
+        "uq_paper_order_events_idempotency",
+        "ix_paper_order_events_account_event",
+        "ix_paper_order_events_order_event",
+        "ix_paper_order_events_account_id",
+        "ix_paper_order_events_order_id",
+        "ix_paper_order_events_trade_id",
+        "ix_paper_order_events_market",
+        "ix_paper_order_events_symbol",
+        "ix_paper_order_events_event_type",
+        "ix_paper_order_events_event_at",
+    }
     engine.dispose()
 
 
@@ -424,6 +466,7 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             connection.execute(text("ALTER TABLE paper_accounts ALTER COLUMN initial_cash TYPE NUMERIC(20, 4)"))
             connection.execute(text("ALTER TABLE paper_accounts ALTER COLUMN share_count TYPE NUMERIC(40, 20)"))
             connection.execute(text("ALTER TABLE paper_cash_ledger ALTER COLUMN amount TYPE NUMERIC(40, 4)"))
+            connection.execute(text("ALTER TABLE paper_position_lots DROP COLUMN projected_cost_price"))
             connection.execute(
                 text("ALTER TABLE paper_account_snapshots ALTER COLUMN net_asset_value TYPE NUMERIC(20, 6)")
             )
@@ -472,7 +515,7 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
                     "OR (table_name = 'paper_account_snapshots' AND column_name = 'net_asset_value') "
                     "OR (table_name = 'paper_positions' AND column_name IN ('total_quantity', 'frozen_quantity')) "
                     "OR (table_name = 'paper_position_lots' AND column_name IN "
-                    "('original_quantity', 'remaining_quantity')))"
+                    "('original_quantity', 'remaining_quantity', 'projected_cost_price')))"
                 )
             ).all()
             observed = {(row[0], row[1]): (row[2], row[3]) for row in types}
@@ -485,6 +528,7 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             assert observed[("paper_positions", "frozen_quantity")] == (32, 0)
             assert observed[("paper_position_lots", "original_quantity")] == (32, 0)
             assert observed[("paper_position_lots", "remaining_quantity")] == (32, 0)
+            assert observed[("paper_position_lots", "projected_cost_price")] == (30, 12)
             assert connection.execute(
                 text("SELECT initial_cash, share_count FROM paper_accounts WHERE id = 1")
             ).one() == (
@@ -500,6 +544,9 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             assert connection.execute(
                 text("SELECT original_quantity, remaining_quantity FROM paper_position_lots WHERE id = 1")
             ).one() == (100, 80)
+            assert connection.execute(
+                text("SELECT projected_cost_price FROM paper_position_lots WHERE id = 1")
+            ).scalar_one() == Decimal("1.234500000000")
             assert connection.execute(
                 text("SELECT net_asset_value, share_count FROM paper_account_snapshots WHERE account_id = 1")
             ).one() == (Decimal("1.234567"), Decimal("9.000000000000"))

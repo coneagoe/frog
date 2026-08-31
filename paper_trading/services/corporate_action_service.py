@@ -17,6 +17,8 @@ from paper_trading.domain.enums import (
     CorporateActionType,
     Market,
     NavReplayEventType,
+    PaperOrderEventType,
+    ReplayTimeProvenance,
     SnapshotQualityStatus,
 )
 from paper_trading.domain.errors import CorporateActionError
@@ -97,7 +99,7 @@ class CorporateActionService:
         if account.status != AccountStatus.ACTIVE.value:
             raise ValueError(f"paper account is not active: {account_id}")
 
-        quantity, cost, cash, materialized, baseline_cash = self._replay_state_before_action(
+        quantity, cost, cash, materialized = self._replay_state_before_action(
             account_id, resolved_market, symbol, event_at, action_type, canonical_parameters
         )
         impact = calculate_corporate_action_impact(action_type, quantity, cost, cash, canonical_parameters)
@@ -116,7 +118,6 @@ class CorporateActionService:
             impact,
             materialized,
             event_at,
-            baseline_cash,
         )
 
         if impact.cash_delta:
@@ -173,7 +174,7 @@ class CorporateActionService:
         event_at: datetime,
         action_type: CorporateActionType,
         parameters: Mapping[str, Decimal],
-    ) -> tuple[Decimal, Decimal, Decimal, object, Decimal]:
+    ) -> tuple[Decimal, Decimal, Decimal, object]:
         """Replay pre-action eligibility and materialize the post-action history."""
         events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account_id)
         if any(
@@ -234,7 +235,7 @@ class CorporateActionService:
             )
             .points[-1]
         )
-        return (*pre_state, materialized, quantize_account_money(Decimal(str(baseline["cash"]))))
+        return (*pre_state, materialized)
 
     def _update_position_projection(
         self,
@@ -246,14 +247,26 @@ class CorporateActionService:
         impact: CorporateActionImpact,
         materialized: object,
         effective_at: datetime,
-        baseline_cash: Decimal,
     ) -> None:
         """Keep the mutable position projection aligned with the replayed action."""
         position = self.repo.lock_position(account_id, market, symbol)
         lots = self.repo.lock_lots(account_id, market, symbol)
         current_quantity = Decimal(position.total_quantity or 0) if position is not None else Decimal("0")
         current_cost = Decimal(position.cost_amount or 0) if position is not None else Decimal("0")
-        self._validate_holding(position, lots, market, symbol, current_quantity, current_cost, Decimal("0"))
+        has_prior_action = any(
+            action.market == market.value and action.symbol == symbol
+            for action in self.repo.list_corporate_actions(account_id)
+        )
+        self._validate_holding(
+            position,
+            lots,
+            market,
+            symbol,
+            current_quantity,
+            current_cost,
+            Decimal("0"),
+            validate_projection=not has_prior_action,
+        )
         if position is None:
             if impact.before_quantity:
                 raise ValueError("replayed holding has no position projection")
@@ -275,24 +288,14 @@ class CorporateActionService:
             effective_at,
             action_type,
             parameters,
-            baseline_cash,
         )
         if len(materialized_lots) != len(lots):
             raise ValueError("replay lot count does not match position projection")
         for lot, materialized_lot in zip(
             sorted(lots, key=lambda item: (item.buy_trade_date, item.id)), materialized_lots
         ):
-            lot.original_quantity = self._integer_quantity(materialized_lot["original"])
             lot.remaining_quantity = self._integer_quantity(materialized_lot["remaining"])
-            lot.cost_price = quantize_account_money(materialized_lot["cost_price"])
-        if lots:
-            lot_cost = sum((Decimal(lot.remaining_quantity) * Decimal(lot.cost_price) for lot in lots), Decimal("0"))
-            residual = final_cost - quantize_account_money(lot_cost)
-            last = next((lot for lot in reversed(lots) if lot.remaining_quantity), None)
-            if last is not None:
-                last.cost_price = quantize_account_money(
-                    Decimal(last.cost_price) + residual / Decimal(last.remaining_quantity)
-                )
+            lot.projected_cost_price = quantize_account_money(materialized_lot["projected_cost_price"])
 
     def _materialize_lots(
         self,
@@ -302,7 +305,6 @@ class CorporateActionService:
         effective_at: datetime,
         action_type: CorporateActionType,
         parameters: Mapping[str, Decimal],
-        cash_available: Decimal,
     ) -> list[dict[str, Any]]:
         persisted_lots = self.repo.lock_lots(account_id, market, symbol)
         simulated: list[dict[str, Any]] = [
@@ -310,6 +312,7 @@ class CorporateActionService:
                 "original": Decimal(lot.original_quantity),
                 "remaining": Decimal(lot.original_quantity),
                 "cost_price": Decimal(lot.cost_price),
+                "projected_cost_price": Decimal(lot.cost_price),
                 "buy_trade_date": lot.buy_trade_date,
                 "buy_trade_at": datetime.combine(lot.buy_trade_date, datetime.min.time(), tzinfo=timezone.utc),
             }
@@ -331,7 +334,6 @@ class CorporateActionService:
                 (action_type, parameters),
             )
         )
-        running_cash = cash_available
         for event_at, source_id, kind, payload in sorted(events, key=lambda item: (item[0], item[1], item[2])):
             if kind == "trade":
                 trade = payload
@@ -343,15 +345,15 @@ class CorporateActionService:
                             "cost_price": quantize_account_money(
                                 (Decimal(trade.amount) + Decimal(trade.fees)) / Decimal(trade.quantity)
                             ),
+                            "projected_cost_price": quantize_account_money(
+                                (Decimal(trade.amount) + Decimal(trade.fees)) / Decimal(trade.quantity)
+                            ),
                             "buy_trade_date": trade.trade_date,
                             "buy_trade_at": self._persisted_utc(trade.trade_time),
                         }
                     )
-                    running_cash -= Decimal(trade.amount) + Decimal(trade.fees)
                 else:
                     self._consume_lot_inventory(simulated, Decimal(trade.quantity))
-                    if trade.market != Market.HK_CONNECT.value:
-                        running_cash += Decimal(trade.amount) - Decimal(trade.fees)
                 continue
             if kind == "action":
                 action = payload
@@ -359,42 +361,38 @@ class CorporateActionService:
                 current_parameters = action.parameters
             else:
                 current_type, current_parameters = payload
-            before_quantity = sum((item["remaining"] for item in simulated), Decimal("0"))
-            before_cost = sum((item["remaining"] * item["cost_price"] for item in simulated), Decimal("0"))
-            action_impact = calculate_corporate_action_impact(
-                current_type, before_quantity, before_cost, cash_available, current_parameters
-            )
-            action_factor = (
-                action_impact.after_quantity / action_impact.before_quantity
-                if action_impact.before_quantity
-                else Decimal("0")
-            )
+            action_factor = self._action_quantity_factor(current_type, current_parameters)
             for item in simulated:
                 if item["buy_trade_at"] > event_at:
                     continue
-                item["original"] = quantize_shares(item["original"] * action_factor)
+                before_remaining = Decimal(item["remaining"])
                 item["remaining"] = quantize_shares(item["remaining"] * action_factor)
-                if item["remaining"]:
-                    old_cost = Decimal(item["cost_price"])
-                    if current_type is CorporateActionType.RIGHTS_ISSUE:
-                        old_remaining = Decimal(item["remaining"]) / action_factor if action_factor else Decimal("0")
-                        added_cost = (
-                            old_remaining
-                            * current_parameters["subscription_ratio"]
-                            * current_parameters["subscription_price"]
-                        )
-                        item["cost_price"] = quantize_account_money(
-                            (old_remaining * old_cost + added_cost) / item["remaining"]
-                        )
-                    elif current_type in {
-                        CorporateActionType.SPLIT,
-                        CorporateActionType.REVERSE_SPLIT,
-                        CorporateActionType.BONUS_SHARE,
-                    }:
-                        item["cost_price"] = quantize_account_money(old_cost / action_factor)
-            running_cash += action_impact.cash_delta
-            cash_available = running_cash
+                if not item["remaining"]:
+                    continue
+                if current_type is CorporateActionType.RIGHTS_ISSUE:
+                    added_cost = (
+                        before_remaining
+                        * Decimal(current_parameters["subscription_ratio"])
+                        * Decimal(current_parameters["subscription_price"])
+                    )
+                    item["projected_cost_price"] = quantize_account_money(
+                        (before_remaining * Decimal(item["projected_cost_price"]) + added_cost) / item["remaining"]
+                    )
+                elif action_factor:
+                    item["projected_cost_price"] = quantize_account_money(
+                        Decimal(item["projected_cost_price"]) / action_factor
+                    )
         return simulated
+
+    @staticmethod
+    def _action_quantity_factor(action_type: CorporateActionType, parameters: Mapping[str, Decimal]) -> Decimal:
+        if action_type in {CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT}:
+            return Decimal(parameters["ratio"])
+        if action_type is CorporateActionType.BONUS_SHARE:
+            return Decimal("1") + Decimal(parameters["bonus_ratio"])
+        if action_type is CorporateActionType.RIGHTS_ISSUE:
+            return Decimal("1") + Decimal(parameters["subscription_ratio"])
+        return Decimal("1")
 
     def _materialized_frozen_quantity(
         self,
@@ -421,25 +419,26 @@ class CorporateActionService:
                 or order.status not in {"accepted", "partially_filled"}
             ):
                 continue
-            order_frozen = Decimal(order.frozen_quantity or 0)
+            order_events = self.repo.list_order_events(account_id, order.id)
+            if not order_events or any(
+                event.event_time_provenance != ReplayTimeProvenance.CANONICAL_UTC.value
+                for event in order_events
+            ):
+                raise ValueError("reservation chronology is unproven; repair historical order facts first")
+            reservation_events = [
+                event for event in order_events if event.event_type == PaperOrderEventType.RESERVED.value
+            ]
+            if not reservation_events:
+                raise ValueError("reservation chronology is unproven; repair historical order facts first")
+            order_frozen = sum((Decimal(event.quantity_delta) for event in order_events), Decimal("0"))
             if not order_frozen:
                 continue
             factor = Decimal("1")
-            # Order ``created_at`` is processing metadata and is not the
-            # historical ordering fact for backfilled orders.  The order's
-            # trade date is the conservative effective boundary here.
-            order_at = datetime.combine(order.trade_date, datetime.min.time(), tzinfo=timezone.utc)
+            order_at = min(self._persisted_utc(event.event_at) for event in reservation_events)
             for action_at, action_type, parameters in sorted(actions, key=lambda item: item[0]):
                 if action_at < order_at:
                     continue
-                if action_type is CorporateActionType.SPLIT:
-                    factor *= Decimal(parameters["ratio"])
-                elif action_type is CorporateActionType.REVERSE_SPLIT:
-                    factor *= Decimal(parameters["ratio"])
-                elif action_type is CorporateActionType.BONUS_SHARE:
-                    factor *= Decimal("1") + Decimal(parameters["bonus_ratio"])
-                elif action_type is CorporateActionType.RIGHTS_ISSUE:
-                    factor *= Decimal("1") + Decimal(parameters["subscription_ratio"])
+                factor *= self._action_quantity_factor(action_type, parameters)
             frozen += quantize_shares(order_frozen * factor)
         return quantize_shares(frozen)
 
@@ -558,7 +557,15 @@ class CorporateActionService:
 
     @staticmethod
     def _validate_holding(
-        position, lots, market: Market, symbol: str, quantity: Decimal, cost: Decimal, cash: Decimal
+        position,
+        lots,
+        market: Market,
+        symbol: str,
+        quantity: Decimal,
+        cost: Decimal,
+        cash: Decimal,
+        *,
+        validate_projection: bool,
     ) -> None:
         values = (quantity, cost, cash)
         if any(not value.is_finite() for value in values) or any(value < 0 for value in values):
@@ -582,11 +589,15 @@ class CorporateActionService:
                 raise ValueError("position lot identity is invalid")
             if any(not value.is_finite() for value in (original, lot_remaining, lot_cost)):
                 raise ValueError("position lot values are invalid")
-            if original < 0 or lot_remaining < 0 or lot_remaining > original or lot_cost < 0:
+            if original < 0 or lot_remaining < 0 or lot_cost < 0:
                 raise ValueError("position lot values are invalid")
+            # Remaining quantity is a mutable projection and may exceed the
+            # acquisition quantity after a split or bonus-share action.
             remaining += lot_remaining
             aggregate_cost += lot_remaining * lot_cost
-        if remaining != quantity or quantize_account_money(aggregate_cost) != quantize_account_money(cost):
+        if validate_projection and (
+            remaining != quantity or quantize_account_money(aggregate_cost) != quantize_account_money(cost)
+        ):
             raise ValueError("position aggregate does not match lots")
 
     @staticmethod

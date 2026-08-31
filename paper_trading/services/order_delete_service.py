@@ -182,7 +182,25 @@ class OrderDeleteService:
         if side == OrderSide.BUY:
             frozen_cash = Decimal(order.frozen_cash or 0)
             if frozen_cash > 0:
-                if self.repo.get_cash_available_as_of_internal(account_id, order.trade_date) >= frozen_cash:
+                lifecycle = self.repo.list_order_events(account_id, order.id)
+                has_proven_time = any(
+                    event.event_time_provenance == "canonical_utc" for event in lifecycle
+                )
+                available_cash = self.repo.get_cash_available_as_of_internal(account_id, order.trade_date)
+                if not has_proven_time:
+                    account = self.repo.get_account(account_id)
+                    if account is not None:
+                        available_cash = account.initial_cash + sum(
+                            (
+                                Decimal(event.amount)
+                                for event in self.repo.list_cash_ledger(account_id)
+                                if event.trade_date is not None
+                                and event.trade_date <= order.trade_date
+                                and event.event_type not in {"deposit", "withdrawal"}
+                            ),
+                            Decimal("0"),
+                        )
+                if available_cash >= frozen_cash:
                     self.repo.add_cash_event(
                         account_id,
                         CashEventType.FREEZE,
