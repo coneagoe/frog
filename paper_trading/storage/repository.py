@@ -596,18 +596,20 @@ class PaperTradingRepository:
         SQLite stores SQLAlchemy numerics as floating point values when they
         are aggregated directly.  Read the values as text there and sum
         Decimal values in Python, just as the all-time internal accessor does.
+        Initial cash is the account baseline, so it is included once even when
+        its persisted ledger date is later than the requested historical date.
         """
-        query: Any = self.session.query(PaperCashLedger.amount).filter(
-            PaperCashLedger.account_id == account_id,
-            or_(PaperCashLedger.trade_date.is_(None), PaperCashLedger.trade_date <= as_of),
+        account = self.get_account(account_id)
+        if account is None:
+            return Decimal("0")
+        values = (
+            quantize_account_money(Decimal(str(ledger.amount)))
+            for ledger in self.list_cash_ledger(account_id)
+            if (ledger.trade_date is None or ledger.trade_date <= as_of)
+            and not self._is_creation_initial_cash_event(account, ledger)
         )
-        if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
-            query = self.session.query(sa_cast(PaperCashLedger.amount, String)).filter(
-                PaperCashLedger.account_id == account_id,
-                or_(PaperCashLedger.trade_date.is_(None), PaperCashLedger.trade_date <= as_of),
-            )
-        values = (Decimal(str(amount)) for (amount,) in query.all())
-        return quantize_account_money(sum((quantize_account_money(value) for value in values), Decimal("0")))
+        initial_cash = quantize_account_money(Decimal(str(account.initial_cash)))
+        return quantize_account_money(initial_cash + sum(values, Decimal("0")))
 
     def get_cash_frozen(self, account_id: int) -> Decimal:
         return self.get_cash_frozen_internal(account_id).quantize(Decimal("0.0001"))
@@ -1137,6 +1139,7 @@ class PaperTradingRepository:
                         "order_id": trade.order_id,
                         "trade_id": trade.id,
                         "settlement": True,
+                        "internal_asset_projection": True,
                     },
                     quality_status=quality_status,
                 )
@@ -1173,6 +1176,7 @@ class PaperTradingRepository:
                         "after_cash_available": self._replay_decimal(
                             action.after_cash_available, quantize_account_money
                         ),
+                        "internal_asset_projection": True,
                     },
                     quality_status=quality_status,
                 )

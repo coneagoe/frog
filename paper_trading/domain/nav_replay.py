@@ -88,8 +88,13 @@ class NavSeriesReplay:
         return ReplayResult(points=tuple(points))
 
     @staticmethod
-    def _sort_key(event: ReplayEvent) -> tuple[datetime, int, str]:
-        return event.event_at, _EVENT_PRECEDENCE[event.event_type], event.source_id
+    def _sort_key(event: ReplayEvent) -> tuple[int, datetime, int, str]:
+        return (
+            0 if event.payload.get("_replay_baseline") else 1,
+            event.event_at,
+            _EVENT_PRECEDENCE[event.event_type],
+            event.source_id,
+        )
 
     def _apply_event(self, event: ReplayEvent, state: dict[str, Any]) -> NavPoint:
         total_assets = self._decimal(state.get("total_assets"))
@@ -252,9 +257,16 @@ class NavSeriesReplay:
                 elif ledger_event_type == "release":
                     cash = (cash if cash is not None else Decimal("0")) + amount
                     cash_frozen = max(Decimal("0"), cash_frozen - amount)
-                else:
+                elif ledger_event_type not in {"corporate_action", "fee"}:
                     cash = (cash if cash is not None else Decimal("0")) + amount
                     pending_settlement = max(Decimal("0"), pending_settlement - amount)
+                if not event.payload.get("internal_asset_projection"):
+                    total_assets = (
+                        (cash if cash is not None else Decimal("0"))
+                        + cash_frozen
+                        + pending_settlement
+                        + sum(market_values.values(), Decimal("0"))
+                    )
                 if total_assets is not None and share_count:
                     nav = total_assets / share_count
             elif side not in {"buy", "sell"}:
@@ -299,13 +311,14 @@ class NavSeriesReplay:
                     holdings[holding_key] = current_quantity - quantity
                     costs[holding_key] = current_cost - reduction
                     market_values[holding_key] = market_values.get(holding_key, Decimal("0")) - market_reduction
-                total_assets = (
-                    (cash if cash is not None else Decimal("0"))
-                    + cash_frozen
-                    + pending_settlement
-                    + sum(market_values.values(), Decimal("0"))
-                )
-                if share_count:
+                if not event.payload.get("internal_asset_projection"):
+                    total_assets = (
+                        (cash if cash is not None else Decimal("0"))
+                        + cash_frozen
+                        + pending_settlement
+                        + sum(market_values.values(), Decimal("0"))
+                    )
+                if total_assets is not None and share_count:
                     nav = total_assets / share_count
         elif event.event_type is NavReplayEventType.CORPORATE_ACTION:
             market = str(event.payload.get("market") or "")
@@ -327,8 +340,9 @@ class NavSeriesReplay:
                 after_cost = self._decimal(event.payload.get("after_cost_amount"))
                 if after_cost is not None:
                     costs[holding_key] = after_cost
-                total_assets = (total_assets if total_assets is not None else Decimal("0")) + cash_delta
-                if share_count:
+                if not event.payload.get("internal_asset_projection"):
+                    total_assets = (total_assets if total_assets is not None else Decimal("0")) + cash_delta
+                if total_assets is not None and share_count:
                     nav = total_assets / share_count
                 cash = (cash if cash is not None else Decimal("0")) + cash_delta
                 # Continue to the common point construction below.
@@ -339,16 +353,18 @@ class NavSeriesReplay:
                 from paper_trading.domain.corporate_actions import calculate_corporate_action_impact
                 from paper_trading.domain.enums import CorporateActionType
 
+                action_type_value = str(action_type)
                 impact = calculate_corporate_action_impact(
-                    CorporateActionType(action_type), quantity, cost, cash or Decimal("0"), parameters
+                    CorporateActionType(action_type_value), quantity, cost, cash or Decimal("0"), parameters
                 )
-                if CorporateActionType(action_type) is CorporateActionType.RIGHTS_ISSUE:
+                if CorporateActionType(action_type_value) is CorporateActionType.RIGHTS_ISSUE:
                     impact = replace(impact, after_cost_amount=cost - impact.cash_delta)
                 cash_delta = impact.cash_delta
                 holdings[holding_key] = impact.after_quantity
                 costs[holding_key] = impact.after_cost_amount
-                total_assets = (total_assets if total_assets is not None else Decimal("0")) + cash_delta
-                if share_count:
+                if not event.payload.get("internal_asset_projection"):
+                    total_assets = (total_assets if total_assets is not None else Decimal("0")) + cash_delta
+                if total_assets is not None and share_count:
                     nav = total_assets / share_count
                 cash = (cash if cash is not None else Decimal("0")) + cash_delta
         elif total_assets is not None and share_count:

@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import date, datetime, time, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, cast
@@ -58,9 +59,14 @@ class NavSeriesBuilder:
             events = self._enrich_initial_events(account_id, events)
             events = self._normalize_hk_settlement_dates(account_id, events)
         events = self._deduplicate_trade_settlements(events)
-        baseline = self._baseline_from_events(events)
-        if baseline is None:
+        baseline_event = self._baseline_event(events)
+        if baseline_event is None:
             raise ValueError("baseline is not provably reconstructible")
+        baseline = self._baseline_from_event(baseline_event)
+        # Persisted historical facts can predate account creation. Replay the
+        # proven initial state first without altering its visible event time.
+        replay_baseline = replace(baseline_event, payload={**baseline_event.payload, "_replay_baseline": True})
+        events = [replay_baseline, *(event for event in events if event is not baseline_event)]
         return events, baseline
 
     def _enrich_initial_events(self, account_id: int, events: list[ReplayEvent]) -> list[ReplayEvent]:
@@ -228,7 +234,7 @@ class NavSeriesBuilder:
             return False
         return cash_value.is_finite() and shares_value.is_finite() and cash_value >= 0 and shares_value > 0
 
-    def _baseline_from_events(self, events: list[ReplayEvent]) -> dict[str, Any] | None:
+    def _baseline_event(self, events: list[ReplayEvent]) -> ReplayEvent | None:
         candidates = [
             event
             for event in events
@@ -240,7 +246,11 @@ class NavSeriesBuilder:
         if not candidates:
             return None
         candidates.sort(key=lambda event: (event.event_at, event.source_id))
-        initial = candidates[0].payload
+        return candidates[0]
+
+    @staticmethod
+    def _baseline_from_event(event: ReplayEvent) -> dict[str, Any]:
+        initial = event.payload
         opening_cash = initial.get("opening_cash", initial.get("total_assets"))
         opening_shares = initial.get("opening_shares", initial.get("share_count"))
         cash = initial.get("cash_available", initial.get("cash", opening_cash))

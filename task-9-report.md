@@ -2,9 +2,9 @@
 
 ## Status
 
-Issue #82 Task 9 migration and schema gate repairs are implemented. The
-remaining repository failures are pre-existing and were reproduced at the
-issue #82 baseline commit `f7575fb`.
+Issue #82 Task 9 migration and schema gate repairs remain intact. The three
+final-review failures were fixed without changing matching or settlement
+facts.
 
 ## Changes
 
@@ -23,6 +23,15 @@ issue #82 baseline commit `f7575fb`.
 - Updated unified enum-governance fixtures for the additive order-event table,
   its legacy index, and its table-level rollback semantics.
 - Preserved the five pre-existing Ruff formatting changes in the working tree.
+- Prevented repository replay of trade and corporate-action projection facts
+  from applying their asset impact a second time after the persisted NAV
+  baseline.
+- Included account creation cash exactly once in historical internal cash
+  queries, independent of a later or filtered creation-ledger date, while
+  retaining Decimal summation.
+- Replayed the proven initial baseline before historical facts without changing
+  its visible timestamp, preserving imported position quantities when an
+  imported lot is a partial representation of the position.
 
 ## Verification
 
@@ -34,11 +43,18 @@ issue #82 baseline commit `f7575fb`.
 - Frontend `npm run build`: passed.
 - `uv run pre-commit run --all-files`: formatting and Ruff passed; mypy failed
   on existing typing/import diagnostics.
-- Full `tools/run_tests.sh`: `2358 passed, 9 skipped, 3 failed`.
+- Full `tools/run_tests.sh`: `2361 passed, 9 skipped`.
+- Replay/repository/recalculation suites after the fixes: `183 passed, 8
+  skipped`.
+- The three final-review focused tests all pass.
 
 ## Baseline Evidence
 
-The following failures were reproduced unchanged at `f7575fb`:
+The following failures were reproduced unchanged at both current `HEAD`
+(`ec750df`) and the issue-start implementation baseline `f7575fb`. The
+earlier `0bd1122` ancestor was also confirmed as an ancestor of `f7575fb`, but
+the final-review tests were not all present there; therefore `f7575fb` is the
+reproducible comparison baseline for these exact assertions.
 
 - `test_mixed_repository_stream_replays_without_cash_flow_double_count`
   (`100099` observed versus `100075` expected).
@@ -47,16 +63,39 @@ The following failures were reproduced unchanged at `f7575fb`:
 - `test_postgresql_recalculation_preserves_initial_components_and_imported_holdings`
   (imported holding replay remains at quantity `2` rather than `3`).
 
-The final full-suite run after the Task 9 fixes contains only those three
-baseline failures. The two enum-governance rollback failures from the earlier
-run are resolved by the fixture updates.
+The previous full-suite run after the Task 9 fixes contained only these three
+failures. The two enum-governance rollback failures from the earlier run remain
+resolved by the fixture updates.
+
+## Root Causes And Results
+
+- Mixed replay: repository trade and corporate-action facts carried the same
+  economic state already represented by the persisted NAV stream. Replay now
+  marks those adapter-level projections and applies cash/holding state without
+  double-changing total assets; external deposits/withdrawals still remain the
+  only share-flow events, and internal fee/corporate-action ledger rows do not
+  mint or burn shares.
+- Historical cash: the as-of accessor filtered out the creation ledger by
+  `trade_date` and returned zero before later activity. It now starts from the
+  account's Decimal `initial_cash`, excludes the matching creation ledger, and
+  sums only eligible later ledger rows once.
+- PostgreSQL recalculation: the builder replayed a backdated trade before an
+  INITIAL event whose persisted timestamp was later, so INITIAL reset holdings
+  from the imported position total to the partial imported-lot quantity. The
+  selected proven baseline is now ordered first for replay, and imported lots
+  remain the cost/quantity source when present while imported positions remain
+  the fallback when no lot exists.
+
+All three final-review assertions pass, including NAV/assets/share consistency,
+the adjacent Decimal boundary, and imported holding quantity `3` after
+recalculation.
 
 ## Mypy
 
-The final full `uv run mypy` run reports 18 existing diagnostics, including
+The final full `uv run mypy` run reports 16 existing diagnostics, including
 legacy `tools` third-party import stubs and pre-existing paper-trading typing
-issues. The Task 9 reduced-fixture diagnostic was removed; the pre-commit
-scope reports 13 remaining existing diagnostics.
+issues. The Task 9 reduced-fixture diagnostic was removed; pre-commit stops at
+the existing `paper_trading/storage/repository.py:1053` diagnostic.
 
 ## Scope
 
@@ -65,6 +104,7 @@ No matching or settlement behavior was changed. Untracked `PRODUCT.md` and
 
 ## Simplify Review
 
-No safe simplification was identified. The changed code directly expresses
-schema dependency ordering and test-fixture invariants; further compression
-would make the migration boundary less clear.
+Removed an unused baseline wrapper introduced while fixing replay ordering. No
+further safe simplification was identified: the changed code directly expresses
+persistence and replay boundaries, and further compression would make those
+facts less clear.
