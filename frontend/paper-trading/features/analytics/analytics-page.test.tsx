@@ -101,6 +101,7 @@ const analyticsPayload = {
     timezone: "UTC",
     invalid_reason: null,
     nav: "1.250000",
+    shares: "1000",
     share: "1000"
   }]
 };

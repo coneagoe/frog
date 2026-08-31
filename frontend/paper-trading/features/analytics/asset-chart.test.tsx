@@ -24,6 +24,7 @@ const initialPoint: AnalyticsEvent = {
   timezone: "UTC",
   invalid_reason: null,
   nav: "1",
+  shares: "100000",
   share: "100000"
 };
 
@@ -46,6 +47,7 @@ describe("AssetChart", () => {
       quality: "invalid",
       invalid_reason: "missing_nav",
       nav: null,
+      shares: null,
       share: null
     };
     const tradingPoint: AnalyticsEvent = {
@@ -54,6 +56,7 @@ describe("AssetChart", () => {
       point_type: "trading",
       event_at: "2026-09-10T15:00:00Z",
       nav: "1.1",
+      shares: "100000",
       share: "100000"
     };
     const malformedTimestampPoint: AnalyticsEvent = {
@@ -83,6 +86,7 @@ describe("AssetChart", () => {
         timezone: "UTC",
         invalid_reason: null,
         nav: "1",
+        shares: "100000",
         share: "100000"
       },
       {
@@ -120,6 +124,7 @@ describe("AssetChart", () => {
         timezone: "UTC",
         invalid_reason: "missing_nav",
         nav: null,
+        shares: null,
         share: null
       },
       {
@@ -131,6 +136,7 @@ describe("AssetChart", () => {
         timezone: "UTC",
         invalid_reason: null,
         nav: "1.1",
+        shares: "150000",
         share: "150000"
       }
     ];

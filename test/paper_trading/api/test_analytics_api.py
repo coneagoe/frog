@@ -463,6 +463,22 @@ def test_get_account_analytics_exposes_shared_nav_point_metadata(monkeypatch, sq
     assert snapshot["valuation_quality"] == "current"
     assert snapshot["valuation_details"] == [{"source": "close", "symbol": "000001.SZ"}]
     assert snapshot["nav"] == "1.000000"
+    assert set(snapshot) == {
+        "event_type",
+        "id",
+        "event_at",
+        "point_type",
+        "quality",
+        "timezone",
+        "quality_status",
+        "invalid_reason",
+        "valuation_quality",
+        "valuation_details",
+        "nav",
+        "shares",
+        "share",
+    }
+    assert snapshot["shares"] == "100000.000000"
     assert snapshot["share"] == "100000.000000"
 
 

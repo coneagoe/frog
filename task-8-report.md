@@ -15,6 +15,9 @@ Implemented the paper-trading analytics API/frontend contract repair.
   payloads.
 - Narrowed the analytics snapshot event contract to UTC timestamps and closed
   `initial`/`trading` point and `valid`/`invalid` quality sets in Python and TypeScript.
+- Kept both `shares` (canonical) and `share` (legacy compatibility alias) in analytics
+  snapshot events; Python and TypeScript now declare both fields and the API test locks
+  their exact JSON presence and equal values.
 - Aligned TypeScript analytics and snapshot types with valuation quality/details,
   canonical snapshot event metadata, UTC timezone strings, and valuation gaps.
 - Removed the raw snapshot request and fallback from the analytics page.
@@ -34,11 +37,15 @@ Implemented the paper-trading analytics API/frontend contract repair.
 
 - `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py test/paper_trading/api/test_snapshots_api.py` — 98 tests passed.
 - `npm run test -- --run features/analytics/analytics-page.test.tsx` — 12 tests passed.
-- `npm run test` — 227 tests passed.
+- `npm run test -- --run` — 226 of 227 tests passed; one timing-sensitive
+  `analytics-page` valuation-gap assertion failed in the full-suite run. The focused
+  `analytics-page` suite passed all 12 tests on its immediate rerun.
 - `npm run lint` — passed.
 - `npm run build` — passed.
 - `uv run ruff check paper_trading/services/analytics_service.py paper_trading/schemas/analytics.py test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py` — passed.
 - `git diff --check` — passed.
+- The analytics snapshot JSON contract test asserts the full key set and equal
+  `shares`/`share` compatibility values.
 
 ## Simplify Review
 

@@ -106,6 +106,8 @@ export type SnapshotAnalyticsEvent = {
   quality_status: "valid" | "invalid";
   invalid_reason: string | null;
   nav: string | null;
+  /** Legacy clients use `share`; both fields carry the same share count. */
+  shares: string | null;
   share: string | null;
   valuation_quality?: "current" | "stale_suspended" | null;
   valuation_details?: Array<Record<string, unknown>> | null;
@@ -299,7 +301,7 @@ export type Snapshot = {
   invalid_reason: string | null;
   valuation_quality: "current" | "stale_suspended" | null;
   valuation_details: Array<Record<string, unknown>> | null;
-  timezone: string;
+  timezone: "UTC";
   cash_available: string;
   cash_frozen: string;
   market_value: string;
