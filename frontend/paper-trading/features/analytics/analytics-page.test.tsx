@@ -234,7 +234,7 @@ describe("AnalyticsPage", () => {
   });
 
   it("shows valuation gaps outside the performance chart", async () => {
-    getAnalyticsMock.mockResolvedValueOnce({
+    getAnalyticsMock.mockResolvedValue({
       available: false,
       reason: "valuation_gap",
       valuation_gaps: [{ trade_date: "2026-09-10", missing_symbols: ["000001.SZ"], details: [{ reason: "missing_bar" }], resolved: false }]
@@ -246,6 +246,18 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("Reason: missing_bar")).toBeInTheDocument();
     expect(screen.getByText("Unresolved")).toBeInTheDocument();
     expect(document.querySelector(".chart-surface")).not.toBeInTheDocument();
+  });
+
+  it("shows valuation gaps for available analytics too", async () => {
+    getAnalyticsMock.mockResolvedValueOnce({
+      ...analyticsPayload,
+      valuation_gaps: [{ trade_date: "2026-09-10", missing_symbols: ["000001.SZ"], details: [{ reason: "stale_bar" }], resolved: false }]
+    });
+
+    render(<AnalyticsPage />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Valuation Gaps" })).toBeInTheDocument();
+    expect(screen.getByText("Reason: stale_bar")).toBeInTheDocument();
   });
 
   it("renders the corporate action audit with formatted values and labels", async () => {

@@ -102,7 +102,8 @@ export type SnapshotAnalyticsEvent = {
   event_at: string;
   point_type: "initial" | "trading";
   quality: "valid" | "invalid";
-  timezone: string;
+  timezone: "UTC";
+  quality_status: "valid" | "invalid";
   invalid_reason: string | null;
   nav: string | null;
   share: string | null;

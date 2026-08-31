@@ -1,9 +1,9 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from paper_trading.domain.enums import CorporateActionType
 
@@ -110,16 +110,23 @@ class SnapshotAnalyticsEvent(BaseModel):
     event_type: Literal["snapshot"] = "snapshot"
     id: int
     event_at: datetime
-    point_type: str
-    quality: str
-    timezone: str
-    quality_status: str
+    point_type: Literal["initial", "trading"]
+    quality: Literal["valid", "invalid"]
+    timezone: Literal["UTC"]
+    quality_status: Literal["valid", "invalid"]
     invalid_reason: str | None = None
     valuation_quality: Literal["current", "stale_suspended"] | None = None
     valuation_details: list[dict[str, Any]] | None = None
     nav: Decimal | None = None
     shares: Decimal | None = None
     share: Decimal | None = None
+
+    @field_validator("event_at")
+    @classmethod
+    def event_at_must_be_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() != timedelta(0):
+            raise ValueError("event_at must be UTC")
+        return value
 
 
 class CashFlowAnalyticsEvent(BaseModel):

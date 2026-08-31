@@ -60,43 +60,44 @@ class AnalyticsService:
         snapshots = self.repo.list_snapshots(account_id)
         if not hasattr(self.repo, "list_replay_events"):
             return AnalyticsUnavailableResponse(reason="replay_unavailable")
+        persisted_gaps = self._valuation_gaps(account_id)
         initial_snapshots = [
             snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.INITIAL.value
         ]
         if not initial_snapshots:
-            return AnalyticsUnavailableResponse(reason="missing_initial")
+            return AnalyticsUnavailableResponse(reason="missing_initial", valuation_gaps=persisted_gaps or None)
         if any(snapshot.quality_status != SnapshotQualityStatus.VALID.value for snapshot in initial_snapshots):
-            return AnalyticsUnavailableResponse(reason="invalid_initial")
+            return AnalyticsUnavailableResponse(reason="invalid_initial", valuation_gaps=persisted_gaps or None)
         if any(self._snapshot_nav(snapshot) is None for snapshot in initial_snapshots):
-            return AnalyticsUnavailableResponse(reason="invalid_initial")
+            return AnalyticsUnavailableResponse(reason="invalid_initial", valuation_gaps=persisted_gaps or None)
         try:
             replay = NavSeriesBuilder(repo=self.repo).build(account_id)
         except ValueError:
-            return AnalyticsUnavailableResponse(reason="replay_unavailable")
+            return AnalyticsUnavailableResponse(reason="replay_unavailable", valuation_gaps=persisted_gaps or None)
+        replay_gaps = self._replay_valuation_gaps(replay)
+        valuation_gaps = persisted_gaps + replay_gaps
         if not replay.points or replay.points[0].event_type.value != SnapshotPointType.INITIAL.value:
-            return AnalyticsUnavailableResponse(reason="missing_initial")
+            return AnalyticsUnavailableResponse(reason="missing_initial", valuation_gaps=valuation_gaps or None)
         if (
             replay.points[0].quality_status is not SnapshotQualityStatus.VALID
             or replay.points[0].nav is None
             or not replay.points[0].nav.is_finite()
             or replay.points[0].nav <= 0
         ):
-            return AnalyticsUnavailableResponse(reason="invalid_initial")
-        replay_gaps = self._replay_valuation_gaps(replay)
+            return AnalyticsUnavailableResponse(reason="invalid_initial", valuation_gaps=valuation_gaps or None)
         if any(point.quality_status is not SnapshotQualityStatus.VALID for point in replay.points[1:]):
-            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=replay_gaps)
+            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=valuation_gaps)
         if any(
             snapshot.point_type == SnapshotPointType.TRADING.value
             and snapshot.quality_status == SnapshotQualityStatus.VALID.value
             and self._snapshot_nav(snapshot) is None
             for snapshot in snapshots
         ):
-            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=replay_gaps)
-        unresolved_gaps = self._valuation_gaps(account_id)
-        if any(not gap.resolved for gap in unresolved_gaps):
+            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=valuation_gaps)
+        if any(not gap.resolved for gap in persisted_gaps):
             return AnalyticsUnavailableResponse(
                 reason=AnalyticsUnavailableReason.VALUATION_GAP,
-                valuation_gaps=unresolved_gaps,
+                valuation_gaps=valuation_gaps,
             )
         invalid_replay_nav = next(
             (
@@ -112,7 +113,7 @@ class AnalyticsService:
             None,
         )
         if invalid_replay_nav is not None:
-            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=replay_gaps)
+            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=valuation_gaps)
         ledger_entries = self.repo.list_cash_ledger(account_id)
         corporate_actions = (
             self.repo.list_corporate_actions(account_id) if hasattr(self.repo, "list_corporate_actions") else []
@@ -124,7 +125,7 @@ class AnalyticsService:
             execution=self._execution(orders),
             trade_quality=self._trade_quality(round_trips),
             risk=self._risk(replay),
-            valuation_gaps=unresolved_gaps + replay_gaps,
+            valuation_gaps=valuation_gaps,
             event_series=self._event_series(snapshots, ledger_entries, corporate_actions, replay),
         )
 
@@ -260,9 +261,9 @@ class AnalyticsService:
                         quality=quality,
                         timezone="UTC",
                         quality_status=quality,
-                        valuation_quality=snapshot.valuation_quality,
-                        valuation_details=list(snapshot.valuation_details)
-                        if snapshot.valuation_details is not None
+                        valuation_quality=getattr(snapshot, "valuation_quality", None),
+                        valuation_details=list(valuation_details)
+                        if (valuation_details := getattr(snapshot, "valuation_details", None)) is not None
                         else None,
                         nav=Decimal(nav).quantize(_QUANTIZE) if nav is not None else None,
                         shares=Decimal(shares).quantize(_QUANTIZE) if shares is not None else None,

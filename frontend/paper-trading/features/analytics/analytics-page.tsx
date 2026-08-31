@@ -109,7 +109,7 @@ export function AnalyticsPage() {
         {analytics?.available ? <AnalyticsSummary analytics={analytics} /> : null}
         {analytics?.available ? <AssetChart events={analytics.event_series} /> : null}
       </section>
-      {analytics?.available === false && analytics.valuation_gaps?.length ? (
+      {analytics?.valuation_gaps?.length ? (
         <section className="panel">
           <h2>Valuation Gaps</h2>
           <ValuationGapsSection gaps={analytics.valuation_gaps} />

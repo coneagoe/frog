@@ -926,6 +926,23 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
     assert events[2].share_delta is None
 
 
+def test_event_series_supports_legacy_snapshots_without_valuation_metadata():
+    snapshot = SimpleNamespace(
+        id=1,
+        event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        point_type="initial",
+        quality_status="valid",
+        invalid_reason=None,
+        net_asset_value=Decimal("1"),
+        share_count=Decimal("100"),
+    )
+
+    events = AnalyticsService._event_series([cast(PaperAccountSnapshot, snapshot)], [])
+
+    assert events[0].valuation_quality is None
+    assert events[0].valuation_details is None
+
+
 def test_event_series_excludes_unsupported_snapshot_point_type():
     snapshots = [
         SimpleNamespace(
@@ -1577,6 +1594,28 @@ def test_mocked_builder_non_positive_or_nonfinite_replay_nav_returns_diagnostic_
             "resolved": False,
         }
     ]
+    engine.dispose()
+
+
+def test_early_unavailable_response_merges_persisted_and_replay_gaps(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("merged-analytics-gaps", Decimal("100000.00"))
+    repo.upsert_valuation_gap(account.id, date(2026, 8, 2), ["000001"], [{"reason": "missing_bar"}])
+    initial = NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1), "initial", NavReplayEventType.INITIAL,
+        Decimal("100"), Decimal("100"), Decimal("1"), SnapshotQualityStatus.VALID,
+    )
+    replay_gap = NavPoint(
+        datetime(2026, 8, 3, tzinfo=timezone.utc), date(2026, 8, 3), "replay-gap",
+        NavReplayEventType.MARKET_VALUATION, None, Decimal("100"), None, SnapshotQualityStatus.INVALID,
+        valuation_quality="missing_bar", valuation_details=({"symbol": "000002", "reason": "no_bar"},),
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, replay_gap)))
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert [gap.trade_date for gap in response.valuation_gaps or []] == [date(2026, 8, 2), date(2026, 8, 3)]
     engine.dispose()
 
 
