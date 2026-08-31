@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any, Literal
@@ -124,9 +124,9 @@ class SnapshotAnalyticsEvent(BaseModel):
     @field_validator("event_at")
     @classmethod
     def event_at_must_be_utc(cls, value: datetime) -> datetime:
-        if value.tzinfo is None or value.utcoffset() != timedelta(0):
-            raise ValueError("event_at must be UTC")
-        return value
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("event_at must include a timezone offset")
+        return value.astimezone(timezone.utc)
 
 
 class CashFlowAnalyticsEvent(BaseModel):

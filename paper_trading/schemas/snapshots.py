@@ -39,7 +39,7 @@ class SnapshotResponse(BaseModel):
     def _aware_event_at(cls, value: datetime) -> datetime:
         if isinstance(value, datetime) and value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
-        return value
+        return value.astimezone(timezone.utc) if isinstance(value, datetime) else value
 
     @field_serializer(
         "cash_available",

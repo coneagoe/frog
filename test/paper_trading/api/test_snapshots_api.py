@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -112,6 +112,21 @@ def test_snapshots_api_returns_ordered_nav_point_metadata(monkeypatch, sqlite_se
     assert payload[2]["total_assets"] == "250000.0000"
     assert all(item["valuation_quality"] is None for item in payload)
     assert all(item["valuation_details"] is None for item in payload)
+
+
+def test_snapshots_api_normalizes_aware_event_at_to_utc(monkeypatch, sqlite_session):
+    client, headers, session = _client(monkeypatch, sqlite_session)
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("aware-snapshot-timezone", Decimal("100000.00"))
+    snapshot = repo.list_snapshots(account.id)[0]
+    snapshot.event_at = datetime(2026, 8, 25, 10, 30, tzinfo=timezone(timedelta(hours=8)))
+    monkeypatch.setattr(PaperTradingRepository, "list_snapshots", lambda self, account_id: [snapshot])
+
+    response = client.get(f"/paper/accounts/{account.id}/snapshots", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()[0]["event_at"] == "2026-08-25T02:30:00Z"
+    assert response.json()[0]["timezone"] == "UTC"
 
 
 def test_snapshots_api_preserves_nullable_money_fields_for_initial_and_legacy_snapshots(monkeypatch, sqlite_session):

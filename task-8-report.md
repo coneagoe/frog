@@ -30,12 +30,16 @@ Implemented the paper-trading analytics API/frontend contract repair.
   resolved/unresolved status; gaps are not plotted.
 - Propagated valuation metadata through the analytics API and exposed UTC on the
   snapshots API.
+- Normalized aware snapshot `event_at` values through `astimezone(timezone.utc)`
+  before serialization in both the snapshots and analytics response schemas;
+  added API coverage for a `+08:00` input emitting a UTC ISO timestamp with
+  `timezone: "UTC"`.
 - Updated available, repair, gap, chart filtering, and API contract tests,
   including persisted gaps on repair and replay-unavailable payloads.
 
 ## Validation
 
-- `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py test/paper_trading/api/test_snapshots_api.py` — 98 tests passed.
+- `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py test/paper_trading/api/test_snapshots_api.py` — 99 tests passed.
 - `npm run test -- --run features/analytics/analytics-page.test.tsx` — 12 tests passed.
 - `npm run test -- --run` — 226 of 227 tests passed; one timing-sensitive
   `analytics-page` valuation-gap assertion failed in the full-suite run. The focused
@@ -44,6 +48,7 @@ Implemented the paper-trading analytics API/frontend contract repair.
 - `npm run build` — passed.
 - `uv run ruff check paper_trading/services/analytics_service.py paper_trading/schemas/analytics.py test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py` — passed.
 - `git diff --check` — passed.
+- `uv run ruff check paper_trading/schemas/snapshots.py paper_trading/schemas/analytics.py test/paper_trading/api/test_snapshots_api.py` — passed.
 - The analytics snapshot JSON contract test asserts the full key set and equal
   `shares`/`share` compatibility values.
 
