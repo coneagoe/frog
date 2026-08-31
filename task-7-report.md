@@ -2,7 +2,7 @@
 
 ## Scope
 
-Task 7 changes are limited to `paper_trading/services/analytics_service.py`, `test/paper_trading/services/test_analytics_service.py`, `test/paper_trading/api/test_analytics_api.py`, and this report. No frontend, schema, corporate-action service, corporate-action tests, or Task 5 report files are part of Task 7.
+Task 7 changes are limited to `paper_trading/schemas/analytics.py`, `paper_trading/services/analytics_service.py`, `test/paper_trading/services/test_analytics_service.py`, `test/paper_trading/api/test_analytics_api.py`, and this report. No frontend, corporate-action service, corporate-action tests, or Task 5 report files are part of Task 7.
 
 Task 7 replay commits are `a10e46f`, `6dcd630`, `eae607b`, `0bd8fd8`, `02a0f26`, and `8a38c92`; Task 5 corporate-action commits are deliberately excluded from this report.
 

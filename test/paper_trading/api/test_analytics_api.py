@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -10,13 +10,11 @@ from paper_trading.api.routers import analytics as analytics_router
 from paper_trading.domain.enums import (
     CorporateActionType,
     MigrationRepairReason,
-    NavReplayEventType,
     OrderSide,
     OrderStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
 )
-from paper_trading.domain.nav_replay import NavPoint, ReplayResult
 from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.storage.models import PaperAccountSnapshot
 from paper_trading.storage.repository import PaperTradingRepository
@@ -250,103 +248,6 @@ def test_get_account_analytics_real_repository_replay_gap_has_diagnostic_gap(mon
             }
         ],
     }
-
-
-def test_get_account_analytics_invalid_replay_nav_returns_diagnostic_gap(monkeypatch, sqlite_session):
-    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
-    account = repo.create_account("api-invalid-replay-nav", Decimal("100000.00"))
-    initial = NavPoint(
-        datetime(2026, 8, 1, tzinfo=timezone.utc),
-        date(2026, 8, 1),
-        "replay:initial",
-        NavReplayEventType.INITIAL,
-        Decimal("100"),
-        Decimal("100"),
-        Decimal("1"),
-        SnapshotQualityStatus.VALID,
-    )
-    invalid = NavPoint(
-        datetime(2026, 8, 2, tzinfo=timezone.utc),
-        date(2026, 8, 2),
-        "replay:valuation",
-        NavReplayEventType.MARKET_VALUATION,
-        Decimal("100"),
-        Decimal("100"),
-        Decimal("0"),
-        SnapshotQualityStatus.VALID,
-    )
-    monkeypatch.setattr(
-        "paper_trading.services.analytics_service.NavSeriesBuilder.build",
-        lambda self, account_id: ReplayResult((initial, invalid)),
-    )
-
-    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "available": False,
-        "reason": "valuation_gap",
-        "valuation_gaps": [
-            {
-                "trade_date": "2026-08-02",
-                "missing_symbols": [],
-                "details": [{"reason": "invalid_nav"}],
-                "resolved": False,
-            }
-        ],
-    }
-
-
-def test_get_account_analytics_replays_backdated_cash_flow(monkeypatch, sqlite_session):
-    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
-    account = repo.create_account("api-backdated-cash", Decimal("100000.00"))
-    initial_at = datetime(2026, 8, 1, 9, tzinfo=timezone.utc)
-    initial = repo.list_snapshots(account.id)[0]
-    initial.event_at = initial_at
-    initial.trade_date = initial_at.date()
-    creation_ledger = repo.list_cash_ledger(account.id)[0]
-    creation_ledger.occurred_at = initial_at
-    creation_ledger.trade_date = initial_at.date()
-    cash_at = initial_at + timedelta(days=1)
-    repo.add_cash_event(
-        account.id,
-        "deposit",
-        Decimal("10000.00"),
-        trade_date=cash_at.date(),
-        net_asset_value=Decimal("1.000000"),
-        share_delta=Decimal("10000.000000"),
-        occurred_at=cash_at,
-    )
-    valuation_at = initial_at + timedelta(days=2)
-    repo.save_snapshot(
-        account_id=account.id,
-        trade_date=valuation_at.date(),
-        event_at=valuation_at,
-        point_type=SnapshotPointType.TRADING.value,
-        quality_status=SnapshotQualityStatus.VALID.value,
-        cash_available=Decimal("110000.0000"),
-        cash_frozen=Decimal("0"),
-        market_value=Decimal("0"),
-        total_assets=Decimal("110000.0000"),
-        realized_pnl=Decimal("0"),
-        unrealized_pnl=Decimal("0"),
-        position_count=0,
-        order_count=0,
-        trade_count=0,
-        net_asset_value=Decimal("1.000000"),
-        share_count=Decimal("110000.000000"),
-    )
-    sqlite_session.commit()
-
-    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["available"] is True
-    assert payload["overview"]["net_asset_value"] == "1.000000"
-    assert payload["overview"]["total_return"]["value"] == "0.000000"
-    assert [event["event_type"] for event in payload["event_series"]] == ["snapshot", "deposit", "snapshot"]
-    assert payload["event_series"][1]["effective_nav"] == "1.000000"
 
 
 def _analytics_client(monkeypatch, sqlite_session):

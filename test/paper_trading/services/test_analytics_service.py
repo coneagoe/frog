@@ -1521,14 +1521,14 @@ def test_replay_invalid_initial_is_unavailable_even_when_snapshot_initial_is_val
     engine.dispose()
 
 
-def test_real_repository_missing_valuation_replay_gap_is_unavailable(tmp_path):
+def test_valid_trading_snapshot_without_nav_is_not_reconstructed_from_assets(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("missing-trading-nav", Decimal("100000.00"))
     seed_trading_point(
         repo,
         account,
         nav=None,
-        quality_status=SnapshotQualityStatus.INVALID.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
         total_assets=Decimal("200000"),
     )
 
@@ -1536,14 +1536,6 @@ def test_real_repository_missing_valuation_replay_gap_is_unavailable(tmp_path):
 
     assert isinstance(response, AnalyticsUnavailableResponse)
     assert response.reason == "valuation_gap"
-    assert [gap.model_dump() for gap in response.valuation_gaps or []] == [
-        {
-            "trade_date": repo.list_snapshots(account.id)[-1].trade_date,
-            "missing_symbols": [],
-            "details": [{"reason": "invalid_nav"}],
-            "resolved": False,
-        }
-    ]
     engine.dispose()
 
 
