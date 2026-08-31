@@ -1,10 +1,17 @@
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError
 
-from paper_trading.domain.enums import CashEventType, Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import (
+    CashEventType,
+    Market,
+    OrderSide,
+    OrderStatus,
+    PaperOrderEventType,
+    ReplayTimeProvenance,
+)
 from paper_trading.domain.errors import PaperTradingError
 from paper_trading.domain.fees import (
     calculate_a_share_fees,
@@ -319,6 +326,7 @@ class OrderService:
             idempotency_key=idempotency_key,
             comment=comment,
             market=market.value,
+            lifecycle_time_provenance=ReplayTimeProvenance.UNKNOWN,
         )
         self.validity_service.analyze_order(order)
 
@@ -407,6 +415,7 @@ class OrderService:
             idempotency_key=idempotency_key,
             comment=comment,
             market=market.value,
+            lifecycle_time_provenance=ReplayTimeProvenance.UNKNOWN,
         )
         self.validity_service.analyze_order(order)
 
@@ -466,20 +475,43 @@ class OrderService:
 
     def cancel_order(self, order_id: int) -> PaperOrder:
         order = self.repo.get_order(order_id)
-        if order.status != OrderStatus.ACCEPTED.value:
-            raise ValueError("Only accepted orders can be cancelled")
-        if Decimal(order.frozen_cash or 0) > 0:
+        if order.status not in {OrderStatus.ACCEPTED.value, OrderStatus.PARTIALLY_FILLED.value}:
+            raise ValueError("Only accepted or partially filled orders can be cancelled")
+        outstanding_quantity, outstanding_cash = self._outstanding_reservation(order)
+        if outstanding_cash > 0:
             self.repo.add_cash_event(
                 order.account_id,
                 CashEventType.RELEASE,
-                Decimal(order.frozen_cash),
+                outstanding_cash,
                 order_id=order.id,
                 note="cancel_buy_order",
             )
-        if int(order.frozen_quantity or 0) > 0:
+        if outstanding_quantity > 0:
             position = self.repo.get_position(order.account_id, order.market, order.symbol)
             if position is not None:
-                position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
+                position.frozen_quantity = int(position.frozen_quantity or 0) - int(outstanding_quantity)
+        self.repo.append_order_event(
+            order.account_id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.CANCEL,
+            datetime.now(timezone.utc),
+            quantity_delta=Decimal("0"),
+            cash_delta=Decimal("0"),
+            idempotency_key=f"order:{order.id}:cancel",
+        )
+        self.repo.append_order_event(
+            order.account_id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.RELEASE,
+            datetime.now(timezone.utc),
+            quantity_delta=-outstanding_quantity,
+            cash_delta=outstanding_cash,
+            idempotency_key=f"order:{order.id}:release:cancel",
+        )
         return self.repo.update_order_status(order, OrderStatus.CANCELLED)
 
     def update_order_comment(self, order_id: int, comment: str | None) -> PaperOrder:
@@ -672,3 +704,9 @@ class OrderService:
         )
         self.validity_service.analyze_order(order)
         return order
+
+    def _outstanding_reservation(self, order: PaperOrder) -> tuple[Decimal, Decimal]:
+        events = self.repo.list_order_events(order.account_id, order.id)
+        quantity = sum((Decimal(event.quantity_delta) for event in events), Decimal("0"))
+        cash = sum((Decimal(event.cash_delta) for event in events), Decimal("0"))
+        return max(quantity, Decimal("0")), max(-cash, Decimal("0"))

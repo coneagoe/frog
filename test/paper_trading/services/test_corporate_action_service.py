@@ -4,7 +4,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from paper_trading.domain.enums import CashEventType, CorporateActionType, Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import (
+    CashEventType,
+    CorporateActionType,
+    Market,
+    OrderSide,
+    OrderStatus,
+    ReplayTimeProvenance,
+)
 from paper_trading.domain.errors import InsufficientRightsCashError, InvalidCorporateActionParametersError
 from paper_trading.services.corporate_action_service import (
     CorporateActionIdempotencyConflict,
@@ -126,6 +133,36 @@ def test_no_holding_creates_zero_impact_event(sqlite_session):
 
     assert result.impact.cash_delta == 0
     assert result.event.before_quantity == 0
+
+
+def test_action_rejects_historical_order_without_proven_reservation_chronology(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-unproven-order", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 100, 100, Decimal("10"), source="imported"
+    )
+    _set_action_baseline(repo, account)
+    repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        100,
+        Decimal("10"),
+        date(2026, 8, 27),
+        OrderStatus.ACCEPTED,
+        frozen_quantity=100,
+        lifecycle_time_provenance=ReplayTimeProvenance.UNKNOWN,
+    )
+    with pytest.raises(ValueError, match="reservation chronology"):
+        _service(sqlite_session).apply(
+            account.id,
+            "000001",
+            CorporateActionType.SPLIT,
+            datetime(2026, 8, 27, 10, tzinfo=timezone.utc),
+            "unproven-order-action",
+            {"ratio": Decimal("2")},
+        )
 
 
 def test_idempotent_replay_returns_original_and_conflict_is_rejected(sqlite_session):
@@ -772,6 +809,7 @@ def test_late_action_rebuilds_frozen_sell_quantity_without_scaling_post_action_b
         OrderStatus.ACCEPTED,
         frozen_quantity=30,
         market=Market.A_SHARE,
+        lifecycle_event_at=datetime(2026, 8, 5, 10, tzinfo=timezone.utc),
     )
     buy_order = repo.create_order(
         account.id,
@@ -783,6 +821,7 @@ def test_late_action_rebuilds_frozen_sell_quantity_without_scaling_post_action_b
         OrderStatus.ACCEPTED,
         frozen_cash=Decimal("80"),
         market=Market.A_SHARE,
+        lifecycle_event_at=datetime(2026, 8, 20, 10, tzinfo=timezone.utc),
     )
     sqlite_session.commit()
 
@@ -824,6 +863,7 @@ def test_repeated_action_chain_rebuilds_frozen_quantity_from_immutable_order_bas
         frozen_quantity=30,
         market=Market.A_SHARE,
         comment="immutable-order",
+        lifecycle_event_at=datetime(2026, 8, 5, 10, tzinfo=timezone.utc),
     )
     sqlite_session.commit()
     original_order = {
@@ -1053,7 +1093,5 @@ def test_consecutive_actions_preserve_lot_acquisition_facts_and_post_action_buy(
     assert buy_lot.projected_cost_price == Decimal("5.333333333333")
     assert buy_lot.remaining_quantity == 15
     assert sum(lot.remaining_quantity for lot in lots) == 315
-    assert {
-        column.name: getattr(buy_order, column.name) for column in buy_order.__table__.columns
-    } == order_facts
+    assert {column.name: getattr(buy_order, column.name) for column in buy_order.__table__.columns} == order_facts
     assert {column.name: getattr(buy_trade, column.name) for column in buy_trade.__table__.columns} == trade_facts

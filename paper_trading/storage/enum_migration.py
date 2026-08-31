@@ -20,6 +20,7 @@ from paper_trading.domain.enums import (
     MigrationRepairReason,
     OrderSide,
     OrderStatus,
+    PaperOrderEventType,
     PendingSettlementSource,
     PositionSource,
     ReplayTimeProvenance,
@@ -41,6 +42,7 @@ from storage.model import (
     PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
+    PaperOrderEvent,
     PaperPosition,
     PaperPositionLot,
     PaperPositionRoundTrip,
@@ -54,6 +56,7 @@ from storage.model.paper_trading import (
     PaperPendingSettlement,
     tb_name_paper_corporate_actions,
     tb_name_paper_etf_eligibility,
+    tb_name_paper_order_events,
 )
 
 
@@ -194,6 +197,18 @@ PAPER_TRADING_ENUM_GROUPS = (
                 "status",
                 "VARCHAR(30)",
                 indexes=(_index("ix_paper_orders_status", "paper_orders", "status"),),
+            ),
+        ),
+    ),
+    PaperTradingEnumGroup(
+        "paper_order_event_type",
+        _labels(PaperOrderEventType),
+        (
+            _column(
+                tb_name_paper_order_events,
+                "event_type",
+                "VARCHAR(20)",
+                indexes=(_index("ix_paper_order_events_event_type", tb_name_paper_order_events, "event_type"),),
             ),
         ),
     ),
@@ -393,6 +408,7 @@ _GOVERNED_TABLES = (
     PaperPosition.__table__,
     PaperPositionLot.__table__,
     PaperOrder.__table__,
+    PaperOrderEvent.__table__,
     PaperTrade.__table__,
     PaperPositionRoundTrip.__table__,
     PaperMatchingRun.__table__,

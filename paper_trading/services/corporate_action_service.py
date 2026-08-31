@@ -17,6 +17,8 @@ from paper_trading.domain.enums import (
     CorporateActionType,
     Market,
     NavReplayEventType,
+    PaperOrderEventType,
+    ReplayTimeProvenance,
     SnapshotQualityStatus,
 )
 from paper_trading.domain.errors import CorporateActionError
@@ -368,8 +370,10 @@ class CorporateActionService:
                 if not item["remaining"]:
                     continue
                 if current_type is CorporateActionType.RIGHTS_ISSUE:
-                    added_cost = before_remaining * Decimal(current_parameters["subscription_ratio"]) * Decimal(
-                        current_parameters["subscription_price"]
+                    added_cost = (
+                        before_remaining
+                        * Decimal(current_parameters["subscription_ratio"])
+                        * Decimal(current_parameters["subscription_price"])
                     )
                     item["projected_cost_price"] = quantize_account_money(
                         (before_remaining * Decimal(item["projected_cost_price"]) + added_cost) / item["remaining"]
@@ -415,25 +419,26 @@ class CorporateActionService:
                 or order.status not in {"accepted", "partially_filled"}
             ):
                 continue
-            order_frozen = Decimal(order.frozen_quantity or 0)
+            order_events = self.repo.list_order_events(account_id, order.id)
+            if not order_events or any(
+                event.event_time_provenance != ReplayTimeProvenance.CANONICAL_UTC.value
+                for event in order_events
+            ):
+                raise ValueError("reservation chronology is unproven; repair historical order facts first")
+            reservation_events = [
+                event for event in order_events if event.event_type == PaperOrderEventType.RESERVED.value
+            ]
+            if not reservation_events:
+                raise ValueError("reservation chronology is unproven; repair historical order facts first")
+            order_frozen = sum((Decimal(event.quantity_delta) for event in order_events), Decimal("0"))
             if not order_frozen:
                 continue
             factor = Decimal("1")
-            # Order ``created_at`` is processing metadata and is not the
-            # historical ordering fact for backfilled orders.  The order's
-            # trade date is the conservative effective boundary here.
-            order_at = datetime.combine(order.trade_date, datetime.min.time(), tzinfo=timezone.utc)
+            order_at = min(self._persisted_utc(event.event_at) for event in reservation_events)
             for action_at, action_type, parameters in sorted(actions, key=lambda item: item[0]):
                 if action_at < order_at:
                     continue
-                if action_type is CorporateActionType.SPLIT:
-                    factor *= Decimal(parameters["ratio"])
-                elif action_type is CorporateActionType.REVERSE_SPLIT:
-                    factor *= Decimal(parameters["ratio"])
-                elif action_type is CorporateActionType.BONUS_SHARE:
-                    factor *= Decimal("1") + Decimal(parameters["bonus_ratio"])
-                elif action_type is CorporateActionType.RIGHTS_ISSUE:
-                    factor *= Decimal("1") + Decimal(parameters["subscription_ratio"])
+                factor *= self._action_quantity_factor(action_type, parameters)
             frozen += quantize_shares(order_frozen * factor)
         return quantize_shares(frozen)
 

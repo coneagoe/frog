@@ -24,6 +24,7 @@ from paper_trading.domain.enums import (
     MatchingRunStatus,
     OrderSide,
     OrderStatus,
+    PaperOrderEventType,
     SnapshotPointType,
     SnapshotQualityStatus,
 )
@@ -146,6 +147,38 @@ def test_matching_preserves_accounting_precision_through_buy_and_sell(tmp_path):
     position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
     assert position is None
     assert account.realized_pnl == Decimal("-4.666666936667")
+    session.commit()
+    engine.dispose()
+
+
+def test_fill_order_appends_trade_linked_lifecycle_facts(tmp_path):
+    engine, session, repo, _, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("matching-order-events", Decimal("100000"))
+    order = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.01"),
+    )
+
+    matching_service._fill_order(order)
+
+    events = repo.list_order_events(account.id, order.id)
+    trade = repo.list_trades(account.id)[0]
+    assert [event.event_type for event in events] == [
+        PaperOrderEventType.ACCEPTED.value,
+        PaperOrderEventType.RESERVED.value,
+        PaperOrderEventType.FILL.value,
+        PaperOrderEventType.RELEASE.value,
+    ]
+    assert events[2].trade_id == trade.id
+    assert events[2].quantity_delta == Decimal("0.000000000000")
+    assert events[2].cash_delta == Decimal("1005.010000000000")
+    assert events[3].cash_delta == Decimal("0.000000000000")
     session.commit()
     engine.dispose()
 

@@ -14,6 +14,7 @@ from paper_trading.domain.enums import (
     Market,
     MatchingRunStatus,
     MigrationRepairReason,
+    PaperOrderEventType,
     SnapshotPointType,
     SnapshotQualityStatus,
     SnapshotValuationQuality,
@@ -26,6 +27,7 @@ from paper_trading.storage.models import (
     PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
+    PaperOrderEvent,
     PaperPendingSettlement,
     PaperPosition,
     PaperPositionLot,
@@ -62,6 +64,41 @@ def test_position_lot_market_defaults_to_a_share(tmp_path):
     assert market_column.nullable is False
     assert market_column.server_default is not None
     engine.dispose()
+
+
+def test_order_event_model_has_immutable_lifecycle_fact_contract():
+    assert set(PaperOrderEventType) == {
+        PaperOrderEventType.ACCEPTED,
+        PaperOrderEventType.RESERVED,
+        PaperOrderEventType.FILL,
+        PaperOrderEventType.CANCEL,
+        PaperOrderEventType.REJECT,
+        PaperOrderEventType.RELEASE,
+    }
+    columns = PaperOrderEvent.__table__.c
+    assert {
+        "id",
+        "account_id",
+        "order_id",
+        "trade_id",
+        "market",
+        "symbol",
+        "event_type",
+        "event_at",
+        "quantity_delta",
+        "cash_delta",
+        "idempotency_key",
+    } <= set(columns.keys())
+    assert columns.event_at.nullable is False
+    assert columns.quantity_delta.nullable is False
+    assert columns.cash_delta.nullable is False
+    assert columns.idempotency_key.nullable is False
+    index_names = {index.name for index in PaperOrderEvent.__table__.indexes}
+    assert {
+        "uq_paper_order_events_idempotency",
+        "ix_paper_order_events_account_event",
+        "ix_paper_order_events_order_event",
+    } <= index_names
 
 
 def test_account_has_nullable_etf_commission_rate_column():

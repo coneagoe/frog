@@ -1,54 +1,45 @@
-# Task 5 Corporate Action Projection Report
+# Task 5 Order Lifecycle Fact Report
 
-## Root Cause
+## Scope
 
-Corporate-action projection used mutable `PaperPositionLot.remaining_quantity`,
-`original_quantity`, and `cost_price` as if they were historical acquisition
-facts. Replaying a later action therefore started from an already transformed
-lot and could apply earlier actions again. Lot materialization also maintained
-a separate running cash balance instead of using the canonical account replay.
-
-## Fix
-
-- `PaperPositionLot.original_quantity` and `cost_price` remain immutable
-  acquisition facts.
-- Corporate-action application updates only projection fields:
-  `PaperPosition.total_quantity`, `PaperPosition.cost_amount`,
-  `PaperPosition.frozen_quantity`, and lot `remaining_quantity`.
-- Lot projection is rebuilt from imported acquisition facts and immutable buy
-  trade facts, then applies each action's quantity factor only to lots that
-  existed at that action timestamp.
-- Later buys are created after earlier actions and are not retroactively
-  scaled by those actions.
-- Sell trades consume the rebuilt FIFO inventory without changing order or
-  trade records.
-- Corporate-action cash eligibility remains on the existing baseline plus
-  cash-ledger/trade/action `NavSeriesReplay` path. The lot materializer no
-  longer maintains a second `running_cash` state, preventing cash double
-  counting and preserving HK pending/settlement handling.
-- Frozen sell projection is rebuilt from immutable order reservation values;
-  corporate actions do not mutate any order or trade fields.
-- `PaperPositionLot.projected_cost_price` is an additive projection seam.
-  Startup migration backfills it from immutable `cost_price` for SQLite and
-  PostgreSQL legacy schemas; no order-reservation lifecycle schema is needed
-  because existing order, trade, cash-ledger, and corporate-action facts
-  express the replay inputs.
+- Added append-only `PaperOrderEvent` facts for accepted, reserved, fill,
+  cancel, reject, and release transitions, including ordered UTC timestamps,
+  deltas, market/symbol, order and optional trade links, and per-account
+  idempotency keys.
+- Added additive SQLite/PostgreSQL schema migration coverage and repeatable
+  startup creation for `paper_order_events`.
+- Corporate-action frozen projection now derives the outstanding sell
+  reservation and its action-time factor from lifecycle facts, never from
+  mutable `PaperOrder.frozen_quantity`.
+- Historical order paths record UNKNOWN provenance without inventing midnight
+  chronology. Corporate-action application rejects a pending reservation whose
+  accepted/reserved ordering cannot be proven; existing historical matching
+  replay remains operational.
+- Fill consumes only its actual reservation portion; cancel/reject release only
+  the outstanding event balance. Operational orders, trades, and acquisition
+  fields remain unchanged by action projection.
 
 ## Coverage
 
-The service tests cover consecutive split factors (`x2`, then `x1.5`), late
-action chains, post-action buys, multiple cost lots and partial sells, rights
-cash eligibility, idempotency, chronology ambiguity, baseline rejection,
-valuation gaps, recalculation ranges, rollback behavior, and full order/trade
-immutability snapshots.
+- TDD RED: a corporate action with an UNKNOWN historical reservation did not
+  reject; the regression now passes.
+- Lifecycle facts: idempotency/immutability, partial fill/cancelled remainder,
+  fill trade link, delete retention, and reject/release transitions.
+- Corporate actions: consecutive splits, late action with frozen sell,
+  rights/cash flows, HK pending behavior, and order/trade immutability.
+- Migration: SQLite table creation/rerun and PostgreSQL additive migration.
 
 ## Verification
 
-- RED: new consecutive-action regression failed because the second action read
-  the first action's mutable projection.
-- SQLite focused tests: `43 passed, 3 skipped`.
-- PostgreSQL migration suite: `5 passed`.
-- Ruff check on changed Python files: passed.
+- `uv run pytest test/paper_trading/services/test_order_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/services/test_corporate_action_service.py -q`: `140 passed`.
+- `uv run pytest test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py -q`: `54 passed, 3 skipped`.
+- `tools/run_tests.sh test/paper_trading/storage/test_corporate_action_migration.py -v`: `6 passed`.
+- Ruff on touched lifecycle modules: passed.
 - `git diff --check`: passed.
-- Task 7 analytics files and matching/settlement business code were not
-  modified.
+
+## Known Test Gap
+
+The broad storage suite has two unrelated pre-existing failures in
+`test_mixed_repository_stream_replays_without_cash_flow_double_count` and
+`test_cash_available_as_of_internal_preserves_adjacent_decimal_boundary`.
+They do not exercise `PaperOrderEvent` and were left unchanged.

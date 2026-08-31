@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from paper_trading.domain.enums import CashEventType, CorporateActionProcessingStatus, CorporateActionType
 from paper_trading.storage.enum_migration import _GOVERNED_TABLES, migrate_paper_trading_enums
+from paper_trading.storage.models import PaperOrderEvent, tb_name_paper_order_events
 from storage.model import Base
 from storage.storage_db import StorageDb
 
@@ -160,6 +161,39 @@ def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_pat
         .scalar_one()
         == 1.2345
     )
+    engine.dispose()
+
+
+def test_sqlite_startup_adds_order_event_table_and_is_repeatable(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'order_events.db'}")
+    with engine.begin() as connection:
+        Base.metadata.create_all(
+            connection,
+            tables=[table for table in _GOVERNED_TABLES if table.name != tb_name_paper_order_events],
+        )
+        connection.execute(text("INSERT INTO paper_accounts (name, initial_cash) VALUES ('legacy-events', 1000)"))
+
+    storage = _storage(engine)
+    storage.ensure_paper_trading_schema()
+    first_columns = {column["name"] for column in inspect(engine).get_columns(tb_name_paper_order_events)}
+    first_indexes = {index["name"] for index in inspect(engine).get_indexes(tb_name_paper_order_events)}
+    storage.ensure_paper_trading_schema()
+    second_columns = {column["name"] for column in inspect(engine).get_columns(tb_name_paper_order_events)}
+    second_indexes = {index["name"] for index in inspect(engine).get_indexes(tb_name_paper_order_events)}
+
+    assert first_columns == second_columns == set(PaperOrderEvent.__table__.columns.keys())
+    assert first_indexes == second_indexes == {
+        "uq_paper_order_events_idempotency",
+        "ix_paper_order_events_account_event",
+        "ix_paper_order_events_order_event",
+        "ix_paper_order_events_account_id",
+        "ix_paper_order_events_order_id",
+        "ix_paper_order_events_trade_id",
+        "ix_paper_order_events_market",
+        "ix_paper_order_events_symbol",
+        "ix_paper_order_events_event_type",
+        "ix_paper_order_events_event_at",
+    }
     engine.dispose()
 
 

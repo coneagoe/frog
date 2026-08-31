@@ -24,6 +24,15 @@ class OrderStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class PaperOrderEventType(StrEnum):
+    ACCEPTED = "accepted"
+    RESERVED = "reserved"
+    FILL = "fill"
+    CANCEL = "cancel"
+    REJECT = "reject"
+    RELEASE = "release"
+
+
 class Market(StrEnum):
     A_SHARE = "a_share"
     HK_CONNECT = "hk_connect"

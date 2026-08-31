@@ -3997,6 +3997,7 @@ class StorageDb:
             DailyBarDiagnostic,
             PaperCorporateAction,
             PaperLedgerRebuild,
+            PaperOrderEvent,
             PaperTradeValidityCheck,
             PaperValuationGap,
         )
@@ -4010,6 +4011,7 @@ class StorageDb:
                 migrate_paper_trading_enums(conn)
         if self.engine.dialect.name != "postgresql" and has_paper_accounts:
             PaperCorporateAction.__table__.create(self.engine, checkfirst=True)
+            PaperOrderEvent.__table__.create(self.engine, checkfirst=True)
         self._ensure_paper_cash_ledger_columns()
         self._ensure_sqlite_replay_time_provenance_columns()
         if self.engine.dialect.name == "sqlite":
@@ -4041,9 +4043,7 @@ class StorageDb:
                             "ADD COLUMN projected_cost_price NUMERIC(30, 12) NOT NULL DEFAULT 0"
                         )
                     )
-                    conn.execute(
-                        text(f"UPDATE {tb_name_paper_position_lots} SET projected_cost_price = cost_price")
-                    )
+                    conn.execute(text(f"UPDATE {tb_name_paper_position_lots} SET projected_cost_price = cost_price"))
 
         if not has_paper_orders:
             self._ensure_paper_account_repair_without_orders()
@@ -4377,9 +4377,7 @@ class StorageDb:
         if not required <= columns:
             return "1 = 1"
         provenance = (
-            "snapshot.event_time_provenance IS 'canonical_utc'"
-            if "event_time_provenance" in columns
-            else "1 = 0"
+            "snapshot.event_time_provenance IS 'canonical_utc'" if "event_time_provenance" in columns else "1 = 0"
         )
         return f"""EXISTS (
             SELECT 1 FROM {tb_name_paper_account_snapshots} AS snapshot
@@ -4398,9 +4396,9 @@ class StorageDb:
 
     def _sqlite_legacy_source_predicates(self, conn) -> list[str]:
         predicates: list[str] = []
-        if not inspect(conn).has_table(tb_name_paper_cash_ledger) and inspect(
-            conn
-        ).has_table(tb_name_paper_account_snapshots):
+        if not inspect(conn).has_table(tb_name_paper_cash_ledger) and inspect(conn).has_table(
+            tb_name_paper_account_snapshots
+        ):
             predicates.append(
                 f"EXISTS (SELECT 1 FROM {tb_name_paper_account_snapshots} AS source "
                 "WHERE source.account_id = account.id AND source.point_type IS NOT 'initial')"
@@ -4439,9 +4437,7 @@ class StorageDb:
                 checks = f"{checks} OR {provenance}"
             if table_name == tb_name_paper_account_snapshots:
                 checks = f"{checks} OR source.quality_status IS NOT 'valid'"
-            predicates.append(
-                f"EXISTS (SELECT 1 FROM {table_name} AS source WHERE {account_match} AND ({checks}))"
-            )
+            predicates.append(f"EXISTS (SELECT 1 FROM {table_name} AS source WHERE {account_match} AND ({checks}))")
         return predicates
 
     def _sqlite_invalid_cash_ledger_accounts(self, conn) -> tuple[int, ...]:
@@ -4453,8 +4449,7 @@ class StorageDb:
         numeric_columns = ("amount", "net_asset_value", "share_delta", "rounding_residual")
         if not all(column in columns for column in numeric_columns):
             return tuple(
-                row[0]
-                for row in conn.execute(text(f"SELECT DISTINCT account_id FROM {tb_name_paper_cash_ledger}"))
+                row[0] for row in conn.execute(text(f"SELECT DISTINCT account_id FROM {tb_name_paper_cash_ledger}"))
             )
         rows = conn.execute(
             text(
@@ -4943,14 +4938,10 @@ class StorageDb:
                     row_uncertain = f"({row_uncertain}) OR TRUE"
                 else:
                     row_uncertain = (
-                        f"({row_uncertain}) OR "
-                        "(source.event_time_provenance IS DISTINCT FROM 'canonical_utc')"
+                        f"({row_uncertain}) OR (source.event_time_provenance IS DISTINCT FROM 'canonical_utc')"
                     )
             if table_name == tb_name_paper_cash_ledger:
-                row_uncertain = (
-                    f"({row_uncertain}) OR "
-                    f"({self._legacy_cash_ledger_invalid(columns)})"
-                )
+                row_uncertain = f"({row_uncertain}) OR ({self._legacy_cash_ledger_invalid(columns)})"
             if table_name == tb_name_paper_account_snapshots:
                 row_uncertain = f"({row_uncertain}) OR source.quality_status IS DISTINCT FROM 'valid'"
             predicates.append(
