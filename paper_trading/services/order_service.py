@@ -706,7 +706,7 @@ class OrderService:
         return order
 
     def _outstanding_reservation(self, order: PaperOrder) -> tuple[Decimal, Decimal]:
-        events = self.repo.list_order_events(order.account_id, order.id)
+        events = self.repo.list_effective_order_events(order.account_id, order.id)
         quantity = sum((Decimal(event.quantity_delta) for event in events), Decimal("0"))
         cash = sum((Decimal(event.cash_delta) for event in events), Decimal("0"))
         return max(quantity, Decimal("0")), max(-cash, Decimal("0"))

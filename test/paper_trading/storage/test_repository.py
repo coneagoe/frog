@@ -181,17 +181,20 @@ def test_order_events_are_idempotent_ordered_and_immutable(sqlite_session):
         idempotency_key="explicit:order:1:reserved",
     )
 
-    assert repo.append_order_event(
-        account.id,
-        order.id,
-        Market.A_SHARE,
-        order.symbol,
-        PaperOrderEventType.ACCEPTED,
-        accepted_at,
-        quantity_delta=Decimal("0"),
-        cash_delta=Decimal("0"),
-        idempotency_key="explicit:order:1:accepted",
-    ).id == accepted.id
+    assert (
+        repo.append_order_event(
+            account.id,
+            order.id,
+            Market.A_SHARE,
+            order.symbol,
+            PaperOrderEventType.ACCEPTED,
+            accepted_at,
+            quantity_delta=Decimal("0"),
+            cash_delta=Decimal("0"),
+            idempotency_key="explicit:order:1:accepted",
+        ).id
+        == accepted.id
+    )
     with pytest.raises(ValueError, match="idempotency"):
         repo.append_order_event(
             account.id,
@@ -250,6 +253,86 @@ def test_order_event_facts_preserve_partial_fill_and_cancelled_reservation(sqlit
     assert sum(event.quantity_delta for event in events) == Decimal("0")
     release = next(event for event in events if event.event_type == PaperOrderEventType.RELEASE.value)
     assert release.quantity_delta == Decimal("-60.000000")
+
+
+def test_effective_order_lifecycle_starts_at_latest_accepted_event(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("replay-order-event-facts", Decimal("10000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        100,
+        Decimal("10"),
+        date(2026, 8, 27),
+        OrderStatus.ACCEPTED,
+        frozen_quantity=100,
+    )
+    original_events = repo.list_order_events(account.id, order.id)
+    repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.FILL,
+        datetime(2026, 8, 27, 10, tzinfo=timezone.utc),
+        quantity_delta=Decimal("-100"),
+        cash_delta=Decimal("0"),
+        idempotency_key=f"order:{order.id}:fill:original",
+    )
+    repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.ACCEPTED,
+        datetime(2026, 8, 28, 9, tzinfo=timezone.utc),
+        quantity_delta=Decimal("0"),
+        cash_delta=Decimal("0"),
+        idempotency_key=f"order:{order.id}:accepted:replay",
+    )
+    repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.RESERVED,
+        datetime(2026, 8, 28, 9, tzinfo=timezone.utc),
+        quantity_delta=Decimal("100"),
+        cash_delta=Decimal("0"),
+        idempotency_key=f"order:{order.id}:reserved:replay",
+    )
+
+    effective = repo.list_effective_order_events(account.id, order.id)
+
+    assert {event.id for event in original_events}.issubset(
+        {event.id for event in repo.list_order_events(account.id, order.id)}
+    )
+    assert [event.event_type for event in effective] == [
+        PaperOrderEventType.ACCEPTED.value,
+        PaperOrderEventType.RESERVED.value,
+    ]
+    assert sum(event.quantity_delta for event in effective) == Decimal("100.000000")
+
+
+def test_terminal_historical_order_does_not_emit_incomplete_lifecycle(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("terminal-order-events", Decimal("10000"))
+
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 8, 27),
+        OrderStatus.FILLED,
+        frozen_cash=Decimal("1000"),
+    )
+
+    assert repo.list_order_events(account.id, order.id) == []
 
 
 def test_deleting_order_keeps_append_only_order_events(sqlite_session):
@@ -541,9 +624,7 @@ def test_unproven_persisted_naive_replay_event_is_invalid(sqlite_session) -> Non
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("legacy-provenance", Decimal("100000.00"))
     snapshot = repo.save_trading_snapshot(
-        **_trading_snapshot_values(
-            account.id, date(2026, 8, 25), datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
-        )
+        **_trading_snapshot_values(account.id, date(2026, 8, 25), datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc))
     )
     snapshot.event_time_provenance = None
     sqlite_session.commit()
@@ -567,9 +648,7 @@ def test_unproven_persisted_aware_replay_event_is_invalid(request, repository_fi
     repo = request.getfixturevalue(repository_fixture)
     account = repo.create_account("legacy-aware-provenance", Decimal("100000.00"))
     snapshot = repo.save_trading_snapshot(
-        **_trading_snapshot_values(
-            account.id, date(2026, 8, 25), datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
-        )
+        **_trading_snapshot_values(account.id, date(2026, 8, 25), datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc))
     )
     session = repo.session
     if provenance is None:
@@ -614,9 +693,10 @@ def test_sqlite_replay_provenance_upgrade_is_idempotent_and_does_not_backfill(sq
     for table_name in table_names:
         columns = {column["name"] for column in inspect(storage.engine).get_columns(table_name)}
         assert "event_time_provenance" in columns
-        assert sqlite_session.execute(
-            text(f"SELECT event_time_provenance FROM {table_name} WHERE id = 1")
-        ).scalar_one() is None
+        assert (
+            sqlite_session.execute(text(f"SELECT event_time_provenance FROM {table_name} WHERE id = 1")).scalar_one()
+            is None
+        )
 
 
 def test_replay_event_time_keeps_unproven_naive_input_invalid(sqlite_session) -> None:
@@ -726,11 +806,19 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
         trade_time=event_at,
     )
     action = repo.create_corporate_action(
-        account_id=account.id, symbol="000001", event_type=CorporateActionType.DIVIDEND,
-        event_at=event_at, idempotency_key="mixed-dividend", parameters={"per_share_amount": "1"},
-        cash_delta=Decimal("10"), before_quantity=Decimal("10"), after_quantity=Decimal("10"),
-        before_cost_amount=Decimal("100"), after_cost_amount=Decimal("100"),
-        before_cash_available=Decimal("100000"), after_cash_available=Decimal("100010"),
+        account_id=account.id,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND,
+        event_at=event_at,
+        idempotency_key="mixed-dividend",
+        parameters={"per_share_amount": "1"},
+        cash_delta=Decimal("10"),
+        before_quantity=Decimal("10"),
+        after_quantity=Decimal("10"),
+        before_cost_amount=Decimal("100"),
+        after_cost_amount=Decimal("100"),
+        before_cash_available=Decimal("100000"),
+        after_cash_available=Decimal("100010"),
     )
     dividend_ledger = repo.add_cash_event(
         account.id,
@@ -745,9 +833,12 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
     valuation = repo.save_trading_snapshot(**valuation_values)
     events = repo.list_replay_events(account.id)
     assert {event.source_id for event in events} >= {
-        f"paper_cash_ledger:{deposit.id}", f"paper_cash_ledger:{withdrawal.id}",
-        f"paper_cash_ledger:{internal.id}", f"paper_cash_ledger:{dividend_ledger.id}",
-        f"paper_trades:{trade.id}", f"paper_corporate_actions:{action.id}",
+        f"paper_cash_ledger:{deposit.id}",
+        f"paper_cash_ledger:{withdrawal.id}",
+        f"paper_cash_ledger:{internal.id}",
+        f"paper_cash_ledger:{dividend_ledger.id}",
+        f"paper_trades:{trade.id}",
+        f"paper_corporate_actions:{action.id}",
         f"paper_account_snapshots:{valuation.id}",
     }
     assert sum(event.event_type is NavReplayEventType.CASH_FLOW for event in events) == 2
@@ -783,9 +874,9 @@ def test_mixed_repository_stream_replays_without_cash_flow_double_count(sqlite_s
     assert wrong_before_valuation.share_count == Decimal("100085")
     assert wrong_before_valuation.total_assets == Decimal("100085")
     assert wrong_before_valuation.nav == correct_before_valuation.nav == Decimal("1")
-    assert (
-        (wrong_before_valuation.total_assets, wrong_before_valuation.share_count)
-        != (correct_before_valuation.total_assets, correct_before_valuation.share_count)
+    assert (wrong_before_valuation.total_assets, wrong_before_valuation.share_count) != (
+        correct_before_valuation.total_assets,
+        correct_before_valuation.share_count,
     )
     assert replay.points[-1].event_type is NavReplayEventType.MARKET_VALUATION
     assert replay.points[-1].total_assets == Decimal("100075.000000000000")

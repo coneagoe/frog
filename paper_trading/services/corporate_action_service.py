@@ -419,10 +419,9 @@ class CorporateActionService:
                 or order.status not in {"accepted", "partially_filled"}
             ):
                 continue
-            order_events = self.repo.list_order_events(account_id, order.id)
+            order_events = self.repo.list_effective_order_events(account_id, order.id)
             if not order_events or any(
-                event.event_time_provenance != ReplayTimeProvenance.CANONICAL_UTC.value
-                for event in order_events
+                event.event_time_provenance != ReplayTimeProvenance.CANONICAL_UTC.value for event in order_events
             ):
                 raise ValueError("reservation chronology is unproven; repair historical order facts first")
             reservation_events = [

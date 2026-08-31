@@ -71,6 +71,7 @@ class LedgerRebuildService:
         by_date: dict[date, list[PaperOrder]] = defaultdict(list)
         for order in self.repo.list_orders(account_id):
             if order.trade_date >= start_date and order.status == OrderStatus.ACCEPTED.value:
+                self.repo.start_order_replay_lifecycle(order)
                 by_date[order.trade_date].append(order)
 
         for trade_date in sorted(by_date):

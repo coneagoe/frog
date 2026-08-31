@@ -669,35 +669,36 @@ class PaperTradingRepository:
         )
         self.session.add(order)
         self.session.flush()
-        event_at = lifecycle_event_at or (
-            order.created_at.replace(tzinfo=timezone.utc)
-            if order.created_at.tzinfo is None or order.created_at.utcoffset() is None
-            else order.created_at.astimezone(timezone.utc)
-        )
-        self.append_order_event(
-            account_id,
-            order.id,
-            market or Market.A_SHARE,
-            symbol,
-            PaperOrderEventType.ACCEPTED,
-            event_at,
-            quantity_delta=Decimal("0"),
-            cash_delta=Decimal("0"),
-            idempotency_key=f"order:{order.id}:accepted",
-            event_time_provenance=lifecycle_time_provenance,
-        )
-        self.append_order_event(
-            account_id,
-            order.id,
-            market or Market.A_SHARE,
-            symbol,
-            PaperOrderEventType.RESERVED,
-            event_at,
-            quantity_delta=Decimal(frozen_quantity),
-            cash_delta=-Decimal(frozen_cash),
-            idempotency_key=f"order:{order.id}:reserved",
-            event_time_provenance=lifecycle_time_provenance,
-        )
+        if status in {OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED}:
+            event_at = lifecycle_event_at or (
+                order.created_at.replace(tzinfo=timezone.utc)
+                if order.created_at.tzinfo is None or order.created_at.utcoffset() is None
+                else order.created_at.astimezone(timezone.utc)
+            )
+            self.append_order_event(
+                account_id,
+                order.id,
+                market or Market.A_SHARE,
+                symbol,
+                PaperOrderEventType.ACCEPTED,
+                event_at,
+                quantity_delta=Decimal("0"),
+                cash_delta=Decimal("0"),
+                idempotency_key=f"order:{order.id}:accepted",
+                event_time_provenance=lifecycle_time_provenance,
+            )
+            self.append_order_event(
+                account_id,
+                order.id,
+                market or Market.A_SHARE,
+                symbol,
+                PaperOrderEventType.RESERVED,
+                event_at,
+                quantity_delta=Decimal(frozen_quantity),
+                cash_delta=-Decimal(frozen_cash),
+                idempotency_key=f"order:{order.id}:reserved",
+                event_time_provenance=lifecycle_time_provenance,
+            )
         return order
 
     def append_order_event(
@@ -754,6 +755,64 @@ class PaperTradingRepository:
         if order_id is not None:
             query = query.filter(PaperOrderEvent.order_id == order_id)
         return list(query.order_by(PaperOrderEvent.event_at.asc(), PaperOrderEvent.id.asc()).all())
+
+    def list_effective_order_events(self, account_id: int, order_id: int) -> list[PaperOrderEvent]:
+        events = list(
+            self.session.query(PaperOrderEvent)
+            .filter(PaperOrderEvent.account_id == account_id, PaperOrderEvent.order_id == order_id)
+            .order_by(PaperOrderEvent.id.asc())
+            .all()
+        )
+        accepted_indexes = [
+            index for index, event in enumerate(events) if event.event_type == PaperOrderEventType.ACCEPTED.value
+        ]
+        return events[accepted_indexes[-1] :] if accepted_indexes else events
+
+    def effective_order_lifecycle_id(self, account_id: int, order_id: int) -> int | None:
+        events = self.list_effective_order_events(account_id, order_id)
+        return events[0].id if events and events[0].event_type == PaperOrderEventType.ACCEPTED.value else None
+
+    def start_order_replay_lifecycle(self, order: PaperOrder) -> None:
+        original = list(
+            self.session.query(PaperOrderEvent)
+            .filter(PaperOrderEvent.account_id == order.account_id, PaperOrderEvent.order_id == order.id)
+            .order_by(PaperOrderEvent.id.asc())
+            .all()
+        )
+        reservation = next(
+            (event for event in original if event.event_type == PaperOrderEventType.RESERVED.value),
+            None,
+        )
+        if reservation is None:
+            return
+        replay_number = len([event for event in original if event.event_type == PaperOrderEventType.ACCEPTED.value])
+        replay_key = f"order:{order.id}:replay:{replay_number}"
+        event_at = reservation.event_at.replace(tzinfo=timezone.utc)
+        provenance = ReplayTimeProvenance(reservation.event_time_provenance)
+        self.append_order_event(
+            order.account_id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.ACCEPTED,
+            event_at,
+            quantity_delta=Decimal("0"),
+            cash_delta=Decimal("0"),
+            idempotency_key=f"{replay_key}:accepted",
+            event_time_provenance=provenance,
+        )
+        self.append_order_event(
+            order.account_id,
+            order.id,
+            order.market,
+            order.symbol,
+            PaperOrderEventType.RESERVED,
+            event_at,
+            quantity_delta=Decimal(reservation.quantity_delta),
+            cash_delta=Decimal(reservation.cash_delta),
+            idempotency_key=f"{replay_key}:reserved",
+            event_time_provenance=provenance,
+        )
 
     def get_order_by_idempotency_key(self, account_id: int, idempotency_key: str) -> PaperOrder | None:
         return (

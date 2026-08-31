@@ -58,6 +58,7 @@ class OrderDeleteService:
         by_date: dict[date, list[PaperOrder]] = defaultdict(list)
         for o in orders:
             if o.status == OrderStatus.ACCEPTED.value:
+                self.repo.start_order_replay_lifecycle(o)
                 by_date[o.trade_date].append(o)
 
         for trade_date in sorted(by_date):
@@ -179,32 +180,31 @@ class OrderDeleteService:
         Called immediately before ``matching_service.match_order(order)``.
         """
         side = OrderSide(order.side)
+        lifecycle = self.repo.list_effective_order_events(account_id, order.id)
+        outstanding_quantity = max(
+            sum((Decimal(event.quantity_delta) for event in lifecycle), Decimal("0")), Decimal("0")
+        )
+        outstanding_cash = max(-sum((Decimal(event.cash_delta) for event in lifecycle), Decimal("0")), Decimal("0"))
         if side == OrderSide.BUY:
-            frozen_cash = Decimal(order.frozen_cash or 0)
-            if frozen_cash > 0:
-                lifecycle = self.repo.list_order_events(account_id, order.id)
-                has_proven_time = any(
-                    event.event_time_provenance == "canonical_utc" for event in lifecycle
-                )
+            if outstanding_cash > 0:
+                account = self.repo.get_account(account_id)
                 available_cash = self.repo.get_cash_available_as_of_internal(account_id, order.trade_date)
-                if not has_proven_time:
-                    account = self.repo.get_account(account_id)
-                    if account is not None:
-                        available_cash = account.initial_cash + sum(
-                            (
-                                Decimal(event.amount)
-                                for event in self.repo.list_cash_ledger(account_id)
-                                if event.trade_date is not None
-                                and event.trade_date <= order.trade_date
-                                and event.event_type not in {"deposit", "withdrawal"}
-                            ),
-                            Decimal("0"),
-                        )
-                if available_cash >= frozen_cash:
+                if account is not None:
+                    available_cash = account.initial_cash + sum(
+                        (
+                            Decimal(event.amount)
+                            for event in self.repo.list_cash_ledger(account_id)
+                            if event.trade_date is not None
+                            and event.trade_date <= order.trade_date
+                            and event.event_type not in {"deposit", "withdrawal"}
+                        ),
+                        Decimal("0"),
+                    )
+                if available_cash >= outstanding_cash:
                     self.repo.add_cash_event(
                         account_id,
                         CashEventType.FREEZE,
-                        -frozen_cash,
+                        -outstanding_cash,
                         order_id=order.id,
                         trade_date=order.trade_date,
                         note="buy_order_freeze",
@@ -219,8 +219,7 @@ class OrderDeleteService:
                         ),
                     )
         else:
-            frozen_qty = int(order.frozen_quantity or 0)
-            if frozen_qty > 0:
+            if outstanding_quantity > 0:
                 position = self.repo.get_position(account_id, order.market, order.symbol)
                 if position is not None:
                     lots = self.repo.get_lots(account_id, order.market, order.symbol)
@@ -228,11 +227,11 @@ class OrderDeleteService:
                         position,
                         lots,
                         order.trade_date,
-                        frozen_qty,
+                        int(outstanding_quantity),
                         order.market,
                     )
                     if ok:
-                        position.frozen_quantity = int(position.frozen_quantity or 0) + frozen_qty
+                        position.frozen_quantity = int(position.frozen_quantity or 0) + int(outstanding_quantity)
                     else:
                         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
                 else:

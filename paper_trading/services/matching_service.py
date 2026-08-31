@@ -151,26 +151,25 @@ class MatchingService:
 
     def _reject_order(self, order: PaperOrder, code: str, reason: str) -> None:
         now = datetime.now(timezone.utc)
-        lifecycle = self.repo.list_order_events(order.account_id, order.id)
+        lifecycle = self.repo.list_effective_order_events(order.account_id, order.id)
+        lifecycle_id = lifecycle[0].id if lifecycle else order.id
         outstanding_quantity = max(
             sum((Decimal(event.quantity_delta) for event in lifecycle), Decimal("0")), Decimal("0")
         )
-        outstanding_cash = max(
-            -sum((Decimal(event.cash_delta) for event in lifecycle), Decimal("0")), Decimal("0")
-        )
-        if Decimal(order.frozen_cash or 0) > 0:
+        outstanding_cash = max(-sum((Decimal(event.cash_delta) for event in lifecycle), Decimal("0")), Decimal("0"))
+        if outstanding_cash > 0:
             self.repo.add_cash_event(
                 order.account_id,
                 CashEventType.RELEASE,
-                Decimal(order.frozen_cash),
+                outstanding_cash,
                 order_id=order.id,
                 trade_date=order.trade_date,
                 note="reject_order_release",
             )
-        if int(order.frozen_quantity or 0) > 0:
+        if outstanding_quantity > 0:
             position = self.repo.get_position(order.account_id, order.market, order.symbol)
             if position is not None:
-                position.frozen_quantity = int(position.frozen_quantity or 0) - int(order.frozen_quantity or 0)
+                position.frozen_quantity = max(0, int(position.frozen_quantity or 0) - int(outstanding_quantity))
         self.repo.append_order_event(
             order.account_id,
             order.id,
@@ -180,7 +179,7 @@ class MatchingService:
             now,
             quantity_delta=Decimal("0"),
             cash_delta=Decimal("0"),
-            idempotency_key=f"order:{order.id}:reject:{code}",
+            idempotency_key=f"order:{order.id}:lifecycle:{lifecycle_id}:reject:{code}",
         )
         self.repo.append_order_event(
             order.account_id,
@@ -191,7 +190,7 @@ class MatchingService:
             now,
             quantity_delta=-outstanding_quantity,
             cash_delta=outstanding_cash,
-            idempotency_key=f"order:{order.id}:release:reject",
+            idempotency_key=f"order:{order.id}:lifecycle:{lifecycle_id}:release:reject",
         )
         self.repo.update_order_status(order, OrderStatus.REJECTED, code, reason)
 
@@ -265,7 +264,10 @@ class MatchingService:
             market=order.market,
         )
         actual_cost = amount + fees
-        release_cash = Decimal(order.frozen_cash or 0) - actual_cost
+        lifecycle = self.repo.list_effective_order_events(order.account_id, order.id)
+        outstanding_cash = max(-sum((Decimal(event.cash_delta) for event in lifecycle), Decimal("0")), Decimal("0"))
+        release_cash = outstanding_cash - actual_cost
+        lifecycle_id = self.repo.effective_order_lifecycle_id(order.account_id, order.id) or order.id
         self.repo.append_order_event(
             order.account_id,
             order.id,
@@ -275,7 +277,7 @@ class MatchingService:
             trade.trade_time if trade.trade_time.tzinfo else trade.trade_time.replace(tzinfo=timezone.utc),
             quantity_delta=-Decimal(quantity) if side == OrderSide.SELL else Decimal("0"),
             cash_delta=actual_cost if side == OrderSide.BUY else Decimal("0"),
-            idempotency_key=f"order:{order.id}:fill:{trade.id}",
+            idempotency_key=f"order:{order.id}:lifecycle:{lifecycle_id}:fill:{trade.id}",
             trade_id=trade.id,
         )
         self.repo.append_order_event(
@@ -287,11 +289,11 @@ class MatchingService:
             trade.trade_time if trade.trade_time.tzinfo else trade.trade_time.replace(tzinfo=timezone.utc),
             quantity_delta=Decimal("0"),
             cash_delta=release_cash,
-            idempotency_key=f"order:{order.id}:release:fill:{trade.id}",
+            idempotency_key=f"order:{order.id}:lifecycle:{lifecycle_id}:release:fill:{trade.id}",
             trade_id=trade.id,
         )
         if side == OrderSide.BUY:
-            self._settle_buy(order, trade.id, amount, fees)
+            self._settle_buy(order, trade.id, amount, fees, release_cash)
             position = self.repo.get_position(order.account_id, order.market, order.symbol)
             self.round_trip_service.record_fill(
                 trade,
@@ -323,14 +325,15 @@ class MatchingService:
         order.filled_quantity = quantity
         self.repo.update_order_status(order, OrderStatus.FILLED)
 
-    def _settle_buy(self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal) -> None:
+    def _settle_buy(
+        self, order: PaperOrder, trade_id: int, amount: Decimal, fees: Decimal, release_cash: Decimal
+    ) -> None:
         actual_cost = amount + fees
-        release = Decimal(order.frozen_cash or 0) - actual_cost
-        if release:
+        if release_cash:
             self.repo.add_cash_event(
                 order.account_id,
                 CashEventType.RELEASE,
-                release,
+                release_cash,
                 order_id=order.id,
                 trade_id=trade_id,
                 trade_date=order.trade_date,

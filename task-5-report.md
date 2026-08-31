@@ -1,5 +1,19 @@
 # Task 5 Order Lifecycle Fact Report
 
+## Regression Repair
+
+- Rebuilds preserve append-only order events and begin each replay with a new
+  accepted/reserved lifecycle boundary. Effective reservation projection uses
+  the latest boundary by immutable event lineage, so old fills/releases cannot
+  cancel or offset the rebuilt reservation.
+- Reservation restore, cancel/reject release, and fill settlement use the
+  effective event balance rather than mutable order frozen fields. Lifecycle
+  idempotency keys include the replay lifecycle, allowing regenerated facts to
+  coexist with original execution facts.
+- Terminal historical orders do not receive synthetic accepted/reserved facts.
+  Orders with unproven reservation chronology remain rejected for corporate
+  action projection repair instead of receiving fabricated midnight timestamps.
+
 ## Scope
 
 - Added append-only `PaperOrderEvent` facts for accepted, reserved, fill,
@@ -31,9 +45,10 @@
 
 ## Verification
 
-- `uv run pytest test/paper_trading/services/test_order_service.py test/paper_trading/services/test_matching_service.py test/paper_trading/services/test_corporate_action_service.py -q`: `140 passed`.
+- `uv run pytest test/paper_trading/services/test_order_delete_service.py test/paper_trading/api/test_ledger_rebuild_api.py test/paper_trading/services/test_matching_service.py test/paper_trading/services/test_corporate_action_service.py -q`: `110 passed`.
+- `uv run pytest test/paper_trading/storage/test_repository.py -q`: `124 passed, 5 skipped`; two unrelated pre-existing failures remain in mixed replay stream and adjacent decimal boundary coverage.
 - `uv run pytest test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py test/paper_trading/domain/test_nav_replay.py -q`: `54 passed, 3 skipped`.
-- `tools/run_tests.sh test/paper_trading/storage/test_corporate_action_migration.py -v`: `6 passed`.
+- `uv run pytest test/paper_trading/storage/test_corporate_action_migration.py -q`: `4 passed, 2 skipped`.
 - Ruff on touched lifecycle modules: passed.
 - `git diff --check`: passed.
 
