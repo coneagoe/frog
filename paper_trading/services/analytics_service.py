@@ -75,8 +75,23 @@ class AnalyticsService:
             return AnalyticsUnavailableResponse(reason="replay_unavailable")
         if not replay.points or replay.points[0].event_type.value != SnapshotPointType.INITIAL.value:
             return AnalyticsUnavailableResponse(reason="missing_initial")
-        if replay.points[0].quality_status is not SnapshotQualityStatus.VALID or replay.points[0].nav is None:
+        if (
+            replay.points[0].quality_status is not SnapshotQualityStatus.VALID
+            or replay.points[0].nav is None
+            or not replay.points[0].nav.is_finite()
+            or replay.points[0].nav <= 0
+        ):
             return AnalyticsUnavailableResponse(reason="invalid_initial")
+        replay_gaps = self._replay_valuation_gaps(replay)
+        if any(point.quality_status is not SnapshotQualityStatus.VALID for point in replay.points[1:]):
+            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=replay_gaps)
+        if any(
+            snapshot.point_type == SnapshotPointType.TRADING.value
+            and snapshot.quality_status == SnapshotQualityStatus.VALID.value
+            and self._snapshot_nav(snapshot) is None
+            for snapshot in snapshots
+        ):
+            return AnalyticsUnavailableResponse(reason="valuation_gap")
         if any(
             snapshot.point_type == SnapshotPointType.TRADING.value
             and snapshot.quality_status == SnapshotQualityStatus.VALID.value
@@ -86,7 +101,10 @@ class AnalyticsService:
             return AnalyticsUnavailableResponse(reason="valuation_gap")
         unresolved_gaps = self._valuation_gaps(account_id)
         if any(not gap.resolved for gap in unresolved_gaps):
-            return AnalyticsUnavailableResponse(reason=AnalyticsUnavailableReason.VALUATION_GAP)
+            return AnalyticsUnavailableResponse(
+                reason=AnalyticsUnavailableReason.VALUATION_GAP,
+                valuation_gaps=unresolved_gaps,
+            )
         invalid_replay_nav = next(
             (
                 point
@@ -101,7 +119,7 @@ class AnalyticsService:
             None,
         )
         if invalid_replay_nav is not None:
-            return AnalyticsUnavailableResponse(reason="valuation_gap")
+            return AnalyticsUnavailableResponse(reason="valuation_gap", valuation_gaps=replay_gaps)
         ledger_entries = self.repo.list_cash_ledger(account_id)
         corporate_actions = (
             self.repo.list_corporate_actions(account_id) if hasattr(self.repo, "list_corporate_actions") else []
@@ -112,8 +130,8 @@ class AnalyticsService:
             activity=self._activity(orders),
             execution=self._execution(orders),
             trade_quality=self._trade_quality(round_trips),
-            risk=self._risk(replay if replay is not None else snapshots, snapshots),
-            valuation_gaps=unresolved_gaps + self._replay_valuation_gaps(replay),
+            risk=self._risk(replay),
+            valuation_gaps=unresolved_gaps + replay_gaps,
             event_series=self._event_series(snapshots, ledger_entries, corporate_actions, replay),
         )
 
@@ -166,24 +184,6 @@ class AnalyticsService:
         return nav.quantize(_QUANTIZE)
 
     @staticmethod
-    def _nav_series(snapshots: list[PaperAccountSnapshot]) -> list[Decimal]:
-        if not snapshots:
-            return []
-        first = snapshots[0]
-        if first.point_type != SnapshotPointType.INITIAL.value:
-            return []
-        first_nav = AnalyticsService._snapshot_nav(first)
-        if first_nav is None:
-            return []
-        values = [first_nav]
-        for snapshot in snapshots[1:]:
-            if snapshot.point_type != SnapshotPointType.TRADING.value:
-                continue
-            nav = AnalyticsService._snapshot_nav(snapshot)
-            if nav is not None:
-                values.append(nav)
-        return values
-
     @staticmethod
     def _replay_nav_series(replay: ReplayResult) -> tuple[list[Decimal], str | None]:
         if not replay.points:
@@ -212,14 +212,8 @@ class AnalyticsService:
         return navs, None
 
     @staticmethod
-    def _linked_total_return(
-        snapshots: list[PaperAccountSnapshot], replay: ReplayResult | None = None
-    ) -> MetricValue:
-        navs, issue = (
-            AnalyticsService._replay_nav_series(replay)
-            if replay is not None
-            else (AnalyticsService._nav_series(snapshots), None)
-        )
+    def _linked_total_return(snapshots: list[PaperAccountSnapshot], replay: ReplayResult) -> MetricValue:
+        navs, issue = AnalyticsService._replay_nav_series(replay)
         if issue is not None:
             return MetricValue(value=None, reason=issue)
         if not navs:
@@ -240,15 +234,12 @@ class AnalyticsService:
         replay: ReplayResult | None = None,
     ) -> list[AnalyticsEvent]:
         events: list[tuple[datetime, int, int, AnalyticsEvent]] = []
-        replay_by_snapshot = {
-            point.source_id: point for point in (replay.points if replay is not None else ())
-        }
+        replay_by_snapshot = {point.source_id: point for point in replay.points} if replay else {}
         initial_snapshots = [
             snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.INITIAL.value
         ]
-        replay_order = {
-            point.source_id: index for index, point in enumerate(replay.points if replay is not None else ())
-        }
+        replay_order = {point.source_id: index for index, point in enumerate(replay.points)} if replay else {}
+        replay_by_source = {point.source_id: point for point in replay.points} if replay else {}
         for snapshot in snapshots:
             if snapshot.point_type not in {
                 SnapshotPointType.INITIAL.value,
@@ -257,8 +248,8 @@ class AnalyticsService:
                 continue
             point = replay_by_snapshot.get(f"paper_account_snapshots:{snapshot.id}")
             quality = point.quality_status.value if point is not None else "invalid"
-            nav = point.nav if point is not None else None
-            shares = point.share_count if point is not None else None
+            nav = point.nav if point is not None else (snapshot.net_asset_value if replay is None else None)
+            shares = point.share_count if point is not None else (snapshot.share_count if replay is None else None)
             events.append(
                 (
                     AnalyticsService._utc(snapshot.event_at),
@@ -303,6 +294,7 @@ class AnalyticsService:
             if event_type not in {CashEventType.DEPOSIT, CashEventType.WITHDRAWAL}:
                 continue
             event_name = cast(Literal["deposit", "withdrawal"], event_type.value)
+            replay_point = replay_by_source.get(f"paper_cash_ledger:{entry.id}")
             events.append(
                 (
                     AnalyticsService._utc(entry.occurred_at),
@@ -317,12 +309,10 @@ class AnalyticsService:
                         id=entry.id,
                         occurred_at=AnalyticsService._utc(entry.occurred_at),
                         amount=Decimal(entry.amount).quantize(Decimal("0.0001")),
-                        effective_nav=Decimal(entry.net_asset_value).quantize(_QUANTIZE)
-                        if entry.net_asset_value is not None
+                        effective_nav=Decimal(replay_point.nav).quantize(_QUANTIZE)
+                        if replay_point is not None and replay_point.nav is not None
                         else None,
-                        share_delta=Decimal(entry.share_delta).quantize(_QUANTIZE)
-                        if entry.share_delta is not None
-                        else None,
+                        share_delta=None,
                     ),
                 )
             )
@@ -371,7 +361,7 @@ class AnalyticsService:
         self,
         initial_cash: Decimal,
         snapshots: list[PaperAccountSnapshot],
-        replay: ReplayResult | None = None,
+        replay: ReplayResult,
     ) -> OverviewAnalytics:
         if not snapshots:
             return OverviewAnalytics(total_return=MetricValue(value=None, reason="insufficient_data"))
@@ -384,7 +374,7 @@ class AnalyticsService:
                 if point.nav is not None and point.nav.is_finite() and point.nav > 0
             ),
             None,
-        ) if replay is not None else None
+        )
         total_return = self._linked_total_return(snapshots, replay)
         simple_asset_return = MetricValue(value=None, reason="invalid_initial_cash")
         if initial_cash and initial_cash > 0:
@@ -624,15 +614,8 @@ class AnalyticsService:
     # ------------------------------------------------------------------
     # Risk
     # ------------------------------------------------------------------
-    def _risk(
-        self,
-        replay: ReplayResult | list[PaperAccountSnapshot],
-        snapshots: list[PaperAccountSnapshot] | None = None,
-    ) -> RiskAnalytics:
-        if isinstance(replay, ReplayResult):
-            navs, issue = self._replay_nav_series(replay)
-        else:
-            navs, issue = self._nav_series(replay), None
+    def _risk(self, replay: ReplayResult) -> RiskAnalytics:
+        navs, issue = self._replay_nav_series(replay)
         if issue is not None:
             metric = MetricValue(value=None, reason=issue)
             return RiskAnalytics(

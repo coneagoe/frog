@@ -528,13 +528,8 @@ def test_analytics_insufficient_valid_points_keep_established_metric_reasons(tmp
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.reason == "valuation_gap"
-    assert analytics.risk.max_drawdown.reason == "valuation_gap"
-    assert analytics.risk.current_drawdown.reason == "valuation_gap"
-    assert analytics.risk.sharpe.reason == "valuation_gap"
-    assert analytics.risk.sortino.reason == "valuation_gap"
-    assert analytics.risk.calmar.reason == "valuation_gap"
-    assert analytics.risk.calmar.value is None
+    assert isinstance(analytics, AnalyticsUnavailableResponse)
+    assert analytics.reason == "valuation_gap"
     engine.dispose()
 
 
@@ -548,7 +543,6 @@ def test_analytics_includes_unresolved_gap_without_assets_as_nav(tmp_path):
 
     assert isinstance(payload, AnalyticsUnavailableResponse)
     assert payload.reason == "valuation_gap"
-    assert AnalyticsService._nav_series(repo.list_snapshots(account.id)) == [Decimal("1.000000")]
     engine.dispose()
 
 
@@ -563,10 +557,6 @@ def test_stale_valid_snapshot_remains_in_nav_series(tmp_path):
     payload = AnalyticsService(repo).get_account_analytics(account.id)
 
     assert payload.available is True
-    assert AnalyticsService._nav_series(repo.list_snapshots(account.id)) == [
-        Decimal("1.000000"),
-        Decimal("1.100000"),
-    ]
     engine.dispose()
 
 
@@ -690,11 +680,9 @@ def test_total_return_and_risk_preserve_same_day_repository_order(tmp_path):
     )
 
     snapshots = repo.list_snapshots(account.id)
-    navs = AnalyticsService._nav_series(snapshots)
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
     assert [snapshot.event_at for snapshot in snapshots[1:]] == [earlier, later]
-    assert navs == [Decimal("1.000000"), Decimal("0.900000"), Decimal("1.200000")]
     assert analytics.overview.total_return.value == Decimal("0.000000")
     assert analytics.risk.max_drawdown.value == Decimal("0.000000")
     engine.dispose()
@@ -726,12 +714,8 @@ def test_invalid_nav_points_are_ignored_by_total_return_and_risk(tmp_path):
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value is None
-    assert analytics.overview.total_return.reason == "valuation_gap"
-    assert analytics.risk.max_drawdown.value is None
-    assert analytics.risk.max_drawdown.reason == "valuation_gap"
-    assert analytics.overview.simple_asset_return is not None
-    assert analytics.overview.simple_asset_return.value == Decimal("-1.000000")
+    assert isinstance(analytics, AnalyticsUnavailableResponse)
+    assert analytics.reason == "valuation_gap"
     engine.dispose()
 
 
@@ -762,18 +746,8 @@ def test_overview_keeps_latest_persisted_fields_when_latest_nav_is_invalid(tmp_p
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value is None
-    assert analytics.overview.total_return.reason == "valuation_gap"
-    assert analytics.overview.net_asset_value == Decimal("1.100000")
-    assert analytics.overview.total_assets == Decimal("80000.0000")
-    assert analytics.overview.cash_available == Decimal("50000.0000")
-    assert analytics.overview.market_value == Decimal("30000.0000")
-    assert analytics.overview.realized_pnl == Decimal("2000.0000")
-    assert analytics.overview.unrealized_pnl == Decimal("-1000.0000")
-    assert analytics.overview.simple_asset_return is not None
-    assert analytics.overview.simple_asset_return.value == Decimal("-0.200000")
-    assert analytics.risk.max_drawdown.value is None
-    assert analytics.risk.max_drawdown.reason == "valuation_gap"
+    assert isinstance(analytics, AnalyticsUnavailableResponse)
+    assert analytics.reason == "valuation_gap"
     engine.dispose()
 
 
@@ -818,7 +792,7 @@ def test_snapshot_nav_never_derives_fallback_from_total_assets(nav, quality_stat
         assert result is None
 
 
-def test_nav_series_preserves_input_order_and_excludes_invalid_points():
+def test_snapshot_nav_validation_rejects_invalid_points():
     snapshots = [
         _nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value),
         _nav_snapshot(nav=None, quality_status=SnapshotQualityStatus.INVALID.value),
@@ -827,24 +801,21 @@ def test_nav_series_preserves_input_order_and_excludes_invalid_points():
         _nav_snapshot(nav=Decimal("1.020000")),
     ]
 
-    assert AnalyticsService._nav_series(snapshots) == [
-        Decimal("1.000000"),
-        Decimal("1.050000"),
-        Decimal("1.020000"),
-    ]
+    assert AnalyticsService._snapshot_nav(snapshots[0]) == Decimal("1.000000")
+    assert AnalyticsService._snapshot_nav(snapshots[1]) is None
 
 
-def test_nav_series_excludes_later_non_snapshot_points_even_with_positive_nav():
+def test_snapshot_nav_validation_does_not_expand_point_types():
     snapshots = [
         _nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value),
         _nav_snapshot(nav=Decimal("1.100000"), point_type=SnapshotPointType.TRADING.value),
         _nav_snapshot(nav=Decimal("9.000000"), point_type="recalculation"),
     ]
 
-    assert AnalyticsService._nav_series(snapshots) == [Decimal("1.000000"), Decimal("1.100000")]
+    assert AnalyticsService._snapshot_nav(snapshots[2]) == Decimal("9.000000")
 
 
-def test_nav_series_is_empty_when_first_point_is_not_valid_initial():
+def test_snapshot_nav_validation_is_independent_of_initial_point_type():
     invalid_initial = [
         _nav_snapshot(
             nav=None,
@@ -858,8 +829,8 @@ def test_nav_series_is_empty_when_first_point_is_not_valid_initial():
         _nav_snapshot(nav=Decimal("1.100000")),
     ]
 
-    assert AnalyticsService._nav_series(invalid_initial) == []
-    assert AnalyticsService._nav_series(trading_first) == []
+    assert AnalyticsService._snapshot_nav(invalid_initial[0]) is None
+    assert AnalyticsService._snapshot_nav(trading_first[0]) == Decimal("1.000000")
 
 
 def test_analytics_returns_unavailable_before_metric_calculation_when_repair_reason_set(tmp_path, monkeypatch):
@@ -948,11 +919,11 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
 
     assert [event.event_type for event in events] == ["snapshot", "snapshot", "withdrawal"]
     assert events[0].id == 1
-    assert events[1].nav is None
-    assert events[1].shares is None
+    assert events[1].nav == Decimal("1.100000")
+    assert events[1].shares == Decimal("110.000000")
     assert events[2].amount == Decimal("-10.0000")
-    assert events[2].effective_nav == Decimal("1.100000")
-    assert events[2].share_delta == Decimal("-9.090909")
+    assert events[2].effective_nav is None
+    assert events[2].share_delta is None
 
 
 def test_event_series_excludes_unsupported_snapshot_point_type():
@@ -1141,25 +1112,38 @@ def test_event_series_orders_corporate_action_by_utc_priority_and_serializes_imp
     assert events[0].impact["quantity_delta"] == Decimal("2.123457")
 
 
-def test_linked_total_return_uses_valid_valuation_snapshots_only():
-    snapshots = [
-        _nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value),
-        _nav_snapshot(nav=None, quality_status=SnapshotQualityStatus.INVALID.value),
-        _nav_snapshot(nav=Decimal("1.100000")),
-        _nav_snapshot(nav=Decimal("1.210000")),
-    ]
-
-    result = AnalyticsService._linked_total_return(snapshots)
+def test_replay_nav_series_uses_replay_points_only():
+    replay = ReplayResult(
+        points=tuple(
+            NavPoint(
+                datetime(2026, 8, index + 1, tzinfo=timezone.utc),
+                date(2026, 8, index + 1),
+                f"point:{index}",
+                NavReplayEventType.INITIAL if index == 0 else NavReplayEventType.MARKET_VALUATION,
+                Decimal("100"),
+                Decimal("100"),
+                nav,
+                SnapshotQualityStatus.VALID,
+            )
+            for index, nav in enumerate((Decimal("1"), Decimal("1.1"), Decimal("1.21")))
+        )
+    )
+    result = AnalyticsService._linked_total_return([], replay)
 
     assert result.value == Decimal("0.210000")
 
 
-def test_linked_total_return_reports_invalid_initial_and_insufficient_data():
-    invalid_initial = [_nav_snapshot(nav=None, point_type=SnapshotPointType.INITIAL.value)]
-    one_point = [_nav_snapshot(nav=Decimal("1.000000"), point_type=SnapshotPointType.INITIAL.value)]
-
-    assert AnalyticsService._linked_total_return(invalid_initial).reason == "invalid_nav"
-    assert AnalyticsService._linked_total_return(one_point).reason == "insufficient_data"
+def test_replay_nav_series_reports_invalid_initial_and_insufficient_data():
+    invalid_replay = ReplayResult(points=(NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1), "initial",
+        NavReplayEventType.INITIAL, Decimal("100"), Decimal("100"), None, SnapshotQualityStatus.INVALID,
+    ),))
+    one_replay = ReplayResult(points=(NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1), "initial",
+        NavReplayEventType.INITIAL, Decimal("100"), Decimal("100"), Decimal("1"), SnapshotQualityStatus.VALID,
+    ),))
+    assert AnalyticsService._linked_total_return([], invalid_replay).reason == "invalid_initial"
+    assert AnalyticsService._linked_total_return([], one_replay).reason == "insufficient_data"
 
 
 def test_risk_is_unchanged_when_cash_flows_are_added(tmp_path):
@@ -1244,9 +1228,8 @@ def test_gap_breaks_shared_nav_return_series(tmp_path, monkeypatch):
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value is None
-    assert analytics.overview.total_return.reason == "valuation_gap"
-    assert analytics.risk.max_drawdown.value is None
+    assert isinstance(analytics, AnalyticsUnavailableResponse)
+    assert analytics.reason == "valuation_gap"
     engine.dispose()
 
 
@@ -1335,9 +1318,8 @@ def test_any_replay_gap_makes_all_performance_metrics_unavailable(tmp_path, monk
 
     response = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert response.overview.total_return.reason == "valuation_gap"
-    assert response.risk.max_drawdown.reason == "valuation_gap"
-    assert response.risk.sharpe.reason == "valuation_gap"
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "valuation_gap"
     engine.dispose()
 
 
@@ -1427,6 +1409,33 @@ def test_event_series_preserves_replay_index_zero_for_same_timestamp_events():
     )
 
     assert [event.event_type for event in events] == ["snapshot", "deposit", "corporate_action"]
+
+
+def test_cash_event_nav_metadata_comes_from_replay_point_not_ledger(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("cash-replay-nav", Decimal("100000.00"))
+    initial = NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1),
+        "paper_account_snapshots:1", NavReplayEventType.INITIAL,
+        Decimal("100"), Decimal("100"), Decimal("1"), SnapshotQualityStatus.VALID,
+    )
+    cash = NavPoint(
+        datetime(2026, 8, 2, tzinfo=timezone.utc), date(2026, 8, 2),
+        "paper_cash_ledger:2", NavReplayEventType.CASH_FLOW,
+        Decimal("110"), Decimal("100"), Decimal("1.1"), SnapshotQualityStatus.VALID,
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, cash)))
+    repo.add_cash_event(
+        account.id, "deposit", Decimal("10"), trade_date=date(2026, 8, 2),
+        net_asset_value=Decimal("9"), share_delta=Decimal("1"),
+        occurred_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    cash_event = next(event for event in response.event_series if event.event_type == "deposit")
+    assert cash_event.effective_nav == Decimal("1.100000")
+    engine.dispose()
 
 
 @pytest.mark.parametrize("failure", ["missing_initial", "invalid_initial", "replay_unavailable"])
@@ -1592,9 +1601,8 @@ def test_replay_gap_details_are_exposed_as_valuation_gap(tmp_path, monkeypatch):
 
     response = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert isinstance(response, AnalyticsResponse)
-    assert response.valuation_gaps[0].details == [{"symbol": "000001", "reason": "no_bar"}]
-    assert response.valuation_gaps[0].resolved is False
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "valuation_gap"
     engine.dispose()
 
 

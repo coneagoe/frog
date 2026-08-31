@@ -160,3 +160,4 @@ class AnalyticsResponse(BaseModel):
 class AnalyticsUnavailableResponse(BaseModel):
     available: Literal[False] = False
     reason: AnalyticsUnavailableReason
+    valuation_gaps: list[ValuationGapResponse] | None = None

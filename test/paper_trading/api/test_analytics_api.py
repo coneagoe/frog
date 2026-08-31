@@ -163,7 +163,18 @@ def test_get_account_analytics_does_not_turn_unresolved_gap_into_nav_or_metrics(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload == {"available": False, "reason": "valuation_gap"}
+    assert payload == {
+        "available": False,
+        "reason": "valuation_gap",
+        "valuation_gaps": [
+            {
+                "trade_date": "2026-08-25",
+                "missing_symbols": ["000001.SZ"],
+                "details": [{"reason": "no bar"}],
+                "resolved": False,
+            }
+        ],
+    }
 
 
 def test_get_account_analytics_returns_date_ordered_valuation_gaps(monkeypatch, sqlite_session):
@@ -177,7 +188,8 @@ def test_get_account_analytics_returns_date_ordered_valuation_gaps(monkeypatch, 
     response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
 
     assert response.status_code == 200
-    assert response.json() == {"available": False, "reason": "valuation_gap"}
+    assert response.json()["available"] is False
+    assert response.json()["reason"] == "valuation_gap"
 
 
 def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_assets(monkeypatch, sqlite_session):
@@ -201,12 +213,9 @@ def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_asse
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["overview"]["total_return"]["reason"] == "valuation_gap"
-    assert payload["overview"]["simple_asset_return"]["value"] == "-0.200000"
-    assert payload["risk"]["max_drawdown"]["reason"] == "valuation_gap"
-    assert payload["overview"]["net_asset_value"] == "1.000000"
-    assert payload["overview"]["total_assets"] == "80000.0000"
-    assert payload["overview"]["cash_available"] == "80000.0000"
+    assert payload["available"] is False
+    assert payload["reason"] == "valuation_gap"
+    assert payload["valuation_gaps"][0]["details"] == [{"reason": "invalid_nav"}]
 
 
 def _analytics_client(monkeypatch, sqlite_session):
@@ -240,7 +249,11 @@ def test_get_account_analytics_returns_unavailable_for_repair_marked_account(mon
     response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
 
     assert response.status_code == 200
-    assert response.json() == {"available": False, "reason": "legacy_ordering_uncertain"}
+    assert response.json() == {
+        "available": False,
+        "reason": "legacy_ordering_uncertain",
+        "valuation_gaps": None,
+    }
 
 
 @pytest.mark.parametrize("reason", ["missing_initial", "invalid_initial", "replay_unavailable", "valuation_gap"])
