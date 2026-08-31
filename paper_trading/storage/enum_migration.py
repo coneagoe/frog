@@ -604,13 +604,13 @@ def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
 
 
 def _adapter_rollback(connection: Connection) -> bool:
-    dropped_additive_tables = _drop_additive_governed_tables(connection)
     _adapter_preflight(connection, rollback=True)
     if all(
         not _table_exists(connection, table.name) for table in _GOVERNED_TABLES
     ) and not _diagnostics_only_market_state(connection):
-        return dropped_additive_tables
+        return False
     _reject_legacy_key_collisions(connection)
+    dropped_additive_tables = _drop_additive_governed_tables(connection)
     changed = _rollback(connection, PAPER_TRADING_ENUM_GROUPS)
     return _drop_etf_commission_rate_column(connection) or changed or dropped_additive_tables
 
@@ -704,8 +704,6 @@ def migrate_paper_trading_enums(
     if connection.dialect.name != "postgresql":
         return _result(dry_run=dry_run, rollback=rollback)
 
-    if rollback and not dry_run:
-        _drop_additive_governed_tables(connection)
     PAPER_TRADING_ENUM_ADAPTER.preflight(connection, rollback=rollback)
     if dry_run:
         return _result(dry_run=True, rollback=rollback)

@@ -23,7 +23,8 @@
 - PostgreSQL enum migration treats `paper_order_events` as an additive
   governed table, permits it to be absent during preflight, creates it with
   the native `paper_order_event_type` and its event-type index, reruns
-  idempotently, and drops it before rollback enum dependency checks.
+  idempotently, and drops it only after every rollback enum dependency,
+  additive-column, and legacy-key collision preflight check has passed.
 
 ## Scope
 
@@ -53,6 +54,11 @@
 - TDD RED: PostgreSQL enum preflight treated the additive order-event table as
   a partially missing governed table, and rollback retained its enum
   dependencies; both migration regressions now pass.
+- TDD RED: a `paper_order_side` view dependency made rollback fail after the
+  wrapper had already deleted `paper_order_events`; rollback now preserves the
+  additive table, its append-only facts, and `paper_order_event_type` until
+  the complete rollback preflight has succeeded. The public wrapper and
+  adapter entry points share this behavior.
 - Lifecycle facts: idempotency/immutability, partial fill -> rebuild ->
   remaining fill, repeated partial-fill rebuild -> fill/cancel/reject,
   fill trade link, delete retention, and reject/release transitions.
@@ -94,6 +100,18 @@
   `131 passed, 7 skipped, 2 broad storage failures` after the lifecycle tests.
 - `tools/run_tests.sh test/paper_trading/storage/test_enum_migration.py test/paper_trading/storage/test_corporate_action_migration.py -q`:
   `45 passed`.
+- `tools/run_tests.sh test/paper_trading/storage/test_enum_migration.py -q`:
+  `40 passed`. This includes wrapper and adapter regression coverage: a
+  `paper_order_side` view dependency rejects rollback while preserving a
+  stored order-event fact; after removing the view, rollback removes both the
+  additive table and `paper_order_event_type`.
+- `uv run pytest test/paper_trading/services/test_order_delete_service.py
+  test/paper_trading/services/test_matching_service.py
+  test/paper_trading/services/test_order_service.py -q`: `147 passed`.
+- `uv run ruff check paper_trading/storage/enum_migration.py
+  test/paper_trading/storage/test_enum_migration.py` and `uv run ruff format
+  --check paper_trading/storage/enum_migration.py
+  test/paper_trading/storage/test_enum_migration.py`: passed.
 
 ## Known Test Gap
 

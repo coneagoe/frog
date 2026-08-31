@@ -294,6 +294,53 @@ def test_pre_task5_missing_order_events_is_additive_and_rollback_safe(postgres_s
         assert _enum_types(connection) == set()
 
 
+@pytest.mark.parametrize("use_wrapper", (True, False), ids=("wrapper", "adapter"))
+def test_rollback_dependency_failure_preserves_additive_order_event_facts(postgres_schema, use_wrapper):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(text("INSERT INTO paper_accounts (id, status, fee_preset) VALUES (1, 'active', 'a_share')"))
+        connection.execute(
+            text(
+                "INSERT INTO paper_order_events "
+                "(account_id, order_id, symbol, event_type, event_at, event_time_provenance, quantity_delta, cash_delta, idempotency_key) "
+                "VALUES (1, 1, '000001', 'accepted', now(), 'canonical_utc', 100, 0, 'rollback-safety')"
+            )
+        )
+        connection.execute(text("CREATE VIEW paper_order_side_dependency AS SELECT 'buy'::paper_order_side AS side"))
+
+        rollback = (
+            (lambda: migrate_paper_trading_enums(connection, rollback=True))
+            if use_wrapper
+            else (lambda: PAPER_TRADING_ENUM_ADAPTER.rollback(connection))
+        )
+        with pytest.raises(PaperTradingEnumMigrationError, match="paper_order_side: dependencies remain"):
+            rollback()
+
+        assert _table_exists(connection, "paper_order_events")
+        assert (
+            connection.execute(text("SELECT idempotency_key FROM paper_order_events")).scalar_one() == "rollback-safety"
+        )
+        assert _enum_labels(connection, "paper_order_event_type") == (
+            "accepted",
+            "reserved",
+            "fill",
+            "cancel",
+            "reject",
+            "release",
+        )
+
+        connection.execute(text("DROP VIEW paper_order_side_dependency"))
+
+        if use_wrapper:
+            assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
+        else:
+            assert PAPER_TRADING_ENUM_ADAPTER.rollback(connection) is True
+            PAPER_TRADING_ENUM_ADAPTER.verify(connection, rollback=True)
+        assert not _table_exists(connection, "paper_order_events")
+        assert "paper_order_event_type" not in _enum_types(connection)
+
+
 def test_apply_adds_missing_nullable_migration_repair_reason_column(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
