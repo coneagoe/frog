@@ -1,4 +1,4 @@
-from datetime import date, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -10,11 +10,13 @@ from paper_trading.api.routers import analytics as analytics_router
 from paper_trading.domain.enums import (
     CorporateActionType,
     MigrationRepairReason,
+    NavReplayEventType,
     OrderSide,
     OrderStatus,
     SnapshotPointType,
     SnapshotQualityStatus,
 )
+from paper_trading.domain.nav_replay import NavPoint, ReplayResult
 from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.storage.models import PaperAccountSnapshot
 from paper_trading.storage.repository import PaperTradingRepository
@@ -217,6 +219,51 @@ def test_get_account_analytics_ignores_invalid_nav_and_does_not_derive_from_asse
     assert payload["available"] is False
     assert payload["reason"] == "valuation_gap"
     assert payload["valuation_gaps"][0]["details"] == [{"reason": "invalid_nav"}]
+
+
+def test_get_account_analytics_invalid_replay_nav_returns_diagnostic_gap(monkeypatch, sqlite_session):
+    client, headers, repo = _analytics_client(monkeypatch, sqlite_session)
+    account = repo.create_account("api-invalid-replay-nav", Decimal("100000.00"))
+    initial = NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    invalid = NavPoint(
+        datetime(2026, 8, 2, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:valuation",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("0"),
+        SnapshotQualityStatus.VALID,
+    )
+    monkeypatch.setattr(
+        "paper_trading.services.analytics_service.NavSeriesBuilder.build",
+        lambda self, account_id: ReplayResult((initial, invalid)),
+    )
+
+    response = client.get(f"/paper/accounts/{account.id}/analytics", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "available": False,
+        "reason": "valuation_gap",
+        "valuation_gaps": [
+            {
+                "trade_date": "2026-08-02",
+                "missing_symbols": [],
+                "details": [{"reason": "invalid_nav"}],
+                "resolved": False,
+            }
+        ],
+    }
 
 
 def _analytics_client(monkeypatch, sqlite_session):

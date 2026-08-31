@@ -162,6 +162,8 @@ class AnalyticsService:
             for point in replay.points
             if point.quality_status is not SnapshotQualityStatus.VALID
             or point.nav is None
+            or not point.nav.is_finite()
+            or point.nav <= 0
         ]
 
     # ------------------------------------------------------------------
