@@ -57,19 +57,32 @@ class AnalyticsService:
             return AnalyticsUnavailableResponse(reason=MigrationRepairReason(account.migration_repair_reason))
         orders = self.repo.list_orders(account_id)
         snapshots = self.repo.list_snapshots(account_id)
-        replay: ReplayResult | None = None
-        if hasattr(self.repo, "list_replay_events"):
-            initial_snapshots = [
-                snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.INITIAL.value
-            ]
-            if not initial_snapshots:
-                return AnalyticsUnavailableResponse(reason="missing_initial")
-            if any(snapshot.quality_status != SnapshotQualityStatus.VALID.value for snapshot in initial_snapshots):
-                return AnalyticsUnavailableResponse(reason="invalid_initial")
-            try:
-                replay = NavSeriesBuilder(repo=self.repo).build(account_id)
-            except ValueError:
-                return AnalyticsUnavailableResponse(reason="replay_unavailable")
+        if not hasattr(self.repo, "list_replay_events"):
+            return AnalyticsUnavailableResponse(reason="replay_unavailable")
+        initial_snapshots = [
+            snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.INITIAL.value
+        ]
+        if not initial_snapshots:
+            return AnalyticsUnavailableResponse(reason="missing_initial")
+        if any(snapshot.quality_status != SnapshotQualityStatus.VALID.value for snapshot in initial_snapshots):
+            return AnalyticsUnavailableResponse(reason="invalid_initial")
+        if any(self._snapshot_nav(snapshot) is None for snapshot in initial_snapshots):
+            return AnalyticsUnavailableResponse(reason="invalid_initial")
+        try:
+            replay = NavSeriesBuilder(repo=self.repo).build(account_id)
+        except ValueError:
+            return AnalyticsUnavailableResponse(reason="replay_unavailable")
+        if not replay.points or replay.points[0].event_type.value != SnapshotPointType.INITIAL.value:
+            return AnalyticsUnavailableResponse(reason="missing_initial")
+        if replay.points[0].quality_status is not SnapshotQualityStatus.VALID or replay.points[0].nav is None:
+            return AnalyticsUnavailableResponse(reason="invalid_initial")
+        if any(
+            snapshot.quality_status == SnapshotQualityStatus.VALID.value
+            and self._snapshot_nav(snapshot) is None
+            for snapshot in snapshots
+            if snapshot.point_type != SnapshotPointType.INITIAL.value
+        ):
+            return AnalyticsUnavailableResponse(reason="valuation_gap")
         ledger_entries = self.repo.list_cash_ledger(account_id)
         corporate_actions = (
             self.repo.list_corporate_actions(account_id) if hasattr(self.repo, "list_corporate_actions") else []

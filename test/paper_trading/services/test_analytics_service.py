@@ -613,11 +613,12 @@ def test_analytics_orders_same_date_gaps_by_persisted_id():
         list_snapshots=lambda _account_id: [],
         list_cash_ledger=lambda _account_id: [],
         list_round_trips=lambda _account_id: [],
+        list_replay_events=lambda _account_id: [],
     )
 
-    payload = AnalyticsService(cast(PaperTradingRepository, repo)).get_account_analytics(1)
+    payload = AnalyticsService(cast(PaperTradingRepository, repo))._valuation_gaps(1)
 
-    assert [gap.details[0]["reason"] for gap in payload.valuation_gaps] == ["first", "second"]
+    assert [gap.details[0]["reason"] for gap in payload] == ["first", "second"]
     assert [str(ordering) for ordering in query.order_by_args] == [
         "paper_valuation_gaps.trade_date ASC",
         "paper_valuation_gaps.id ASC",
@@ -1200,8 +1201,8 @@ def test_analytics_metrics_consume_replay_result_not_persisted_snapshot_nav(tmp_
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value is None
-    assert analytics.overview.total_return.reason == "missing_initial"
+    assert isinstance(analytics, AnalyticsUnavailableResponse)
+    assert analytics.reason == "missing_initial"
     engine.dispose()
 
 
@@ -1449,4 +1450,81 @@ def test_analytics_exposes_structured_replay_unavailable_reason(tmp_path, monkey
 
     assert isinstance(response, AnalyticsUnavailableResponse)
     assert response.reason == failure
+    engine.dispose()
+
+
+def test_analytics_requires_replay_series_instead_of_snapshot_fallback():
+    account = SimpleNamespace(initial_cash=Decimal("100"), migration_repair_reason=None)
+    repo = SimpleNamespace(
+        get_account=lambda _account_id: account,
+        list_orders=lambda _account_id: [],
+        list_snapshots=lambda _account_id: [
+            _nav_snapshot(nav=Decimal("1"), point_type=SnapshotPointType.INITIAL.value)
+        ],
+        list_cash_ledger=lambda _account_id: [],
+        list_round_trips=lambda _account_id: [],
+        session=SimpleNamespace(
+            query=lambda *_args: SimpleNamespace(
+                filter=lambda *_a: SimpleNamespace(order_by=lambda *_a: SimpleNamespace(all=lambda: []))
+            )
+        ),
+    )
+
+    response = AnalyticsService(cast(PaperTradingRepository, repo)).get_account_analytics(1)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "replay_unavailable"
+
+
+def test_valid_initial_snapshot_without_nav_is_unavailable(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("missing-initial-nav", Decimal("100000.00"))
+    initial = repo.list_snapshots(account.id)[0]
+    initial.net_asset_value = None
+    session.flush()
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "invalid_initial"
+    engine.dispose()
+
+
+def test_replay_invalid_initial_is_unavailable_even_when_snapshot_initial_is_valid(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("replay-invalid-initial", Decimal("100000.00"))
+    initial = NavPoint(
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial,)))
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "invalid_initial"
+    engine.dispose()
+
+
+def test_valid_trading_snapshot_without_nav_is_not_reconstructed_from_assets(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("missing-trading-nav", Decimal("100000.00"))
+    seed_trading_point(
+        repo,
+        account,
+        nav=None,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        total_assets=Decimal("200000"),
+    )
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == "valuation_gap"
     engine.dispose()

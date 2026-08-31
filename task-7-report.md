@@ -6,7 +6,7 @@ Task 7 changes are limited to analytics schemas/service and analytics service/AP
 
 ## Implementation
 
-- Analytics now builds a shared `ReplayResult` through `NavSeriesBuilder` when the repository exposes replay events.
+- Analytics requires a shared `ReplayResult` from `NavSeriesBuilder`; repositories without the replay seam return `replay_unavailable` instead of using snapshot-only metrics.
 - Performance and risk metrics consume the same replay-derived NAV series, excluding cash-flow replay points from return sampling.
 - Missing and invalid initial points return `available=false` with distinct `missing_initial` and `invalid_initial` reasons; replay failures return `replay_unavailable`.
 - Any invalid replay point surfaces `valuation_gap` for all performance/risk metrics; no NAV or return is synthesized across a gap.
@@ -19,11 +19,11 @@ Task 7 changes are limited to analytics schemas/service and analytics service/AP
 
 - Added a failing test proving analytics ignored a replay-only result before implementation.
 - Added failing tests for replay-only NAV authority, gaps after multiple valid NAV points, structured availability reasons, and same-time replay ordering.
-- Implemented the shared replay path, then verified both tests passed.
+- Implemented the shared replay path, then verified the new review-finding tests and the complete focused suites passed.
 
 ## Verification
 
-- Focused analytics service/API tests: `69 passed, 1 warning`
+- Focused analytics service/API tests: `73 passed, 1 warning`
 - Scoped Ruff: passed for analytics service/schema and analytics service/API tests
 - `git diff --check`: passed
 - Warning: installed Starlette emits an `httpx` deprecation warning from `TestClient`; unrelated to Task 7.
