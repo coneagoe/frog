@@ -583,6 +583,65 @@ def test_rebuild_then_reject_releases_only_partially_filled_buy_remainder(sessio
     assert release.cash_delta == Decimal("600.000000000000")
 
 
+def test_repeated_partial_fill_rebuild_does_not_accumulate_regenerated_fills(session):
+    repo = PaperTradingRepository(session)
+    market_data = FakeMarketDataProvider()
+    account = repo.create_account("repeated-partial-rebuild", Decimal("100000"))
+    trade_date = date(2026, 7, 17)
+    order = _seed_partially_filled_buy(repo, account.id, trade_date)
+
+    rebuild_service = OrderDeleteService(repo, market_data)
+    rebuild_service.rebuild_account_from(account.id, trade_date, [order.id])
+    first_rebuild = repo.get_order(order.id)
+    assert first_rebuild.filled_quantity == 100
+    assert [trade.quantity for trade in repo.list_trades(account.id)] == [60]
+    assert repo.cumulative_order_filled_quantity(account.id, order.id) == 40
+
+    rebuild_service.rebuild_account_from(account.id, trade_date, [order.id])
+
+    rebuilt = repo.get_order(order.id)
+    assert repo.cumulative_order_filled_quantity(account.id, order.id) == 40
+    assert rebuilt.filled_quantity == 100
+    assert [trade.quantity for trade in repo.list_trades(account.id)] == [60]
+
+
+@pytest.mark.parametrize("terminal_event", [PaperOrderEventType.CANCEL, PaperOrderEventType.REJECT])
+def test_repeated_partial_fill_rebuild_then_terminal_keeps_original_fill_count(session, terminal_event):
+    repo = PaperTradingRepository(session)
+    account = repo.create_account("repeated-partial-terminal", Decimal("100000"))
+    trade_date = date(2026, 7, 17)
+    order = _seed_partially_filled_buy(repo, account.id, trade_date)
+    market_data = FakeMarketDataProvider()
+    rebuild_service = OrderDeleteService(repo, market_data)
+
+    rebuild_service.rebuild_account_from(account.id, trade_date, [order.id])
+    repo.reset_orders_for_replay(account.id)
+    repo.start_order_replay_lifecycle(repo.get_order(order.id))
+    order = repo.get_order(order.id)
+    order.status = OrderStatus.ACCEPTED.value
+    repo.session.flush()
+
+    if terminal_event == PaperOrderEventType.CANCEL:
+        OrderService(repo, market_data).cancel_order(order.id)
+    else:
+        MatchingService(repo, market_data, SnapshotService(repo, market_data))._reject_order(
+            order, "SUSPENDED_SYMBOL", "Symbol is suspended"
+        )
+
+    terminal = repo.get_order(order.id)
+    effective_events = repo.list_effective_order_events(account.id, order.id)
+    assert terminal.filled_quantity == 40
+    assert sum(event.quantity_delta for event in effective_events) == Decimal("0")
+    assert sum(event.cash_delta for event in effective_events) == Decimal("0")
+    assert [trade.quantity for trade in repo.list_trades(account.id)] == [60]
+    fill_events = [
+        event
+        for event in repo.list_order_events(account.id, order.id)
+        if event.event_type == PaperOrderEventType.FILL.value
+    ]
+    assert len(fill_events) == 2
+
+
 def test_rebuild_isolates_missing_untouched_and_suspended_orders(session):
     repo = PaperTradingRepository(session)
     missing_date = date(2026, 7, 17)

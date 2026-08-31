@@ -9,7 +9,10 @@
 - Replay lifecycle creation now copies the reservation from the current
   effective epoch. The copied reservation is its remaining balance after
   lifecycle fills/releases, so a partial fill only restores the unfilled cash
-  and quantity rather than the original order amount.
+  and quantity rather than the original order amount. Historical execution
+  facts are bounded to the original append-only epoch for cumulative projection;
+  regenerated fills from later epochs are replaceable rebuild output and are
+  never added to `filled_quantity` again.
 - Reservation restore, cancel/reject release, and fill settlement use the
   effective event balance rather than mutable order frozen fields. Lifecycle
   idempotency keys include the replay lifecycle, allowing regenerated facts to
@@ -51,8 +54,8 @@
   a partially missing governed table, and rollback retained its enum
   dependencies; both migration regressions now pass.
 - Lifecycle facts: idempotency/immutability, partial fill -> rebuild ->
-  remaining fill, partial fill -> rebuild -> cancel/reject, fill trade link,
-  delete retention, and reject/release transitions.
+  remaining fill, repeated partial-fill rebuild -> fill/cancel/reject,
+  fill trade link, delete retention, and reject/release transitions.
 - Corporate actions: consecutive splits, late action with frozen sell,
   rights/cash flows, HK pending behavior, and order/trade immutability.
 - Migration: SQLite table creation/rerun and a real PostgreSQL pre-Task5
@@ -65,6 +68,16 @@
   100-unit replay trade; it now passes with one 60-unit trade and cumulative
   `filled_quantity=100`. The cancel/reject cases pass with a 60-unit release
   and `filled_quantity=40`.
+- Critical repeated-epoch regression: the test first reproduced
+  `filled_quantity=160` after two rebuilds. Projection now counts the original
+  40-unit execution once, restores only the current 60-unit reservation, and
+  keeps the rebuilt output at one 60-unit trade. Repeated terminal transitions
+  retain `filled_quantity=40` and release only the current 60-unit balance.
+- The repeated-epoch projection is ordered by append-only event id, not
+  `event_at`: replay accepted events reuse the reservation timestamp and can
+  otherwise sort before the original execution. This preserves a stable
+  original-epoch/current-epoch boundary and keeps lifecycle idempotency keys
+  tied to the latest accepted event id.
 - `uv run pytest test/paper_trading/services/test_order_delete_service.py
   test/paper_trading/services/test_matching_service.py
   test/paper_trading/services/test_order_service.py -q`: `144 passed`.
@@ -72,12 +85,15 @@
   the failure was lifecycle replay funding residue: a near-zero effective
   cash balance (`1E-12`) prevented the intended insufficient-cash rejection.
   Replay cash is now normalized at the lifecycle projection boundary.
+- The extended lifecycle and corporate-action verification command covers
+  order deletion, rebuild, matching, order service, and corporate projection:
+  `178 passed`.
 - `uv run pytest test/paper_trading/storage/test_repository.py
   test/paper_trading/services/test_corporate_action_service.py
   test/paper_trading/storage/test_corporate_action_migration.py -q`:
-  `162 passed, 7 skipped, 2 broad storage failures` after the lifecycle tests.
+  `131 passed, 7 skipped, 2 broad storage failures` after the lifecycle tests.
 - `tools/run_tests.sh test/paper_trading/storage/test_enum_migration.py test/paper_trading/storage/test_corporate_action_migration.py -q`:
-  `44 passed`.
+  `45 passed`.
 
 ## Known Test Gap
 

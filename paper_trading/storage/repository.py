@@ -773,11 +773,27 @@ class PaperTradingRepository:
         return events[0].id if events and events[0].event_type == PaperOrderEventType.ACCEPTED.value else None
 
     def cumulative_order_filled_quantity(self, account_id: int, order_id: int) -> int:
-        """Project cumulative executions without mutating append-only facts."""
+        """Return immutable executions from the order's original lifecycle epoch."""
+        events = list(
+            self.session.query(PaperOrderEvent)
+            .filter(PaperOrderEvent.account_id == account_id, PaperOrderEvent.order_id == order_id)
+            .order_by(PaperOrderEvent.id.asc())
+            .all()
+        )
+        accepted_indexes = [
+            index for index, event in enumerate(events) if event.event_type == PaperOrderEventType.ACCEPTED.value
+        ]
+        if not accepted_indexes:
+            return 0
+        accepted_index = accepted_indexes[0]
+        next_accepted_index = next(
+            (index for index in accepted_indexes if index > accepted_index),
+            len(events),
+        )
         filled = sum(
             (
                 -Decimal(event.quantity_delta)
-                for event in self.list_order_events(account_id, order_id)
+                for event in events[accepted_index:next_accepted_index]
                 if event.event_type == PaperOrderEventType.FILL.value
             ),
             Decimal("0"),
@@ -807,6 +823,12 @@ class PaperTradingRepository:
             remaining_cash = Decimal("0")
         if OrderSide(order.side) == OrderSide.SELL:
             remaining_cash = Decimal("0")
+        accepted_count = sum(
+            event.event_type == PaperOrderEventType.ACCEPTED.value for event in original
+        )
+        if accepted_count > 1:
+            remaining_quantity = max(Decimal(reservation.quantity_delta), Decimal("0"))
+            remaining_cash = min(Decimal(reservation.cash_delta), Decimal("0"))
         if remaining_quantity == 0 and (OrderSide(order.side) == OrderSide.SELL or remaining_cash == 0):
             remaining_quantity = Decimal(reservation.quantity_delta)
             remaining_cash = Decimal(reservation.cash_delta)
