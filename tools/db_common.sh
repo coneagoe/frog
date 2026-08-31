@@ -46,6 +46,7 @@ BUSINESS_TABLES=(
   paper_positions
   paper_position_lots
   paper_orders
+  paper_order_events
   paper_trade_validity_checks
   paper_trades
   paper_position_round_trips

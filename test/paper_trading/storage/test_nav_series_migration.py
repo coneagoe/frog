@@ -7,6 +7,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import Enum as SqlAlchemyEnum
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import OperationalError
@@ -226,6 +227,12 @@ def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
             for group in PAPER_TRADING_ENUM_GROUPS
             if any(column.table_name in missing_tables for column in group.columns)
         }
+        required_enum_types.update(
+            column.type.name
+            for table in missing_metadata_tables
+            for column in table.columns
+            if isinstance(column.type, SqlAlchemyEnum) and column.type.name is not None
+        )
 
         for group in PAPER_TRADING_ENUM_GROUPS:
             if group.type_name not in required_enum_types:
@@ -1133,7 +1140,8 @@ def test_nav_series_migration_prefers_available_timestamp_over_date_fallback():
                     CREATE TABLE paper_position_lots (
                         id integer PRIMARY KEY,
                         account_id integer NOT NULL,
-                        buy_trade_date date NOT NULL
+                        buy_trade_date date NOT NULL,
+                        cost_price numeric(20, 4) NOT NULL DEFAULT 0
                     )
                     """
                 )
@@ -1575,10 +1583,7 @@ def test_sqlite_legacy_source_timestamp_date_conflict_marks_account_for_repair(t
             )
         )
         connection.execute(
-            text(
-                "INSERT INTO paper_trades VALUES "
-                "(1, 1, '2026-01-03 16:00:00', '2026-01-01', 'canonical_utc')"
-            )
+            text("INSERT INTO paper_trades VALUES (1, 1, '2026-01-03 16:00:00', '2026-01-01', 'canonical_utc')")
         )
 
     ensure_paper_trading_schema(engine)

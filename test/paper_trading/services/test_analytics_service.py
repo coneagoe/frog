@@ -1151,14 +1151,34 @@ def test_replay_nav_series_uses_replay_points_only():
 
 
 def test_replay_nav_series_reports_invalid_initial_and_insufficient_data():
-    invalid_replay = ReplayResult(points=(NavPoint(
-        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1), "initial",
-        NavReplayEventType.INITIAL, Decimal("100"), Decimal("100"), None, SnapshotQualityStatus.INVALID,
-    ),))
-    one_replay = ReplayResult(points=(NavPoint(
-        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1), "initial",
-        NavReplayEventType.INITIAL, Decimal("100"), Decimal("100"), Decimal("1"), SnapshotQualityStatus.VALID,
-    ),))
+    invalid_replay = ReplayResult(
+        points=(
+            NavPoint(
+                datetime(2026, 8, 1, tzinfo=timezone.utc),
+                date(2026, 8, 1),
+                "initial",
+                NavReplayEventType.INITIAL,
+                Decimal("100"),
+                Decimal("100"),
+                None,
+                SnapshotQualityStatus.INVALID,
+            ),
+        )
+    )
+    one_replay = ReplayResult(
+        points=(
+            NavPoint(
+                datetime(2026, 8, 1, tzinfo=timezone.utc),
+                date(2026, 8, 1),
+                "initial",
+                NavReplayEventType.INITIAL,
+                Decimal("100"),
+                Decimal("100"),
+                Decimal("1"),
+                SnapshotQualityStatus.VALID,
+            ),
+        )
+    )
     assert AnalyticsService._linked_total_return([], invalid_replay).reason == "invalid_initial"
     assert AnalyticsService._linked_total_return([], one_replay).reason == "insufficient_data"
 
@@ -1210,6 +1230,7 @@ def test_analytics_metrics_consume_replay_result_not_persisted_snapshot_nav(tmp_
 def test_gap_breaks_shared_nav_return_series(tmp_path, monkeypatch):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("gap-breaks-analytics", Decimal("100000.00"))
+
     def point(day: int, nav: Decimal | None, quality: SnapshotQualityStatus) -> NavPoint:
         return NavPoint(
             event_at=datetime(2026, 8, day, tzinfo=timezone.utc),
@@ -1432,19 +1453,33 @@ def test_cash_event_nav_metadata_comes_from_replay_point_not_ledger(tmp_path, mo
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("cash-replay-nav", Decimal("100000.00"))
     initial = NavPoint(
-        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1),
-        "paper_account_snapshots:1", NavReplayEventType.INITIAL,
-        Decimal("100"), Decimal("100"), Decimal("1"), SnapshotQualityStatus.VALID,
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "paper_account_snapshots:1",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
     )
     cash = NavPoint(
-        datetime(2026, 8, 2, tzinfo=timezone.utc), date(2026, 8, 2),
-        "paper_cash_ledger:2", NavReplayEventType.CASH_FLOW,
-        Decimal("110"), Decimal("100"), Decimal("1.1"), SnapshotQualityStatus.VALID,
+        datetime(2026, 8, 2, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "paper_cash_ledger:2",
+        NavReplayEventType.CASH_FLOW,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
     )
     monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, cash)))
     repo.add_cash_event(
-        account.id, "deposit", Decimal("10"), trade_date=date(2026, 8, 2),
-        net_asset_value=Decimal("9"), share_delta=Decimal("1"),
+        account.id,
+        "deposit",
+        Decimal("10"),
+        trade_date=date(2026, 8, 2),
+        net_asset_value=Decimal("9"),
+        share_delta=Decimal("1"),
         occurred_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
 
@@ -1602,13 +1637,26 @@ def test_early_unavailable_response_merges_persisted_and_replay_gaps(tmp_path, m
     account = repo.create_account("merged-analytics-gaps", Decimal("100000.00"))
     repo.upsert_valuation_gap(account.id, date(2026, 8, 2), ["000001"], [{"reason": "missing_bar"}])
     initial = NavPoint(
-        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1), "initial", NavReplayEventType.INITIAL,
-        Decimal("100"), Decimal("100"), Decimal("1"), SnapshotQualityStatus.VALID,
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
     )
     replay_gap = NavPoint(
-        datetime(2026, 8, 3, tzinfo=timezone.utc), date(2026, 8, 3), "replay-gap",
-        NavReplayEventType.MARKET_VALUATION, None, Decimal("100"), None, SnapshotQualityStatus.INVALID,
-        valuation_quality="missing_bar", valuation_details=({"symbol": "000002", "reason": "no_bar"},),
+        datetime(2026, 8, 3, tzinfo=timezone.utc),
+        date(2026, 8, 3),
+        "replay-gap",
+        NavReplayEventType.MARKET_VALUATION,
+        None,
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+        valuation_quality="missing_bar",
+        valuation_details=({"symbol": "000002", "reason": "no_bar"},),
     )
     monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, replay_gap)))
 
@@ -1685,16 +1733,34 @@ def test_unresolved_persisted_gap_blocks_valid_replay_metrics(tmp_path, monkeypa
     account = repo.create_account("persisted-gap-blocks", Decimal("100000.00"))
     repo.upsert_valuation_gap(account.id, date(2026, 8, 2), ["000001"], [{"reason": "missing_bar"}])
     initial = NavPoint(
-        datetime(2026, 8, 1, tzinfo=timezone.utc), date(2026, 8, 1), "initial", NavReplayEventType.INITIAL,
-        Decimal("100"), Decimal("100"), Decimal("1"), SnapshotQualityStatus.VALID,
+        datetime(2026, 8, 1, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
     )
     first = NavPoint(
-        datetime(2026, 8, 2, tzinfo=timezone.utc), date(2026, 8, 2), "valuation-1", NavReplayEventType.MARKET_VALUATION,
-        Decimal("110"), Decimal("100"), Decimal("1.1"), SnapshotQualityStatus.VALID,
+        datetime(2026, 8, 2, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "valuation-1",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
     )
     second = NavPoint(
-        datetime(2026, 8, 3, tzinfo=timezone.utc), date(2026, 8, 3), "valuation-2", NavReplayEventType.MARKET_VALUATION,
-        Decimal("120"), Decimal("100"), Decimal("1.2"), SnapshotQualityStatus.VALID,
+        datetime(2026, 8, 3, tzinfo=timezone.utc),
+        date(2026, 8, 3),
+        "valuation-2",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("120"),
+        Decimal("100"),
+        Decimal("1.2"),
+        SnapshotQualityStatus.VALID,
     )
     monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, first, second)))
 

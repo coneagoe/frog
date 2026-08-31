@@ -8,7 +8,7 @@ from datetime import date
 from unittest.mock import Mock
 
 import pytest
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Connection, Engine
 
 import storage.storage_db as storage_db_module
@@ -242,6 +242,10 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
                 .scalars()
                 .all()
             )
+            table_columns = {
+                table_name: {column["name"] for column in inspect(connection).get_columns(table_name)}
+                for table_name in existing_tables
+            }
             column_types = {
                 (column.table_name, column.column_name): connection.execute(
                     text(
@@ -255,7 +259,7 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
                 ).scalar_one()
                 for group in PAPER_TRADING_ENUM_GROUPS
                 for column in group.columns
-                if column.table_name in existing_tables
+                if column.table_name in existing_tables and column.column_name in table_columns[column.table_name]
             }
             paper_account_snapshots = connection.execute(
                 text("SELECT to_regclass('paper_account_snapshots')")

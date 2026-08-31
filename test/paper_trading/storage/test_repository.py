@@ -1277,9 +1277,14 @@ def _replay_event_signature(events):
 
 def _populate_replay_facts(repo: PaperTradingRepository):
     account = repo.create_account("replay-parity", Decimal("100000.00"))
+    fixed_creation_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    account.created_at = fixed_creation_at
     initial_snapshot = repo.list_snapshots(account.id)[0]
-    initial_snapshot.event_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    initial_snapshot.event_at = fixed_creation_at
     initial_snapshot.trade_date = date(2026, 8, 1)
+    initial_ledger = repo.list_cash_ledger(account.id)[0]
+    initial_ledger.occurred_at = fixed_creation_at
+    initial_ledger.trade_date = fixed_creation_at.date()
     repo.session.flush()
     event_at = datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
     order = repo.create_order(
@@ -1320,9 +1325,14 @@ def _populate_replay_facts(repo: PaperTradingRepository):
 
 def _populate_offset_replay_facts(repo: PaperTradingRepository):
     account = repo.create_account("offset-replay-parity", Decimal("100000.00"))
+    fixed_creation_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    account.created_at = fixed_creation_at
     initial_snapshot = repo.list_snapshots(account.id)[0]
-    initial_snapshot.event_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    initial_snapshot.event_at = fixed_creation_at
     initial_snapshot.trade_date = date(2026, 8, 1)
+    initial_ledger = repo.list_cash_ledger(account.id)[0]
+    initial_ledger.occurred_at = fixed_creation_at
+    initial_ledger.trade_date = fixed_creation_at.date()
     repo.session.flush()
     event_at = datetime(2026, 8, 25, 17, 30, tzinfo=timezone(timedelta(hours=8)))
     order = repo.create_order(

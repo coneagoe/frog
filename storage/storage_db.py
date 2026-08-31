@@ -155,6 +155,7 @@ from .model import (
     tb_name_paper_etf_eligibility,
     tb_name_paper_ledger_rebuilds,
     tb_name_paper_matching_runs,
+    tb_name_paper_order_events,
     tb_name_paper_orders,
     tb_name_paper_pending_settlement,
     tb_name_paper_position_lots,
@@ -373,6 +374,7 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_paper_positions,
     tb_name_paper_position_lots,
     tb_name_paper_orders,
+    tb_name_paper_order_events,
     tb_name_paper_trades,
     tb_name_paper_position_round_trips,
     tb_name_paper_matching_runs,
@@ -392,6 +394,7 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
 _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
     tb_name_paper_account_snapshots,
     tb_name_paper_valuation_gaps,
+    tb_name_paper_order_events,
 }
 _PAPER_SNAPSHOT_SERIES_LOCK_KEY = "paper_account_snapshots.nav_series"
 _PAPER_SNAPSHOT_NAV_COLUMNS = {

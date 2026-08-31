@@ -89,6 +89,7 @@ def _create_paper_legacy_schema(connection: Connection) -> None:
         "CREATE TABLE paper_positions (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_position_lots (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_orders (id integer primary key, side varchar(10) NOT NULL, status varchar(30) NOT NULL, validity_status varchar(20), market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_order_events (id integer primary key, event_type varchar(20) NOT NULL)",
         "CREATE TABLE paper_trades (id integer primary key, side varchar(10) NOT NULL, market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_position_round_trips (id integer primary key, status varchar(20) NOT NULL DEFAULT 'open')",
         "CREATE TABLE paper_trade_validity_checks (id integer primary key, side varchar(10) NOT NULL, status varchar(20) NOT NULL, data_granularity varchar(20) NOT NULL DEFAULT 'daily', market varchar(20) NOT NULL DEFAULT 'a_share')",
@@ -100,6 +101,7 @@ def _create_paper_legacy_schema(connection: Connection) -> None:
         "CREATE INDEX ix_paper_orders_status ON paper_orders (status)",
         "CREATE INDEX ix_paper_orders_validity_status ON paper_orders (validity_status)",
         "CREATE INDEX ix_paper_orders_market ON paper_orders (market)",
+        "CREATE INDEX ix_paper_order_events_event_type ON paper_order_events (event_type)",
         "CREATE INDEX ix_paper_trades_market ON paper_trades (market)",
         "CREATE INDEX ix_paper_trade_validity_checks_status ON paper_trade_validity_checks (status)",
         "CREATE INDEX ix_paper_trade_validity_checks_market ON paper_trade_validity_checks (market)",
@@ -826,9 +828,13 @@ def test_unified_rollback_restores_all_domains_and_removes_checks(postgres_schem
         assert _all_managed_enum_types(connection) == set()
         assert _managed_check_names(connection) == set()
         absent_columns = {
+            ("paper_order_events", "event_type"),
             ("paper_position_round_trips", "market"),
             ("daily_bar_diagnostics", "market"),
         }
+        existing_tables = set(
+            connection.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = current_schema()")).scalars()
+        )
         for table_name, column_name in absent_columns:
             assert (
                 connection.execute(
@@ -844,7 +850,10 @@ def test_unified_rollback_restores_all_domains_and_removes_checks(postgres_schem
             )
         for group in _all_enum_groups():
             for column in group.columns:
-                if (column.table_name, column.column_name) in absent_columns:
+                if (
+                    column.table_name not in existing_tables
+                    or (column.table_name, column.column_name) in absent_columns
+                ):
                     continue
                 assert _column_type(connection, column.table_name, column.column_name) == _normalized_legacy_type(
                     column.legacy_type_sql

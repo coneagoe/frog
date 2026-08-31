@@ -156,9 +156,7 @@ def test_sqlite_startup_adds_corporate_actions_and_preserves_legacy_rows(tmp_pat
         engine.connect().execute(text("SELECT cost_price FROM paper_position_lots WHERE id = 1")).scalar_one() == 1.2345
     )
     assert (
-        engine.connect()
-        .execute(text("SELECT projected_cost_price FROM paper_position_lots WHERE id = 1"))
-        .scalar_one()
+        engine.connect().execute(text("SELECT projected_cost_price FROM paper_position_lots WHERE id = 1")).scalar_one()
         == 1.2345
     )
     engine.dispose()
@@ -182,18 +180,22 @@ def test_sqlite_startup_adds_order_event_table_and_is_repeatable(tmp_path):
     second_indexes = {index["name"] for index in inspect(engine).get_indexes(tb_name_paper_order_events)}
 
     assert first_columns == second_columns == set(PaperOrderEvent.__table__.columns.keys())
-    assert first_indexes == second_indexes == {
-        "uq_paper_order_events_idempotency",
-        "ix_paper_order_events_account_event",
-        "ix_paper_order_events_order_event",
-        "ix_paper_order_events_account_id",
-        "ix_paper_order_events_order_id",
-        "ix_paper_order_events_trade_id",
-        "ix_paper_order_events_market",
-        "ix_paper_order_events_symbol",
-        "ix_paper_order_events_event_type",
-        "ix_paper_order_events_event_at",
-    }
+    assert (
+        first_indexes
+        == second_indexes
+        == {
+            "uq_paper_order_events_idempotency",
+            "ix_paper_order_events_account_event",
+            "ix_paper_order_events_order_event",
+            "ix_paper_order_events_account_id",
+            "ix_paper_order_events_order_id",
+            "ix_paper_order_events_trade_id",
+            "ix_paper_order_events_market",
+            "ix_paper_order_events_symbol",
+            "ix_paper_order_events_event_type",
+            "ix_paper_order_events_event_at",
+        }
+    )
     engine.dispose()
 
 
