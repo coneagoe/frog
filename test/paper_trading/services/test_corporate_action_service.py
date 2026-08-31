@@ -750,3 +750,95 @@ def test_late_actions_materialize_only_effective_lots_before_subsequent_buys(
         datetime(2026, 8, 15, 10, tzinfo=timezone.utc),
         datetime(2026, 8, 25, 10, tzinfo=timezone.utc),
     }
+
+
+def test_late_action_rebuilds_frozen_sell_quantity_without_scaling_post_action_buy_cash(
+    sqlite_session,
+):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-frozen-chain", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 120, 30, Decimal("1200"), source="imported")
+    repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 120, 120, Decimal("10"), source="imported"
+    )
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
+    sell_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.SELL,
+        30,
+        Decimal("12"),
+        date(2026, 8, 5),
+        OrderStatus.ACCEPTED,
+        frozen_quantity=30,
+        market=Market.A_SHARE,
+    )
+    buy_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        10,
+        Decimal("8"),
+        date(2026, 8, 20),
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("80"),
+        market=Market.A_SHARE,
+    )
+    sqlite_session.commit()
+
+    result = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.SPLIT,
+        datetime(2026, 8, 10, 10, tzinfo=timezone.utc),
+        "frozen-chain",
+        {"ratio": Decimal("2")},
+    )
+
+    refreshed_sell = sqlite_session.get(type(sell_order), sell_order.id)
+    refreshed_buy = sqlite_session.get(type(buy_order), buy_order.id)
+    position = repo.get_position(account.id, Market.A_SHARE, "000001")
+    assert result.impact.before_quantity == Decimal("120.000000000000")
+    assert position is not None and position.total_quantity == 240
+    assert position.frozen_quantity == 60
+    assert refreshed_sell is not None and refreshed_sell.frozen_quantity == 60
+    assert refreshed_buy is not None and refreshed_buy.frozen_cash == Decimal("80.000000000000")
+
+
+def test_late_action_chain_advances_rights_cash_and_preserves_distinct_lot_costs(sqlite_session):
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("corporate-action-cost-chain", Decimal("10000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1600"), source="imported")
+    first_lot = repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 1), 40, 40, Decimal("10"), source="imported"
+    )
+    second_lot = repo.create_position_lot(
+        account.id, Market.A_SHARE, "000001", date(2026, 8, 2), 60, 60, Decimal("20"), source="imported"
+    )
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
+    prior = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.DIVIDEND,
+        datetime(2026, 8, 15, 10, tzinfo=timezone.utc),
+        "chain-dividend",
+        {"per_share_amount": Decimal("0.1")},
+    )
+    assert prior.event.id is not None
+    sqlite_session.commit()
+
+    result = _service(sqlite_session).apply(
+        account.id,
+        "000001",
+        CorporateActionType.RIGHTS_ISSUE,
+        datetime(2026, 8, 10, 10, tzinfo=timezone.utc),
+        "chain-rights-late",
+        {"subscription_ratio": Decimal("0.1"), "subscription_price": Decimal("2")},
+    )
+
+    lots = repo.get_lots(account.id, Market.A_SHARE, "000001")
+    assert result.impact.before_cash_available == Decimal("10000.000000000000")
+    assert result.impact.cash_delta == Decimal("-20.000000000000")
+    assert first_lot.cost_price != second_lot.cost_price
+    assert sum(lot.remaining_quantity for lot in lots) == 110
+    assert len(repo.list_corporate_actions(account.id)) == 2

@@ -309,6 +309,7 @@ class CorporateActionService:
                 "remaining": Decimal(lot.original_quantity),
                 "cost_price": Decimal(lot.cost_price),
                 "buy_trade_date": lot.buy_trade_date,
+                "buy_trade_at": datetime.combine(lot.buy_trade_date, datetime.min.time(), tzinfo=timezone.utc),
             }
             for lot in persisted_lots
             if lot.source == "imported"
@@ -341,12 +342,14 @@ class CorporateActionService:
                                 (Decimal(trade.amount) + Decimal(trade.fees)) / Decimal(trade.quantity)
                             ),
                             "buy_trade_date": trade.trade_date,
+                            "buy_trade_at": self._persisted_utc(trade.trade_time),
                         }
                     )
-                    running_cash -= Decimal(trade.amount) + Decimal(trade.fees)
+                    if event_at >= effective_at:
+                        running_cash -= Decimal(trade.amount) + Decimal(trade.fees)
                 else:
                     self._consume_lot_inventory(simulated, Decimal(trade.quantity))
-                    if trade.market != Market.HK_CONNECT.value:
+                    if event_at >= effective_at and trade.market != Market.HK_CONNECT.value:
                         running_cash += Decimal(trade.amount) - Decimal(trade.fees)
                 continue
             if kind == "action":
@@ -366,16 +369,31 @@ class CorporateActionService:
                 else Decimal("0")
             )
             for item in simulated:
+                if item["buy_trade_at"] > event_at:
+                    continue
                 item["original"] = quantize_shares(item["original"] * action_factor)
                 item["remaining"] = quantize_shares(item["remaining"] * action_factor)
                 if item["remaining"]:
-                    item["cost_price"] = quantize_account_money(
-                        action_impact.after_cost_amount / action_impact.after_quantity
-                        if action_impact.after_quantity
-                        else Decimal("0")
-                    )
-            running_cash += action_impact.cash_delta
-            cash_available = running_cash
+                    old_cost = Decimal(item["cost_price"])
+                    if current_type is CorporateActionType.RIGHTS_ISSUE:
+                        old_remaining = Decimal(item["remaining"]) / action_factor if action_factor else Decimal("0")
+                        added_cost = (
+                            old_remaining
+                            * current_parameters["subscription_ratio"]
+                            * current_parameters["subscription_price"]
+                        )
+                        item["cost_price"] = quantize_account_money(
+                            (old_remaining * old_cost + added_cost) / item["remaining"]
+                        )
+                    elif current_type in {
+                        CorporateActionType.SPLIT,
+                        CorporateActionType.REVERSE_SPLIT,
+                        CorporateActionType.BONUS_SHARE,
+                    }:
+                        item["cost_price"] = quantize_account_money(old_cost / action_factor)
+            if event_at >= effective_at:
+                running_cash += action_impact.cash_delta
+                cash_available = running_cash
         return simulated
 
     def _materialized_frozen_quantity(
@@ -407,9 +425,12 @@ class CorporateActionService:
             if not order_frozen:
                 continue
             factor = Decimal("1")
-            order_at = self._persisted_utc(order.created_at)
+            # Order ``created_at`` is processing metadata and is not the
+            # historical ordering fact for backfilled orders.  The order's
+            # trade date is the conservative effective boundary here.
+            order_at = datetime.combine(order.trade_date, datetime.min.time(), tzinfo=timezone.utc)
             for action_at, action_type, parameters in sorted(actions, key=lambda item: item[0]):
-                if action_at > effective_at or action_at < order_at:
+                if action_at < order_at:
                     continue
                 if action_type is CorporateActionType.SPLIT:
                     factor *= parameters["ratio"]
@@ -420,6 +441,7 @@ class CorporateActionService:
                 elif action_type is CorporateActionType.RIGHTS_ISSUE:
                     factor *= Decimal("1") + parameters["subscription_ratio"]
             frozen += quantize_shares(order_frozen * factor)
+            order.frozen_quantity = self._integer_quantity(quantize_shares(order_frozen * factor))
         return quantize_shares(frozen)
 
     @staticmethod

@@ -23,6 +23,9 @@
   chain rather than scaled from the current aggregate position.
 - Existing corporate actions after a late action are replayed in sequence, with
   cash eligibility advanced through each event and per-lot cost basis preserved.
+- Frozen sell quantities are materialized from historical order/action chronology;
+  post-action frozen buys retain their own frozen cash and are not scaled by an
+  earlier action.
 - Existing cash-ledger audit rows remain separate from corporate-action replay
   events, preventing duplicate cash application during NAV replay.
 - Existing idempotency, processing metadata, affected range, precision, and
@@ -33,11 +36,11 @@
 ## Verification
 
 - `uv run pytest test/paper_trading/domain/test_corporate_actions.py test/paper_trading/domain/test_nav_replay.py test/paper_trading/services/test_corporate_action_service.py test/paper_trading/api/test_corporate_actions_api.py -q`
-  - **102 passed**, 1 existing Starlette/httpx deprecation warning.
+  - **104 passed**, 1 existing Starlette/httpx deprecation warning.
 - `uv run pytest test/paper_trading/services/test_nav_series.py test/paper_trading/services/test_snapshot_recalculation_service.py -q`
   - **29 passed, 3 skipped** (Task 3 regression suite).
 - `tools/run_tests.sh test/paper_trading/services/test_corporate_action_service.py test/paper_trading/api/test_corporate_actions_api.py -q`
-  - **47 passed** with PostgreSQL test database.
+  - **49 passed** with PostgreSQL test database.
 - `uv run ruff check ...` on all Task 5 changed source and test files: **passed**.
 - `git diff --check`: **passed**.
 
