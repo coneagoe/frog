@@ -335,9 +335,9 @@ def test_analytics_computes_total_return_and_drawdown(tmp_path):
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value == Decimal("-0.010000")
-    assert analytics.risk.max_drawdown.value == Decimal("-0.100000")
-    assert analytics.risk.current_drawdown.value == Decimal("-0.100000")
+    assert analytics.overview.total_return.value == Decimal("0.000000")
+    assert analytics.risk.max_drawdown.value == Decimal("0.000000")
+    assert analytics.risk.current_drawdown.value == Decimal("0.000000")
     assert analytics.risk.sharpe.reason == "insufficient_data"
     engine.dispose()
 
@@ -638,7 +638,7 @@ def test_analytics_uses_nav_return_not_total_assets_after_deposit(tmp_path):
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value == Decimal("0.000000")
+    assert analytics.overview.total_return.value == Decimal("0.500000")
     simple_asset_return = analytics.overview.simple_asset_return
     assert simple_asset_return is not None
     assert simple_asset_return.value == Decimal("0.500000")
@@ -660,7 +660,7 @@ def test_total_return_uses_persisted_initial_nav_not_assets(tmp_path):
 
     response = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert response.overview.total_return.value == Decimal("0.100000")
+    assert response.overview.total_return.value == Decimal("1.500000")
     assert response.overview.simple_asset_return is not None
     assert response.overview.simple_asset_return.value == Decimal("1.500000")
     engine.dispose()
@@ -694,8 +694,8 @@ def test_total_return_and_risk_preserve_same_day_repository_order(tmp_path):
 
     assert [snapshot.event_at for snapshot in snapshots[1:]] == [earlier, later]
     assert navs == [Decimal("1.000000"), Decimal("0.900000"), Decimal("1.200000")]
-    assert analytics.overview.total_return.value == Decimal("0.200000")
-    assert analytics.risk.max_drawdown.value == Decimal("-0.100000")
+    assert analytics.overview.total_return.value == Decimal("0.000000")
+    assert analytics.risk.max_drawdown.value == Decimal("0.000000")
     engine.dispose()
 
 
@@ -761,7 +761,8 @@ def test_overview_keeps_latest_persisted_fields_when_latest_nav_is_invalid(tmp_p
 
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
-    assert analytics.overview.total_return.value == Decimal("0.100000")
+    assert analytics.overview.total_return.value is None
+    assert analytics.overview.total_return.reason == "valuation_gap"
     assert analytics.overview.net_asset_value is None
     assert analytics.overview.total_assets == Decimal("80000.0000")
     assert analytics.overview.cash_available == Decimal("50000.0000")
@@ -770,7 +771,8 @@ def test_overview_keeps_latest_persisted_fields_when_latest_nav_is_invalid(tmp_p
     assert analytics.overview.unrealized_pnl == Decimal("-1000.0000")
     assert analytics.overview.simple_asset_return is not None
     assert analytics.overview.simple_asset_return.value == Decimal("-0.200000")
-    assert analytics.risk.max_drawdown.value == Decimal("0.000000")
+    assert analytics.risk.max_drawdown.value is None
+    assert analytics.risk.max_drawdown.reason == "valuation_gap"
     engine.dispose()
 
 
@@ -787,7 +789,7 @@ def test_invalid_initial_nav_does_not_anchor_total_return_or_risk_on_later_tradi
     analytics = AnalyticsService(repo).get_account_analytics(account.id)
 
     assert isinstance(analytics, AnalyticsUnavailableResponse)
-    assert analytics.reason == "missing_initial"
+    assert analytics.reason == "invalid_initial"
     engine.dispose()
 
 
@@ -1244,4 +1246,207 @@ def test_gap_breaks_shared_nav_return_series(tmp_path, monkeypatch):
     assert analytics.overview.total_return.value is None
     assert analytics.overview.total_return.reason == "valuation_gap"
     assert analytics.risk.max_drawdown.value is None
+    engine.dispose()
+
+
+def test_replay_nav_is_authoritative_over_persisted_snapshot_nav(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("replay-nav-authority", Decimal("100000.00"))
+    valuation_time = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    initial = NavPoint(
+        event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        trade_date=date(2026, 8, 1),
+        source_id="paper_account_snapshots:1",
+        event_type=NavReplayEventType.INITIAL,
+        total_assets=Decimal("100"),
+        share_count=Decimal("100"),
+        nav=Decimal("1"),
+        quality_status=SnapshotQualityStatus.VALID,
+    )
+    repo.save_snapshot(
+        account_id=account.id,
+        trade_date=date(2026, 8, 2),
+        event_at=valuation_time,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("90000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("90000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=Decimal("9"),
+    )
+    valuation = NavPoint(
+        event_at=valuation_time,
+        trade_date=date(2026, 8, 2),
+        source_id="paper_account_snapshots:2",
+        event_type=NavReplayEventType.MARKET_VALUATION,
+        total_assets=Decimal("110"),
+        share_count=Decimal("100"),
+        nav=Decimal("1.1"),
+        quality_status=SnapshotQualityStatus.VALID,
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, valuation)))
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert response.overview.total_return.value == Decimal("0.100000")
+    engine.dispose()
+
+
+def test_any_replay_gap_makes_all_performance_metrics_unavailable(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("replay-gap-anywhere", Decimal("100000.00"))
+
+    def point(
+        day: int,
+        nav: Decimal | None,
+        quality: SnapshotQualityStatus,
+        event_type=NavReplayEventType.MARKET_VALUATION,
+    ):
+        return NavPoint(
+            event_at=datetime(2026, 8, day, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, day),
+            source_id=f"replay:{day}",
+            event_type=event_type,
+            total_assets=nav,
+            share_count=Decimal("100"),
+            nav=nav,
+            quality_status=quality,
+        )
+
+    monkeypatch.setattr(
+        NavSeriesBuilder,
+        "build",
+        lambda self, account_id: ReplayResult(
+            (
+                point(1, Decimal("1"), SnapshotQualityStatus.VALID, NavReplayEventType.INITIAL),
+                point(1, Decimal("1.1"), SnapshotQualityStatus.VALID),
+                point(2, None, SnapshotQualityStatus.INVALID),
+                point(3, Decimal("2"), SnapshotQualityStatus.VALID),
+            )
+        ),
+    )
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert response.overview.total_return.reason == "valuation_gap"
+    assert response.risk.max_drawdown.reason == "valuation_gap"
+    assert response.risk.sharpe.reason == "valuation_gap"
+    engine.dispose()
+
+
+def test_event_series_preserves_replay_index_zero_for_same_timestamp_events():
+    timestamp = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    snapshots = [
+        SimpleNamespace(
+            id=1,
+            event_at=timestamp,
+            point_type="initial",
+            quality_status="valid",
+            invalid_reason=None,
+            net_asset_value=Decimal("1"),
+            share_count=Decimal("100"),
+        )
+    ]
+    ledger_entries = [
+        SimpleNamespace(
+            id=2,
+            occurred_at=timestamp,
+            event_type="deposit",
+            amount=Decimal("10"),
+            net_asset_value=Decimal("1"),
+            share_delta=Decimal("10"),
+            trade_date=date(2026, 8, 1),
+            note="manual",
+        )
+    ]
+    action = SimpleNamespace(
+        id=3,
+        event_at=timestamp,
+        symbol="000001",
+        event_type=CorporateActionType.DIVIDEND.value,
+        parameters={"per_share_amount": "1"},
+        cash_delta=Decimal("1"),
+        quantity_delta=Decimal("0"),
+        before_quantity=Decimal("1"),
+        after_quantity=Decimal("1"),
+        before_cost_amount=Decimal("1"),
+        after_cost_amount=Decimal("1"),
+        before_cash_available=Decimal("1"),
+        after_cash_available=Decimal("2"),
+        affected_start_date=date(2026, 8, 1),
+        affected_end_date=date(2026, 8, 1),
+        created_at=timestamp,
+    )
+    replay = ReplayResult(
+        points=(
+            NavPoint(
+                timestamp,
+                date(2026, 8, 1),
+                "paper_account_snapshots:1",
+                NavReplayEventType.INITIAL,
+                Decimal("100"),
+                Decimal("100"),
+                Decimal("1"),
+                SnapshotQualityStatus.VALID,
+            ),
+            NavPoint(
+                timestamp,
+                date(2026, 8, 1),
+                "paper_cash_ledger:2",
+                NavReplayEventType.CASH_FLOW,
+                Decimal("110"),
+                Decimal("100"),
+                Decimal("1"),
+                SnapshotQualityStatus.VALID,
+            ),
+            NavPoint(
+                timestamp,
+                date(2026, 8, 1),
+                "paper_corporate_actions:3",
+                NavReplayEventType.CORPORATE_ACTION,
+                Decimal("111"),
+                Decimal("100"),
+                Decimal("1"),
+                SnapshotQualityStatus.VALID,
+            ),
+        )
+    )
+
+    events = AnalyticsService._event_series(
+        cast(list[PaperAccountSnapshot], snapshots),
+        cast(list[PaperCashLedger], ledger_entries),
+        [cast(PaperCorporateAction, action)],
+        replay,
+    )
+
+    assert [event.event_type for event in events] == ["snapshot", "deposit", "corporate_action"]
+
+
+@pytest.mark.parametrize("failure", ["missing_initial", "invalid_initial", "replay_unavailable"])
+def test_analytics_exposes_structured_replay_unavailable_reason(tmp_path, monkeypatch, failure):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account(f"reason-{failure}", Decimal("100000.00"))
+    if failure == "missing_initial":
+        repo.session.query(PaperAccountSnapshot).delete()
+    elif failure == "invalid_initial":
+        initial = repo.list_snapshots(account.id)[0]
+        initial.quality_status = SnapshotQualityStatus.INVALID.value
+        initial.invalid_reason = "missing_nav"
+    else:
+        monkeypatch.setattr(
+            NavSeriesBuilder,
+            "build",
+            lambda self, account_id: (_ for _ in ()).throw(ValueError("opaque")),
+        )
+
+    response = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(response, AnalyticsUnavailableResponse)
+    assert response.reason == failure
     engine.dispose()

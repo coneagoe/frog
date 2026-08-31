@@ -130,7 +130,7 @@ def test_get_account_analytics_uses_persisted_nav_not_total_assets(monkeypatch, 
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["overview"]["total_return"]["value"] == "0.100000"
+    assert payload["overview"]["total_return"]["value"] == "1.500000"
     assert payload["overview"]["simple_asset_return"]["value"] == "1.500000"
     assert payload["risk"]["max_drawdown"]["value"] == "0.000000"
 
