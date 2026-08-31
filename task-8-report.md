@@ -36,16 +36,25 @@ Implemented the paper-trading analytics API/frontend contract repair.
   `timezone: "UTC"`.
 - Updated available, repair, gap, chart filtering, and API contract tests,
   including persisted gaps on repair and replay-unavailable payloads.
+- Updated analytics test fixtures to use `satisfies` with complete
+  `SnapshotAnalyticsEvent` and `Account` contracts, including `quality_status`
+  and strict UTC snapshot metadata; chart fixtures now preserve literal
+  `initial`/`trading` and `valid`/`invalid` fields.
 
 ## Validation
 
+- `npx tsc --noEmit` — no Task 8 analytics diagnostics remain after the Next
+  build generated `.next` types. The command still exits non-zero for unrelated
+  existing account/trading fixture contracts: incomplete `Account`/`Order`
+  mocks, `Position.price_source` literal widening, and mock callback typing.
 - `uv run pytest test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py test/paper_trading/api/test_snapshots_api.py` — 99 tests passed.
-- `npm run test -- --run features/analytics/analytics-page.test.tsx` — 12 tests passed.
-- `npm run test -- --run` — 226 of 227 tests passed; one timing-sensitive
-  `analytics-page` valuation-gap assertion failed in the full-suite run. The focused
-  `analytics-page` suite passed all 12 tests on its immediate rerun.
+- `npm run test -- --run features/analytics` — 16 tests passed across the
+  analytics-page and asset-chart suites.
+- `npm run test -- --run` — 227 tests passed across 18 test files.
 - `npm run lint` — passed.
 - `npm run build` — passed.
+- `uv run ruff check frontend/paper-trading` — passed (no Python files in the
+  frontend path).
 - `uv run ruff check paper_trading/services/analytics_service.py paper_trading/schemas/analytics.py test/paper_trading/services/test_analytics_service.py test/paper_trading/api/test_analytics_api.py` — passed.
 - `git diff --check` — passed.
 - `uv run ruff check paper_trading/schemas/snapshots.py paper_trading/schemas/analytics.py test/paper_trading/api/test_snapshots_api.py` — passed.

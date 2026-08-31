@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { createChart } from "lightweight-charts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAnalytics, listAccounts } from "@/lib/api-client";
+import type { Account, AvailableAnalyticsResponse } from "@/lib/types";
 import { AnalyticsPage } from "./analytics-page";
 
 vi.mock("lightweight-charts", () => ({
@@ -31,7 +32,7 @@ function closestSection(element: HTMLElement): HTMLElement {
 }
 
 const analyticsPayload = {
-  available: true as const,
+  available: true,
   overview: {
     total_assets: "106000.0000",
     cash_available: "90000.0000",
@@ -99,18 +100,37 @@ const analyticsPayload = {
     point_type: "trading",
     quality: "valid",
     timezone: "UTC",
+    quality_status: "valid",
     invalid_reason: null,
     nav: "1.250000",
     shares: "1000",
     share: "1000"
   }]
-};
+} satisfies AvailableAnalyticsResponse;
+
+const accountFixture = {
+  id: 1,
+  name: "demo",
+  initial_cash: "100000.00",
+  cash_available: "100000.00",
+  fee_preset: "default",
+  commission_rate: "0.0003",
+  min_commission: "5.00",
+  stamp_duty_rate: "0.001",
+  transfer_fee_rate: "0.00002",
+  share_count: "0",
+  net_asset_value: "1.000000",
+  cumulative_deposit: "100000.00",
+  cumulative_withdrawal: "0.00",
+  status: "active",
+  base_currency: "CNY"
+} satisfies Account;
 
 describe("AnalyticsPage", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     createChartMock.mockReturnValue({ addSeries: vi.fn(() => ({ setData: vi.fn() })), remove: vi.fn() } as never);
-    listAccountsMock.mockResolvedValue([{ id: 1, name: "demo", initial_cash: "100000.00", status: "active", base_currency: "CNY" }]);
+    listAccountsMock.mockResolvedValue([accountFixture]);
     getAnalyticsMock.mockResolvedValue(analyticsPayload);
   });
 
