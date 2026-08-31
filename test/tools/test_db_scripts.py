@@ -9,6 +9,8 @@ PAPER_ENUM_TYPES = (
     "paper_cash_event_type",
     "paper_order_side",
     "paper_order_status",
+    "paper_order_event_type",
+    "paper_replay_time_provenance",
     "paper_trade_validity_status",
     "paper_market",
     "paper_position_source",
@@ -25,6 +27,13 @@ MONITOR_ENUM_TYPES = (
     "forecast_ssf_candidate_state",
 )
 ETF_QUANT_PIPELINE_TABLES = {"etf_share_size", "index_daily_turnover", "etf_net_flow"}
+REPLAY_PROVENANCE_TABLES = (
+    "paper_cash_ledger",
+    "paper_trades",
+    "paper_corporate_actions",
+    "paper_account_snapshots",
+    "paper_order_events",
+)
 
 
 def _run_script_result(
@@ -93,6 +102,51 @@ def test_export_places_enum_before_matching_table_dump(tmp_path: Path):
     database_commands = [command for command in commands if " psql " in command or " pg_dump " in command]
     assert "type=paper_matching_run_status" in database_commands[0]
     assert "pg_dump" in database_commands[1]
+
+
+def test_order_events_export_places_event_enum_before_table_dump(tmp_path: Path):
+    output_file = tmp_path / "order-events.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--table", "paper_order_events", "--out", str(output_file)], tmp_path)
+
+    dump = output_file.read_text(encoding="utf-8")
+    assert 'CREATE TYPE "public"."paper_order_event_type"' in dump
+    assert 'CREATE TYPE "public"."paper_replay_time_provenance"' in dump
+    assert dump.index('CREATE TYPE "public"."paper_order_event_type"') < dump.index("-- dump output")
+    assert dump.index('CREATE TYPE "public"."paper_replay_time_provenance"') < dump.index("-- dump output")
+
+
+def test_replay_provenance_selected_exports_query_only_required_enum(tmp_path: Path):
+    for table_name in REPLAY_PROVENANCE_TABLES:
+        output_file = tmp_path / f"{table_name}.sql"
+        _, commands = _run_script(
+            "db_export.sh",
+            ["--no-gzip", "--table", table_name, "--out", str(output_file)],
+            tmp_path,
+        )
+
+        assert "type=paper_replay_time_provenance" in commands
+        assert "type=paper_order_event_type" not in commands or table_name == "paper_order_events"
+
+
+def test_full_export_includes_new_paper_enums_before_table_dump(tmp_path: Path):
+    output_file = tmp_path / "full.sql"
+    _run_script("db_export.sh", ["--no-gzip", "--out", str(output_file)], tmp_path)
+
+    dump = output_file.read_text(encoding="utf-8")
+    for type_name in ("paper_order_event_type", "paper_replay_time_provenance"):
+        assert dump.index(f'CREATE TYPE "public"."{type_name}"') < dump.index("-- dump output")
+
+
+def test_clean_order_events_import_drops_table_before_its_enums(tmp_path: Path):
+    input_file = tmp_path / "order-events.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    _run_script("db_import.sh", ["--clean", "--table", "paper_order_events", "--in", str(input_file)], tmp_path)
+
+    drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
+    table_position = drop_sql.index('DROP TABLE IF EXISTS "public"."paper_order_events"')
+    for type_name in ("paper_order_event_type", "paper_replay_time_provenance"):
+        assert table_position < drop_sql.index(f'DROP TYPE IF EXISTS "public"."{type_name}"')
 
 
 def test_clean_import_drops_matching_table_before_enum(tmp_path: Path):

@@ -8,6 +8,13 @@ facts.
 
 ## Changes
 
+- Added `paper_order_event_type` and `paper_replay_time_provenance` to the
+  business backup enum list. The event enum is selected for
+  `paper_order_events`; replay-time provenance is selected for
+  `paper_cash_ledger`, `paper_trades`, `paper_corporate_actions`,
+  `paper_account_snapshots`, and `paper_order_events`.
+- Added TDD coverage for the enum list, direct enum-to-table selection,
+  selected-table exports, full exports, and clean-import SQL ordering.
 - Added `paper_order_events` to `tools/db_common.sh` and added an explicit
   business-table coverage test.
 - Kept `paper_order_events` out of PostgreSQL's pre-enum metadata creation
@@ -35,6 +42,14 @@ facts.
 
 ## Verification
 
+- Initial TDD run: `25 passed, 7 failed`; failures confirmed the two enum
+  types were absent from backup/restore selection.
+- Focused backup/restore tests after implementation:
+  `uv run pytest test/tools/test_db_common.py test/tools/test_db_scripts.py -q`
+  (`33 passed`).
+- Full tools tests: `uv run pytest test/tools -q` (`306 passed, 4 skipped`).
+- `uv run pre-commit run --all-files`: all hooks passed, including mypy.
+- `git diff --check`: passed.
 - Focused migration, startup, rollback, repository parity, and table-list
   coverage: `103 passed`.
 - Focused enum governance and matching-status coverage: `58 passed`.
@@ -110,3 +125,7 @@ Removed an unused baseline wrapper introduced while fixing replay ordering. No
 further safe simplification was identified: the changed code directly expresses
 persistence and replay boundaries, and further compression would make those
 facts less clear.
+
+For the backup/restore enum mapping change, no further safe simplification was
+identified. The shared table-selection function remains the single source for
+both export and clean-import enum dependency selection.
