@@ -1,7 +1,7 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta, timezone
 
-from paper_trading.domain.enums import MatchingRunStatus, OrderStatus
+from paper_trading.domain.enums import MatchingRunStatus, OrderStatus, PaperOrderEventType
 from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.round_trip_service import RoundTripService
@@ -81,13 +81,31 @@ class LedgerRebuildService:
             processed = filled = skipped = rejected = failed = warning_count = 0
             for order in sorted(by_date[trade_date], key=lambda current_order: current_order.id):
                 processed += 1
+                lifecycle_events = self.repo.list_effective_order_events(account_id, order.id)
+                reservation_event = next(
+                    (event for event in lifecycle_events if event.event_type == PaperOrderEventType.RESERVED.value),
+                    None,
+                )
+                if reservation_event is None:
+                    accepted_event = next(
+                        (event for event in lifecycle_events if event.event_type == PaperOrderEventType.ACCEPTED.value),
+                        None,
+                    )
+                    if accepted_event is None:
+                        raise RuntimeError(f"order {order.id} has no accepted event for replay reservation")
+                    # Legacy lifecycles may retain accepted/fill/release only;
+                    # use their persisted accepted time, never wall-clock time.
+                    reservation_at = accepted_event.event_at
+                else:
+                    reservation_at = reservation_event.event_at
+                reservation_at = reservation_at.replace(tzinfo=timezone.utc)
                 OrderDeleteService(self.repo, self.market_data, self.hk_metadata)._restore_single_reservation(
-                    account_id, order
+                    account_id, order, occurred_at=reservation_at
                 )
                 if order.status != OrderStatus.ACCEPTED.value:
                     rejected += 1
                     continue
-                outcome = matching_service.match_order(order)
+                outcome = matching_service.match_order(order, trade_time=reservation_at + timedelta(microseconds=1))
                 if outcome == "filled":
                     filled += 1
                     regenerated_counts["trades"] += 1

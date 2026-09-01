@@ -454,6 +454,74 @@ def test_replay_lifecycle_copies_the_current_epoch_reservation(sqlite_session):
     assert reservation.cash_delta == Decimal("-1005.000000000000")
 
 
+def test_replay_lifecycle_repairs_legacy_filled_order_without_lifecycle_events(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("legacy-filled-replay", Decimal("10000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 7, 23),
+        OrderStatus.FILLED,
+        frozen_cash=Decimal("1005"),
+    )
+    historical_created_at = datetime(2026, 7, 23, 9, 30, tzinfo=timezone.utc)
+    order.created_at = historical_created_at
+    sqlite_session.flush()
+
+    repo.start_order_replay_lifecycle(order)
+
+    events = repo.list_order_events(account.id, order.id)
+    assert [event.event_type for event in events] == [
+        PaperOrderEventType.ACCEPTED.value,
+        PaperOrderEventType.RESERVED.value,
+    ]
+    assert events[0].event_at.replace(tzinfo=timezone.utc) == historical_created_at
+    assert events[1].cash_delta == Decimal("-1005.000000000000")
+
+
+def test_replay_lifecycle_repairs_legacy_filled_sell_from_fill_facts(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("legacy-filled-sell-replay", Decimal("100000"))
+    order = repo.create_order(
+        account.id,
+        "002558",
+        OrderSide.SELL,
+        1100,
+        Decimal("15"),
+        date(2026, 7, 30),
+        OrderStatus.FILLED,
+        frozen_quantity=0,
+    )
+    fill_at = datetime(2026, 7, 30, 9, 30, tzinfo=timezone.utc)
+    repo.append_order_event(
+        account.id,
+        order.id,
+        Market.A_SHARE,
+        order.symbol,
+        PaperOrderEventType.FILL,
+        fill_at,
+        quantity_delta=Decimal("-1100"),
+        cash_delta=Decimal("16450"),
+        idempotency_key=f"order:{order.id}:fill:legacy",
+    )
+    sqlite_session.flush()
+
+    repo.start_order_replay_lifecycle(order)
+
+    reservation = next(
+        event
+        for event in repo.list_order_events(account.id, order.id)
+        if event.event_type == PaperOrderEventType.RESERVED.value
+    )
+    assert reservation.quantity_delta == Decimal("1100.000000000000")
+    assert reservation.cash_delta == Decimal("0E-12")
+
+
 def test_terminal_historical_order_does_not_emit_incomplete_lifecycle(sqlite_session):
     Base.metadata.create_all(sqlite_session.get_bind())
     repo = PaperTradingRepository(sqlite_session)
@@ -3111,6 +3179,17 @@ def test_same_symbol_positions_and_lots_are_isolated_by_market(sqlite_session):
     assert hk_connect_position.total_quantity == 200
     assert [lot.remaining_quantity for lot in repo.get_lots(account.id, "a_share", "00700")] == [100]
     assert [lot.remaining_quantity for lot in repo.get_lots(account.id, "hk_connect", "00700")] == [200]
+
+
+def test_get_positions_returns_only_positive_total_quantity(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("active-positions", Decimal("100000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 0, Decimal("1000"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000002", 0, 0, Decimal("0"))
+    repo.upsert_position(account.id, Market.A_SHARE, "000003", -1, 0, Decimal("0"))
+
+    assert [position.symbol for position in repo.get_positions(account.id)] == ["000001"]
 
 
 def test_create_position_lot_requires_and_normalizes_market(sqlite_session):

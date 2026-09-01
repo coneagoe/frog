@@ -11,7 +11,7 @@ from paper_trading.domain.enums import (
     SnapshotPointType,
     SnapshotQualityStatus,
 )
-from paper_trading.domain.nav_replay import ReplayResult
+from paper_trading.domain.nav_replay import NavPoint, ReplayResult
 from paper_trading.schemas.analytics import (
     ActivityAnalytics,
     ActivitySummary,
@@ -114,16 +114,13 @@ class AnalyticsService:
                 reason=AnalyticsUnavailableReason.INVALID_INITIAL,
                 valuation_gaps=valuation_gaps or None,
             )
-        if any(point.quality_status is not SnapshotQualityStatus.VALID for point in replay.points[1:]):
-            return AnalyticsUnavailableResponse(
-                reason=AnalyticsUnavailableReason.VALUATION_GAP,
-                valuation_gaps=valuation_gaps,
-            )
+        final_trading_snapshots: dict[date, PaperAccountSnapshot] = {}
+        for snapshot in snapshots:
+            if snapshot.point_type == SnapshotPointType.TRADING.value:
+                final_trading_snapshots[snapshot.trade_date] = snapshot
         if any(
-            snapshot.point_type == SnapshotPointType.TRADING.value
-            and snapshot.quality_status == SnapshotQualityStatus.VALID.value
-            and self._snapshot_nav(snapshot) is None
-            for snapshot in snapshots
+            snapshot.quality_status == SnapshotQualityStatus.VALID.value and self._snapshot_nav(snapshot) is None
+            for snapshot in final_trading_snapshots.values()
         ):
             return AnalyticsUnavailableResponse(
                 reason=AnalyticsUnavailableReason.VALUATION_GAP,
@@ -134,16 +131,7 @@ class AnalyticsService:
                 reason=AnalyticsUnavailableReason.VALUATION_GAP,
                 valuation_gaps=valuation_gaps,
             )
-        invalid_replay_nav = next(
-            (
-                point
-                for point in replay.points
-                if point.quality_status is SnapshotQualityStatus.VALID
-                and (point.nav is None or not point.nav.is_finite() or point.nav <= 0)
-            ),
-            None,
-        )
-        if invalid_replay_nav is not None:
+        if replay_gaps:
             return AnalyticsUnavailableResponse(
                 reason=AnalyticsUnavailableReason.VALUATION_GAP,
                 valuation_gaps=valuation_gaps,
@@ -192,12 +180,29 @@ class AnalyticsService:
                 or [{"reason": point.valuation_quality or "invalid_nav"}],
                 resolved=False,
             )
-            for point in replay.points
+            for point in AnalyticsService._final_replay_points(replay)
             if point.quality_status is not SnapshotQualityStatus.VALID
             or point.nav is None
             or not point.nav.is_finite()
             or point.nav <= 0
         ]
+
+    @staticmethod
+    def _final_replay_points(replay: ReplayResult) -> list[NavPoint]:
+        final_points = AnalyticsService._final_replay_point_index_map(replay)
+        return [point for _, point in sorted(final_points.values(), key=lambda item: item[0])]
+
+    @staticmethod
+    def _final_replay_point_map(replay: ReplayResult) -> dict[date, NavPoint]:
+        indexed_points = AnalyticsService._final_replay_point_index_map(replay)
+        return {trade_date: point for trade_date, (_, point) in indexed_points.items()}
+
+    @staticmethod
+    def _final_replay_point_index_map(replay: ReplayResult) -> dict[date, tuple[int, NavPoint]]:
+        final_points: dict[date, tuple[int, NavPoint]] = {}
+        for index, point in enumerate(replay.points):
+            final_points[point.trade_date] = (index, point)
+        return final_points
 
     # ------------------------------------------------------------------
     # Overview
@@ -219,12 +224,14 @@ class AnalyticsService:
             return [], "missing_initial"
         if replay.points[0].quality_status is not SnapshotQualityStatus.VALID:
             return [], "invalid_initial"
-        if any(point.quality_status is not SnapshotQualityStatus.VALID for point in replay.points[1:]):
+        final_points = AnalyticsService._final_replay_point_map(replay)
+        initial_date = replay.points[0].trade_date
+        final_initial = final_points[initial_date]
+        if final_initial.quality_status is not SnapshotQualityStatus.VALID:
             return [], "valuation_gap"
-        points = [point for point in replay.points if point.event_type.value in {"initial", "market_valuation"}]
-        initial = points[0]
-        if initial.quality_status is not SnapshotQualityStatus.VALID or initial.nav is None:
-            return [], "invalid_initial"
+        if final_initial.nav is None or not final_initial.nav.is_finite() or final_initial.nav <= 0:
+            return [], "valuation_gap"
+        points = AnalyticsService._final_replay_points(replay)
         navs: list[Decimal] = []
         for point in points:
             if point.quality_status is not SnapshotQualityStatus.VALID:
@@ -398,14 +405,7 @@ class AnalyticsService:
             return OverviewAnalytics(total_return=MetricValue(value=None, reason="insufficient_data"))
 
         latest = snapshots[-1]
-        latest_point = next(
-            (
-                point
-                for point in reversed(replay.points)
-                if point.nav is not None and point.nav.is_finite() and point.nav > 0
-            ),
-            None,
-        )
+        latest_point = AnalyticsService._final_replay_points(replay)[-1]
         total_return = self._linked_total_return(snapshots, replay)
         simple_asset_return = MetricValue(value=None, reason="invalid_initial_cash")
         if initial_cash and initial_cash > 0:

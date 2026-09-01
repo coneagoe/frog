@@ -400,6 +400,20 @@ class TestImportPositionsAPI:
         assert positions["UNKNOWN"]["price_source"] is None
         assert positions["UNKNOWN"]["unrealized_pnl"] is None
 
+    def test_list_positions_excludes_non_positive_quantities(self, monkeypatch, sqlite_session):
+        client, headers, session = _client(monkeypatch, sqlite_session)
+        account_id = _create_account(client, headers)
+        repo = PaperTradingRepository(session)
+        repo.upsert_position(account_id, Market.A_SHARE, "000001", 100, 0, Decimal("1000.00"))
+        repo.upsert_position(account_id, Market.A_SHARE, "000002", 0, 0, Decimal("0.00"))
+        repo.upsert_position(account_id, Market.A_SHARE, "000003", -1, 0, Decimal("0.00"))
+        session.commit()
+
+        response = client.get(f"/paper/accounts/{account_id}/positions", headers=headers)
+
+        assert response.status_code == 200
+        assert [position["symbol"] for position in response.json()] == ["000001"]
+
     def test_import_positions_returns_200(self, monkeypatch, sqlite_session):
         client, headers, session = _client(monkeypatch, sqlite_session)
         account_id = _create_account(client, headers)

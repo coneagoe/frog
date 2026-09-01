@@ -15,13 +15,17 @@ from paper_trading.domain.enums import (
     PaperOrderEventType,
     SnapshotPointType,
 )
+from paper_trading.schemas.analytics import AnalyticsResponse
+from paper_trading.services.analytics_service import AnalyticsService
 from paper_trading.services.matching_service import MatchingService
+from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.services.trade_validity_service import TradeValidityService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import DailyBar
+from paper_trading.storage.models import PaperOrderEvent
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
 from storage.model.general_info_ggt import GeneralInfoGGT
@@ -309,6 +313,113 @@ def test_rebuild_from_fills_delayed_order_and_replays_later_ledger(session):
     assert repo.get_order(later_order.id).status == OrderStatus.FILLED.value
     assert [trade.order_id for trade in repo.list_trades(account.id)] == [early_order.id, later_order.id]
     assert rebuild.start_date == early_date
+
+
+def test_historical_rebuild_regenerates_buy_freezes_before_replayed_trades_and_analytics(session):
+    repo = PaperTradingRepository(session)
+    trade_date = date(2026, 7, 17)
+    account = repo.create_account("rebuild-buy-freeze-replay", Decimal("100000"))
+    first_order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0100"),
+    )
+    second_order = repo.create_order(
+        account.id,
+        "000002",
+        OrderSide.BUY,
+        100,
+        Decimal("20.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("2005.0200"),
+    )
+    reservation_times = {
+        order.id: next(
+            event.event_at
+            for event in repo.list_effective_order_events(account.id, order.id)
+            if event.event_type == PaperOrderEventType.RESERVED.value
+        )
+        for order in (first_order, second_order)
+    }
+
+    OrderDeleteService(repo, FakeMarketDataProvider()).rebuild_account_from(
+        account.id, trade_date, [first_order.id, second_order.id]
+    )
+
+    freezes = {
+        event.order_id: event
+        for event in repo.list_cash_ledger(account.id)
+        if event.event_type == CashEventType.FREEZE.value
+    }
+    trades = {trade.order_id: trade for trade in repo.list_trades(account.id)}
+    assert set(freezes) == {first_order.id, second_order.id}
+    assert [freezes[order_id].amount for order_id in (first_order.id, second_order.id)] == [
+        Decimal("-1005.0100"),
+        Decimal("-2005.0200"),
+    ]
+
+    def normalize_utc(value):
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+    for order_id in freezes:
+        assert order_id is not None
+        assert normalize_utc(freezes[order_id].occurred_at) == normalize_utc(reservation_times[order_id])
+        assert normalize_utc(freezes[order_id].occurred_at) < normalize_utc(trades[order_id].trade_time)
+    NavSeriesBuilder(repo).build(account.id)
+    assert isinstance(AnalyticsService(repo).get_account_analytics(account.id), AnalyticsResponse)
+
+
+def test_historical_rebuild_replays_legacy_filled_order_without_reserved_event(session):
+    repo = PaperTradingRepository(session)
+    trade_date = date(2026, 7, 17)
+    account = repo.create_account("rebuild-legacy-no-reservation", Decimal("100000"))
+    order = repo.create_order(
+        account.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10.00"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_cash=Decimal("1005.0100"),
+    )
+    matching = MatchingService(repo, FakeMarketDataProvider(), SnapshotService(repo, FakeMarketDataProvider()))
+    assert matching.match_order(order) == "filled"
+    accepted_at = next(
+        event.event_at
+        for event in repo.list_effective_order_events(account.id, order.id)
+        if event.event_type == PaperOrderEventType.ACCEPTED.value
+    )
+    repo.session.query(PaperOrderEvent).filter(
+        PaperOrderEvent.account_id == account.id,
+        PaperOrderEvent.order_id == order.id,
+        PaperOrderEvent.event_type == PaperOrderEventType.RESERVED.value,
+    ).delete(synchronize_session=False)
+    repo.session.flush()
+    assert [event.event_type for event in repo.list_effective_order_events(account.id, order.id)] == [
+        PaperOrderEventType.ACCEPTED.value,
+        PaperOrderEventType.FILL.value,
+        PaperOrderEventType.RELEASE.value,
+    ]
+
+    OrderDeleteService(repo, FakeMarketDataProvider()).rebuild_account_from(account.id, trade_date, [order.id])
+
+    freeze = next(
+        event for event in repo.list_cash_ledger(account.id) if event.event_type == CashEventType.FREEZE.value
+    )
+    trade = repo.list_trades(account.id)[0]
+    assert freeze.amount == Decimal("-1005.0100")
+    assert freeze.occurred_at.replace(tzinfo=timezone.utc) == accepted_at.replace(tzinfo=timezone.utc)
+    assert freeze.occurred_at.replace(tzinfo=timezone.utc) < trade.trade_time.replace(tzinfo=timezone.utc)
+    assert repo.get_order(order.id).status == OrderStatus.FILLED.value
+    NavSeriesBuilder(repo).build(account.id)
+    assert isinstance(AnalyticsService(repo).get_account_analytics(account.id), AnalyticsResponse)
 
 
 def test_rebuild_locks_account_before_clearing_derived_state(session, monkeypatch):

@@ -118,9 +118,8 @@ class SnapshotRecalculationService:
             if owns_session:
                 current_session.close()
 
-    @staticmethod
     def _dates_with_valuation_state(
-        repo: PaperTradingRepository, account_id: int, start_date: date, end_date: date
+        self, repo: PaperTradingRepository, account_id: int, start_date: date, end_date: date
     ) -> list[date]:
         snapshot_dates = {
             trade_date
@@ -150,7 +149,11 @@ class SnapshotRecalculationService:
             for event in repo.list_replay_events(account_id)
             if event.trade_date is not None and start_date <= event.trade_date <= end_date
         }
-        active_dates = {start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)}
+        active_dates = {
+            candidate
+            for offset in range((end_date - start_date).days + 1)
+            if self.market_data.is_trade_date(candidate := start_date + timedelta(days=offset))
+        }
         return sorted(snapshot_dates | gap_dates | event_dates | active_dates)
 
     def _valuation_events(

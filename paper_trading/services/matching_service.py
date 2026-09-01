@@ -105,7 +105,7 @@ class MatchingService:
             error_details="; ".join(error_messages) if error_messages else None,
         )
 
-    def match_order(self, order: PaperOrder) -> str:
+    def match_order(self, order: PaperOrder, *, trade_time: datetime | None = None) -> str:
         """Match a single accepted order.
 
         Returns one of ``'filled'``, ``'skipped'``, ``'rejected'``, ``'warning'``,
@@ -141,7 +141,10 @@ class MatchingService:
         except Exception:
             return "skipped"  # stays ACCEPTED
         try:
-            self._fill_order(order)
+            if trade_time is None:
+                self._fill_order(order)
+            else:
+                self._fill_order(order, trade_time=trade_time)
             self._resolve_matching_diagnostic(order)
             return "filled"
         except SQLAlchemyError:
@@ -235,7 +238,7 @@ class MatchingService:
             current = self.market_data.next_trade_date(current)
         return current
 
-    def _fill_order(self, order: PaperOrder) -> None:
+    def _fill_order(self, order: PaperOrder, *, trade_time: datetime | None = None) -> None:
         side = OrderSide(order.side)
         price = Decimal(order.limit_price)
         previous_filled_quantity = int(order.filled_quantity or 0)
@@ -275,6 +278,7 @@ class MatchingService:
             order.trade_date,
             comment=order.comment,
             market=order.market,
+            trade_time=trade_time,
         )
         actual_cost = amount + fees
         release_cash = outstanding_cash - actual_cost
@@ -395,7 +399,7 @@ class MatchingService:
             cost_reduction += Decimal(used) * Decimal(lot.cost_price)
             remaining -= used
         position.total_quantity = int(position.total_quantity or 0) - quantity_to_sell
-        position.frozen_quantity = int(position.frozen_quantity or 0) - quantity_to_sell
+        position.frozen_quantity = max(0, int(position.frozen_quantity or 0) - quantity_to_sell)
         position.cost_amount = quantize_account_money(Decimal(position.cost_amount or 0) - cost_reduction)
         realized_pnl = quantize_account_money(amount - fees - cost_reduction)
         position.realized_pnl = quantize_account_money(Decimal(position.realized_pnl or 0) + realized_pnl)

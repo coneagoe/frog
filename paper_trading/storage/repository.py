@@ -808,6 +808,23 @@ class PaperTradingRepository:
             return int(order.filled_quantity or 0)
         return cumulative
 
+    @staticmethod
+    def _legacy_sell_reservation_quantity(order: PaperOrder, events: list[PaperOrderEvent]) -> Decimal:
+        filled_from_events = sum(
+            (
+                -Decimal(event.quantity_delta)
+                for event in events
+                if event.event_type == PaperOrderEventType.FILL.value and Decimal(event.quantity_delta) < 0
+            ),
+            Decimal("0"),
+        )
+        reservation_quantity = filled_from_events or Decimal(order.filled_quantity or 0)
+        if reservation_quantity <= 0:
+            raise RuntimeError(f"order {order.id} has no frozen quantity for replay reservation")
+        if reservation_quantity > order.quantity:
+            raise RuntimeError(f"order {order.id} has invalid filled quantity for replay reservation")
+        return reservation_quantity
+
     def start_order_replay_lifecycle(self, order: PaperOrder) -> None:
         original = self.list_order_events(order.account_id, order.id)
         effective = self.list_effective_order_events(order.account_id, order.id)
@@ -816,26 +833,76 @@ class PaperTradingRepository:
             None,
         )
         if reservation is None:
-            return
-        remaining_quantity = max(
-            sum((Decimal(event.quantity_delta) for event in effective), Decimal("0")), Decimal("0")
-        )
-        remaining_cash = min(sum((Decimal(event.cash_delta) for event in effective), Decimal("0")), Decimal("0"))
-        if abs(remaining_cash) <= Decimal("0.000000000001"):
-            remaining_cash = Decimal("0")
-        if OrderSide(order.side) == OrderSide.SELL:
-            remaining_cash = Decimal("0")
+            accepted = next(
+                (event for event in effective if event.event_type == PaperOrderEventType.ACCEPTED.value),
+                None,
+            )
+            if accepted is not None:
+                # Legacy lifecycles can retain only accepted/fill/release events. The
+                # accepted event is their canonical historical reservation timestamp.
+                reservation = accepted
+                frozen_quantity = order.quantity if OrderSide(order.side) == OrderSide.BUY else order.frozen_quantity
+                remaining_quantity = Decimal(frozen_quantity)
+                remaining_cash = -Decimal(order.frozen_cash) if OrderSide(order.side) == OrderSide.BUY else Decimal("0")
+                reservation_quantity_delta = Decimal(reservation.quantity_delta)
+                reservation_cash_delta = Decimal(reservation.cash_delta)
+                reservation_event_at = reservation.event_at
+                reservation_provenance = reservation.event_time_provenance
+            else:
+                if order.quantity <= 0:
+                    raise RuntimeError(f"order {order.id} has no valid quantity for replay reservation")
+                reservation_quantity = (
+                    order.quantity
+                    if OrderSide(order.side) == OrderSide.BUY
+                    else (
+                        order.frozen_quantity
+                        if order.frozen_quantity > 0
+                        else self._legacy_sell_reservation_quantity(order, original)
+                    )
+                )
+                # Some terminal legacy orders were persisted before lifecycle events
+                # were introduced. Their order facts still provide a safe replay
+                # reservation, anchored to the oldest persisted historical time.
+                historical_event = min(original, key=lambda event: (event.event_at, event.id), default=None)
+                event_at = historical_event.event_at if historical_event is not None else order.created_at
+                if event_at is None:
+                    raise RuntimeError(f"order {order.id} has no historical time for replay reservation")
+                remaining_quantity = (
+                    Decimal(order.quantity) if OrderSide(order.side) == OrderSide.BUY else Decimal(reservation_quantity)
+                )
+                remaining_cash = -Decimal(order.frozen_cash) if OrderSide(order.side) == OrderSide.BUY else Decimal("0")
+                reservation_quantity_delta = remaining_quantity
+                reservation_cash_delta = remaining_cash
+                reservation_event_at = event_at
+                reservation_provenance = (
+                    historical_event.event_time_provenance
+                    if historical_event is not None
+                    else ReplayTimeProvenance.CANONICAL_UTC.value
+                )
+        else:
+            remaining_quantity = max(
+                sum((Decimal(event.quantity_delta) for event in effective), Decimal("0")), Decimal("0")
+            )
+            remaining_cash = min(sum((Decimal(event.cash_delta) for event in effective), Decimal("0")), Decimal("0"))
+            if abs(remaining_cash) <= Decimal("0.000000000001"):
+                remaining_cash = Decimal("0")
+            if OrderSide(order.side) == OrderSide.SELL:
+                remaining_cash = Decimal("0")
+            reservation_quantity_delta = Decimal(reservation.quantity_delta)
+            reservation_cash_delta = Decimal(reservation.cash_delta)
+            reservation_event_at = reservation.event_at
+            reservation_provenance = reservation.event_time_provenance
         accepted_count = sum(event.event_type == PaperOrderEventType.ACCEPTED.value for event in original)
         if accepted_count > 1:
-            remaining_quantity = max(Decimal(reservation.quantity_delta), Decimal("0"))
-            remaining_cash = min(Decimal(reservation.cash_delta), Decimal("0"))
+            remaining_quantity = max(reservation_quantity_delta, Decimal("0"))
+            remaining_cash = min(reservation_cash_delta, Decimal("0"))
         if remaining_quantity == 0 and (OrderSide(order.side) == OrderSide.SELL or remaining_cash == 0):
-            remaining_quantity = Decimal(reservation.quantity_delta)
-            remaining_cash = Decimal(reservation.cash_delta)
+            remaining_quantity = reservation_quantity_delta
+            remaining_cash = reservation_cash_delta
         replay_number = len([event for event in original if event.event_type == PaperOrderEventType.ACCEPTED.value])
         replay_key = f"order:{order.id}:replay:{replay_number}"
-        event_at = reservation.event_at.replace(tzinfo=timezone.utc)
-        provenance = ReplayTimeProvenance(reservation.event_time_provenance)
+        event_at = reservation_event_at.replace(tzinfo=timezone.utc)
+        provenance = ReplayTimeProvenance(reservation_provenance)
         self.append_order_event(
             order.account_id,
             order.id,
@@ -1239,16 +1306,30 @@ class PaperTradingRepository:
 
     def _is_creation_initial_cash_event(self, account: PaperAccount, ledger: PaperCashLedger) -> bool:
         """Identify only the immutable creation event represented by INITIAL."""
+        pair = self._creation_initial_cash_pair(account, ledger)
+        if pair is None:
+            return False
+        _, ledger_quality, snapshot_quality = pair
+        return ledger_quality is SnapshotQualityStatus.VALID and snapshot_quality is SnapshotQualityStatus.VALID
+
+    def _creation_initial_cash_pair(
+        self,
+        account: PaperAccount,
+        ledger: PaperCashLedger,
+        *,
+        require_valid_provenance: bool = True,
+    ) -> tuple[PaperAccountSnapshot, SnapshotQualityStatus, SnapshotQualityStatus] | None:
         initial_snapshots = [
             snapshot
             for snapshot in self.list_snapshots(account.id)
             if snapshot.point_type == SnapshotPointType.INITIAL.value
         ]
-        if len(initial_snapshots) != 1 or ledger.event_type != CashEventType.DEPOSIT.value:
-            return False
-        first_ledger_id = min(event.id for event in self.list_cash_ledger(account.id))
+        all_cash_events = self.list_cash_ledger(account.id)
+        if len(initial_snapshots) != 1 or not all_cash_events or ledger.event_type != CashEventType.DEPOSIT.value:
+            return None
+        first_ledger_id = min(event.id for event in all_cash_events)
         if ledger.id != first_ledger_id:
-            return False
+            return None
         snapshot = initial_snapshots[0]
         ledger_at, ledger_quality = self._replay_persisted_event_time(
             ledger.occurred_at, ledger.trade_date, ledger.event_time_provenance
@@ -1258,21 +1339,29 @@ class PaperTradingRepository:
         )
         if (
             ledger.note != "initial_cash"
-            or ledger_quality is not SnapshotQualityStatus.VALID
-            or snapshot_quality is not SnapshotQualityStatus.VALID
             or ledger_at != snapshot_at
-            or ledger.trade_date != snapshot.trade_date
+            or (ledger.trade_date is not None and ledger.trade_date != snapshot.trade_date)
         ):
-            return False
+            return None
+        if require_valid_provenance and (
+            ledger_quality is not SnapshotQualityStatus.VALID or snapshot_quality is not SnapshotQualityStatus.VALID
+        ):
+            return None
         try:
-            return (
+            if not (
                 Decimal(str(ledger.amount)) == Decimal(str(account.initial_cash))
+                and Decimal(str(snapshot.cash_available)) == Decimal(str(account.initial_cash))
+                and Decimal(str(snapshot.total_assets)) == Decimal(str(account.initial_cash))
+                and Decimal(str(snapshot.net_asset_value)) == Decimal("1")
+                and Decimal(str(snapshot.share_count)) == Decimal(str(account.share_count))
                 and Decimal(str(ledger.net_asset_value)) == Decimal("1")
                 and Decimal(str(ledger.share_delta)) == Decimal(str(snapshot.share_count))
                 and Decimal(str(ledger.rounding_residual)) == Decimal("0")
-            )
+            ):
+                return None
         except (ArithmeticError, TypeError, ValueError):
-            return False
+            return None
+        return snapshot, ledger_quality, snapshot_quality
 
     def get_replay_events(
         self, account_id: int, start_at: datetime | None = None, end_at: datetime | None = None
@@ -1448,7 +1537,7 @@ class PaperTradingRepository:
     def get_positions(self, account_id: int) -> list[PaperPosition]:
         return list(
             self.session.query(PaperPosition)
-            .filter(PaperPosition.account_id == account_id)
+            .filter(PaperPosition.account_id == account_id, PaperPosition.total_quantity > 0)
             .order_by(PaperPosition.symbol.asc())
             .all()
         )
@@ -1991,6 +2080,11 @@ class PaperTradingRepository:
         deleted_counts: dict[str, int],
         regenerated_counts: dict[str, int],
     ) -> PaperLedgerRebuild:
+        account = self.get_account(rebuild.account_id)
+        if account is None:
+            raise KeyError(f"paper account not found: {rebuild.account_id}")
+        self._repair_creation_baseline_provenance(account)
+        account.migration_repair_reason = None
         rebuild.status = LedgerRebuildStatus.COMPLETED.value
         rebuild.deleted_counts = deleted_counts
         rebuild.regenerated_counts = regenerated_counts
@@ -1998,6 +2092,21 @@ class PaperTradingRepository:
         rebuild.finished_at = datetime.now(timezone.utc)
         self.session.flush()
         return rebuild
+
+    def _repair_creation_baseline_provenance(self, account: PaperAccount) -> None:
+        initial_ledger = next(
+            (ledger for ledger in self.list_cash_ledger(account.id) if ledger.note == "initial_cash"),
+            None,
+        )
+        if initial_ledger is None:
+            return
+        pair = self._creation_initial_cash_pair(account, initial_ledger, require_valid_provenance=False)
+        if pair is None:
+            return
+        snapshot, _, _ = pair
+        canonical = ReplayTimeProvenance.CANONICAL_UTC.value
+        initial_ledger.event_time_provenance = canonical
+        snapshot.event_time_provenance = canonical
 
     def create_ledger_rebuild_failed(
         self,
@@ -2097,6 +2206,7 @@ class PaperTradingRepository:
         account = self.get_account(account_id)
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
+        self._repair_creation_baseline_provenance(account)
         deleted_trade_ids = [
             row[0]
             for row in self.session.query(PaperTrade.id)

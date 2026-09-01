@@ -151,6 +151,47 @@ def test_matching_preserves_accounting_precision_through_buy_and_sell(tmp_path):
     engine.dispose()
 
 
+def test_sell_settlement_does_not_make_frozen_quantity_negative(tmp_path):
+    engine, session, repo, _, matching_service, trade_date = _services(tmp_path)
+    account = repo.create_account("sell-frozen-clamp", Decimal("100000"))
+    repo.upsert_position(
+        account.id,
+        Market.A_SHARE,
+        "000001.SZ",
+        total_quantity=200,
+        frozen_quantity=0,
+        cost_amount=Decimal("1000"),
+    )
+    repo.create_position_lot(
+        account.id,
+        Market.A_SHARE,
+        "000001.SZ",
+        trade_date,
+        original_quantity=200,
+        remaining_quantity=200,
+        cost_price=Decimal("10"),
+    )
+    sell = repo.create_order(
+        account.id,
+        "000001.SZ",
+        OrderSide.SELL,
+        100,
+        Decimal("10"),
+        trade_date,
+        OrderStatus.ACCEPTED,
+        frozen_quantity=100,
+    )
+
+    matching_service._fill_order(sell)
+
+    position = repo.get_position(account.id, Market.A_SHARE, "000001.SZ")
+    assert position is not None
+    assert position.total_quantity == 100
+    assert position.frozen_quantity == 0
+    session.commit()
+    engine.dispose()
+
+
 def test_fill_order_appends_trade_linked_lifecycle_facts(tmp_path):
     engine, session, repo, _, matching_service, trade_date = _services(tmp_path)
     account = repo.create_account("matching-order-events", Decimal("100000"))

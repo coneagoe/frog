@@ -1183,7 +1183,561 @@ def test_replay_nav_series_reports_invalid_initial_and_insufficient_data():
     assert AnalyticsService._linked_total_return([], one_replay).reason == "insufficient_data"
 
 
-def test_risk_is_unchanged_when_cash_flows_are_added(tmp_path):
+def test_replay_valuation_gaps_use_final_point_when_later_point_is_valid():
+    trade_date = date(2026, 8, 2)
+    replay = ReplayResult(
+        points=(
+            NavPoint(
+                datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+                trade_date,
+                "replay:invalid",
+                NavReplayEventType.MARKET_VALUATION,
+                None,
+                Decimal("100"),
+                None,
+                SnapshotQualityStatus.INVALID,
+            ),
+            NavPoint(
+                datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+                trade_date,
+                "replay:valid",
+                NavReplayEventType.MARKET_VALUATION,
+                Decimal("110"),
+                Decimal("100"),
+                Decimal("1.1"),
+                SnapshotQualityStatus.VALID,
+            ),
+        )
+    )
+
+    assert AnalyticsService._replay_valuation_gaps(replay) == []
+
+
+def test_replay_valuation_gaps_keep_date_when_final_point_is_invalid():
+    trade_date = date(2026, 8, 2)
+    replay = ReplayResult(
+        points=(
+            NavPoint(
+                datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+                trade_date,
+                "replay:valid",
+                NavReplayEventType.MARKET_VALUATION,
+                Decimal("110"),
+                Decimal("100"),
+                Decimal("1.1"),
+                SnapshotQualityStatus.VALID,
+            ),
+            NavPoint(
+                datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+                trade_date,
+                "replay:invalid",
+                NavReplayEventType.MARKET_VALUATION,
+                None,
+                Decimal("100"),
+                None,
+                SnapshotQualityStatus.INVALID,
+                valuation_quality="missing_bar",
+            ),
+        )
+    )
+
+    assert [gap.model_dump() for gap in AnalyticsService._replay_valuation_gaps(replay)] == [
+        {
+            "trade_date": trade_date,
+            "missing_symbols": [],
+            "details": [{"reason": "missing_bar"}],
+            "resolved": False,
+        }
+    ]
+
+
+def test_replay_valuation_gaps_do_not_skip_invalid_final_initial_date():
+    trade_date = date(2026, 8, 2)
+    initial = NavPoint(
+        datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+        trade_date,
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    invalid_final = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        trade_date,
+        "replay:invalid-final",
+        NavReplayEventType.MARKET_VALUATION,
+        None,
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+    )
+
+    gaps = AnalyticsService._replay_valuation_gaps(ReplayResult((initial, invalid_final)))
+
+    assert [gap.trade_date for gap in gaps] == [trade_date]
+
+
+def test_replay_nav_series_uses_final_point_per_non_initial_date():
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    invalid = NavPoint(
+        datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:invalid",
+        NavReplayEventType.MARKET_VALUATION,
+        None,
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+    )
+    valid = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:valid",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+
+    navs, issue = AnalyticsService._replay_nav_series(ReplayResult((initial, invalid, valid)))
+
+    assert issue is None
+    assert navs == [Decimal("1.000000"), Decimal("1.100000")]
+
+
+def test_replay_nav_series_uses_final_point_for_initial_date():
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    later = NavPoint(
+        datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:later",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+    next_day = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:next",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("120"),
+        Decimal("100"),
+        Decimal("1.2"),
+        SnapshotQualityStatus.VALID,
+    )
+
+    navs, issue = AnalyticsService._replay_nav_series(ReplayResult((initial, later, next_day)))
+
+    assert issue is None
+    assert navs == [Decimal("1.100000"), Decimal("1.200000")]
+
+
+def test_replay_valuation_gaps_judge_final_cash_flow_point():
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    valuation = NavPoint(
+        datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:valuation",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+    invalid_cash = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:cash",
+        NavReplayEventType.CASH_FLOW,
+        Decimal("110"),
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.VALID,
+    )
+
+    gaps = AnalyticsService._replay_valuation_gaps(ReplayResult((initial, valuation, invalid_cash)))
+
+    assert [gap.trade_date for gap in gaps] == [date(2026, 8, 2)]
+
+
+def test_replay_nav_series_uses_final_cash_flow_point():
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    cash_flow = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:cash",
+        NavReplayEventType.CASH_FLOW,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+    next_day = NavPoint(
+        datetime(2026, 8, 3, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 3),
+        "replay:next",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("120"),
+        Decimal("100"),
+        Decimal("1.2"),
+        SnapshotQualityStatus.VALID,
+    )
+
+    navs, issue = AnalyticsService._replay_nav_series(ReplayResult((initial, cash_flow, next_day)))
+
+    assert issue is None
+    assert navs == [Decimal("1.000000"), Decimal("1.100000"), Decimal("1.200000")]
+
+
+def test_replay_valuation_gaps_block_final_invalid_cash_flow_point():
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    valid = NavPoint(
+        datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:valid",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+    invalid_cash = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:cash",
+        NavReplayEventType.CASH_FLOW,
+        Decimal("110"),
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+    )
+
+    gaps = AnalyticsService._replay_valuation_gaps(ReplayResult((initial, valid, invalid_cash)))
+
+    assert [gap.trade_date for gap in gaps] == [date(2026, 8, 2)]
+
+
+@pytest.mark.parametrize("final_event_type", [NavReplayEventType.TRADE_SETTLEMENT, NavReplayEventType.CORPORATE_ACTION])
+def test_replay_valuation_gaps_accept_valid_final_non_valuation_point(final_event_type):
+    trade_date = date(2026, 8, 2)
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    earlier_invalid = NavPoint(
+        datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+        trade_date,
+        "replay:invalid",
+        NavReplayEventType.MARKET_VALUATION,
+        None,
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+    )
+    final_valid = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        trade_date,
+        "replay:final",
+        final_event_type,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+
+    replay = ReplayResult((initial, earlier_invalid, final_valid))
+
+    assert AnalyticsService._replay_valuation_gaps(replay) == []
+    assert AnalyticsService._replay_nav_series(replay) == (
+        [Decimal("1.000000"), Decimal("1.100000")],
+        None,
+    )
+
+
+def test_replay_valuation_gaps_block_invalid_final_trade_settlement():
+    trade_date = date(2026, 8, 2)
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    earlier_valid = NavPoint(
+        datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+        trade_date,
+        "replay:valid",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+    final_invalid = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        trade_date,
+        "replay:invalid-settlement",
+        NavReplayEventType.TRADE_SETTLEMENT,
+        Decimal("110"),
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+        valuation_quality="invalid_settlement_nav",
+    )
+
+    replay = ReplayResult((initial, earlier_valid, final_invalid))
+
+    gaps = AnalyticsService._replay_valuation_gaps(replay)
+
+    assert [gap.model_dump() for gap in gaps] == [
+        {
+            "trade_date": trade_date,
+            "missing_symbols": [],
+            "details": [{"reason": "invalid_settlement_nav"}],
+            "resolved": False,
+        }
+    ]
+
+
+def test_get_account_analytics_uses_final_same_day_replay_point_for_metrics(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("replay-final-point-demo", Decimal("100000.00"))
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    earlier_invalid = NavPoint(
+        datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:invalid",
+        NavReplayEventType.MARKET_VALUATION,
+        None,
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+        valuation_quality="missing_bar",
+    )
+    later_valid = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:valid",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+    next_day = NavPoint(
+        datetime(2026, 8, 3, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 3),
+        "replay:next",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("120"),
+        Decimal("100"),
+        Decimal("1.2"),
+        SnapshotQualityStatus.VALID,
+    )
+    monkeypatch.setattr(
+        NavSeriesBuilder,
+        "build",
+        lambda self, account_id: ReplayResult((initial, earlier_invalid, later_valid, next_day)),
+    )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(analytics, AnalyticsResponse)
+    assert analytics.available is True
+    assert analytics.overview.total_return.value == Decimal("0.200000")
+    assert analytics.risk.max_drawdown.value == Decimal("0.000000")
+    engine.dispose()
+
+
+def test_get_account_analytics_blocks_when_initial_date_final_point_is_invalid(tmp_path, monkeypatch):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("replay-final-initial-invalid", Decimal("100000.00"))
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    invalid_final = NavPoint(
+        datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:invalid-final",
+        NavReplayEventType.MARKET_VALUATION,
+        None,
+        Decimal("100"),
+        None,
+        SnapshotQualityStatus.INVALID,
+        valuation_quality="missing_bar",
+    )
+    monkeypatch.setattr(NavSeriesBuilder, "build", lambda self, account_id: ReplayResult((initial, invalid_final)))
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(analytics, AnalyticsUnavailableResponse)
+    assert analytics.reason == "valuation_gap"
+    engine.dispose()
+
+
+def test_get_account_analytics_ignores_superseded_malformed_snapshot_when_final_same_day_is_valid(
+    tmp_path, monkeypatch
+):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("persisted-final-same-day", Decimal("100000.00"))
+    initial_snapshot = repo.list_snapshots(account.id)[0]
+    invalid_snapshot = PaperAccountSnapshot()
+    invalid_snapshot.id = 2
+    invalid_snapshot.account_id = account.id
+    invalid_snapshot.trade_date = date(2026, 8, 2)
+    invalid_snapshot.event_at = datetime(2026, 8, 2, 9, 0, tzinfo=timezone.utc)
+    invalid_snapshot.point_type = SnapshotPointType.TRADING.value
+    invalid_snapshot.quality_status = SnapshotQualityStatus.INVALID.value
+    invalid_snapshot.invalid_reason = "missing_nav"
+    invalid_snapshot.cash_available = Decimal("100000.0000")
+    invalid_snapshot.cash_frozen = Decimal("0")
+    invalid_snapshot.market_value = Decimal("0")
+    invalid_snapshot.total_assets = Decimal("100000.0000")
+    invalid_snapshot.realized_pnl = Decimal("0")
+    invalid_snapshot.unrealized_pnl = Decimal("0")
+    invalid_snapshot.position_count = 0
+    invalid_snapshot.order_count = 0
+    invalid_snapshot.trade_count = 0
+    invalid_snapshot.net_asset_value = None
+    valid_snapshot = PaperAccountSnapshot()
+    valid_snapshot.id = 3
+    valid_snapshot.account_id = account.id
+    valid_snapshot.trade_date = date(2026, 8, 2)
+    valid_snapshot.event_at = datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc)
+    valid_snapshot.point_type = SnapshotPointType.TRADING.value
+    valid_snapshot.quality_status = SnapshotQualityStatus.VALID.value
+    valid_snapshot.invalid_reason = None
+    valid_snapshot.cash_available = Decimal("110000.0000")
+    valid_snapshot.cash_frozen = Decimal("0")
+    valid_snapshot.market_value = Decimal("0")
+    valid_snapshot.total_assets = Decimal("110000.0000")
+    valid_snapshot.realized_pnl = Decimal("0")
+    valid_snapshot.unrealized_pnl = Decimal("0")
+    valid_snapshot.position_count = 0
+    valid_snapshot.order_count = 0
+    valid_snapshot.trade_count = 0
+    valid_snapshot.net_asset_value = Decimal("1.100000")
+    monkeypatch.setattr(repo, "list_snapshots", lambda account_id: [initial_snapshot, invalid_snapshot, valid_snapshot])
+    initial = NavPoint(
+        datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc),
+        date(2026, 8, 1),
+        "replay:initial",
+        NavReplayEventType.INITIAL,
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("1"),
+        SnapshotQualityStatus.VALID,
+    )
+    valid_same_day = NavPoint(
+        datetime(2026, 8, 2, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 2),
+        "replay:valid",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("110"),
+        Decimal("100"),
+        Decimal("1.1"),
+        SnapshotQualityStatus.VALID,
+    )
+    next_day = NavPoint(
+        datetime(2026, 8, 3, 15, 0, tzinfo=timezone.utc),
+        date(2026, 8, 3),
+        "replay:next",
+        NavReplayEventType.MARKET_VALUATION,
+        Decimal("120"),
+        Decimal("100"),
+        Decimal("1.2"),
+        SnapshotQualityStatus.VALID,
+    )
+    monkeypatch.setattr(
+        NavSeriesBuilder,
+        "build",
+        lambda self, account_id: ReplayResult((initial, valid_same_day, next_day)),
+    )
+
+    analytics = AnalyticsService(repo).get_account_analytics(account.id)
+
+    assert isinstance(analytics, AnalyticsResponse)
+    assert analytics.available is True
+    assert analytics.overview.total_return.value == Decimal("0.200000")
+    engine.dispose()
+
+
+def test_risk_uses_final_cash_flow_point(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("cash-flow-risk-demo", Decimal("100000.00"))
     seed_trading_point(repo, account, nav=Decimal("1.100000"))
@@ -1201,7 +1755,8 @@ def test_risk_is_unchanged_when_cash_flows_are_added(tmp_path):
     )
     with_cash_flows = AnalyticsService(repo).get_account_analytics(account.id).risk
 
-    assert with_cash_flows.model_dump() == baseline.model_dump()
+    assert with_cash_flows.max_drawdown.value != baseline.max_drawdown.value
+    assert with_cash_flows.current_drawdown.value != baseline.current_drawdown.value
     engine.dispose()
 
 

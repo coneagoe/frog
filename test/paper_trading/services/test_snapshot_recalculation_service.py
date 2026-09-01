@@ -93,6 +93,43 @@ def test_recalculation_selects_only_bounded_repository_dates_and_is_idempotent(t
         session.close()
 
 
+def test_recalculation_skips_non_trading_dates(tmp_path):
+    factory = _sqlite_factory(tmp_path)
+    session = factory()
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("trading-date-recalculation", Decimal("100000"))
+        repo.upsert_position(account.id, "a_share", "000001", 100, 0, Decimal("1000"))
+        repo.create_position_lot(account.id, "a_share", "000001", date(2026, 8, 28), 100, 100, Decimal("10"))
+        account_id = account.id
+        session.commit()
+    finally:
+        session.close()
+
+    class WeekdayMarketDataProvider(FakeMarketDataProvider):
+        def is_trade_date(self, trade_date: date) -> bool:
+            return trade_date.weekday() < 5
+
+    market_data = WeekdayMarketDataProvider()
+    result = SnapshotRecalculationService(factory, market_data).recalculate(
+        account_id, date(2026, 8, 28), date(2026, 8, 31)
+    )
+
+    assert result.updated_dates == [date(2026, 8, 28), date(2026, 8, 31)]
+    assert result.unavailable_dates == []
+    session = factory()
+    try:
+        repo = PaperTradingRepository(session)
+        assert {row.trade_date for row in repo.list_snapshots(account_id) if row.point_type == "trading"} == {
+            date(2026, 8, 28),
+            date(2026, 8, 31),
+        }
+        assert repo.get_valuation_gap(account_id, date(2026, 8, 29)) is None
+        assert repo.get_valuation_gap(account_id, date(2026, 8, 30)) is None
+    finally:
+        session.close()
+
+
 def test_recalculation_includes_event_date_and_later_snapshot_and_gap(tmp_path):
     factory = _sqlite_factory(tmp_path)
     session = factory()

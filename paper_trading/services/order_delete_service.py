@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from paper_trading.domain.enums import REPLAY_REJECTION_MARKER, CashEventType, MatchingRunStatus, OrderSide, OrderStatus
@@ -174,7 +174,13 @@ class OrderDeleteService:
             f"{REPLAY_REJECTION_MARKER} 可卖出数量不足：A股 T+1 规则下当日买入部分不可用于卖出",
         )
 
-    def _restore_single_reservation(self, account_id: int, order: PaperOrder) -> None:
+    def _restore_single_reservation(
+        self,
+        account_id: int,
+        order: PaperOrder,
+        *,
+        occurred_at: datetime | None = None,
+    ) -> None:
         """Restore pre-match reservation for a single ACCEPTED order.
 
         Called immediately before ``matching_service.match_order(order)``.
@@ -208,6 +214,7 @@ class OrderDeleteService:
                         order_id=order.id,
                         trade_date=order.trade_date,
                         note="buy_order_freeze",
+                        occurred_at=occurred_at,
                     )
                 else:
                     self.repo.update_order_status(
