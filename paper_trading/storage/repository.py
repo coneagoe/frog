@@ -1762,7 +1762,6 @@ class PaperTradingRepository:
             normalized["event_time_provenance"] = ReplayTimeProvenance.CANONICAL_UTC.value
             self._quantize_snapshot_values(normalized)
             normalized_snapshots.append(normalized)
-        snapshot_dates = {values["trade_date"] for values in snapshots}
         with self.session.begin_nested():
             existing_rows = {
                 row.trade_date: row

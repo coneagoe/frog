@@ -5,7 +5,7 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from paper_trading.domain.enums import NavReplayEventType, SnapshotPointType, SnapshotQualityStatus
+from paper_trading.domain.enums import NavReplayEventType, SnapshotQualityStatus
 from paper_trading.domain.nav_replay import NavSeriesReplay, ReplayEvent
 from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.services.snapshot_service import PositionValuation, SnapshotService
