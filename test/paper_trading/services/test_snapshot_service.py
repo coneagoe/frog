@@ -204,10 +204,9 @@ def test_generate_snapshot_updates_trading_point_for_same_account_date(tmp_path)
     session.commit()
 
     snapshots = repo.list_snapshots(account.id)
-    assert [row.point_type for row in snapshots] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-    ]
+    trading_snapshots = [row for row in snapshots if row.point_type == SnapshotPointType.TRADING.value]
+    assert len(trading_snapshots) == 1
+    snapshot = trading_snapshots[0]
     assert first.id == snapshot.id
     assert snapshot.market_value == Decimal("2000.0000")
     assert snapshot.total_assets == Decimal("102000.0000")

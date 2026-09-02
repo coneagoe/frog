@@ -863,7 +863,7 @@ def test_unproven_persisted_naive_replay_event_is_invalid(sqlite_session) -> Non
     finally:
         fresh_session.close()
 
-    assert event.event_at == datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
+    assert event.event_at == canonical_trading_snapshot_event_at(date(2026, 8, 25))
     assert event.quality_status is SnapshotQualityStatus.INVALID
 
 
@@ -894,7 +894,7 @@ def test_unproven_persisted_aware_replay_event_is_invalid(request, repository_fi
     finally:
         fresh_session.close()
 
-    assert event.event_at == datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
+    assert event.event_at == canonical_trading_snapshot_event_at(date(2026, 8, 25))
     assert event.quality_status is SnapshotQualityStatus.INVALID
 
 
@@ -1308,13 +1308,11 @@ def test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails
 
     def fail_on_second_replacement_write(session, _flush_context, _instances):
         nonlocal replacement_writes
-        if session.new and any(
-            isinstance(row, type(old_rows[0])) and row.point_type == SnapshotPointType.TRADING.value
-            for row in session.new
-        ):
-            replacement_writes += 1
-            if replacement_writes == 2:
-                raise RuntimeError("injected replacement write failure")
+        for row in session.dirty:
+            if isinstance(row, type(old_rows[0])) and row.point_type == SnapshotPointType.TRADING.value:
+                replacement_writes += 1
+                if replacement_writes == 2:
+                    raise RuntimeError("injected replacement write failure")
 
     session = repo.session
     event.listen(session, "before_flush", fail_on_second_replacement_write)
