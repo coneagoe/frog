@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, cast
 
@@ -7,7 +7,7 @@ from paper_trading.domain.enums import SnapshotPointType, SnapshotQualityStatus,
 from paper_trading.domain.precision import quantize_account_money, quantize_nav, quantize_shares
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperAccountSnapshot, PaperValuationGap
-from paper_trading.storage.repository import PaperTradingRepository
+from paper_trading.storage.repository import PaperTradingRepository, canonical_trading_snapshot_event_at
 
 
 def _quantize_account_money_if_finite(value: Decimal) -> Decimal:
@@ -56,7 +56,6 @@ class SnapshotService:
         valuations: list[PositionValuation] | None = None,
         *,
         preserve_account_nav: bool = False,
-        event_at: datetime | None = None,
     ) -> PaperAccountSnapshot:
         cash_available = self.repo.get_cash_available_internal(account_id)
         cash_frozen = self.repo.get_cash_frozen_internal(account_id)
@@ -108,7 +107,7 @@ class SnapshotService:
         return self.repo.save_trading_snapshot(
             account_id=account_id,
             trade_date=trade_date,
-            event_at=event_at or datetime.now(timezone.utc),
+            event_at=canonical_trading_snapshot_event_at(trade_date),
             point_type=SnapshotPointType.TRADING.value,
             quality_status=quality_status,
             invalid_reason=invalid_reason,
@@ -158,26 +157,11 @@ class SnapshotService:
                 delete_snapshot(account_id, trade_date)
             return SnapshotOutcome(status="valuation_gap", valuation_gap=gap)
 
-        historical_event_at = None
-        if preserve_account_nav:
-            historical_event_at = next(
-                (
-                    snapshot.event_at
-                    for snapshot in self.repo.list_snapshots(account_id)
-                    if snapshot.trade_date == trade_date and snapshot.point_type == SnapshotPointType.TRADING.value
-                ),
-                None,
-            )
-            if historical_event_at is not None and (
-                historical_event_at.tzinfo is None or historical_event_at.utcoffset() is None
-            ):
-                historical_event_at = historical_event_at.replace(tzinfo=timezone.utc)
         snapshot = self.generate_snapshot(
             account_id,
             trade_date,
             valuations,
             preserve_account_nav=preserve_account_nav,
-            event_at=historical_event_at,
         )
         existing_gap = self.repo.get_valuation_gap(account_id, trade_date)
         resolved_gap = existing_gap

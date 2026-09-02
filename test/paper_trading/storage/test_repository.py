@@ -1,7 +1,7 @@
 import os
 import uuid
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
@@ -694,6 +694,24 @@ def test_save_trading_snapshot_updates_same_account_date_in_place(sqlite_session
     assert [row.id for row in snapshots] == [first.id]
     assert second.id == first.id
     assert snapshots[0].cash_available == Decimal("98000.0000")
+
+
+def test_canonical_trading_snapshot_preserves_same_date_identity(sqlite_session) -> None:
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("canonical-trading-snapshot", Decimal("100000.00"))
+    trade_date = date(2026, 8, 25)
+
+    first = repo.save_trading_snapshot(
+        **_trading_snapshot_values(account.id, trade_date, datetime(2026, 9, 1, tzinfo=timezone.utc))
+    )
+    second = repo.save_trading_snapshot(
+        **_trading_snapshot_values(account.id, trade_date, datetime(2026, 8, 25, 9, tzinfo=timezone.utc))
+    )
+
+    assert first.id == second.id
+    assert second.event_at == datetime.combine(trade_date, time.max, tzinfo=timezone.utc)
+    assert first.event_at == datetime.combine(trade_date, time.max, tzinfo=timezone.utc)
 
 
 def test_create_initial_snapshot_rejects_duplicate_initial_point(sqlite_session) -> None:

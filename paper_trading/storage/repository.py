@@ -72,6 +72,10 @@ from storage.model.etf_basic import ETFBasic
 _BARE_ETF_SYMBOL = re.compile(r"^\d{6}$")
 
 
+def canonical_trading_snapshot_event_at(trade_date: date) -> datetime:
+    return datetime.combine(trade_date, time.max, tzinfo=timezone.utc)
+
+
 def _whole_quantity(value: int | Decimal, field_name: str) -> int:
     quantity = Decimal(value)
     if not quantity.is_finite() or quantity != quantity.to_integral_value():
@@ -1651,12 +1655,11 @@ class PaperTradingRepository:
         event_at = values.get("event_at")
         if event_at is not None and (event_at.tzinfo is None or event_at.utcoffset() is None):
             raise ValueError("event_at must include a timezone offset")
-        if event_at is not None:
-            values["event_at"] = event_at.astimezone(timezone.utc)
+        trade_date = values["trade_date"]
+        values["event_at"] = canonical_trading_snapshot_event_at(trade_date)
         values["event_time_provenance"] = ReplayTimeProvenance.CANONICAL_UTC.value
         self._quantize_snapshot_values(values)
         account_id = values["account_id"]
-        trade_date = values["trade_date"]
         snapshot = (
             self.session.query(PaperAccountSnapshot)
             .filter_by(
@@ -1720,6 +1723,7 @@ class PaperTradingRepository:
         """Replace only derived trading snapshots in an inclusive account/date range."""
         if start_date > end_date:
             raise ValueError("start_date must not be after end_date")
+        normalized_snapshots: list[dict[str, Any]] = []
         for values in snapshots:
             if not isinstance(values, dict):
                 raise ValueError("snapshot replacement values must be mappings")
@@ -1753,21 +1757,46 @@ class PaperTradingRepository:
             ):
                 if field_name in values and values[field_name] is not None:
                     require_finite(Decimal(values[field_name]), field_name)
+            normalized = {**values, "point_type": SnapshotPointType.TRADING.value}
+            normalized["event_at"] = canonical_trading_snapshot_event_at(normalized["trade_date"])
+            normalized["event_time_provenance"] = ReplayTimeProvenance.CANONICAL_UTC.value
+            self._quantize_snapshot_values(normalized)
+            normalized_snapshots.append(normalized)
+        snapshot_dates = {values["trade_date"] for values in snapshots}
         with self.session.begin_nested():
-            (
-                self.session.query(PaperAccountSnapshot)
+            existing_rows = {
+                row.trade_date: row
+                for row in self.session.query(PaperAccountSnapshot)
                 .filter(
                     PaperAccountSnapshot.account_id == account_id,
                     PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
                     PaperAccountSnapshot.trade_date >= start_date,
                     PaperAccountSnapshot.trade_date <= end_date,
                 )
-                .delete(synchronize_session="fetch")
-            )
+                .all()
+            }
+            for values in normalized_snapshots:
+                existing = existing_rows.pop(values["trade_date"], None)
+                if existing is None:
+                    self.session.add(PaperAccountSnapshot(**values))
+                    continue
+                for field, value in values.items():
+                    setattr(existing, field, value)
+            for remaining in existing_rows.values():
+                self.session.delete(remaining)
             self.session.flush()
             return [
-                self.save_trading_snapshot(**{**values, "point_type": SnapshotPointType.TRADING.value})
-                for values in snapshots
+                cast(
+                    PaperAccountSnapshot,
+                    self.session.query(PaperAccountSnapshot)
+                    .filter_by(
+                        account_id=account_id,
+                        trade_date=values["trade_date"],
+                        point_type=SnapshotPointType.TRADING.value,
+                    )
+                    .one(),
+                )
+                for values in normalized_snapshots
             ]
 
     def count_orders(self, account_id: int, trade_date: date) -> int:

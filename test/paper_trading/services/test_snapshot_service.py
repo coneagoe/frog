@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
@@ -643,21 +643,13 @@ def test_missing_same_symbol_bars_are_market_qualified_and_deterministic(sqlite_
     ]
 
 
-def test_generate_snapshot_sets_explicit_utc_trading_metadata(sqlite_session, monkeypatch):
+def test_generate_snapshot_sets_explicit_utc_trading_metadata(sqlite_session):
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("utc-meta", Decimal("100000.00"))
-    frozen = datetime(2026, 8, 25, 15, 30, tzinfo=timezone.utc)
-
-    class FrozenDateTime(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return frozen
-
-    monkeypatch.setattr("paper_trading.services.snapshot_service.datetime", FrozenDateTime)
 
     snapshot = SnapshotService(repo, FakeMarketDataProvider()).generate_snapshot(account.id, date(2026, 8, 25))
 
-    assert snapshot.event_at == frozen
+    assert snapshot.event_at == datetime.combine(date(2026, 8, 25), time.max, tzinfo=timezone.utc)
     assert snapshot.event_at.tzinfo == timezone.utc
     assert snapshot.point_type == SnapshotPointType.TRADING.value
     assert snapshot.quality_status == SnapshotQualityStatus.VALID.value

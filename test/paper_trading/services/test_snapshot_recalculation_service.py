@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -47,6 +47,40 @@ def test_recalculation_selects_only_bounded_repository_dates_and_is_idempotent(t
         snapshot_service = SnapshotService(repo, FakeMarketDataProvider())
         for trade_date in (date(2026, 8, 24), date(2026, 8, 25), date(2026, 8, 27)):
             snapshot_service.generate_snapshot(account.id, trade_date)
+        seeded = repo.save_trading_snapshot(
+            **{
+                **{
+                    "account_id": account.id,
+                    "trade_date": date(2026, 8, 25),
+                    "event_at": datetime(2026, 9, 1, tzinfo=timezone.utc),
+                    "point_type": "trading",
+                    "quality_status": "valid",
+                },
+                **{
+                    field: getattr(
+                        next(
+                            row
+                            for row in repo.list_snapshots(account.id)
+                            if row.trade_date == date(2026, 8, 25) and row.point_type == "trading"
+                        ),
+                        field,
+                    )
+                    for field in (
+                        "cash_available",
+                        "cash_frozen",
+                        "market_value",
+                        "total_assets",
+                        "realized_pnl",
+                        "unrealized_pnl",
+                        "position_count",
+                        "order_count",
+                        "trade_count",
+                        "pending_settlement",
+                    )
+                },
+            }
+        )
+        assert seeded.event_at == datetime.combine(date(2026, 8, 25), time.max, tzinfo=timezone.utc)
         repo.upsert_valuation_gap(account.id, date(2026, 8, 26), ["000001"], [])
         repo.upsert_valuation_gap(account.id, date(2026, 8, 28), ["000001"], [])
         account_id = account.id
@@ -89,6 +123,10 @@ def test_recalculation_selects_only_bounded_repository_dates_and_is_idempotent(t
         ]
         assert len(rows) == count
         assert {row.trade_date: row.id for row in rows} == ids_by_date
+        assert all(
+            row.event_at.replace(tzinfo=timezone.utc) == datetime.combine(row.trade_date, time.max, tzinfo=timezone.utc)
+            for row in rows
+        )
     finally:
         session.close()
 
@@ -193,8 +231,8 @@ def test_historical_recalculation_preserves_live_nav_and_event_order(tmp_path):
         snapshot_service = SnapshotService(repo, FakeMarketDataProvider())
         older = snapshot_service.generate_snapshot(account.id, date(2026, 8, 25))
         newer = snapshot_service.generate_snapshot(account.id, date(2026, 8, 26))
-        old_event_at = older.event_at
-        newer_event_at = newer.event_at
+        older.event_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        ids_by_date = {older.trade_date: older.id, newer.trade_date: newer.id}
         account.share_count = Decimal("120000.000000")
         account.net_asset_value = Decimal("1.250000")
         account_id = account.id
@@ -217,7 +255,11 @@ def test_historical_recalculation_preserves_live_nav_and_event_order(tmp_path):
         assert account.net_asset_value == Decimal("1.250000")
         trading = [row for row in repo.list_snapshots(account_id) if row.point_type == "trading"]
         assert [row.trade_date for row in trading] == [date(2026, 8, 25), date(2026, 8, 26)]
-        assert [row.event_at.replace(tzinfo=timezone.utc) for row in trading] == [old_event_at, newer_event_at]
+        assert {row.trade_date: row.id for row in trading} == ids_by_date
+        assert all(
+            row.event_at.replace(tzinfo=timezone.utc) == datetime.combine(row.trade_date, time.max, tzinfo=timezone.utc)
+            for row in trading
+        )
     finally:
         session.close()
 

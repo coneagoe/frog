@@ -11,7 +11,7 @@ from paper_trading.services.nav_series import NavSeriesBuilder
 from paper_trading.services.snapshot_service import PositionValuation, SnapshotService
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.models import PaperAccountSnapshot, PaperValuationGap
-from paper_trading.storage.repository import PaperTradingRepository
+from paper_trading.storage.repository import PaperTradingRepository, canonical_trading_snapshot_event_at
 
 
 @dataclass(frozen=True)
@@ -47,11 +47,6 @@ class SnapshotRecalculationService:
             failed_dates: list[date] = []
             errors: list[str] = []
             snapshot_service = SnapshotService(repo, self.market_data)
-            existing_event_at = {
-                snapshot.trade_date: self._utc(snapshot.event_at)
-                for snapshot in repo.list_snapshots(account_id)
-                if snapshot.point_type == SnapshotPointType.TRADING.value
-            }
             builder = NavSeriesBuilder(repo=repo)
             all_events, baseline = builder.prepare(account_id)
             events = [
@@ -84,18 +79,7 @@ class SnapshotRecalculationService:
                 if point is None or point.nav is None:
                     unavailable_dates.append(trade_date)
                     continue
-                snapshots.append(
-                    self._snapshot_values(
-                        repo,
-                        account_id,
-                        trade_date,
-                        point,
-                        existing_event_at.get(
-                            trade_date,
-                            point.event_at or datetime.combine(trade_date, time.max, tzinfo=timezone.utc),
-                        ),
-                    )
-                )
+                snapshots.append(self._snapshot_values(repo, account_id, trade_date, point))
                 existing_gap = repo.get_valuation_gap(account_id, trade_date)
                 if existing_gap is not None and not existing_gap.resolved:
                     repo.upsert_valuation_gap(account_id, trade_date, [], [], resolved=True)
@@ -265,9 +249,7 @@ class SnapshotRecalculationService:
         )()
 
     @staticmethod
-    def _snapshot_values(
-        repo: PaperTradingRepository, account_id: int, trade_date: date, point: Any, event_at: datetime
-    ) -> dict[str, Any]:
+    def _snapshot_values(repo: PaperTradingRepository, account_id: int, trade_date: date, point: Any) -> dict[str, Any]:
         cash = point.cash if point.cash is not None else Decimal("0")
         cash_frozen = point.cash_frozen
         total_assets = point.total_assets if point.total_assets is not None else Decimal("0")
@@ -276,7 +258,7 @@ class SnapshotRecalculationService:
         return {
             "account_id": account_id,
             "trade_date": trade_date,
-            "event_at": event_at,
+            "event_at": canonical_trading_snapshot_event_at(trade_date),
             "quality_status": SnapshotQualityStatus.VALID.value,
             "valuation_quality": point.valuation_quality or "current",
             "valuation_details": list(point.valuation_details) or None,
@@ -296,9 +278,3 @@ class SnapshotRecalculationService:
             "net_cash_flow": point.net_cash_flow,
             "pending_settlement": pending_settlement,
         }
-
-    @staticmethod
-    def _utc(value: datetime) -> datetime:
-        if value.tzinfo is None or value.utcoffset() is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
