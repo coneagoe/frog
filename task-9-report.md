@@ -172,3 +172,30 @@ then deposits at 10:00 UTC on July 20.
 No safe simplification was identified. The optional repository `trade_date`
 filter and CashService UTC-date guard make the same-date exception explicit
 while retaining timestamp semantics for all other flows.
+
+## P2 Follow-up: Cross-Date Canonical Snapshot Eligibility
+
+### Change
+
+Added parameterized cash-service regression coverage for deposits and
+withdrawals when a valid canonical trading snapshot belongs to a different,
+later trade date. The test confirms the later snapshot's canonical event time
+is after the cash flow and therefore cannot price it.
+
+When an earlier eligible snapshot exists, the cash flow uses its NAV
+(`1.250000`). When no snapshot exists at or before `occurred_at`, it uses the
+initial NAV (`1.000000`).
+
+### Validation
+
+- Passed: new cross-date regression and existing same-date regression (`5
+  passed`).
+- Passed: `uv run ruff check test/paper_trading/services/test_cash_service.py`.
+- Passed: `uv run mypy test/paper_trading/services/test_cash_service.py` (one
+  source file; existing unused-override notices only).
+
+### Simplify Review
+
+No safe simplification was identified. The separate eligible and later
+canonical snapshot setup directly documents the timestamp boundary under test;
+extracting it would obscure that distinction.

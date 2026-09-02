@@ -198,6 +198,78 @@ def test_same_date_cash_flow_uses_canonical_trading_snapshot_nav(tmp_path):
     engine.dispose()
 
 
+@pytest.mark.parametrize("operation", ["deposit", "withdraw"])
+@pytest.mark.parametrize(
+    ("prior_nav", "expected_nav"),
+    [
+        (Decimal("1.250000"), Decimal("1.250000")),
+        (None, Decimal("1.000000")),
+    ],
+)
+def test_cash_flow_ignores_later_cross_date_canonical_snapshot(tmp_path, operation, prior_nav, expected_nav):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account(f"cross-date-{operation}-{prior_nav}", Decimal("100000.00"))
+    occurred_at = datetime(2026, 7, 20, 10, tzinfo=timezone.utc)
+
+    class TradingDayMarketData:
+        @staticmethod
+        def is_trade_date(trade_date):
+            return True
+
+    if prior_nav is not None:
+        repo.save_trading_snapshot(
+            account_id=account.id,
+            trade_date=date(2026, 7, 19),
+            event_at=datetime(2026, 7, 19, 9, tzinfo=timezone.utc),
+            point_type=SnapshotPointType.TRADING.value,
+            quality_status=SnapshotQualityStatus.VALID.value,
+            cash_available=Decimal("100000"),
+            cash_frozen=Decimal("0"),
+            market_value=Decimal("0"),
+            total_assets=Decimal("125000"),
+            realized_pnl=Decimal("0"),
+            unrealized_pnl=Decimal("0"),
+            position_count=0,
+            order_count=0,
+            trade_count=0,
+            net_asset_value=prior_nav,
+        )
+    later_snapshot = repo.save_trading_snapshot(
+        account_id=account.id,
+        trade_date=date(2026, 7, 21),
+        event_at=datetime(2026, 7, 21, 9, tzinfo=timezone.utc),
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("100000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("150000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=Decimal("1.500000"),
+    )
+    assert later_snapshot is not None
+    assert later_snapshot.event_at == datetime(2026, 7, 21, 23, 59, 59, 999999, tzinfo=timezone.utc)
+
+    service = CashService(repo, cast(MarketDataProvider, TradingDayMarketData()))
+    result = (
+        service.deposit(account.id, Decimal("25000.00"), occurred_at.date(), occurred_at=occurred_at)
+        if operation == "deposit"
+        else service.withdraw(account.id, Decimal("25000.00"), occurred_at.date(), occurred_at=occurred_at)
+    )
+
+    assert result.ledger.net_asset_value == expected_nav
+    assert result.ledger.share_delta == (
+        Decimal("25000.000000") / expected_nav
+        if operation == "deposit"
+        else -(Decimal("25000.000000") / expected_nav)
+    )
+    engine.dispose()
+
+
 def test_backdated_deposit_replays_existing_trading_snapshot(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("backdated", Decimal("100000.00"))
