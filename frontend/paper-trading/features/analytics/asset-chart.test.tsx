@@ -73,7 +73,7 @@ describe("AssetChart", () => {
 
     expect(setDataMock).toHaveBeenCalledWith([
       { time: toChartTime(initialPoint.trade_date), value: 1 },
-      { time: toChartTime(tradingPoint.trade_date), value: 1.1 }
+      { time: toChartTime(tradingPoint.trade_date) + 1, value: 1.1 }
     ]);
   });
 
