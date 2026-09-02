@@ -136,3 +136,11 @@ prices/amounts/fees, and base lot acquisition facts remain immutable. Replay
 updates mutable order status, cumulative `filled_quantity`, and projected
 remaining reservation fields. Corporate-action projection may update mutable
 position/order projections, but never rewrites order/trade/acquisition facts.
+
+## Task 5 Review Finding Fix
+
+- Fix command: `uv run python -c 'from pathlib import Path; import re; text = Path("docs/paper_trading.md").read_text(); text = re.sub(r"\\s+", " ", text); assert "Before executing or accepting the apply" in text and "the apply `matched_count` must equal the retained" in text and "do not treat the apply as approved scope" in text'`
+- Result: passed; the repair procedure explicitly requires comparing the apply
+  `matched_count` with the retained dry-run `matched_count`, stopping and
+  re-reviewing when they differ, and withholding apply approval.
+- Commit: `703c682` (`Document snapshot repair matched-count approval`)
