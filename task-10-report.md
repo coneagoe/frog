@@ -12,7 +12,7 @@ Implemented and verified the cash-only replay regression fix.
 
 ## Commit
 
-Pending commit.
+`4a9b122` (`Fix cash-only snapshot replay without market data`).
 
 ## Tests
 
