@@ -1800,16 +1800,13 @@ class PaperTradingRepository:
                 self.session.delete(remaining)
             self.session.flush()
             return [
-                cast(
-                    PaperAccountSnapshot,
-                    self.session.query(PaperAccountSnapshot)
-                    .filter_by(
-                        account_id=account_id,
-                        trade_date=values["trade_date"],
-                        point_type=SnapshotPointType.TRADING.value,
-                    )
-                    .one(),
+                self.session.query(PaperAccountSnapshot)
+                .filter_by(
+                    account_id=account_id,
+                    trade_date=values["trade_date"],
+                    point_type=SnapshotPointType.TRADING.value,
                 )
+                .one()
                 for values in normalized_snapshots
             ]
 

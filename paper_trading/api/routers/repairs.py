@@ -54,4 +54,4 @@ def repair_trading_snapshot_event_at(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return TradingSnapshotTimestampRepairResponse.model_validate(result.model_dump())
+    return TradingSnapshotTimestampRepairResponse(**result.model_dump())

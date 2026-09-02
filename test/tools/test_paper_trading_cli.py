@@ -1891,7 +1891,9 @@ class TestRepairSnapshotEventAt:
         client = _mock_client()
         client.repair_trading_snapshot_event_at.return_value = {"dry_run": True, "matched_count": 1, "updated_count": 0}
 
-        code = main(["--json", "repair", "snapshot-event-at", "--account-id", "6", "--start-date", "2026-08-25"], client=client)
+        code = main(
+            ["--json", "repair", "snapshot-event-at", "--account-id", "6", "--start-date", "2026-08-25"], client=client
+        )
 
         assert code == EXIT_CODES["OK"]
         payload = json.loads(capsys.readouterr().out)
@@ -1899,7 +1901,11 @@ class TestRepairSnapshotEventAt:
 
     def test_repair_snapshot_event_at_forwards_end_date_and_apply(self):
         client = _mock_client()
-        client.repair_trading_snapshot_event_at.return_value = {"dry_run": False, "matched_count": 1, "updated_count": 1}
+        client.repair_trading_snapshot_event_at.return_value = {
+            "dry_run": False,
+            "matched_count": 1,
+            "updated_count": 1,
+        }
 
         code = main(
             [

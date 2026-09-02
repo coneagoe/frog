@@ -11,8 +11,7 @@ from paper_trading.api.deps import get_market_data_provider, get_session
 from paper_trading.domain.enums import Market, OrderSide, OrderStatus
 from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.models import PaperAccountSnapshot, PaperOrder
-from paper_trading.storage.repository import PaperTradingRepository
-from paper_trading.storage.repository import canonical_trading_snapshot_event_at
+from paper_trading.storage.repository import PaperTradingRepository, canonical_trading_snapshot_event_at
 from storage.model.base import Base
 from storage.model.etf_basic import ETFBasic
 from test.paper_trading.fakes import FakeMarketDataProvider

@@ -99,7 +99,9 @@ def test_apply_repairs_only_requested_account_and_preserves_snapshot_ids(tmp_pat
         other_account = repo.create_account("repair-apply-other", Decimal("100000"))
         other_account_id = other_account.id
 
-        initial_snapshot = next(row for row in repo.list_snapshots(account.id) if row.point_type == SnapshotPointType.INITIAL.value)
+        initial_snapshot = next(
+            row for row in repo.list_snapshots(account.id) if row.point_type == SnapshotPointType.INITIAL.value
+        )
         first = _seed_trading_snapshot(repo, account.id, date(2026, 8, 25))
         second = _seed_trading_snapshot(repo, account.id, date(2026, 8, 26))
         outside_range = _seed_trading_snapshot(repo, account.id, date(2026, 8, 28))
@@ -143,17 +145,21 @@ def test_apply_repairs_only_requested_account_and_preserves_snapshot_ids(tmp_pat
         assert refreshed[ids["outside"]].event_at.replace(tzinfo=timezone.utc) == datetime(
             2026, 9, 2, 12, 0, tzinfo=timezone.utc
         )
-        assert session.get(PaperAccountSnapshot, ids["foreign"]).event_at.replace(tzinfo=timezone.utc) == datetime(
-            2026, 9, 2, 13, 0, tzinfo=timezone.utc
-        )
-        assert [row.id for row in repo.list_trading_snapshots_in_date_range(account_id, date(2026, 8, 25), date(2026, 8, 28))] == [
+        foreign = session.get(PaperAccountSnapshot, ids["foreign"])
+        assert foreign is not None
+        assert foreign.event_at.replace(tzinfo=timezone.utc) == datetime(2026, 9, 2, 13, 0, tzinfo=timezone.utc)
+        assert [
+            row.id
+            for row in repo.list_trading_snapshots_in_date_range(account_id, date(2026, 8, 25), date(2026, 8, 28))
+        ] == [
             ids["first"],
             ids["second"],
             ids["outside"],
         ]
-        assert [row.id for row in repo.list_trading_snapshots_in_date_range(other_account_id, date(2026, 8, 25), date(2026, 8, 25))] == [
-            ids["foreign"]
-        ]
+        assert [
+            row.id
+            for row in repo.list_trading_snapshots_in_date_range(other_account_id, date(2026, 8, 25), date(2026, 8, 25))
+        ] == [ids["foreign"]]
         assert refreshed[ids["first"]].id == ids["first"]
         assert refreshed[ids["second"]].id == ids["second"]
         assert refreshed[ids["initial"]].id == ids["initial"]
@@ -230,5 +236,9 @@ def test_matching_count_is_full_but_candidate_details_are_limited_and_sorted(tmp
 
     assert result.matched_count == 105
     assert len(result.candidates) == MAX_REPAIR_CANDIDATES
-    assert [candidate.trade_date for candidate in result.candidates] == [start + timedelta(days=index) for index in range(100)]
-    assert [candidate.snapshot_id for candidate in result.candidates] == sorted(candidate.snapshot_id for candidate in result.candidates)
+    assert [candidate.trade_date for candidate in result.candidates] == [
+        start + timedelta(days=index) for index in range(100)
+    ]
+    assert [candidate.snapshot_id for candidate in result.candidates] == sorted(
+        candidate.snapshot_id for candidate in result.candidates
+    )

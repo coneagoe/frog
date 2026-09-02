@@ -42,7 +42,7 @@ from paper_trading.storage.models import (
     PaperTradeValidityCheck,
     PaperValuationGap,
 )
-from paper_trading.storage.repository import PaperTradingRepository
+from paper_trading.storage.repository import PaperTradingRepository, canonical_trading_snapshot_event_at
 from storage.domain_enums import (
     DailyBarDiagnosticAdjust,
     DailyBarDiagnosticClassification,
@@ -767,7 +767,8 @@ def test_list_replay_events_adapts_sources_in_stable_utc_order(sqlite_session) -
     )
     snapshot = repo.save_trading_snapshot(**_trading_snapshot_values(account.id, event_at.date(), event_at))
 
-    events = repo.list_replay_events(account.id, start_at=event_at, end_at=event_at)
+    canonical_event_at = canonical_trading_snapshot_event_at(event_at.date())
+    events = repo.list_replay_events(account.id, start_at=event_at, end_at=canonical_event_at)
 
     assert [(event.event_type, event.source_kind, event.source_id) for event in events] == [
         (

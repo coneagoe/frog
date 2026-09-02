@@ -873,6 +873,7 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
         SimpleNamespace(
             id=2,
             event_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 2),
             point_type="trading",
             quality_status="valid",
             invalid_reason=None,
@@ -882,6 +883,7 @@ def test_event_series_orders_snapshots_before_cash_flows_and_excludes_initial_le
         SimpleNamespace(
             id=1,
             event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 1),
             point_type="initial",
             quality_status="valid",
             invalid_reason=None,
@@ -930,6 +932,7 @@ def test_event_series_supports_legacy_snapshots_without_valuation_metadata():
     snapshot = SimpleNamespace(
         id=1,
         event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        trade_date=date(2026, 8, 1),
         point_type="initial",
         quality_status="valid",
         invalid_reason=None,
@@ -948,6 +951,7 @@ def test_event_series_excludes_unsupported_snapshot_point_type():
         SimpleNamespace(
             id=1,
             event_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 1),
             point_type=SnapshotPointType.INITIAL.value,
             quality_status="valid",
             invalid_reason=None,
@@ -957,6 +961,7 @@ def test_event_series_excludes_unsupported_snapshot_point_type():
         SimpleNamespace(
             id=2,
             event_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            trade_date=date(2026, 8, 2),
             point_type="unsupported",
             quality_status="valid",
             invalid_reason=None,
@@ -1062,6 +1067,7 @@ def test_event_series_normalizes_offset_equivalent_and_legacy_naive_timestamps()
         SimpleNamespace(
             id=1,
             event_at=datetime(2026, 8, 1, 1, 0),
+            trade_date=date(2026, 8, 1),
             point_type="initial",
             quality_status="valid",
             invalid_reason=None,
@@ -1071,6 +1077,7 @@ def test_event_series_normalizes_offset_equivalent_and_legacy_naive_timestamps()
         SimpleNamespace(
             id=2,
             event_at=datetime(2026, 8, 1, 9, 0, tzinfo=timezone(timedelta(hours=8))),
+            trade_date=date(2026, 8, 1),
             point_type="trading",
             quality_status="valid",
             invalid_reason=None,
@@ -1922,6 +1929,7 @@ def test_event_series_preserves_replay_index_zero_for_same_timestamp_events():
         SimpleNamespace(
             id=1,
             event_at=timestamp,
+            trade_date=date(2026, 8, 1),
             point_type="initial",
             quality_status="valid",
             invalid_reason=None,
