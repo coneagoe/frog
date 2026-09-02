@@ -31,6 +31,7 @@ Commands:
    etf_eligibility get --symbol SYMBOL
    etf_eligibility classify --symbol SYMBOL --status supported|money_market --reviewed-by NAME
    repair etf-markets [--apply]
+   repair snapshot-event-at --account-id ID --start-date YYYY-MM-DD [--end-date YYYY-MM-DD] [--apply]
 
 Exit codes:
   0  success
@@ -279,6 +280,18 @@ class PaperTradingApiClient:
     def repair_historical_etf_markets(self, apply: bool = False) -> dict[str, Any]:
         return cast(dict[str, Any], self._request("POST", "/paper/repairs/etf-markets", json={"apply": apply}))
 
+    def repair_trading_snapshot_event_at(
+        self,
+        account_id: int,
+        start_date: str,
+        end_date: str | None = None,
+        apply: bool = False,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"account_id": account_id, "start_date": start_date, "apply": apply}
+        if end_date is not None:
+            body["end_date"] = end_date
+        return cast(dict[str, Any], self._request("POST", "/paper/repairs/trading-snapshot-event-at", json=body))
+
     def list_etf_eligibility(self, status: str | None = None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
         if status is not None:
@@ -456,6 +469,13 @@ def _add_repair_subparsers(subparsers: Any) -> None:
         "etf-markets", help="Preview or repair historical catalogue ETF market identity"
     )
     etf_markets.add_argument("--apply", action="store_true", help="Apply the repair; default is dry run")
+    snapshot_event_at = repair_sub.add_parser(
+        "snapshot-event-at", help="Preview or repair trading snapshot event timestamps"
+    )
+    snapshot_event_at.add_argument("--account-id", type=int, required=True, help="Account ID")
+    snapshot_event_at.add_argument("--start-date", required=True, help="Repair start date YYYY-MM-DD")
+    snapshot_event_at.add_argument("--end-date", default=None, help="Optional repair end date YYYY-MM-DD")
+    snapshot_event_at.add_argument("--apply", action="store_true", help="Apply the repair; default is dry run")
 
 
 def build_parser() -> _SafeParser:
@@ -524,14 +544,18 @@ def _parse_non_negative_decimal(value: str, label: str) -> Decimal:
     return parsed
 
 
-def _validate_trade_date(value: str) -> str:
+def _validate_date_argument(value: str, flag: str) -> str:
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-        raise _ParserError(f"invalid --trade-date: {value!r} is not a valid YYYY-MM-DD date")
+        raise _ParserError(f"invalid {flag}: {value!r} is not a valid YYYY-MM-DD date")
     try:
         datetime.strptime(value, "%Y-%m-%d")
     except ValueError:
-        raise _ParserError(f"invalid --trade-date: {value!r} is not a valid calendar date") from None
+        raise _ParserError(f"invalid {flag}: {value!r} is not a valid calendar date") from None
     return value
+
+
+def _validate_trade_date(value: str) -> str:
+    return _validate_date_argument(value, "--trade-date")
 
 
 def _handle_account(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:
@@ -744,6 +768,19 @@ def _handle_etf_eligibility(client: PaperTradingApiClient, args: argparse.Namesp
 def _handle_repair(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:
     if args.repair_command == "etf-markets":
         return client.repair_historical_etf_markets(apply=args.apply)
+    if args.repair_command == "snapshot-event-at":
+        start_date = _validate_date_argument(args.start_date, "--start-date")
+        end_date = None
+        if args.end_date is not None:
+            end_date = _validate_date_argument(args.end_date, "--end-date")
+            if end_date < start_date:
+                raise _ParserError("invalid date range: --end-date must be on or after --start-date")
+        return client.repair_trading_snapshot_event_at(
+            account_id=args.account_id,
+            start_date=start_date,
+            end_date=end_date,
+            apply=args.apply,
+        )
     raise _ParserError(f"unknown repair command: {args.repair_command}")
 
 

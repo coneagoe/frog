@@ -1872,6 +1872,121 @@ class TestRepairHistoricalEtfMarkets:
         request.assert_called_once_with("POST", "/paper/repairs/etf-markets", json={"apply": apply})
 
 
+class TestRepairSnapshotEventAt:
+    def test_repair_snapshot_event_at_defaults_to_dry_run(self):
+        client = _mock_client()
+        client.repair_trading_snapshot_event_at.return_value = {"dry_run": True, "matched_count": 1, "updated_count": 0}
+
+        code = main(
+            ["repair", "snapshot-event-at", "--account-id", "6", "--start-date", "2026-08-25"],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["OK"]
+        client.repair_trading_snapshot_event_at.assert_called_once_with(
+            account_id=6, start_date="2026-08-25", end_date=None, apply=False
+        )
+
+    def test_repair_snapshot_event_at_json_output(self, capsys):
+        client = _mock_client()
+        client.repair_trading_snapshot_event_at.return_value = {"dry_run": True, "matched_count": 1, "updated_count": 0}
+
+        code = main(["--json", "repair", "snapshot-event-at", "--account-id", "6", "--start-date", "2026-08-25"], client=client)
+
+        assert code == EXIT_CODES["OK"]
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["dry_run"] is True
+
+    def test_repair_snapshot_event_at_forwards_end_date_and_apply(self):
+        client = _mock_client()
+        client.repair_trading_snapshot_event_at.return_value = {"dry_run": False, "matched_count": 1, "updated_count": 1}
+
+        code = main(
+            [
+                "repair",
+                "snapshot-event-at",
+                "--account-id",
+                "6",
+                "--start-date",
+                "2026-08-25",
+                "--end-date",
+                "2026-08-31",
+                "--apply",
+            ],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["OK"]
+        client.repair_trading_snapshot_event_at.assert_called_once_with(
+            account_id=6, start_date="2026-08-25", end_date="2026-08-31", apply=True
+        )
+
+    def test_repair_snapshot_event_at_omits_end_date_from_request(self):
+        with patch.dict(os.environ, {"PAPER_TRADING_API_TOKEN": "tok"}, clear=True):
+            client = PaperTradingApiClient()
+        request = MagicMock(return_value={"dry_run": True})
+
+        with patch.object(client, "_request", request):
+            assert client.repair_trading_snapshot_event_at(6, "2026-08-25") == {"dry_run": True}
+
+        request.assert_called_once_with(
+            "POST",
+            "/paper/repairs/trading-snapshot-event-at",
+            json={"account_id": 6, "start_date": "2026-08-25", "apply": False},
+        )
+
+    def test_repair_snapshot_event_at_bad_start_date_is_local_validation_error(self):
+        client = _mock_client()
+
+        code = main(
+            ["repair", "snapshot-event-at", "--account-id", "6", "--start-date", "2026-99-25"],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+        client.repair_trading_snapshot_event_at.assert_not_called()
+
+    def test_repair_snapshot_event_at_bad_end_date_is_local_validation_error(self):
+        client = _mock_client()
+
+        code = main(
+            [
+                "repair",
+                "snapshot-event-at",
+                "--account-id",
+                "6",
+                "--start-date",
+                "2026-08-25",
+                "--end-date",
+                "2026-02-30",
+            ],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+        client.repair_trading_snapshot_event_at.assert_not_called()
+
+    def test_repair_snapshot_event_at_rejects_inverted_range(self):
+        client = _mock_client()
+
+        code = main(
+            [
+                "repair",
+                "snapshot-event-at",
+                "--account-id",
+                "6",
+                "--start-date",
+                "2026-08-26",
+                "--end-date",
+                "2026-08-25",
+            ],
+            client=client,
+        )
+
+        assert code == EXIT_CODES["VALIDATION_ERROR"]
+        client.repair_trading_snapshot_event_at.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Global flags & configuration
 # ---------------------------------------------------------------------------

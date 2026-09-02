@@ -66,3 +66,7 @@ class TradingSnapshotTimestampRepairResult(BaseModel):
     matched_count: int
     updated_count: int
     candidates: list[TradingSnapshotTimestampRepairCandidate]
+
+
+class TradingSnapshotTimestampRepairResponse(TradingSnapshotTimestampRepairResult):
+    pass
