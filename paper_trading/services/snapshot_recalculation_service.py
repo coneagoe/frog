@@ -133,11 +133,13 @@ class SnapshotRecalculationService:
             for event in repo.list_replay_events(account_id)
             if event.trade_date is not None and start_date <= event.trade_date <= end_date
         }
-        active_dates = {
-            candidate
-            for offset in range((end_date - start_date).days + 1)
-            if self.market_data.is_trade_date(candidate := start_date + timedelta(days=offset))
-        }
+        active_dates = set()
+        if self.market_data is not None:
+            active_dates = {
+                candidate
+                for offset in range((end_date - start_date).days + 1)
+                if self.market_data.is_trade_date(candidate := start_date + timedelta(days=offset))
+            }
         return sorted(snapshot_dates | gap_dates | event_dates | active_dates)
 
     def _valuation_events(

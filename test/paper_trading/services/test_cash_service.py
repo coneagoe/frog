@@ -263,9 +263,7 @@ def test_cash_flow_ignores_later_cross_date_canonical_snapshot(tmp_path, operati
 
     assert result.ledger.net_asset_value == expected_nav
     assert result.ledger.share_delta == (
-        Decimal("25000.000000") / expected_nav
-        if operation == "deposit"
-        else -(Decimal("25000.000000") / expected_nav)
+        Decimal("25000.000000") / expected_nav if operation == "deposit" else -(Decimal("25000.000000") / expected_nav)
     )
     engine.dispose()
 
@@ -293,6 +291,10 @@ def test_backdated_deposit_replays_existing_trading_snapshot(tmp_path):
     )
 
     class EmptyMarketData:
+        @staticmethod
+        def is_trade_date(trade_date):
+            return False
+
         def get_latest_daily_close(self, symbol, trade_date, market=None):
             return None
 
@@ -311,6 +313,47 @@ def test_backdated_deposit_replays_existing_trading_snapshot(tmp_path):
     assert rebuilt.share_count == Decimal("125000.000000")
     assert result.account.share_count == Decimal("125000.000000")
     assert len(repo.list_cash_ledger(account.id)) == 2
+    engine.dispose()
+
+
+def test_backdated_deposit_replays_cash_only_account_without_market_data(tmp_path):
+    engine, session, repo = _repo(tmp_path)
+    account = repo.create_account("cash-only-no-market-data", Decimal("100000.00"))
+    snapshot_at = datetime(2026, 7, 21, 23, tzinfo=timezone.utc)
+    repo.save_trading_snapshot(
+        account_id=account.id,
+        trade_date=snapshot_at.date(),
+        event_at=snapshot_at,
+        point_type=SnapshotPointType.TRADING.value,
+        quality_status=SnapshotQualityStatus.VALID.value,
+        cash_available=Decimal("100000"),
+        cash_frozen=Decimal("0"),
+        market_value=Decimal("0"),
+        total_assets=Decimal("100000"),
+        realized_pnl=Decimal("0"),
+        unrealized_pnl=Decimal("0"),
+        position_count=0,
+        order_count=0,
+        trade_count=0,
+        net_asset_value=Decimal("1"),
+    )
+
+    result = CashService(repo).deposit(
+        account.id,
+        Decimal("25000.00"),
+        date(2026, 7, 20),
+        occurred_at=datetime(2026, 7, 20, 10, tzinfo=timezone.utc),
+    )
+
+    rebuilt_dates = {
+        snapshot.trade_date
+        for snapshot in repo.list_snapshots(account.id)
+        if date(2026, 7, 20) <= snapshot.trade_date <= date(2026, 7, 21)
+    }
+    assert rebuilt_dates == {date(2026, 7, 20), date(2026, 7, 21)}
+    rebuilt = next(snapshot for snapshot in repo.list_snapshots(account.id) if snapshot.trade_date == date(2026, 7, 21))
+    assert rebuilt.cash_available == Decimal("125000.0000")
+    assert result.account.share_count == Decimal("125000.000000")
     engine.dispose()
 
 
