@@ -153,6 +153,40 @@ that account's earliest corrected order date. A failed account rolls back while
 completed account repairs remain committed. The operation does not remove prior
 A-share missing-date diagnostics.
 
+### Repair Trading Snapshot Timestamps
+
+Use this repair when trading snapshots were persisted with a noncanonical
+`event_at`. The authenticated API endpoint is `POST
+/paper/repairs/trading-snapshot-event-at`; its request body accepts
+`account_id`, `start_date`, `end_date`, and `apply`.
+
+Dry runs return the full `matched_count` while capping response details at 100
+candidate rows. Applied repairs update only the reviewed noncanonical rows and
+report both the full `matched_count` and the `updated_count`. Re-running the
+same repair after a successful apply is idempotent: the final dry run should
+report `matched_count: 0` and `updated_count: 0`.
+
+```bash
+export PAPER_TRADING_API_TOKEN="change-me"
+export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
+
+uv run tools/paper_trading_cli.py --json repair snapshot-event-at \
+  --account-id 6 --start-date 1970-01-01 --end-date 2026-09-01
+
+uv run tools/paper_trading_cli.py --json repair snapshot-event-at \
+  --account-id 6 --start-date 1970-01-01 --end-date 2026-09-01 --apply
+
+uv run tools/paper_trading_cli.py --json repair snapshot-event-at \
+  --account-id 6 --start-date 1970-01-01 --end-date 2026-09-01
+```
+
+The observed bad processing timestamp is `2026-09-01`, but no narrower
+affected business-date span is committed in this repository. Use the complete
+historical scope ending at that batch date; the repair itself changes only
+noncanonical rows. Retain all three JSON outputs for operator review. Do not
+embed a production token or execute these production commands during
+implementation tests.
+
 Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. ETF orders use the account's `etf_commission_rate`, defaulting to `0.00006`; ETF fees are commission-only, with no minimum commission, stamp duty, or transfer fee. Explicit fee flags override the preset values for the new account.
 
 Use `--json` when machine-readable output is needed:
@@ -453,7 +487,7 @@ Matching processes accepted orders for the trade date. Tradable orders fill at l
 
 Snapshots require a daily bar for every held position. When one is unavailable, matching preserves fills, records a valuation gap, and completes with `status="completed_with_warnings"` and a non-zero `warning_count` instead of discarding the run. The account snapshot is created on a later retry once the missing data is available, and the valuation gap is marked resolved. Other matching or persistence errors remain failures and are reported in `error_details`.
 
-Trading snapshots persist a UTC `event_at`, `point_type="trading"`, and a quality status. A valid NAV must be a finite, strictly positive Decimal. Missing, non-finite, zero, or negative NAV is stored as `net_asset_value=None` with `quality_status="invalid"` and one of `missing_share_state`, `missing_nav`, `non_finite_nav`, or `non_positive_nav`. Invalid points keep the other financial fields and do not update account NAV state. NAV is never replaced with `total_assets`. Nullable `valuation_quality` (`current` or `stale_suspended`) and JSON `valuation_details` record later stale-price evidence; both stay `null` on `initial` points and on legacy rows until a later valuation writes them.
+Trading snapshots persist a UTC `event_at`, `point_type="trading"`, and a quality status. Every trading snapshot is canonicalized to `23:59:59.999999+00:00` for its `trade_date`; initial snapshots retain their creation timestamp. A valid NAV must be a finite, strictly positive Decimal. Missing, non-finite, zero, or negative NAV is stored as `net_asset_value=None` with `quality_status="invalid"` and one of `missing_share_state`, `missing_nav`, `non_finite_nav`, or `non_positive_nav`. Invalid points keep the other financial fields and do not update account NAV state. NAV is never replaced with `total_assets`. Nullable `valuation_quality` (`current` or `stale_suspended`) and JSON `valuation_details` record later stale-price evidence; both stay `null` on `initial` points and on legacy rows until a later valuation writes them.
 
 Analytics reports valuation gaps separately in date order through `valuation_gaps`. Each entry contains the exact `trade_date`, missing symbols, diagnostic details, and whether the gap has been resolved. A valid snapshot with `valuation_quality="stale_suspended"` remains a NAV input; invalid or unavailable valuation points are excluded from NAV calculations and never fall back to `total_assets`. The bounded snapshot recalculation endpoint may be used to retry one account and trading date after market data is available; it preserves baseline, orders, and ledger data while retaining one trading snapshot for that scope.
 
