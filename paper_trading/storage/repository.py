@@ -1152,7 +1152,7 @@ class PaperTradingRepository:
         account = self.get_account(account_id)
         for ledger in self.list_cash_ledger(account_id):
             ledger_event_type = CashEventType(ledger.event_type)
-            if account is not None and self._is_creation_initial_cash_event(account, ledger):
+            if account is not None and self._is_creation_initial_cash_replay_event(account, ledger):
                 continue
             event_at, quality_status = self._replay_persisted_event_time(
                 ledger.occurred_at, ledger.trade_date, ledger.event_time_provenance
@@ -1316,12 +1316,21 @@ class PaperTradingRepository:
         _, ledger_quality, snapshot_quality = pair
         return ledger_quality is SnapshotQualityStatus.VALID and snapshot_quality is SnapshotQualityStatus.VALID
 
+    def _is_creation_initial_cash_replay_event(self, account: PaperAccount, ledger: PaperCashLedger) -> bool:
+        """Identify the seed ledger even when its initial snapshot was edited."""
+        pair = self._creation_initial_cash_pair(account, ledger, require_snapshot_components=False)
+        if pair is None:
+            return False
+        _, ledger_quality, snapshot_quality = pair
+        return ledger_quality is SnapshotQualityStatus.VALID and snapshot_quality is SnapshotQualityStatus.VALID
+
     def _creation_initial_cash_pair(
         self,
         account: PaperAccount,
         ledger: PaperCashLedger,
         *,
         require_valid_provenance: bool = True,
+        require_snapshot_components: bool = True,
     ) -> tuple[PaperAccountSnapshot, SnapshotQualityStatus, SnapshotQualityStatus] | None:
         initial_snapshots = [
             snapshot
@@ -1354,8 +1363,13 @@ class PaperTradingRepository:
         try:
             if not (
                 Decimal(str(ledger.amount)) == Decimal(str(account.initial_cash))
-                and Decimal(str(snapshot.cash_available)) == Decimal(str(account.initial_cash))
-                and Decimal(str(snapshot.total_assets)) == Decimal(str(account.initial_cash))
+                and (
+                    not require_snapshot_components
+                    or (
+                        Decimal(str(snapshot.cash_available)) == Decimal(str(account.initial_cash))
+                        and Decimal(str(snapshot.total_assets)) == Decimal(str(account.initial_cash))
+                    )
+                )
                 and Decimal(str(snapshot.net_asset_value)) == Decimal("1")
                 and Decimal(str(snapshot.share_count)) == Decimal(str(account.share_count))
                 and Decimal(str(ledger.net_asset_value)) == Decimal("1")

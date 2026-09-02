@@ -234,6 +234,30 @@ def test_repository_builder_preserves_explicit_zero_initial_cash_flow_fields(tmp
         engine.dispose()
 
 
+def test_repository_builder_does_not_replay_creation_cash_again_after_initial_snapshot_edit(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'builder_edited_initial.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        repo = PaperTradingRepository(session)
+        account = repo.create_account("repository-builder-edited-initial", Decimal("100"))
+        initial = next(row for row in repo.list_snapshots(account.id) if row.point_type == "initial")
+        initial.cash_available = Decimal("70")
+        initial.cash_frozen = Decimal("10")
+        initial.pending_settlement = Decimal("20")
+        initial.total_assets = Decimal("100")
+
+        point = NavSeriesBuilder(repo=repo).build(account.id).points[0]
+
+        assert point.cash == Decimal("70")
+        assert point.cash_frozen == Decimal("10")
+        assert point.pending_settlement == Decimal("20")
+        assert point.total_assets == Decimal("100")
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_postgresql_repository_builder_replays_persisted_cash_flow():
     url = cast(str, os.getenv("TEST_POSTGRESQL_URL"))
     if not url:
