@@ -187,6 +187,11 @@ noncanonical rows. Retain all three JSON outputs for operator review. Do not
 embed a production token or execute these production commands during
 implementation tests.
 
+Before executing or accepting the apply, compare its `matched_count` with the
+retained dry-run result: the apply `matched_count` must equal the retained
+dry-run `matched_count`. If it differs, stop and re-review the scope; do not
+treat the apply as approved scope.
+
 Account fee flags are optional. When omitted, account creation uses the built-in `a_share` preset, which matches the previous hardcoded A-share fees: commission rate `0.0003`, minimum commission `5.00`, stamp duty rate `0.0005`, and transfer fee rate `0.00001`. ETF orders use the account's `etf_commission_rate`, defaulting to `0.00006`; ETF fees are commission-only, with no minimum commission, stamp duty, or transfer fee. Explicit fee flags override the preset values for the new account.
 
 Use `--json` when machine-readable output is needed:
