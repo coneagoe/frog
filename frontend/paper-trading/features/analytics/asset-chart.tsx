@@ -5,6 +5,17 @@ import { createChart, LineSeries, type UTCTimestamp } from "lightweight-charts";
 import { EmptyState } from "@/components/empty-state";
 import type { AnalyticsEvent } from "@/lib/types";
 
+function toTradeDateUtcTimestamp(tradeDate: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(tradeDate);
+  if (!match) return null;
+  const [, year, month, day] = match.map(Number);
+  const milliseconds = Date.UTC(year, month - 1, day, 23, 59, 59);
+  const check = new Date(milliseconds);
+  return check.getUTCFullYear() === year && check.getUTCMonth() === month - 1 && check.getUTCDate() === day
+    ? Math.floor(milliseconds / 1000)
+    : null;
+}
+
 export function AssetChart({ events }: { events: AnalyticsEvent[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartData = useMemo(
@@ -15,13 +26,13 @@ export function AssetChart({ events }: { events: AnalyticsEvent[] }) {
           return [];
         }
         const nav = Number(event.nav);
-        const timestamp = Math.floor(new Date(event.event_at).getTime() / 1000);
+        const timestamp = toTradeDateUtcTimestamp(event.trade_date);
         if (
           event.quality !== "valid"
           || event.nav === null
           || !Number.isFinite(nav)
           || nav <= 0
-          || !Number.isFinite(timestamp)
+          || timestamp === null
         ) {
           return [];
         }

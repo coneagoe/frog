@@ -20,6 +20,7 @@ const initialPoint = {
   id: 1,
   point_type: "initial",
   event_at: "2026-09-10T09:30:00Z",
+  trade_date: "2026-08-25",
   quality: "valid",
   timezone: "UTC",
   quality_status: "valid",
@@ -29,8 +30,8 @@ const initialPoint = {
   share: "100000"
 } satisfies SnapshotAnalyticsEvent;
 
-function toChartTime(eventAt: string) {
-  return Math.floor(new Date(eventAt).getTime() / 1000);
+function toChartTime(tradeDate: string) {
+  return Math.floor(new Date(`${tradeDate}T23:59:59Z`).getTime() / 1000);
 }
 
 describe("AssetChart", () => {
@@ -63,7 +64,7 @@ describe("AssetChart", () => {
     const malformedTimestampPoint = {
       ...initialPoint,
       id: 4,
-      event_at: "not-a-timestamp",
+      trade_date: "not-a-date",
       nav: "1.2",
       share: "100000"
     } satisfies SnapshotAnalyticsEvent;
@@ -71,8 +72,8 @@ describe("AssetChart", () => {
     render(<AssetChart events={[initialPoint, invalidPoint, malformedTimestampPoint, tradingPoint]} />);
 
     expect(setDataMock).toHaveBeenCalledWith([
-      { time: toChartTime(initialPoint.event_at), value: 1 },
-      { time: toChartTime(tradingPoint.event_at), value: 1.1 }
+      { time: toChartTime(initialPoint.trade_date), value: 1 },
+      { time: toChartTime(tradingPoint.trade_date), value: 1.1 }
     ]);
   });
 
@@ -82,6 +83,7 @@ describe("AssetChart", () => {
         event_type: "snapshot",
         id: 1,
         event_at: "2026-09-10T09:30:00Z",
+        trade_date: "2026-08-25",
         point_type: "initial",
         quality: "valid",
         timezone: "UTC",
@@ -121,6 +123,7 @@ describe("AssetChart", () => {
         event_type: "snapshot",
         id: 3,
         event_at: "2026-09-10T11:00:00Z",
+        trade_date: "2026-08-25",
         point_type: "trading",
         quality: "invalid",
         timezone: "UTC",
@@ -134,6 +137,7 @@ describe("AssetChart", () => {
         event_type: "snapshot",
         id: 4,
         event_at: "2026-09-10T15:00:00Z",
+        trade_date: "2026-08-25",
         point_type: "trading",
         quality: "valid",
         timezone: "UTC",
@@ -148,8 +152,8 @@ describe("AssetChart", () => {
     render(<AssetChart events={eventSeries} />);
 
     expect(setDataMock).toHaveBeenCalledWith([
-      { time: toChartTime("2026-09-10T09:30:00Z"), value: 1 },
-      { time: toChartTime("2026-09-10T15:00:00Z"), value: 1.1 }
+      { time: toChartTime("2026-08-25"), value: 1 },
+      { time: toChartTime("2026-08-25") + 1, value: 1.1 }
     ]);
   });
 
@@ -172,8 +176,8 @@ describe("AssetChart", () => {
     render(<AssetChart events={[initialPoint, sameSecondPoint]} />);
 
     expect(setDataMock).toHaveBeenCalledWith([
-      { time: toChartTime(initialPoint.event_at), value: 1 },
-      { time: toChartTime(initialPoint.event_at) + 1, value: 1.1 }
+      { time: toChartTime(initialPoint.trade_date), value: 1 },
+      { time: toChartTime(initialPoint.trade_date) + 1, value: 1.1 }
     ]);
   });
 });

@@ -296,6 +296,7 @@ class AnalyticsService:
                     SnapshotAnalyticsEvent(
                         id=snapshot.id,
                         event_at=AnalyticsService._utc(snapshot.event_at),
+                        trade_date=snapshot.trade_date,
                         point_type=point_type,
                         quality=quality,
                         timezone="UTC",

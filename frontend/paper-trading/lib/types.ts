@@ -100,6 +100,7 @@ export type SnapshotAnalyticsEvent = {
   event_type: "snapshot";
   id: number;
   event_at: string;
+  trade_date: string;
   point_type: "initial" | "trading";
   quality: "valid" | "invalid";
   timezone: "UTC";

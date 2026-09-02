@@ -114,6 +114,7 @@ class SnapshotAnalyticsEvent(BaseModel):
     event_type: Literal["snapshot"] = "snapshot"
     id: int
     event_at: datetime
+    trade_date: date
     point_type: SnapshotPointTypeValue
     quality: SnapshotQualityValue
     timezone: Literal["UTC"]

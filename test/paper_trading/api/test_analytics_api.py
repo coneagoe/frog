@@ -458,6 +458,7 @@ def test_get_account_analytics_exposes_shared_nav_point_metadata(monkeypatch, sq
     assert response.status_code == 200
     snapshot = response.json()["event_series"][0]
     assert snapshot["point_type"] == "initial"
+    assert snapshot["trade_date"] == initial.trade_date.isoformat()
     assert snapshot["quality"] == "valid"
     assert snapshot["timezone"] == "UTC"
     assert snapshot["valuation_quality"] == "current"
@@ -467,6 +468,7 @@ def test_get_account_analytics_exposes_shared_nav_point_metadata(monkeypatch, sq
         "event_type",
         "id",
         "event_at",
+        "trade_date",
         "point_type",
         "quality",
         "timezone",
