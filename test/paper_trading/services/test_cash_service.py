@@ -12,6 +12,7 @@ from paper_trading.services.cash_service import CashService
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.base import Base
+from test.paper_trading.fakes import MarketDataProviderCompatibility
 
 
 def _repo(tmp_path):
@@ -290,13 +291,9 @@ def test_backdated_deposit_replays_existing_trading_snapshot(tmp_path):
         net_asset_value=Decimal("1"),
     )
 
-    class EmptyMarketData:
-        @staticmethod
-        def is_trade_date(trade_date):
+    class EmptyMarketData(MarketDataProviderCompatibility):
+        def is_trade_date(self, trade_date):
             return False
-
-        def get_latest_daily_close(self, symbol, trade_date, market=None):
-            return None
 
         def get_daily_bar(self, symbol, trade_date, market=None):
             return None
