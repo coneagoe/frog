@@ -1429,6 +1429,21 @@ class PaperTradingRepository:
             .all()
         )
 
+    def list_trading_snapshots_in_date_range(
+        self, account_id: int, start_date: date, end_date: date
+    ) -> list[PaperAccountSnapshot]:
+        return list(
+            self.session.query(PaperAccountSnapshot)
+            .filter(
+                PaperAccountSnapshot.account_id == account_id,
+                PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
+                PaperAccountSnapshot.trade_date >= start_date,
+                PaperAccountSnapshot.trade_date <= end_date,
+            )
+            .order_by(PaperAccountSnapshot.trade_date.asc(), PaperAccountSnapshot.id.asc())
+            .all()
+        )
+
     def upsert_valuation_gap(
         self,
         account_id: int,
