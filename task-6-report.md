@@ -52,7 +52,7 @@ The requested redundant cast removal is the only simplification applied.
 
 ## Commit
 
-Commit hash: `e71d622`.
+Commit hash: `c242064`.
 
 ## Concerns
 
