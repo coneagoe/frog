@@ -38,3 +38,31 @@ Task 7 replay commits are `a10e46f`, `6dcd630`, `eae607b`, `0bd8fd8`, `02a0f26`,
 ## Review
 
 The `simplify` review removed the duplicate trading-snapshot NAV validation and duplicate `@staticmethod` decorator while preserving the shared replay analytics boundary.
+
+## Task 7 NAV date repair follow-up
+
+### Status
+
+Implemented and committed the focused creation-initial-cash replay fix.
+
+### Changes
+
+- Added a regression test proving an edited initial snapshot does not replay the matching creation deposit a second time.
+- Added a replay-only creation-pair classification path that ignores mutable snapshot cash components while retaining immutable ledger allocation, timing, provenance, account, and snapshot identity checks.
+- Preserved strict `_is_creation_initial_cash_event` behavior used by cash-service classification and repair paths, so incomplete or invalid allocations remain ordinary cash flows.
+
+### Exact verification commands and results
+
+- `uv run pytest test/paper_trading/services/test_nav_series.py::test_repository_builder_does_not_replay_creation_cash_again_after_initial_snapshot_edit test/paper_trading/services/test_snapshot_recalculation_service.py::test_recalculation_preserves_initial_cash_components_and_identity test/paper_trading/services/test_cash_service.py::test_deposit_with_initial_cash_note_is_replayed_as_ordinary_cash_flow test/paper_trading/services/test_cash_service.py::test_initial_cash_note_with_incomplete_allocation_is_not_creation_event test/paper_trading/services/test_cash_service.py::test_initial_cash_note_with_invalid_allocation_is_not_creation_event test/paper_trading/services/test_cash_service.py::test_initial_cash_note_invalid_allocation_reaches_replay_repair_path` — **12 passed**.
+- `uv run pytest test/paper_trading/services/test_snapshot_recalculation_service.py` — **20 passed, 2 skipped**.
+- `uv run pytest test/paper_trading/services/test_nav_series.py test/paper_trading/storage/test_repository.py` — **140 passed, 6 skipped, 4 failed**. The four failures are unrelated pre-existing provenance/SQLite rollback tests: `test_unproven_persisted_*` and `test_replace_trading_snapshots_restores_all_old_rows_when_second_write_fails`.
+- `git diff --check` — **passed** before commit.
+
+### Commit
+
+- `80fdcd0` — `Fix creation cash replay after snapshot edits`
+
+### Concerns
+
+- Full repository/NAV module coverage still reports the four unrelated baseline failures listed above.
+- PostgreSQL-specific tests were skipped because `TEST_POSTGRESQL_URL` was unavailable.
