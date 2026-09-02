@@ -44,7 +44,7 @@ class CashService:
             account = self._active_account(account_id)
             amount = self._positive_money(amount)
             occurred_at = self._occurred_at(occurred_at)
-            nav = self._cash_flow_nav(account_id, occurred_at)
+            nav = self._cash_flow_nav(account_id, occurred_at, trade_date)
             share_delta = quantize_shares(amount / nav)
             ledger = self.repo.add_cash_event(
                 account_id,
@@ -73,7 +73,7 @@ class CashService:
             account = self._active_account(account_id)
             amount = self._positive_money(amount)
             occurred_at = self._occurred_at(occurred_at)
-            cash_available, share_count, nav = self._state_before(account_id, occurred_at)
+            cash_available, share_count, nav = self._state_before(account_id, occurred_at, trade_date)
             if amount > cash_available:
                 display_amount = amount.quantize(Decimal("0.0001"))
                 display_cash_available = cash_available.quantize(Decimal("0.0001"))
@@ -117,13 +117,16 @@ class CashService:
             raise ValueError("occurred_at must include a timezone offset")
         return value or datetime.now(timezone.utc)
 
-    def _cash_flow_nav(self, account_id: int, occurred_at: datetime) -> Decimal:
-        nav = self.repo.latest_valid_nav_before(account_id, occurred_at)
+    def _cash_flow_nav(self, account_id: int, occurred_at: datetime, trade_date: date) -> Decimal:
+        same_date = trade_date if trade_date == occurred_at.astimezone(timezone.utc).date() else None
+        nav = self.repo.latest_valid_nav_before(account_id, occurred_at, same_date)
         if nav is not None:
             return nav
         return quantize_nav(Decimal("1"))
 
-    def _state_before(self, account_id: int, occurred_at: datetime) -> tuple[Decimal, Decimal, Decimal]:
+    def _state_before(
+        self, account_id: int, occurred_at: datetime, trade_date: date
+    ) -> tuple[Decimal, Decimal, Decimal]:
         events, baseline = NavSeriesBuilder(repo=self.repo).prepare(account_id)
         self._require_complete_cash_allocations(events)
         prior_events = [
@@ -136,7 +139,7 @@ class CashService:
             return (
                 Decimal(str(baseline["cash"])),
                 Decimal(str(baseline["share_count"])),
-                self._cash_flow_nav(account_id, occurred_at),
+                self._cash_flow_nav(account_id, occurred_at, trade_date),
             )
         if any(point.quality_status.value != "valid" for point in result.points):
             raise ValueError("cash-flow replay could not prove pre-withdrawal state")
@@ -149,7 +152,7 @@ class CashService:
         # valid snapshot NAV only for that legacy valuation-only boundary.
         pricing_nav = point.nav
         if prior_events[-1].event_type is NavReplayEventType.MARKET_VALUATION:
-            persisted_nav = self._cash_flow_nav(account_id, occurred_at)
+            persisted_nav = self._cash_flow_nav(account_id, occurred_at, trade_date)
             if persisted_nav != quantize_nav(Decimal("1")):
                 pricing_nav = persisted_nav
         return point.cash, point.share_count, pricing_nav

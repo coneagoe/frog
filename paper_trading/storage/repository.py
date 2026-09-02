@@ -1387,16 +1387,21 @@ class PaperTradingRepository:
         """Compatibility alias for callers that use getter naming."""
         return self.list_replay_events(account_id, start_at=start_at, end_at=end_at)
 
-    def latest_valid_nav_before(self, account_id: int, occurred_at: datetime) -> Decimal | None:
+    def latest_valid_nav_before(
+        self, account_id: int, occurred_at: datetime, trade_date: date | None = None
+    ) -> Decimal | None:
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must include a timezone offset")
+        event_at_filter = PaperAccountSnapshot.event_at <= occurred_at
+        if trade_date is not None:
+            event_at_filter = or_(event_at_filter, PaperAccountSnapshot.trade_date == trade_date)
         snapshots = (
             self.session.query(PaperAccountSnapshot)
             .filter(
                 PaperAccountSnapshot.account_id == account_id,
                 PaperAccountSnapshot.point_type == SnapshotPointType.TRADING.value,
                 PaperAccountSnapshot.quality_status == SnapshotQualityStatus.VALID.value,
-                PaperAccountSnapshot.event_at <= occurred_at,
+                event_at_filter,
             )
             .order_by(PaperAccountSnapshot.event_at.desc(), PaperAccountSnapshot.id.desc())
             .all()

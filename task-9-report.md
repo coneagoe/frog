@@ -129,3 +129,46 @@ facts less clear.
 For the backup/restore enum mapping change, no further safe simplification was
 identified. The shared table-selection function remains the single source for
 both export and clean-import enum dependency selection.
+
+## Final Review: Same-Date Cash Flow NAV
+
+### Change
+
+Cash-flow NAV pricing now includes a valid trading snapshot for the same
+business date when the cash flow's UTC date matches its `trade_date`. The
+repository lookup otherwise remains bounded by `event_at <= occurred_at`.
+
+Trading snapshots remain canonical at `trade_date 23:59:59.999999 UTC`, and
+initial snapshot creation is unchanged.
+
+### TDD Evidence
+
+Added `test_same_date_cash_flow_uses_canonical_trading_snapshot_nav`, which
+saves a valid July 20 trading snapshot, confirms its canonical timestamp, and
+then deposits at 10:00 UTC on July 20.
+
+- Red: the ledger used NAV `1.000000` instead of the snapshot NAV
+  `1.250000`.
+- Green: the regression passes after the business-date-aware lookup change and
+  confirms NAV `1.250000` with share allocation `20000.000000`.
+
+### Validation
+
+- Passed: targeted regression test.
+- Passed: `test/paper_trading/storage/test_repository.py` (`133 passed, 5
+  skipped`).
+- Passed: snapshot service, timestamp repair, and recalculation tests (`68
+  passed, 2 skipped`).
+- Passed: focused Ruff check.
+- Passed: `uv run mypy` (`235` source files).
+- Cash-service module: `49 passed, 8 failed`. These failures predate this
+  lookup change and occur because test fixtures pass `None` or market-data
+  stubs lacking `is_trade_date` to `SnapshotRecalculationService`; failure is
+  before the affected assertions. The new regression supplies the required
+  minimal method and passes.
+
+### Simplify Review
+
+No safe simplification was identified. The optional repository `trade_date`
+filter and CashService UTC-date guard make the same-date exception explicit
+while retaining timestamp semantics for all other flows.

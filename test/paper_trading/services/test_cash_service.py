@@ -157,11 +157,11 @@ def test_cash_flow_before_valuation_uses_initial_nav(tmp_path):
     engine.dispose()
 
 
-def test_cash_flow_after_valid_snapshot_uses_preceding_snapshot_nav(tmp_path):
+def test_same_date_cash_flow_uses_canonical_trading_snapshot_nav(tmp_path):
     engine, session, repo = _repo(tmp_path)
     account = repo.create_account("demo", Decimal("100000.00"))
     snapshot_at = datetime(2026, 7, 20, 9, tzinfo=timezone.utc)
-    repo.save_trading_snapshot(
+    snapshot = repo.save_trading_snapshot(
         account_id=account.id,
         trade_date=snapshot_at.date(),
         event_at=snapshot_at,
@@ -178,9 +178,15 @@ def test_cash_flow_after_valid_snapshot_uses_preceding_snapshot_nav(tmp_path):
         trade_count=0,
         net_asset_value=Decimal("1.250000"),
     )
+    assert snapshot.event_at == datetime(2026, 7, 20, 23, 59, 59, 999999, tzinfo=timezone.utc)
     account.net_asset_value = Decimal("1.500000")
 
-    result = CashService(repo).deposit(
+    class TradingDayMarketData:
+        @staticmethod
+        def is_trade_date(trade_date):
+            return True
+
+    result = CashService(repo, cast(MarketDataProvider, TradingDayMarketData())).deposit(
         account.id,
         Decimal("25000.00"),
         date(2026, 7, 20),
