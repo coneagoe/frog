@@ -1,77 +1,77 @@
 # Issue #89 Task 6 Report
 
-## Commits
+## Final Status
 
-- `c38936f` `chore: clean up auth process artifacts`
-- `f9a6ca0` `fix: align auth email validation`
-- `32d77c6` `fix: validate auth email inputs`
-- `7accb8b` `fix: align auth validation and login handling`
-- `ee1d850` `fix: use dummy hash for empty auth passwords`
-- `82221d2` `fix: preserve auth cookies through proxy`
-- `1e3526a` `fix: avoid duplicate auth test module basename`
+Issue #89 authentication foundation work is complete in the current branch.
+The latest branch changes after `main` are regression-test and fixture fixes;
+no authentication runtime code was changed by those final commits.
 
-## Current Fix
+## Final Commits
 
-- Added authoritative backend email validation shared by register and login. It trims and lowercases valid emails and rejects empty values, missing local parts, missing domains, and domains without a suffix.
-- Invalid login emails receive a schema validation response before user lookup or password verification, without revealing whether an account exists.
-- Added API coverage confirming invalid registration emails return 422 and do not create users, plus invalid-login validation coverage.
+The current branch is three commits ahead of `main`:
 
-## Validation
+- `9bef3b6` `Fix analytics chart test fixture`
+- `d486d62` `Fix canonical snapshot test assertions`
+- `b347316` `Strengthen canonical snapshot test assertions`
 
-- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_auth_service.py -q`: PASS, 78 tests.
-- `tools/run_tests.sh test/paper_trading/api/test_auth_api.py test/paper_trading/storage/test_auth_models.py -q`: PASS, 21 tests against a fresh PostgreSQL test database. The runner created and waited for `issue-89-auth-foundation-test_db-1`; cleanup completed.
-- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_auth_service.py test/paper_trading/storage/test_auth_models.py -q`: PASS, 85 tests.
-- `uv run ruff check paper_trading/auth/__init__.py paper_trading/auth/service.py paper_trading/api/routers/auth.py test/paper_trading/auth/test_auth_service.py test/paper_trading/api/test_auth_api.py test/paper_trading/storage/test_auth_models.py`: PASS.
-- `uv run mypy paper_trading/auth/__init__.py paper_trading/auth/service.py paper_trading/api/routers/auth.py`: PASS.
-- Frontend auth focused tests: PASS, 38 tests.
-- Frontend `npm run lint`: PASS.
-- Frontend `npm run build`: PASS. Auth proxy route included.
-- Frontend complete `npm test`: 244 passed, 2 existing analytics failures in `features/analytics/analytics-page.test.tsx`.
-- `git diff --check`: PASS.
+The authentication implementation and its earlier verification commits are
+already included in the branch history before `main`'s current tip. The final
+auth-related changes provide shared backend/frontend email validation,
+consistent normalization and invalid-input handling, empty-password safety,
+proxy cookie preservation, browser auth coverage, and PostgreSQL auth schema
+coverage.
 
-## Known Limitations
+## Backend Final Result
 
-- The full frontend suite still has two pre-existing analytics chart-rendering failures; analytics files were not changed.
-- Backend tests emit the existing Starlette/httpx deprecation warning; the authentication primitive tests no longer emit short JWT key warnings.
-- No ownership, DAG, proxy implementation outside auth, PRODUCT.md, or data files were changed.
+Latest recorded backend verification passed:
 
-## Final Review Fix Round 2
+- Full `tools/run_tests.sh`: `2361 passed, 9 skipped`.
+- Replay, repository, and recalculation suites: `183 passed, 8 skipped`.
+- Authentication API/service tests: `78 passed`.
+- PostgreSQL auth model/schema tests: `23 passed` on a fresh test database,
+  including a repeated `create_all` run.
+- `uv run mypy`: no issues in `234` source files in the latest recorded full
+  run.
+- `uv run pre-commit run --all-files`: all hooks passed, including mypy.
+- Focused Ruff checks passed.
 
-- Aligned the frontend email validator exactly with the backend authority: `^[^\s@]+@[^\s@]+\.[^\s@]+$`, with trim/lower normalization preserved.
-- Added the `a@b@c.com` cross-layer boundary case and kept invalid registration emails from creating users.
-- Added a real PostgreSQL schema test that drops and creates `users` and `auth_tokens`, runs `create_all` twice, verifies indexes and the foreign key, and inserts a linked user/token.
+No full backend suite was rerun after the three final branch commits, so this
+report does not claim a newer post-commit backend total.
 
-### Validation
+## Frontend Final Result
 
-- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_auth_service.py -q`: PASS, 78 tests.
-- `tools/run_tests.sh test/paper_trading/api/test_auth_api.py test/paper_trading/storage/test_auth_models.py test/paper_trading/storage/test_auth_postgresql.py -q`: PASS, 23 tests, fresh PostgreSQL database.
-- Same `tools/run_tests.sh ...` command a second time: PASS, 23 tests, fresh PostgreSQL database.
-- Frontend auth tests: PASS, 39 tests.
-- Frontend `npm run lint`: PASS.
-- Frontend `npm run build`: PASS.
-- Frontend complete `npm test`: 244 passed, 2 existing analytics failures in `features/analytics/analytics-page.test.tsx`.
-- Auth ruff and mypy checks: PASS.
-- `git diff --check`: PASS.
+Latest recorded frontend verification passed:
 
-### Limitations
+- `npm run test -- --run`: `227 passed` across 18 test files.
+- Analytics-focused tests: `16 passed`.
+- Authentication-focused tests: `39 passed`.
+- `npm run lint`: passed.
+- `npm run build`: passed.
+- `npx tsc --noEmit` still reports unrelated existing account/trading fixture
+  typing errors; no Task 6 analytics diagnostics remained.
 
-- The full frontend suite retains the two existing analytics failures; no analytics code was changed.
-- Existing backend test warnings remain for Starlette/httpx deprecation and unrelated AnyIO/Starlette deprecation notices.
+The final branch includes `9bef3b6`, which fixes an analytics chart test
+fixture after that recorded frontend run. No newer complete frontend test run
+is recorded, so a post-commit full-suite pass is not asserted here.
 
-## Final Verification: Test Module Rename
+## Warnings And Limitations
 
-- Renamed `test/paper_trading/auth/test_service.py` to `test/paper_trading/auth/test_auth_service.py` to avoid pytest's duplicate-basename imported-module mismatch with `test/forecast_snapshot/test_service.py`.
-- Synchronized active Task 6 command references. The accidentally committed Task 1/Task 3 process files were removed in the final cleanup commit; historical review diffs and pytest cache entries were left unchanged as historical/generated artifacts.
-- No runtime source, analytics, `PRODUCT.md`, or `data/` files were changed.
+- The recorded backend tests emitted the existing Starlette/httpx deprecation
+  warning from `TestClient`; unrelated AnyIO/Starlette deprecation notices
+  were also observed in focused runs.
+- PostgreSQL-dependent checks must use the test database runner; the latest
+  recorded auth PostgreSQL checks did so successfully.
+- The latest recorded TypeScript check remains non-zero for unrelated
+  pre-existing account/trading fixture contract errors.
+- No runtime source or test files were changed for this report update.
 
-### Validation
+## Untracked User Files
 
-- `tools/run_tests.sh`: collection completed successfully; 2487 passed, 9 skipped, 17 pre-existing business failures. The prior imported-module mismatch was fixed by the test rename; all 17 failures are unrelated to this issue.
-- `uv run pytest test/paper_trading/auth/test_auth_service.py -v`: PASS, 64 tests.
-- `uv run ruff check paper_trading/auth test/paper_trading/auth/test_auth_service.py`: PASS.
-- `uv run mypy paper_trading/auth`: PASS, no issues found in 2 source files.
-- `git diff --check`: PASS.
+`git status --short --untracked-files=all` is clean in this worktree. No
+untracked user files are present to report, and no `PRODUCT.md` or `data/`
+files were modified.
 
-### Concerns
+## Verification Record
 
-- The full backend suite remains non-green because of 17 pre-existing business failures in corporate actions, ledger rebuild, historical ETF repair, matching, order deletion, and repository replay tests. The failure set is unrelated to this issue and this process-file cleanup.
+- `git diff --check`: run for this report update and passed.
+- No tests were rerun for this documentation-only update.
