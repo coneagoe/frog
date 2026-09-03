@@ -253,6 +253,9 @@ services:
     environment:
       <<: *db-common-env
       DATABASE_URL: postgresql://quant:quant@db:5432/quant
+      FROG_ENV: ${FROG_ENV:?FROG_ENV is required for paper-trading}
+      PAPER_TRADING_JWT_SECRET: ${PAPER_TRADING_JWT_SECRET:?PAPER_TRADING_JWT_SECRET is required for paper-trading}
+      PAPER_TRADING_COOKIE_SECURE: ${PAPER_TRADING_COOKIE_SECURE:?PAPER_TRADING_COOKIE_SECURE is required for paper-trading}
       PAPER_TRADING_API_TOKEN: ${PAPER_TRADING_API_TOKEN:?PAPER_TRADING_API_TOKEN is required in .env}
     ports:
       - "8000:8000"

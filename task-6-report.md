@@ -2,76 +2,39 @@
 
 ## Final Status
 
-Issue #89 authentication foundation work is complete in the current branch.
-The latest branch changes after `main` are regression-test and fixture fixes;
-no authentication runtime code was changed by those final commits.
+Production authentication configuration now fails closed at both configuration
+load and FastAPI startup boundaries. Only authentication configuration,
+paper-trading app startup, the paper-trading Compose contract, related tests,
+and this report were changed.
 
-## Final Commits
+## Changes
 
-The current branch is three commits ahead of `main`:
+- `AuthSettings` accepts only `local`, `test`, and `production` when
+  `FROG_ENV` is explicitly set; unknown and empty values are rejected.
+- Local and test environments retain the development JWT and insecure-cookie
+  defaults used by existing static Bearer tests.
+- Production rejects missing, blank, or default JWT secrets and requires
+  Secure cookies.
+- The FastAPI lifespan loads and validates `AuthSettings` before storage
+  startup, so invalid production configuration cannot be bypassed by requests
+  without cookies. Static Bearer compatibility remains intact in local/test.
+- The `paper-trading` Compose service requires `FROG_ENV`,
+  `PAPER_TRADING_JWT_SECRET`, and `PAPER_TRADING_COOKIE_SECURE`.
 
-- `9bef3b6` `Fix analytics chart test fixture`
-- `d486d62` `Fix canonical snapshot test assertions`
-- `b347316` `Strengthen canonical snapshot test assertions`
+## TDD And Verification
 
-The authentication implementation and its earlier verification commits are
-already included in the branch history before `main`'s current tip. The final
-auth-related changes provide shared backend/frontend email validation,
-consistent normalization and invalid-input handling, empty-password safety,
-proxy cookie preservation, browser auth coverage, and PostgreSQL auth schema
-coverage.
+- Initial startup tests failed: `4 failed, 3 passed`, proving the missing
+  lifespan validation.
+- `uv run pytest test/paper_trading/auth test/paper_trading/api/test_api_auth.py -q`:
+  `74 passed`.
+- `tools/run_tests.sh test/paper_trading/storage/test_auth_models.py test/paper_trading/storage/test_auth_postgresql.py -v`:
+  `3 passed` with required temporary auth variables.
+- The same auth/API tests through `tools/run_tests.sh`: `74 passed`.
+- Focused `uv run ruff check`: passed.
+- Focused `uv run mypy`: passed with no issues.
+- `git diff --check`: passed.
+- Docker Compose config fails fast when paper-trading auth variables are
+  missing and parses successfully when required variables are supplied.
 
-## Backend Final Result
-
-Latest recorded backend verification passed:
-
-- Full `tools/run_tests.sh`: `2361 passed, 9 skipped`.
-- Replay, repository, and recalculation suites: `183 passed, 8 skipped`.
-- Authentication API/service tests: `78 passed`.
-- PostgreSQL auth model/schema tests: `23 passed` on a fresh test database,
-  including a repeated `create_all` run.
-- `uv run mypy`: no issues in `234` source files in the latest recorded full
-  run.
-- `uv run pre-commit run --all-files`: all hooks passed, including mypy.
-- Focused Ruff checks passed.
-
-No full backend suite was rerun after the three final branch commits, so this
-report does not claim a newer post-commit backend total.
-
-## Frontend Final Result
-
-Latest recorded frontend verification passed:
-
-- `npm run test -- --run`: `227 passed` across 18 test files.
-- Analytics-focused tests: `16 passed`.
-- Authentication-focused tests: `39 passed`.
-- `npm run lint`: passed.
-- `npm run build`: passed.
-- `npx tsc --noEmit` still reports unrelated existing account/trading fixture
-  typing errors; no Task 6 analytics diagnostics remained.
-
-The final branch includes `9bef3b6`, which fixes an analytics chart test
-fixture after that recorded frontend run. No newer complete frontend test run
-is recorded, so a post-commit full-suite pass is not asserted here.
-
-## Warnings And Limitations
-
-- The recorded backend tests emitted the existing Starlette/httpx deprecation
-  warning from `TestClient`; unrelated AnyIO/Starlette deprecation notices
-  were also observed in focused runs.
-- PostgreSQL-dependent checks must use the test database runner; the latest
-  recorded auth PostgreSQL checks did so successfully.
-- The latest recorded TypeScript check remains non-zero for unrelated
-  pre-existing account/trading fixture contract errors.
-- No runtime source or test files were changed for this report update.
-
-## Untracked User Files
-
-`git status --short --untracked-files=all` is clean in this worktree. No
-untracked user files are present to report, and no `PRODUCT.md` or `data/`
-files were modified.
-
-## Verification Record
-
-- `git diff --check`: run for this report update and passed.
-- No tests were rerun for this documentation-only update.
+The focused tests emit the existing Starlette/httpx `TestClient` deprecation
+warning. The simplify review found no safe simplification worth making.

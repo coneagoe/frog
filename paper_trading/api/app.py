@@ -15,11 +15,13 @@ from paper_trading.api.routers import (
     snapshot_recalculation,
     snapshots,
 )
+from paper_trading.auth import AuthSettings
 from storage.storage_db import get_storage
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.auth_settings = AuthSettings.from_environment()
     # Account-only API routes do not otherwise initialize StorageDb.
     # Bootstrap it here so legacy paper-trading schemas are upgraded at startup.
     get_storage()
