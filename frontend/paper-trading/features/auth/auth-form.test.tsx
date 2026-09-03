@@ -120,4 +120,14 @@ describe("AuthForm", () => {
     await user.click(screen.getByRole("button", { name: "Log in" }));
     expect(loginMock).not.toHaveBeenCalled();
   });
+
+  it("rejects an email with more than one at-sign", async () => {
+    const user = userEvent.setup();
+    render(<AuthForm mode="login" />);
+    await user.type(screen.getByLabelText("Email address"), "a@b@c.com");
+    await user.type(screen.getByLabelText("Password"), "Validpassword1");
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("valid email address");
+    expect(loginMock).not.toHaveBeenCalled();
+  });
 });

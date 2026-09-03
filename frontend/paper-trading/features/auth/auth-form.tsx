@@ -24,7 +24,7 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
 
   function validate(): string | null {
     const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail || !/^\S+@\S+\.\S+$/.test(normalizedEmail)) return "Enter a valid email address.";
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return "Enter a valid email address.";
     if (password.length < 12 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return "Password must be at least 12 characters and include a letter and a number.";
     return null;
   }
@@ -34,7 +34,7 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
     const validationError = validate();
     if (validationError) {
       setFieldError(validationError);
-      setEmailError(!email.trim() || !/^\S+@\S+\.\S+$/.test(email.trim()));
+      setEmailError(!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()));
       setPasswordError(password.length < 12 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password));
       return;
     }

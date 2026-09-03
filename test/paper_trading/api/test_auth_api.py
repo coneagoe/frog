@@ -68,7 +68,7 @@ def test_register_rejects_weak_password(auth_client):
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("email", ["", "@example.com", "user@", "user@example"])
+@pytest.mark.parametrize("email", ["", "@example.com", "user@", "user@example", "a@b@c.com"])
 def test_register_rejects_invalid_email_without_creating_user(auth_client, email):
     client, factory = auth_client
     response = _register(client, email=email)

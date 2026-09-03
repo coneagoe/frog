@@ -30,3 +30,26 @@
 - The full frontend suite still has two pre-existing analytics chart-rendering failures; analytics files were not changed.
 - Backend auth tests emit existing Starlette/httpx deprecation and short test JWT key warnings.
 - No ownership, DAG, proxy implementation outside auth, PRODUCT.md, or data files were changed.
+
+## Final Review Fix Round 2
+
+- Aligned the frontend email validator exactly with the backend authority: `^[^\s@]+@[^\s@]+\.[^\s@]+$`, with trim/lower normalization preserved.
+- Added the `a@b@c.com` cross-layer boundary case and kept invalid registration emails from creating users.
+- Added a real PostgreSQL schema test that drops and creates `users` and `auth_tokens`, runs `create_all` twice, verifies indexes and the foreign key, and inserts a linked user/token.
+
+### Validation
+
+- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_service.py -q`: PASS, 78 tests.
+- `tools/run_tests.sh test/paper_trading/api/test_auth_api.py test/paper_trading/storage/test_auth_models.py test/paper_trading/storage/test_auth_postgresql.py -q`: PASS, 23 tests, fresh PostgreSQL database.
+- Same `tools/run_tests.sh ...` command a second time: PASS, 23 tests, fresh PostgreSQL database.
+- Frontend auth tests: PASS, 39 tests.
+- Frontend `npm run lint`: PASS.
+- Frontend `npm run build`: PASS.
+- Frontend complete `npm test`: 244 passed, 2 existing analytics failures in `features/analytics/analytics-page.test.tsx`.
+- Auth ruff and mypy checks: PASS.
+- `git diff --check`: PASS.
+
+### Limitations
+
+- The full frontend suite retains the two existing analytics failures; no analytics code was changed.
+- Existing backend test warnings remain for Starlette/httpx and short test JWT keys.
