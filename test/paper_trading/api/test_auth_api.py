@@ -120,6 +120,23 @@ def test_login_empty_password_uses_dummy_verification_and_returns_generic_401(au
     assert calls and calls[0][0] == "" and calls[0][1].startswith("$argon2id$")
 
 
+def test_login_existing_user_empty_password_uses_dummy_hash(auth_client, monkeypatch):
+    client, factory = auth_client
+    user = _verified_user(factory)
+    calls = []
+
+    def verify(password, password_hash):
+        calls.append((password, password_hash))
+        return False
+
+    monkeypatch.setattr("paper_trading.api.routers.auth.verify_password", verify)
+    response = client.post("/auth/login", json={"email": user.email, "password": ""})
+    assert response.status_code == 401
+    assert calls == [("", calls[0][1])]
+    assert calls[0][1].startswith("$argon2id$")
+    assert calls[0][1] != user.password_hash
+
+
 def test_login_sets_http_only_lax_session_and_readable_csrf_cookie(auth_client):
     client, factory = auth_client
     _verified_user(factory)

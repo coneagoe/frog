@@ -80,3 +80,15 @@ No known concerns within the requested scope. Broader PostgreSQL-backed and full
 
 - Backend tests emit existing Starlette/httpx deprecation and short test JWT key warnings.
 - No analytics, ownership, auth proxy, PRODUCT.md, or data files were changed.
+
+## Final Auth Fix
+
+- Ensured an empty login password always uses the fixed dummy Argon2 hash, including when the email belongs to an existing user. Non-empty passwords continue to use the user's real hash when present.
+- Added a regression test confirming existing-user empty-password login returns generic 401 and never passes the user's real hash to verification.
+
+### Validation
+
+- Backend auth tests: PASS.
+- Backend `uv run ruff check`: PASS.
+- Backend `uv run mypy`: PASS.
+- `git diff --check`: PASS.

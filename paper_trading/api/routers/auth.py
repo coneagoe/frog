@@ -82,7 +82,7 @@ def login(
     session: Session = Depends(get_session),
 ) -> Identity:
     user = session.scalar(select(User).where(User.email == normalize_email(credentials.email)))
-    password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+    password_hash = user.password_hash if user is not None and credentials.password else _DUMMY_PASSWORD_HASH
     password_valid = verify_password(credentials.password, password_hash)
     if user is None or not password_valid or user.email_verified_at is None:
         raise _generic_unauthorized()
