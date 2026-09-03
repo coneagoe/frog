@@ -2,6 +2,7 @@
 
 ## Commits
 
+- `c38936f` `chore: clean up auth process artifacts`
 - `f9a6ca0` `fix: align auth email validation`
 - `32d77c6` `fix: validate auth email inputs`
 - `7accb8b` `fix: align auth validation and login handling`
