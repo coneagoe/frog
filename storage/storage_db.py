@@ -117,7 +117,6 @@ from .model import (
     ForecastSnapshotRun,
     IndexDailyTurnover,
     tb_name_a_stock_basic,
-    tb_name_auth_tokens,
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
     tb_name_daily_basic_a_stock,
@@ -171,7 +170,6 @@ from .model import (
     tb_name_stock_monitor_target,
     tb_name_suspend_d_a_stock,
     tb_name_top10_floatholders,
-    tb_name_users,
 )
 
 
@@ -398,7 +396,6 @@ _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
     tb_name_paper_valuation_gaps,
     tb_name_paper_order_events,
 }
-_AUTH_TABLES = {tb_name_users, tb_name_auth_tokens}
 _PAPER_SNAPSHOT_SERIES_LOCK_KEY = "paper_account_snapshots.nav_series"
 _PAPER_SNAPSHOT_NAV_COLUMNS = {
     "net_asset_value": "NUMERIC(30, 12)",
@@ -515,7 +512,7 @@ def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
         return tables
 
     excluded_tables = _ENUM_GOVERNED_PAPER_TRADING_TABLES | _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS
-    return [table for table in tables if table.name not in excluded_tables or table.name in _AUTH_TABLES]
+    return [table for table in tables if table.name not in excluded_tables]
 
 
 # Tables keyed by ETF/fund code instead of stock code.
