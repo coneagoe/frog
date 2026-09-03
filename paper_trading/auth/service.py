@@ -114,7 +114,13 @@ def decode_session_token(
         raise ValueError("Invalid session token") from exc
 
     current_time = _as_utc(now or datetime.now(timezone.utc))
-    if expires_at <= current_time or session_version < 0 or user_id <= 0:
+    if (
+        issued_at > current_time
+        or expires_at <= issued_at
+        or expires_at <= current_time
+        or session_version < 0
+        or user_id <= 0
+    ):
         raise ValueError("Invalid session token")
     return SessionClaims(user_id, session_version, issued_at, expires_at)
 

@@ -88,8 +88,13 @@ from .service import (  # noqa: E402
 
 
 def validate_auth_settings(settings: AuthSettings, environment: str | None = None) -> None:
-    current_environment = environment if environment is not None else os.getenv("FROG_ENV", "local")
-    current_environment = current_environment.strip().lower()
+    configured_environment = environment if environment is not None else os.getenv("FROG_ENV")
+    if configured_environment is None:
+        current_environment = "local"
+    else:
+        current_environment = configured_environment.strip().lower()
+        if current_environment not in {"local", "test", "production"}:
+            raise ValueError("FROG_ENV environment must be local, test, or production")
     if settings.jwt_ttl_seconds <= 0:
         raise ValueError("JWT TTL must be positive")
     for cookie_name, label in (

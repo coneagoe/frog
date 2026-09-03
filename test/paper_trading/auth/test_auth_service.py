@@ -43,6 +43,13 @@ def test_production_settings_require_jwt_secret(monkeypatch):
         AuthSettings.from_environment()
 
 
+def test_production_settings_fail_closed_when_environment_is_explicitly_empty(monkeypatch):
+    monkeypatch.setenv("FROG_ENV", "")
+
+    with pytest.raises(ValueError, match="environment"):
+        AuthSettings.from_environment()
+
+
 def test_production_settings_reject_insecure_cookie(monkeypatch):
     monkeypatch.setenv("PAPER_TRADING_JWT_SECRET", "test-secret")
     monkeypatch.setenv("FROG_ENV", "production")
@@ -124,7 +131,7 @@ def test_explicit_environment_is_used_and_trimmed(monkeypatch):
     validate_auth_settings(settings, environment="  PRODUCTION  ")
 
 
-def test_explicit_empty_environment_is_not_replaced(monkeypatch):
+def test_explicit_empty_environment_is_rejected(monkeypatch):
     monkeypatch.setenv("FROG_ENV", "production")
     settings = AuthSettings(
         jwt_secret="production-secret",
@@ -134,7 +141,8 @@ def test_explicit_empty_environment_is_not_replaced(monkeypatch):
         csrf_cookie_name="csrf",
     )
 
-    validate_auth_settings(settings, environment="")
+    with pytest.raises(ValueError, match="environment"):
+        validate_auth_settings(settings, environment="")
 
 
 def test_valid_production_settings():
@@ -243,6 +251,27 @@ def test_decode_session_token_uses_injected_now_for_expiry():
     assert claims.user_id == 42
     with pytest.raises(ValueError):
         decode_session_token(token, _settings(), datetime(2026, 1, 1, 2, tzinfo=timezone.utc))
+
+
+def test_decode_session_token_rejects_future_iat():
+    issued_at = datetime(2026, 1, 1, 1, tzinfo=timezone.utc)
+    token = create_session_token(42, 0, _settings(), issued_at)
+
+    with pytest.raises(ValueError, match="Invalid session token"):
+        decode_session_token(token, _settings(), datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+
+def test_decode_session_token_rejects_expiration_at_or_before_iat():
+    issued_timestamp = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp())
+    for expires_timestamp in (issued_timestamp, issued_timestamp - 1):
+        token = encode(
+            {"sub": "42", "sv": 0, "iat": issued_timestamp, "exp": expires_timestamp},
+            _settings().jwt_secret,
+            algorithm="HS256",
+        )
+
+        with pytest.raises(ValueError, match="Invalid session token"):
+            decode_session_token(token, _settings(), datetime(2026, 1, 1, tzinfo=timezone.utc))
 
 
 @pytest.mark.parametrize(
