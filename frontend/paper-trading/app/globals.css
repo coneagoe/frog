@@ -409,7 +409,7 @@ select:focus {
 
 .auth-card__intro { border-left: 3px solid var(--accent); padding-left: 16px; }
 .auth-card__eyebrow { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; margin: 0 0 8px; text-transform: uppercase; }
-.auth-card h1 { font-size: clamp(24px, 4vw, 32px); line-height: 1.15; margin: 0; }
+.auth-card h1 { font-size: 32px; line-height: 1.15; margin: 0; }
 .auth-card__intro > p:last-child { color: var(--muted); line-height: 1.5; margin: 10px 0 0; }
 .auth-form { margin-top: 26px; }
 .auth-form__password { display: flex; position: relative; }
@@ -421,6 +421,7 @@ select:focus {
 
 @media (max-width: 480px) {
   .auth-card { padding: 24px 20px; }
+  .auth-card h1 { font-size: 24px; }
 }
 
 .button {

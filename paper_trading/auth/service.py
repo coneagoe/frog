@@ -38,7 +38,7 @@ def normalize_email(email: str) -> str:
 def validate_password(password: str) -> None:
     if len(password) < 12 or not _PASSWORD_LETTER_RE.search(password):
         raise ValueError("Password must be at least 12 characters and contain a letter and a number")
-    if not any(char.isdigit() for char in password):
+    if not re.search(r"[0-9]", password):
         raise ValueError("Password must be at least 12 characters and contain a letter and a number")
 
 

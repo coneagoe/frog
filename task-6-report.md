@@ -57,3 +57,26 @@ Commit hash: `c242064`.
 ## Concerns
 
 No known concerns within the requested scope. Broader PostgreSQL-backed and full-suite validation was not rerun because it was not assigned for this focused fix.
+
+## Auth Fix Round 1
+
+- Split registration credentials from login credentials so registration rejects an empty password while login accepts it long enough to execute the dummy Argon2 verification path and return generic 401.
+- Updated backend password validation to require at least 12 characters, an ASCII letter, and an ASCII digit (`[0-9]`), matching the frontend contract.
+- Added regression coverage for empty-password login and Unicode digits.
+- Removed the current worktree's unplanned process reports: `task-1-report.md` and `.superpowers/sdd/2026-09-03-issue-89-browser-auth-foundation-plan/task-2-report.md`.
+- Replaced the auth heading's viewport-dependent `clamp()` font size with fixed 32px and 24px breakpoint values.
+
+### Validation
+
+- Backend focused auth tests: PASS, 77 tests.
+- Backend `uv run ruff check`: PASS.
+- Backend `uv run mypy` on auth router/service: PASS.
+- Frontend auth tests: PASS, 38 tests.
+- Frontend `npm run lint`: PASS.
+- Frontend `npm run build`: PASS. Existing autoprefixer warning remains at `globals.css:156`.
+- `git diff --check`: PASS.
+
+### Concerns
+
+- Backend tests emit existing Starlette/httpx deprecation and short test JWT key warnings.
+- No analytics, ownership, auth proxy, PRODUCT.md, or data files were changed.

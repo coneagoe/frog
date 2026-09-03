@@ -31,6 +31,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 class Credentials(BaseModel):
     email: str
+    password: str
+
+
+class RegistrationCredentials(Credentials):
     password: str = Field(min_length=1)
 
 
@@ -52,7 +56,7 @@ def _generic_unauthorized() -> HTTPException:
 
 
 @router.post("/register", response_model=Identity, status_code=status.HTTP_201_CREATED)
-def register(credentials: Credentials, session: Session = Depends(get_session)) -> Identity:
+def register(credentials: RegistrationCredentials, session: Session = Depends(get_session)) -> Identity:
     email = normalize_email(credentials.email)
     try:
         validate_password(credentials.password)

@@ -203,6 +203,11 @@ def test_validate_password_rejects_short_missing_letter_and_missing_number(passw
         validate_password(password)
 
 
+def test_validate_password_rejects_unicode_digit():
+    with pytest.raises(ValueError, match="letter and a number"):
+        validate_password("abcdefghijkl١")
+
+
 def test_hash_password_never_equals_plaintext_and_verifies():
     password = "correct-horse2"
     password_hash = hash_password(password)
