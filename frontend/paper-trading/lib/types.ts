@@ -1,3 +1,14 @@
+export type AuthIdentity = {
+  id: number;
+  email: string;
+  email_verified_at: string | null;
+};
+
+export type AuthInput = {
+  email: string;
+  password: string;
+};
+
 export type Account = {
   id: number;
   name: string;

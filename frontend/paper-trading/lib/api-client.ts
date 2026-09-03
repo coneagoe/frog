@@ -1,6 +1,8 @@
 import { ApiError, parseApiError } from "./api-error";
 import type {
   Account,
+  AuthIdentity,
+  AuthInput,
   AnalyticsResponse,
   CashFlowInput,
   CashFlowResult,
@@ -43,6 +45,48 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T;
   }
   return response.json() as Promise<T>;
+}
+
+async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  if (init?.body && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  const response = await fetch(`/api${path}`, {
+    ...init,
+    credentials: "same-origin",
+    headers
+  });
+  if (!response.ok) {
+    throw await parseApiError(response);
+  }
+  if (response.status === 204) return undefined as T;
+  return response.json() as Promise<T>;
+}
+
+function readCsrfToken(): string | undefined {
+  const cookie = document.cookie.split("; ").find((item) => item.startsWith("paper_trading_csrf="));
+  return cookie ? decodeURIComponent(cookie.slice("paper_trading_csrf=".length)) : undefined;
+}
+
+export function register(input: AuthInput): Promise<AuthIdentity> {
+  return authRequest<AuthIdentity>("/auth/register", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function login(input: AuthInput): Promise<AuthIdentity> {
+  return authRequest<AuthIdentity>("/auth/login", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function getCurrentUser(): Promise<AuthIdentity> {
+  return authRequest<AuthIdentity>("/auth/me");
+}
+
+export function logout(): Promise<void> {
+  const csrfToken = readCsrfToken();
+  return authRequest<void>("/auth/logout", {
+    method: "POST",
+    headers: csrfToken ? { "X-CSRF-Token": csrfToken } : undefined
+  });
 }
 
 export function apiGet<T>(path: string): Promise<T> {
