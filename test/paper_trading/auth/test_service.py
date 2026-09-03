@@ -1,6 +1,24 @@
-import pytest
+from datetime import datetime, timezone
 
-from paper_trading.auth import AuthSettings, validate_auth_settings
+import pytest
+from fastapi import Response
+from jwt import decode
+
+from paper_trading.auth import (
+    AuthSettings,
+    build_csrf_cookie,
+    build_session_cookie,
+    clear_auth_cookies,
+    create_session_token,
+    decode_session_token,
+    hash_auth_token,
+    hash_password,
+    new_auth_token,
+    normalize_email,
+    validate_auth_settings,
+    validate_password,
+    verify_password,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -166,3 +184,69 @@ def test_invalid_cookie_names_are_rejected(monkeypatch, variable_name, cookie_na
 
     with pytest.raises(ValueError, match="cookie name"):
         AuthSettings.from_environment()
+
+
+def _settings() -> AuthSettings:
+    return AuthSettings("test-secret", 3600, True, "session", "csrf")
+
+
+def test_normalize_email_trims_and_lowercases():
+    assert normalize_email("  User@Example.COM ") == "user@example.com"
+
+
+@pytest.mark.parametrize("password", ["short1", "allletters", "12345678"])
+def test_validate_password_rejects_short_missing_letter_and_missing_number(password):
+    with pytest.raises(ValueError, match="letter and a number"):
+        validate_password(password)
+
+
+def test_hash_password_never_equals_plaintext_and_verifies():
+    password = "correct-horse2"
+    password_hash = hash_password(password)
+    assert password_hash != password
+    assert verify_password(password, password_hash)
+    assert not verify_password("wrong-password2", password_hash)
+
+
+def test_session_token_contains_user_and_session_version():
+    token = create_session_token(42, 7, _settings())
+    claims = decode(token, _settings().jwt_secret, algorithms=["HS256"])
+    assert claims["sub"] == "42"
+    assert claims["sv"] == 7
+
+
+def test_decode_session_token_rejects_expired_and_wrong_version_claims():
+    issued_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    token = create_session_token(42, 0, _settings(), issued_at)
+    with pytest.raises(ValueError):
+        decode_session_token(token, _settings(), issued_at)
+
+    wrong_version = create_session_token(42, -1, _settings())
+    with pytest.raises(ValueError):
+        decode_session_token(wrong_version, _settings())
+
+
+def test_new_auth_token_returns_only_hash_for_storage():
+    raw_token, token_hash = new_auth_token()
+    assert raw_token
+    assert token_hash == hash_auth_token(raw_token)
+    assert raw_token != token_hash
+
+
+def test_session_cookie_has_httponly_lax_and_secure_attributes():
+    response = Response()
+    build_session_cookie(response, "token", _settings())
+    cookie = response.headers["set-cookie"]
+    assert "session=token" in cookie
+    assert "HttpOnly" in cookie
+    assert "SameSite=lax" in cookie
+    assert "Secure" in cookie
+
+
+def test_clear_auth_cookies_expires_session_and_csrf_cookies():
+    response = Response()
+    build_session_cookie(response, "token", _settings())
+    build_csrf_cookie(response, "csrf-token", _settings())
+    clear_auth_cookies(response, _settings())
+    set_cookie_headers = [value.decode() for name, value in response.raw_headers if name == b"set-cookie"]
+    assert sum(header.count("Max-Age=0") for header in set_cookie_headers) == 2

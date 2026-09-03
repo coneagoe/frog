@@ -10,6 +10,24 @@ _DEFAULT_SESSION_COOKIE_NAME = "paper_trading_session"
 _DEFAULT_CSRF_COOKIE_NAME = "paper_trading_csrf"
 _COOKIE_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$")
 
+__all__ = [
+    "AuthSettings",
+    "SessionClaims",
+    "build_csrf_cookie",
+    "build_session_cookie",
+    "bump_session_version",
+    "clear_auth_cookies",
+    "create_session_token",
+    "decode_session_token",
+    "hash_auth_token",
+    "hash_password",
+    "new_auth_token",
+    "normalize_email",
+    "validate_auth_settings",
+    "validate_password",
+    "verify_password",
+]
+
 
 def _parse_bool(value: str, variable_name: str) -> bool:
     normalized = value.strip().lower()
@@ -48,6 +66,23 @@ class AuthSettings:
         )
         validate_auth_settings(settings)
         return settings
+
+
+from .service import (  # noqa: E402
+    SessionClaims,
+    build_csrf_cookie,
+    build_session_cookie,
+    bump_session_version,
+    clear_auth_cookies,
+    create_session_token,
+    decode_session_token,
+    hash_auth_token,
+    hash_password,
+    new_auth_token,
+    normalize_email,
+    validate_password,
+    verify_password,
+)
 
 
 def validate_auth_settings(settings: AuthSettings, environment: str | None = None) -> None:
