@@ -4,6 +4,7 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from paper_trading.api.app import create_app
@@ -54,6 +55,7 @@ def test_register_normalizes_email_and_stores_only_argon2_hash(auth_client):
     response = _register(client, " User@Example.COM ")
     assert response.status_code == 201
     assert response.json()["email"] == "user@example.com"
+    assert response.json()["email_verified_at"] is None
     with factory() as session:
         user = session.scalar(select(User))
         assert user is not None
@@ -72,6 +74,13 @@ def test_register_rejects_duplicate_normalized_email_with_409(auth_client):
     assert _register(client, " USER@example.COM ").status_code == 409
 
 
+def test_register_does_not_map_non_email_integrity_error_to_409(auth_client, monkeypatch):
+    client, _ = auth_client
+    monkeypatch.setattr("paper_trading.api.routers.auth.hash_password", lambda _: None)
+    with pytest.raises(IntegrityError):
+        client.post("/auth/register", json={"email": "integrity@example.com", "password": "StrongPass1"})
+
+
 def test_login_requires_verified_user_but_uses_generic_401(auth_client):
     client, factory = auth_client
     assert _register(client).status_code == 201
@@ -81,6 +90,20 @@ def test_login_requires_verified_user_but_uses_generic_401(auth_client):
     incorrect = _login(client, password="WrongPass1")
     assert unknown.status_code == incorrect.status_code == 401
     assert unknown.json() == incorrect.json()
+
+
+def test_login_unknown_user_runs_password_verification_path(auth_client, monkeypatch):
+    client, _ = auth_client
+    calls = []
+
+    def verify(password, password_hash):
+        calls.append((password, password_hash))
+        return False
+
+    monkeypatch.setattr("paper_trading.api.routers.auth.verify_password", verify)
+    response = _login(client, "missing@example.com")
+    assert response.status_code == 401
+    assert calls and calls[0][1].startswith("$argon2id$")
 
 
 def test_login_sets_http_only_lax_session_and_readable_csrf_cookie(auth_client):
@@ -100,6 +123,7 @@ def test_login_sets_http_only_lax_session_and_readable_csrf_cookie(auth_client):
         "paper_trading_csrf=" in value and "HttpOnly" not in value and "SameSite=lax" in value
         for value in set_cookie
     )
+    assert all("Path=/" in value and "Max-Age=3600" in value and "Secure" not in value for value in set_cookie)
 
 
 def test_me_returns_safe_identity_for_valid_session(auth_client):
@@ -139,6 +163,11 @@ def test_logout_bumps_session_version_and_clears_cookies(auth_client):
         "paper_trading_session=" in value and "Max-Age=0" in value
         for value in response.headers.get_list("set-cookie")
     )
+    assert any(
+        "paper_trading_csrf=" in value and "Max-Age=0" in value
+        for value in response.headers.get_list("set-cookie")
+    )
+    assert all("Path=/" in value and "Secure" not in value for value in response.headers.get_list("set-cookie"))
 
 
 def test_cookie_authenticated_mutation_requires_matching_csrf(auth_client):
@@ -152,5 +181,10 @@ def test_cookie_authenticated_mutation_requires_matching_csrf(auth_client):
 def test_static_bearer_token_remains_compatible_and_csrf_exempt(auth_client):
     client, _ = auth_client
     headers = {"Authorization": "Bearer api-secret"}
-    assert client.get("/paper/accounts", headers=headers).status_code != 401
+    response = client.post(
+        "/paper/accounts",
+        json={"name": "bearer-account", "initial_cash": "1000"},
+        headers=headers,
+    )
+    assert response.status_code == 200
     assert client.post("/auth/logout", headers=headers).status_code == 401

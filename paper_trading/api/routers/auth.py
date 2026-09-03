@@ -3,7 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,6 @@ from paper_trading.auth import (
     AuthSettings,
     build_csrf_cookie,
     build_session_cookie,
-    bump_session_version,
     clear_auth_cookies,
     create_session_token,
     hash_password,
@@ -21,6 +20,11 @@ from paper_trading.auth import (
     verify_password,
 )
 from storage.model.auth import User
+
+_DUMMY_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$NGJ2+MUUColXDcqLKM6NHw$"
+    "VmCfSMah6ivG0JZGbbYZXPdKVCu4ZbZI+Ye9FoFzh+M"
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -61,6 +65,8 @@ def register(credentials: Credentials, session: Session = Depends(get_session)) 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except IntegrityError as exc:
         session.rollback()
+        if not _is_email_unique_violation(exc):
+            raise
         raise HTTPException(status_code=409, detail="email is already registered") from exc
     return _identity(user)
 
@@ -72,11 +78,9 @@ def login(
     session: Session = Depends(get_session),
 ) -> Identity:
     user = session.scalar(select(User).where(User.email == normalize_email(credentials.email)))
-    if (
-        user is None
-        or not verify_password(credentials.password, user.password_hash)
-        or user.email_verified_at is None
-    ):
+    password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+    password_valid = verify_password(credentials.password, password_hash)
+    if user is None or not password_valid or user.email_verified_at is None:
         raise _generic_unauthorized()
     settings = AuthSettings.from_environment()
     build_session_cookie(response, create_session_token(user.id, user.session_version, settings), settings)
@@ -100,8 +104,20 @@ def logout(
 ) -> Response:
     if user is None:
         raise _generic_unauthorized()
-    bump_session_version(user)
+    result = session.execute(
+        update(User)
+        .where(User.id == user.id, User.session_version == user.session_version)
+        .values(session_version=User.session_version + 1)
+    )
+    if getattr(result, "rowcount", 0) != 1:
+        session.rollback()
+        raise _generic_unauthorized()
     session.commit()
     clear_auth_cookies(response, AuthSettings.from_environment())
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
+
+
+def _is_email_unique_violation(exc: IntegrityError) -> bool:
+    message = str(exc.orig).lower()
+    return "users.email" in message or "users_email_key" in message
