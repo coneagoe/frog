@@ -8,7 +8,7 @@ _DEFAULT_JWT_SECRET = "local-development-secret"
 _DEFAULT_JWT_TTL_SECONDS = 3600
 _DEFAULT_SESSION_COOKIE_NAME = "paper_trading_session"
 _DEFAULT_CSRF_COOKIE_NAME = "paper_trading_csrf"
-_COOKIE_NAME_RE = re.compile(r"^[^\x00-\x20\x7f()<>@,;:\\\"/\[\]?={}]+$")
+_COOKIE_NAME_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$")
 
 
 def _parse_bool(value: str, variable_name: str) -> bool:
@@ -62,7 +62,7 @@ def validate_auth_settings(settings: AuthSettings, environment: str | None = Non
         if not cookie_name or not _COOKIE_NAME_RE.fullmatch(cookie_name):
             raise ValueError(f"{label} cookie name is invalid")
     if current_environment == "production":
-        if not settings.jwt_secret.strip() or settings.jwt_secret == _DEFAULT_JWT_SECRET:
+        if not settings.jwt_secret.strip() or settings.jwt_secret.strip() == _DEFAULT_JWT_SECRET:
             raise ValueError("JWT secret is required in production")
         if not settings.cookie_secure:
             raise ValueError("secure cookies are required in production")

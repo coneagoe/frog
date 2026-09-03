@@ -141,10 +141,26 @@ def test_blank_production_secret_is_rejected_without_leaking_secret(monkeypatch)
 
 
 @pytest.mark.parametrize(
+    "secret",
+    [" local-development-secret", "local-development-secret ", "\tlocal-development-secret\n"],
+)
+def test_default_production_secret_variants_are_rejected(monkeypatch, secret):
+    monkeypatch.setenv("PAPER_TRADING_JWT_SECRET", secret)
+    monkeypatch.setenv("PAPER_TRADING_COOKIE_SECURE", "true")
+    monkeypatch.setenv("FROG_ENV", "production")
+
+    with pytest.raises(ValueError, match="JWT secret"):
+        AuthSettings.from_environment()
+
+
+@pytest.mark.parametrize(
     "variable_name",
     ["PAPER_TRADING_SESSION_COOKIE_NAME", "PAPER_TRADING_CSRF_COOKIE_NAME"],
 )
-@pytest.mark.parametrize("cookie_name", ["", "   ", "bad name", "bad;name", "bad\\name"])
+@pytest.mark.parametrize(
+    "cookie_name",
+    ["", "   ", "bad name", "bad;name", "bad\\name", "中文", "café", "bad:name", "bad/name"],
+)
 def test_invalid_cookie_names_are_rejected(monkeypatch, variable_name, cookie_name):
     monkeypatch.setenv(variable_name, cookie_name)
 
