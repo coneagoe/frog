@@ -97,6 +97,7 @@ const analyticsPayload = {
     event_type: "snapshot",
     id: 1,
     event_at: "2026-09-10T15:00:00Z",
+    trade_date: "2026-09-10",
     point_type: "trading",
     quality: "valid",
     timezone: "UTC",
@@ -153,7 +154,7 @@ describe("AnalyticsPage", () => {
       expect(createChartMock).toHaveBeenCalled();
     });
     const setData = vi.mocked(createChartMock).mock.results[0]?.value.addSeries.mock.results[0]?.value.setData;
-    expect(setData).toHaveBeenCalledWith([{ time: 1789052400, value: 1.25 }]);
+    expect(setData).toHaveBeenCalledWith([{ time: 1789084799, value: 1.25 }]);
   });
 
   it("renders the analytics dashboard sections", async () => {
