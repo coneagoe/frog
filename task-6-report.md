@@ -7,6 +7,7 @@
 - `7accb8b` `fix: align auth validation and login handling`
 - `ee1d850` `fix: use dummy hash for empty auth passwords`
 - `82221d2` `fix: preserve auth cookies through proxy`
+- `1e3526a` `fix: avoid duplicate auth test module basename`
 
 ## Current Fix
 
@@ -30,7 +31,7 @@
 ## Known Limitations
 
 - The full frontend suite still has two pre-existing analytics chart-rendering failures; analytics files were not changed.
-- Backend auth tests emit existing Starlette/httpx deprecation and short test JWT key warnings.
+- Backend tests emit the existing Starlette/httpx deprecation warning; the authentication primitive tests no longer emit short JWT key warnings.
 - No ownership, DAG, proxy implementation outside auth, PRODUCT.md, or data files were changed.
 
 ## Final Review Fix Round 2
@@ -54,17 +55,17 @@
 ### Limitations
 
 - The full frontend suite retains the two existing analytics failures; no analytics code was changed.
-- Existing backend test warnings remain for Starlette/httpx and short test JWT keys.
+- Existing backend test warnings remain for Starlette/httpx deprecation and unrelated AnyIO/Starlette deprecation notices.
 
 ## Final Verification: Test Module Rename
 
 - Renamed `test/paper_trading/auth/test_service.py` to `test/paper_trading/auth/test_auth_service.py` to avoid pytest's duplicate-basename imported-module mismatch with `test/forecast_snapshot/test_service.py`.
-- Synchronized active Task 1 and Task 3 briefs/reports and Task 6 command references. Historical review diffs and pytest cache entries were left unchanged as historical/generated artifacts.
+- Synchronized active Task 6 command references. The accidentally committed Task 1/Task 3 process files were removed in the final cleanup commit; historical review diffs and pytest cache entries were left unchanged as historical/generated artifacts.
 - No runtime source, analytics, `PRODUCT.md`, or `data/` files were changed.
 
 ### Validation
 
-- `tools/run_tests.sh`: collection completed successfully; 2487 passed, 9 skipped, 17 unrelated pre-existing business-test failures. The prior imported-module mismatch did not recur.
+- `tools/run_tests.sh`: collection completed successfully; 2487 passed, 9 skipped, 17 pre-existing business failures. The prior imported-module mismatch was fixed by the test rename; all 17 failures are unrelated to this issue.
 - `uv run pytest test/paper_trading/auth/test_auth_service.py -v`: PASS, 64 tests.
 - `uv run ruff check paper_trading/auth test/paper_trading/auth/test_auth_service.py`: PASS.
 - `uv run mypy paper_trading/auth`: PASS, no issues found in 2 source files.
@@ -72,4 +73,4 @@
 
 ### Concerns
 
-- The full backend suite remains non-green because of 17 unrelated existing failures in corporate actions, ledger rebuild, historical ETF repair, matching, order deletion, and repository replay tests. The failure set is unrelated to this filename-only change.
+- The full backend suite remains non-green because of 17 pre-existing business failures in corporate actions, ledger rebuild, historical ETF repair, matching, order deletion, and repository replay tests. The failure set is unrelated to this issue and this process-file cleanup.
