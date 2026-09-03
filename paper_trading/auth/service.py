@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,7 @@ from paper_trading.auth import AuthSettings
 from storage.model.auth import User
 
 _JWT_ALGORITHM = "HS256"
+_USER_ID_RE = re.compile(r"^[0-9]+$")
 _password_hasher = PasswordHasher()
 
 
@@ -78,12 +80,27 @@ def decode_session_token(
             token,
             settings.jwt_secret,
             algorithms=[_JWT_ALGORITHM],
-            options={"require": ["sub", "sv", "iat", "exp"]},
+            options={
+                "require": ["sub", "sv", "iat", "exp"],
+                "verify_exp": False,
+                "verify_iat": False,
+            },
         )
-        user_id = int(payload["sub"])
-        session_version = int(payload["sv"])
-        issued_at = datetime.fromtimestamp(int(payload["iat"]), tz=timezone.utc)
-        expires_at = datetime.fromtimestamp(int(payload["exp"]), tz=timezone.utc)
+        subject = payload["sub"]
+        session_version = payload["sv"]
+        issued_timestamp = payload["iat"]
+        expires_timestamp = payload["exp"]
+        if (
+            not isinstance(subject, str)
+            or not _USER_ID_RE.fullmatch(subject)
+            or not _is_integer(session_version)
+            or not _is_integer(issued_timestamp)
+            or not _is_integer(expires_timestamp)
+        ):
+            raise ValueError("Invalid session token")
+        user_id = int(subject)
+        issued_at = datetime.fromtimestamp(issued_timestamp, tz=timezone.utc)
+        expires_at = datetime.fromtimestamp(expires_timestamp, tz=timezone.utc)
     except (ValueError, TypeError, OverflowError, KeyError, jwt.InvalidTokenError) as exc:
         raise ValueError("Invalid session token") from exc
 
@@ -140,3 +157,7 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _is_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)

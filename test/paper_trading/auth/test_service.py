@@ -1,13 +1,15 @@
 from datetime import datetime, timezone
+from http.cookies import SimpleCookie
 
 import pytest
 from fastapi import Response
-from jwt import decode
+from jwt import decode, encode
 
 from paper_trading.auth import (
     AuthSettings,
     build_csrf_cookie,
     build_session_cookie,
+    bump_session_version,
     clear_auth_cookies,
     create_session_token,
     decode_session_token,
@@ -19,6 +21,7 @@ from paper_trading.auth import (
     validate_password,
     verify_password,
 )
+from storage.model.auth import User
 
 
 @pytest.fixture(autouse=True)
@@ -187,7 +190,7 @@ def test_invalid_cookie_names_are_rejected(monkeypatch, variable_name, cookie_na
 
 
 def _settings() -> AuthSettings:
-    return AuthSettings("test-secret", 3600, True, "session", "csrf")
+    return AuthSettings("test-secret-with-at-least-32-bytes-long", 3600, True, "session", "csrf")
 
 
 def test_normalize_email_trims_and_lowercases():
@@ -206,6 +209,7 @@ def test_hash_password_never_equals_plaintext_and_verifies():
     assert password_hash != password
     assert verify_password(password, password_hash)
     assert not verify_password("wrong-password2", password_hash)
+    assert not verify_password(password, "not-an-argon2-hash")
 
 
 def test_session_token_contains_user_and_session_version():
@@ -216,14 +220,58 @@ def test_session_token_contains_user_and_session_version():
 
 
 def test_decode_session_token_rejects_expired_and_wrong_version_claims():
-    issued_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    issued_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
     token = create_session_token(42, 0, _settings(), issued_at)
     with pytest.raises(ValueError):
-        decode_session_token(token, _settings(), issued_at)
+        decode_session_token(token, _settings(), datetime(2026, 1, 1, 1, tzinfo=timezone.utc))
 
     wrong_version = create_session_token(42, -1, _settings())
     with pytest.raises(ValueError):
         decode_session_token(wrong_version, _settings())
+
+
+def test_decode_session_token_uses_injected_now_for_expiry():
+    issued_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    token = create_session_token(42, 0, _settings(), issued_at)
+
+    claims = decode_session_token(token, _settings(), datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc))
+    assert claims.user_id == 42
+    with pytest.raises(ValueError):
+        decode_session_token(token, _settings(), datetime(2026, 1, 1, 2, tzinfo=timezone.utc))
+
+
+@pytest.mark.parametrize(
+    "claim, value",
+    [
+        ("sub", ""),
+        ("sub", "42.0"),
+        ("sub", 42),
+        ("sv", True),
+        ("sv", "0"),
+        ("iat", False),
+        ("iat", 1.5),
+        ("exp", "2"),
+        ("exp", 2.5),
+    ],
+)
+def test_decode_session_token_rejects_invalid_claim_types(claim, value):
+    issued_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    payload = {"sub": "42", "sv": 0, "iat": int(issued_at.timestamp()), "exp": int((issued_at.timestamp() + 3600))}
+    payload[claim] = value
+    token = encode(payload, _settings().jwt_secret, algorithm="HS256")
+
+    with pytest.raises(ValueError, match="Invalid session token"):
+        decode_session_token(token, _settings(), issued_at)
+
+
+def test_session_version_bump_invalidates_old_token_at_calling_boundary():
+    user = User(session_version=1)
+    token = create_session_token(42, user.session_version, _settings())
+    assert decode_session_token(token, _settings()).session_version == user.session_version
+
+    assert bump_session_version(user) == 2
+    claims = decode_session_token(token, _settings())
+    assert claims.session_version != user.session_version
 
 
 def test_new_auth_token_returns_only_hash_for_storage():
@@ -233,14 +281,32 @@ def test_new_auth_token_returns_only_hash_for_storage():
     assert raw_token != token_hash
 
 
-def test_session_cookie_has_httponly_lax_and_secure_attributes():
+def test_session_and_csrf_cookies_have_expected_attributes():
     response = Response()
     build_session_cookie(response, "token", _settings())
-    cookie = response.headers["set-cookie"]
-    assert "session=token" in cookie
-    assert "HttpOnly" in cookie
-    assert "SameSite=lax" in cookie
-    assert "Secure" in cookie
+    build_csrf_cookie(response, "csrf-token", _settings())
+    cookies = [
+        SimpleCookie(value.decode())[name]
+        for header_name, value in response.raw_headers
+        if header_name == b"set-cookie"
+        for name in ("session", "csrf")
+        if name in value.decode()
+    ]
+    session_cookie, csrf_cookie = cookies
+    assert session_cookie.key == "session"
+    assert session_cookie.value == "token"
+    assert session_cookie["path"] == "/"
+    assert session_cookie["max-age"] == "3600"
+    assert session_cookie["httponly"]
+    assert session_cookie["samesite"] == "lax"
+    assert session_cookie["secure"]
+    assert csrf_cookie.key == "csrf"
+    assert csrf_cookie.value == "csrf-token"
+    assert csrf_cookie["path"] == "/"
+    assert csrf_cookie["max-age"] == "3600"
+    assert csrf_cookie["httponly"] == ""
+    assert csrf_cookie["samesite"] == "lax"
+    assert csrf_cookie["secure"]
 
 
 def test_clear_auth_cookies_expires_session_and_csrf_cookies():
@@ -248,5 +314,13 @@ def test_clear_auth_cookies_expires_session_and_csrf_cookies():
     build_session_cookie(response, "token", _settings())
     build_csrf_cookie(response, "csrf-token", _settings())
     clear_auth_cookies(response, _settings())
-    set_cookie_headers = [value.decode() for name, value in response.raw_headers if name == b"set-cookie"]
-    assert sum(header.count("Max-Age=0") for header in set_cookie_headers) == 2
+    cleared = [
+        SimpleCookie(value.decode())[name]
+        for header_name, value in response.raw_headers
+        if header_name == b"set-cookie"
+        for name in ("session", "csrf")
+        if "Max-Age=0" in value.decode() and name in value.decode()
+    ]
+    assert {cookie.key for cookie in cleared} == {"session", "csrf"}
+    assert all(cookie["path"] == "/" for cookie in cleared)
+    assert all(cookie["max-age"] == "0" for cookie in cleared)
