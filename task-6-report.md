@@ -2,14 +2,16 @@
 
 ## Final Status
 
-Production authentication configuration now fails closed at both configuration
-load and FastAPI startup boundaries. Only authentication configuration,
-paper-trading app startup, the paper-trading Compose contract, related tests,
-and this report were changed.
+Issue #89 authentication and the requested regression-test cleanup are complete.
+Production authentication configuration fails closed at both configuration-load
+and FastAPI startup boundaries. The branch also updates affected snapshot,
+replay, corporate-action, ledger-rebuild, and analytics test contracts without
+changing unrelated production behavior.
 
 Related implementation and verification commits currently included in `HEAD`:
 
 - `d5a5624` (`Inject default auth environment in test runner`)
+- `324c976` (`Fix authentication quality gate typing`)
 - `80f8594` (`Test PostgreSQL canonical snapshot timezone`)
 - `3780d8e` (`Document auth configuration verification`)
 - `8876233` (`Enforce fail-closed paper trading auth config`)
@@ -50,10 +52,8 @@ Related implementation and verification commits currently included in `HEAD`:
 - `tools/run_tests.sh test/paper_trading/storage/test_auth_models.py test/paper_trading/storage/test_auth_postgresql.py -v`:
 - `4 passed` with the runner-provided PostgreSQL service and auth variables.
 - `tools/run_tests.sh`: `2516 passed, 9 skipped, 15 warnings`.
-- Frontend auth tests (`npm test -- features/auth/auth-form.test.tsx app/api/auth/[...path]/route.test.ts app/auth-pages.test.tsx`): `17 passed`.
-- Frontend full tests (`npm test`): `246 passed, 1 failed` in the pre-existing
-  analytics valuation-gap test (`features/analytics/analytics-page.test.tsx`),
-  unrelated to authentication changes.
+- Frontend auth tests (`npm test -- features/auth/auth-form.test.tsx lib/api-client.test.ts app/auth-pages.test.tsx app/api/auth/[...path]/route.test.ts`): `38 passed`.
+- Frontend full tests (`npm test`): `247 passed` across 21 test files.
 - Frontend `npm run lint && npm run build`: passed.
 - `uv run pre-commit run --all-files`: all hooks passed, including Ruff format,
   Ruff lint, and mypy.
@@ -64,5 +64,5 @@ Related implementation and verification commits currently included in `HEAD`:
 The full backend run emitted the existing Starlette/httpx and AnyIO deprecation
 warnings, PyJWT insecure test-key warnings, and one SQLAlchemy identity-map
 warning. The focused frontend run emitted the existing Vite CJS API deprecation
-notice. `PRODUCT.md` and `data/` were not present as untracked files and were
+notice. `PRODUCT.md` and `data/` remained pre-existing untracked files and were
 not touched. The simplify review found no safe simplification worth making.
