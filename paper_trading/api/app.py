@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from paper_trading.api.routers import (
     accounts,
     analytics,
+    auth,
     corporate_actions,
     etf_eligibility,
     matching,
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Frog Paper Trading", lifespan=lifespan)
 
     app.include_router(accounts.router)
+    app.include_router(auth.router)
     app.include_router(orders.router)
     app.include_router(matching.router)
     app.include_router(snapshots.router)

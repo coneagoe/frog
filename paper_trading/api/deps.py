@@ -1,13 +1,15 @@
 import os
+import secrets
 from collections.abc import Callable, Generator
 from datetime import date, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
 import pandas_market_calendars as mcal
-from fastapi import Depends, Header, HTTPException
-from sqlalchemy import create_engine
+from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from paper_trading.auth import AuthSettings, decode_session_token
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.position_valuation_service import PositionValuationService
 from paper_trading.storage.market_data import (
@@ -16,6 +18,7 @@ from paper_trading.storage.market_data import (
 )
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.config import StorageConfig
+from storage.model.auth import User
 from storage.storage_db import get_storage
 
 
@@ -33,6 +36,13 @@ def require_api_token(authorization: str | None = Header(default=None)) -> None:
         )
 
 
+def _unauthorized() -> HTTPException:
+    return HTTPException(
+        status_code=401,
+        detail={"code": "UNAUTHORIZED", "message": "Unauthorized", "details": {}},
+    )
+
+
 def get_session_factory() -> Callable[[], Session]:
     config = StorageConfig()
     url = (
@@ -48,6 +58,42 @@ def get_session() -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
+
+
+def require_browser_user(request: Request, session: Session = Depends(get_session)) -> User | None:
+    authorization = request.headers.get("authorization")
+    expected = os.environ.get("PAPER_TRADING_API_TOKEN")
+    if expected and authorization == f"Bearer {expected}":
+        return None
+
+    settings = AuthSettings.from_environment()
+    token = request.cookies.get(settings.session_cookie_name)
+    if not token:
+        raise _unauthorized()
+    try:
+        claims = decode_session_token(token, settings)
+    except ValueError as exc:
+        raise _unauthorized() from exc
+    user = session.scalar(select(User).where(User.id == claims.user_id))
+    if user is None or user.session_version != claims.session_version:
+        raise _unauthorized()
+    return user
+
+
+def require_csrf(
+    request: Request,
+    browser_user: User | None = Depends(require_browser_user),
+) -> None:
+    expected = os.environ.get("PAPER_TRADING_API_TOKEN")
+    if expected and request.headers.get("authorization") == f"Bearer {expected}":
+        return
+    if browser_user is None:
+        raise _unauthorized()
+    settings = AuthSettings.from_environment()
+    cookie_token = request.cookies.get(settings.csrf_cookie_name)
+    header_token = request.headers.get("x-csrf-token")
+    if not cookie_token or not header_token or not secrets.compare_digest(cookie_token, header_token):
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
 
 
 class _DataAvailableCalendar:
