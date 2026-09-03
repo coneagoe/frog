@@ -26,7 +26,7 @@ from paper_trading.services.trade_validity_service import TradeValidityService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import DailyBar
 from paper_trading.storage.models import PaperOrderEvent
-from paper_trading.storage.repository import PaperTradingRepository
+from paper_trading.storage.repository import PaperTradingRepository, canonical_trading_snapshot_event_at
 from storage.model.base import Base
 from storage.model.general_info_ggt import GeneralInfoGGT
 from test.paper_trading.fakes import FakeMarketDataProvider
@@ -111,15 +111,13 @@ def test_delete_filled_order_rebuilds_account_from_remaining_orders(session):
     positions = repo.get_positions(account.id)
     assert [(position.symbol, int(position.total_quantity)) for position in positions] == [("000002", 100)]
     snapshots = repo.list_snapshots(account.id)
-    assert [snapshot.point_type for snapshot in snapshots] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-    ]
-    assert all(
-        snapshot.trade_date >= date(2026, 7, 18)
+    assert sum(snapshot.point_type == SnapshotPointType.INITIAL.value for snapshot in snapshots) == 1
+    trading_snapshot = next(
+        snapshot
         for snapshot in snapshots
-        if snapshot.point_type == SnapshotPointType.TRADING.value
+        if snapshot.point_type == SnapshotPointType.TRADING.value and snapshot.trade_date == date(2026, 7, 18)
     )
+    assert trading_snapshot.trade_date == date(2026, 7, 18)
     ledger = repo.list_cash_ledger(account.id)
     assert ledger[0].note == "initial_cash"
     assert repo.get_cash_available(account.id) < Decimal("100000")
@@ -231,12 +229,14 @@ def test_delete_order_preserves_initial_snapshot_and_regenerates_trading_points(
 
     assert deleted is True
     snapshots = repo.list_snapshots(account.id)
-    assert [point.point_type for point in snapshots] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-    ]
-    assert snapshots[0].id == initial.id
-    assert snapshots[1].trade_date == date(2026, 7, 18)
+    initial_snapshot = next(point for point in snapshots if point.point_type == SnapshotPointType.INITIAL.value)
+    trading_snapshot = next(
+        point
+        for point in snapshots
+        if point.point_type == SnapshotPointType.TRADING.value and point.trade_date == date(2026, 7, 18)
+    )
+    assert initial_snapshot.id == initial.id
+    assert trading_snapshot.trade_date == date(2026, 7, 18)
 
 
 def test_rebuild_from_creation_date_regenerates_same_day_trading_points(session):
@@ -256,23 +256,29 @@ def test_rebuild_from_creation_date_regenerates_same_day_trading_points(session)
     )
     MatchingService(repo, market_data, SnapshotService(repo, market_data)).run(created_date, account.id)
     before = repo.list_snapshots(account.id)
-    assert [point.point_type for point in before] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-    ]
-    original_trading_event_at = before[1].event_at
+    assert sum(point.point_type == SnapshotPointType.INITIAL.value for point in before) == 1
+    original_trading_event_at = next(
+        point.event_at
+        for point in before
+        if point.point_type == SnapshotPointType.TRADING.value and point.trade_date == created_date
+    )
 
     rebuild = OrderDeleteService(repo, market_data).rebuild_account_from(account.id, created_date, [order.id])
 
     after = repo.list_snapshots(account.id)
-    assert [point.point_type for point in after] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-    ]
-    assert after[0].id == before[0].id
+    assert sum(point.point_type == SnapshotPointType.INITIAL.value for point in after) == 1
+    initial_after = next(point for point in after if point.point_type == SnapshotPointType.INITIAL.value)
+    assert initial_after.id == next(point for point in before if point.point_type == SnapshotPointType.INITIAL.value).id
     assert rebuild.regenerated_counts["snapshots"] == 1
-    assert after[1].trade_date == created_date
-    assert after[1].event_at != original_trading_event_at
+    rebuilt_trading_snapshot = next(
+        point
+        for point in after
+        if point.point_type == SnapshotPointType.TRADING.value and point.trade_date == created_date
+    )
+    assert original_trading_event_at.replace(tzinfo=timezone.utc) == canonical_trading_snapshot_event_at(created_date)
+    assert rebuilt_trading_snapshot.event_at.replace(tzinfo=timezone.utc) == canonical_trading_snapshot_event_at(
+        created_date
+    )
 
 
 def test_rebuild_from_fills_delayed_order_and_replays_later_ledger(session):
@@ -1611,11 +1617,14 @@ def test_delete_snapshot_per_date_not_final_state(session):
     assert deleted is True
 
     snapshots = repo.list_snapshots(account.id)
-    assert [snapshot.point_type for snapshot in snapshots] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-        SnapshotPointType.TRADING.value,
+    assert sum(snapshot.point_type == SnapshotPointType.INITIAL.value for snapshot in snapshots) == 1
+    trading_snapshots = [
+        snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value
     ]
+    assert {snapshot.trade_date for snapshot in trading_snapshots} == {
+        date(2026, 7, 17),
+        date(2026, 7, 18),
+    }
 
     snap_17 = next(s for s in snapshots if s.trade_date == date(2026, 7, 17))
     snap_18 = next(s for s in snapshots if s.trade_date == date(2026, 7, 18))

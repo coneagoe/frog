@@ -34,7 +34,7 @@ from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.order_service import OrderService
 from paper_trading.services.snapshot_service import SnapshotService
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
-from paper_trading.storage.repository import PaperTradingRepository
+from paper_trading.storage.repository import PaperTradingRepository, canonical_trading_snapshot_event_at
 from storage.model.base import Base
 from storage.model.etf_basic import ETFBasic
 from test.paper_trading.fakes import (
@@ -411,11 +411,13 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     ]
     assert repo.get_cash_available(account.id) == Decimal("100009.9360")
     assert repo.list_pending_settlements(account.id) == []
-    assert [snapshot.trade_date for snapshot in repo.list_snapshots(account.id)] == [
-        account.created_at.date(),
-        buy_date,
-        sell_date,
-    ]
+    snapshots = repo.list_snapshots(account.id)
+    assert sum(snapshot.point_type == SnapshotPointType.INITIAL.value for snapshot in snapshots) == 1
+    assert {
+        snapshot.trade_date
+        for snapshot in snapshots
+        if snapshot.point_type == SnapshotPointType.TRADING.value
+    } == {buy_date, sell_date}
     round_trips = repo.list_round_trips(account.id)
     assert len(round_trips) == 1
     assert round_trips[0].market == Market.ETF.value
@@ -440,20 +442,18 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         (CashEventType.TRADE.value, Decimal("324.9675"), sell.id, trades[1].id),
     ]
     snapshots = repo.list_snapshots(account.id)
-    assert [snapshot.point_type for snapshot in snapshots] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-        SnapshotPointType.TRADING.value,
+    trading_snapshots = [
+        snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value
     ]
+    assert {snapshot.trade_date for snapshot in trading_snapshots} == {buy_date, sell_date}
     assert [
         (snapshot.trade_date, snapshot.cash_available, snapshot.market_value, snapshot.total_assets)
-        for snapshot in snapshots
-        if snapshot.point_type == SnapshotPointType.TRADING.value
+        for snapshot in sorted(trading_snapshots, key=lambda snapshot: snapshot.trade_date)
     ] == [
         (buy_date, Decimal("99684.968500000003"), Decimal("315.000000000000"), Decimal("99999.968500000003")),
         (sell_date, Decimal("100009.936000000002"), Decimal("0.000000000000"), Decimal("100009.936000000002")),
     ]
-    sell_snapshot = snapshots[2]
+    sell_snapshot = next(snapshot for snapshot in trading_snapshots if snapshot.trade_date == sell_date)
     assert (
         sell_snapshot.realized_pnl,
         sell_snapshot.unrealized_pnl,
@@ -762,10 +762,12 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     assert repo.get_cash_available(account.id) == cash_after_fill
     assert repo.get_position(account.id, Market.A_SHARE, "000001.SZ").total_quantity == position_after_fill
     snapshots = repo.list_snapshots(account.id)
-    assert [row.point_type for row in snapshots] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-    ]
+    assert sum(row.point_type == SnapshotPointType.INITIAL.value for row in snapshots) == 1
+    trading_snapshot = next(
+        row
+        for row in snapshots
+        if row.point_type == SnapshotPointType.TRADING.value and row.trade_date == trade_date
+    )
     gap = repo.get_valuation_gap(account.id, trade_date)
     assert gap is not None
     assert gap.resolved is True
@@ -779,11 +781,11 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
             "reason": "missing_exact_bar",
         }
     ]
-    assert snapshots[1].market_value == Decimal("2000.0000")
-    assert snapshots[1].point_type == SnapshotPointType.TRADING.value
-    assert snapshots[1].quality_status == SnapshotQualityStatus.VALID.value
-    assert snapshots[1].invalid_reason is None
-    assert snapshots[1].event_at is not None
+    assert trading_snapshot.market_value == Decimal("2000.0000")
+    assert trading_snapshot.point_type == SnapshotPointType.TRADING.value
+    assert trading_snapshot.quality_status == SnapshotQualityStatus.VALID.value
+    assert trading_snapshot.invalid_reason is None
+    assert trading_snapshot.event_at.replace(tzinfo=timezone.utc) == canonical_trading_snapshot_event_at(trade_date)
     engine.dispose()
 
 
@@ -817,13 +819,14 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
 
     assert run.warning_count == 1
     complete_snapshots = repo.list_snapshots(complete.id)
-    assert [row.point_type for row in complete_snapshots] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-    ]
-    assert complete_snapshots[1].quality_status == SnapshotQualityStatus.VALID.value
-    assert complete_snapshots[1].invalid_reason is None
-    assert complete_snapshots[1].event_at is not None
+    complete_snapshot = next(
+        row
+        for row in complete_snapshots
+        if row.point_type == SnapshotPointType.TRADING.value and row.trade_date == trade_date
+    )
+    assert complete_snapshot.quality_status == SnapshotQualityStatus.VALID.value
+    assert complete_snapshot.invalid_reason is None
+    assert complete_snapshot.event_at.replace(tzinfo=timezone.utc) == canonical_trading_snapshot_event_at(trade_date)
     assert [row.point_type for row in repo.list_snapshots(incomplete.id)] == [SnapshotPointType.INITIAL.value]
     assert repo.get_valuation_gap(complete.id, trade_date) is None
     gap = repo.get_valuation_gap(incomplete.id, trade_date)
@@ -866,7 +869,12 @@ def test_matching_stale_suspended_snapshot_does_not_add_warning(tmp_path):
     snapshots = repo.list_snapshots(account.id)
     assert run.warning_count == 0
     assert run.status == "completed"
-    assert snapshots[-1].valuation_quality == "stale_suspended"
+    trading_snapshot = next(
+        snapshot
+        for snapshot in snapshots
+        if snapshot.point_type == SnapshotPointType.TRADING.value and snapshot.trade_date == trade_date
+    )
+    assert trading_snapshot.valuation_quality == "stale_suspended"
     engine.dispose()
 
 

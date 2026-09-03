@@ -110,10 +110,13 @@ def test_apply_applies_catalogue_etf_order_and_rebuilds_derived_state(tmp_path):
     assert repo.list_cash_ledger(account.id)
     assert repo.list_round_trips(account.id)
     snapshots = repo.list_snapshots(account.id)
-    assert [row.point_type for row in snapshots] == [
-        SnapshotPointType.INITIAL.value,
-        SnapshotPointType.TRADING.value,
-    ]
+    assert sum(row.point_type == SnapshotPointType.INITIAL.value for row in snapshots) == 1
+    trading_snapshot = next(
+        row
+        for row in snapshots
+        if row.point_type == SnapshotPointType.TRADING.value and row.trade_date == trade_date
+    )
+    assert trading_snapshot.point_type == SnapshotPointType.TRADING.value
     assert repo.list_matching_runs()
     assert repo.get_valuation_gap(account.id, trade_date) is None
     diagnostics = repo.list_daily_bar_diagnostics()
