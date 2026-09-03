@@ -7,6 +7,8 @@ load and FastAPI startup boundaries. Only authentication configuration,
 paper-trading app startup, the paper-trading Compose contract, related tests,
 and this report were changed.
 
+Implementation commit: `8876233` (`Enforce fail-closed paper trading auth config`).
+
 ## Changes
 
 - `AuthSettings` accepts only `local`, `test`, and `production` when
