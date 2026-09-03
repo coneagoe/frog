@@ -412,12 +412,12 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     assert repo.get_cash_available(account.id) == Decimal("100009.9360")
     assert repo.list_pending_settlements(account.id) == []
     snapshots = repo.list_snapshots(account.id)
-    assert sum(snapshot.point_type == SnapshotPointType.INITIAL.value for snapshot in snapshots) == 1
-    assert {
-        snapshot.trade_date
-        for snapshot in snapshots
-        if snapshot.point_type == SnapshotPointType.TRADING.value
-    } == {buy_date, sell_date}
+    assert len(snapshots) == 3
+    assert {(snapshot.point_type, snapshot.trade_date) for snapshot in snapshots} == {
+        (SnapshotPointType.INITIAL.value, account.created_at.date()),
+        (SnapshotPointType.TRADING.value, buy_date),
+        (SnapshotPointType.TRADING.value, sell_date),
+    }
     round_trips = repo.list_round_trips(account.id)
     assert len(round_trips) == 1
     assert round_trips[0].market == Market.ETF.value
@@ -445,6 +445,8 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     trading_snapshots = [
         snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value
     ]
+    assert len(snapshots) == 3
+    assert len(trading_snapshots) == 2
     assert {snapshot.trade_date for snapshot in trading_snapshots} == {buy_date, sell_date}
     assert [
         (snapshot.trade_date, snapshot.cash_available, snapshot.market_value, snapshot.total_assets)
@@ -785,7 +787,13 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     assert trading_snapshot.point_type == SnapshotPointType.TRADING.value
     assert trading_snapshot.quality_status == SnapshotQualityStatus.VALID.value
     assert trading_snapshot.invalid_reason is None
-    assert trading_snapshot.event_at.replace(tzinfo=timezone.utc) == canonical_trading_snapshot_event_at(trade_date)
+    canonical_event_at = canonical_trading_snapshot_event_at(trade_date)
+    if trading_snapshot.event_at.tzinfo is None:
+        assert trading_snapshot.event_at == canonical_event_at.replace(tzinfo=None)
+        actual_event_at = trading_snapshot.event_at.replace(tzinfo=timezone.utc)
+    else:
+        actual_event_at = trading_snapshot.event_at.astimezone(timezone.utc)
+    assert actual_event_at == canonical_event_at
     engine.dispose()
 
 
@@ -819,6 +827,8 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
 
     assert run.warning_count == 1
     complete_snapshots = repo.list_snapshots(complete.id)
+    assert len(complete_snapshots) == 2
+    assert sum(row.point_type == SnapshotPointType.INITIAL.value for row in complete_snapshots) == 1
     complete_snapshot = next(
         row
         for row in complete_snapshots
@@ -826,8 +836,18 @@ def test_matching_mixed_accounts_create_snapshot_and_valuation_gap(tmp_path):
     )
     assert complete_snapshot.quality_status == SnapshotQualityStatus.VALID.value
     assert complete_snapshot.invalid_reason is None
-    assert complete_snapshot.event_at.replace(tzinfo=timezone.utc) == canonical_trading_snapshot_event_at(trade_date)
-    assert [row.point_type for row in repo.list_snapshots(incomplete.id)] == [SnapshotPointType.INITIAL.value]
+    canonical_event_at = canonical_trading_snapshot_event_at(trade_date)
+    if complete_snapshot.event_at.tzinfo is None:
+        assert complete_snapshot.event_at == canonical_event_at.replace(tzinfo=None)
+        actual_event_at = complete_snapshot.event_at.replace(tzinfo=timezone.utc)
+    else:
+        actual_event_at = complete_snapshot.event_at.astimezone(timezone.utc)
+    assert actual_event_at == canonical_event_at
+    incomplete_snapshots = repo.list_snapshots(incomplete.id)
+    assert len(incomplete_snapshots) == 1
+    assert {(row.point_type, row.trade_date) for row in incomplete_snapshots} == {
+        (SnapshotPointType.INITIAL.value, incomplete.created_at.date())
+    }
     assert repo.get_valuation_gap(complete.id, trade_date) is None
     gap = repo.get_valuation_gap(incomplete.id, trade_date)
     assert gap is not None
@@ -867,8 +887,13 @@ def test_matching_stale_suspended_snapshot_does_not_add_warning(tmp_path):
     session.commit()
 
     snapshots = repo.list_snapshots(account.id)
+    assert len(snapshots) == 2
     assert run.warning_count == 0
     assert run.status == "completed"
+    trading_snapshots = [
+        snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value
+    ]
+    assert len(trading_snapshots) == 1
     trading_snapshot = next(
         snapshot
         for snapshot in snapshots
