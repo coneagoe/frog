@@ -1535,9 +1535,19 @@ def test_offset_replay_events_are_persisted_as_utc_across_sqlite_and_postgresql(
 
     assert _replay_event_signature(sqlite_events) == _replay_event_signature(postgres_events)
     expected_event_at = datetime(2026, 8, 25, 9, 30, tzinfo=timezone.utc)
-    assert {event.event_at for event in sqlite_events if event.event_type is not NavReplayEventType.INITIAL} == {
-        expected_event_at
+    expected_snapshot_at = canonical_trading_snapshot_event_at(date(2026, 8, 25))
+    replay_events = {
+        event.event_at
+        for event in sqlite_events
+        if event.event_type not in {NavReplayEventType.INITIAL, NavReplayEventType.MARKET_VALUATION}
     }
+    snapshot_events = {
+        event.event_at for event in sqlite_events if event.event_type is NavReplayEventType.MARKET_VALUATION
+    }
+
+    assert replay_events == {expected_event_at}
+    assert snapshot_events == {expected_snapshot_at}
+    assert all(event.event_at.tzinfo is timezone.utc for event in sqlite_events)
 
 
 def test_get_accounts_for_snapshot_includes_active_cash_only_accounts(sqlite_session) -> None:
