@@ -38,6 +38,9 @@ find_available_port() {
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   trap cleanup EXIT
+  export FROG_ENV="${FROG_ENV-test}"
+  export PAPER_TRADING_JWT_SECRET="${PAPER_TRADING_JWT_SECRET-test-jwt-secret-for-runner-defaults-1234567890}"
+  export PAPER_TRADING_COOKIE_SECURE="${PAPER_TRADING_COOKIE_SECURE-false}"
   TEST_DB_HOST_PORT="$(find_available_port)"
   export TEST_DB_HOST_PORT
   compose up -d --wait test_db

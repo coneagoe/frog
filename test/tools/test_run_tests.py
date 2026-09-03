@@ -15,6 +15,7 @@ def _run_test_runner(
     tmp_path: Path,
     pytest_status: int,
     occupied_ports: tuple[int, ...] = (5433,),
+    environment_overrides: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -22,8 +23,10 @@ def _run_test_runner(
     (bin_dir / "docker").write_text(
         "#!/usr/bin/env bash\n"
         "printf 'docker %s TEST_DB_HOST_PORT=%s TEST_POSTGRESQL_URL=%s "
+        "FROG_ENV=%s PAPER_TRADING_JWT_SECRET=%s PAPER_TRADING_COOKIE_SECURE=%s "
         "COMPOSE_PLACEHOLDERS=%s:%s:%s:%s:%s:%s:%s:%s\\n' "
         '"${*}" "${TEST_DB_HOST_PORT:-}" "${TEST_POSTGRESQL_URL:-}" '
+        '"${FROG_ENV:-}" "${PAPER_TRADING_JWT_SECRET:-}" "${PAPER_TRADING_COOKIE_SECURE:-}" '
         '"${SMTP_HOST:-}" "${SMTP_PORT:-}" "${SMTP_USER:-}" '
         '"${SMTP_PASSWORD:-}" "${SMTP_MAIL_FROM:-}" "${ALERT_EMAILS:-}" '
         '"${TUSHARE_TOKEN:-}" "${PAPER_TRADING_API_TOKEN:-}" '
@@ -32,8 +35,10 @@ def _run_test_runner(
     )
     (bin_dir / "uv").write_text(
         "#!/usr/bin/env bash\n"
-        "printf 'uv %s TEST_DB_HOST_PORT=%s TEST_POSTGRESQL_URL=%s\\n' "
-        '"$*" "$TEST_DB_HOST_PORT" "$TEST_POSTGRESQL_URL" >> "$COMMAND_LOG"\n'
+        "printf 'uv %s TEST_DB_HOST_PORT=%s TEST_POSTGRESQL_URL=%s "
+        "FROG_ENV=%s PAPER_TRADING_JWT_SECRET=%s PAPER_TRADING_COOKIE_SECURE=%s\\n' "
+        '"$*" "$TEST_DB_HOST_PORT" "$TEST_POSTGRESQL_URL" "$FROG_ENV" '
+        '"$PAPER_TRADING_JWT_SECRET" "$PAPER_TRADING_COOKIE_SECURE" >> "$COMMAND_LOG"\n'
         'exit "$PYTEST_STATUS"\n',
         encoding="utf-8",
     )
@@ -67,6 +72,10 @@ def _run_test_runner(
         "PAPER_TRADING_API_TOKEN",
     ):
         environment.pop(name, None)
+    for name in ("FROG_ENV", "PAPER_TRADING_JWT_SECRET", "PAPER_TRADING_COOKIE_SECURE"):
+        environment.pop(name, None)
+    if environment_overrides:
+        environment.update(environment_overrides)
     completed = subprocess.run(
         ["bash", str(ROOT / "tools" / "run_tests.sh"), *arguments],
         cwd=ROOT,
@@ -94,12 +103,30 @@ def test_runner_starts_test_database_runs_pytest_and_cleans_up(tmp_path: Path):
     assert completed.returncode == 0
     assert commands == [
         "docker compose up -d --wait test_db TEST_DB_HOST_PORT=5434 "
-        f"TEST_POSTGRESQL_URL= COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
+        "TEST_POSTGRESQL_URL= FROG_ENV=test PAPER_TRADING_JWT_SECRET="
+        "test-jwt-secret-for-runner-defaults-1234567890 PAPER_TRADING_COOKIE_SECURE=false "
+        f"COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
         "uv run pytest test -k enum TEST_DB_HOST_PORT=5434 "
-        "TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5434/quant",
+        "TEST_POSTGRESQL_URL=postgresql://quant:quant@127.0.0.1:5434/quant "
+        "FROG_ENV=test PAPER_TRADING_JWT_SECRET="
+        "test-jwt-secret-for-runner-defaults-1234567890 PAPER_TRADING_COOKIE_SECURE=false",
         "docker compose rm -sfv test_db TEST_DB_HOST_PORT=5434 "
-        f"TEST_POSTGRESQL_URL= COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
+        "TEST_POSTGRESQL_URL= FROG_ENV=test PAPER_TRADING_JWT_SECRET="
+        "test-jwt-secret-for-runner-defaults-1234567890 PAPER_TRADING_COOKIE_SECURE=false "
+        f"COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
     ]
+
+
+def test_runner_preserves_explicit_auth_environment(tmp_path: Path):
+    overrides = {
+        "FROG_ENV": "ci",
+        "PAPER_TRADING_JWT_SECRET": "explicit-secret-value",
+        "PAPER_TRADING_COOKIE_SECURE": "true",
+    }
+    completed, commands = _run_test_runner([], tmp_path, pytest_status=0, environment_overrides=overrides)
+
+    assert completed.returncode == 0
+    assert all(f"{name}={value}" in command for command in commands for name, value in overrides.items())
 
 
 def test_runner_preserves_pytest_failure_after_cleanup(tmp_path: Path):
@@ -108,7 +135,9 @@ def test_runner_preserves_pytest_failure_after_cleanup(tmp_path: Path):
     assert completed.returncode == 1
     assert commands[-1] == (
         "docker compose rm -sfv test_db TEST_DB_HOST_PORT=5434 "
-        f"TEST_POSTGRESQL_URL= COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}"
+        "TEST_POSTGRESQL_URL= FROG_ENV=test PAPER_TRADING_JWT_SECRET="
+        "test-jwt-secret-for-runner-defaults-1234567890 PAPER_TRADING_COOKIE_SECURE=false "
+        f"COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}"
     )
 
 
