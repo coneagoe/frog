@@ -32,15 +32,15 @@ class LedgerRebuildService:
     ) -> PaperLedgerRebuild:
         deleted_counts: dict[str, int] = {}
         regenerated_counts: dict[str, int] = {"trades": 0, "snapshots": 0, "matching_runs": 0}
+        self.repo.lock_account(account_id)
+        rebuild = self.repo.create_ledger_rebuild_started(
+            account_id,
+            start_date,
+            trigger_evidence=trigger_evidence,
+            triggering_order_ids=triggering_order_ids,
+        )
         try:
             with self.repo.session.begin_nested():
-                self.repo.lock_account(account_id)
-                rebuild = self.repo.create_ledger_rebuild_started(
-                    account_id,
-                    start_date,
-                    trigger_evidence=trigger_evidence,
-                    triggering_order_ids=triggering_order_ids,
-                )
                 rebuild_id = rebuild.id
                 deleted_counts = self.repo.clear_account_rebuild_state_from(account_id, start_date)
                 self.repo.reset_orders_for_replay_from(account_id, start_date)
@@ -52,14 +52,11 @@ class LedgerRebuildService:
                     raise RuntimeError(f"ledger rebuild audit disappeared: {rebuild_id}")
                 return self.repo.complete_ledger_rebuild(persisted, deleted_counts, regenerated_counts)
         except Exception as exc:
-            failed = self.repo.create_ledger_rebuild_failed(
-                account_id,
-                start_date,
-                trigger_evidence=trigger_evidence,
+            failed = self.repo.fail_ledger_rebuild(
+                rebuild,
                 error_details=str(exc),
                 deleted_counts=deleted_counts,
                 regenerated_counts=regenerated_counts,
-                triggering_order_ids=triggering_order_ids,
             )
             self.repo.session.flush()
             if failed.id is None:

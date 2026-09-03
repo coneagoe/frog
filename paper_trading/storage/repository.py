@@ -2192,6 +2192,26 @@ class PaperTradingRepository:
         self.session.flush()
         return rebuild
 
+    def fail_ledger_rebuild(
+        self,
+        rebuild: PaperLedgerRebuild,
+        *,
+        error_details: str,
+        deleted_counts: dict[str, int],
+        regenerated_counts: dict[str, int],
+    ) -> PaperLedgerRebuild:
+        persisted = self.session.get(PaperLedgerRebuild, rebuild.id)
+        if persisted is None:
+            raise RuntimeError(f"ledger rebuild audit disappeared: {rebuild.id}")
+        rebuild = persisted
+        rebuild.status = LedgerRebuildStatus.FAILED.value
+        rebuild.deleted_counts = deleted_counts
+        rebuild.regenerated_counts = regenerated_counts
+        rebuild.error_details = error_details
+        rebuild.finished_at = datetime.now(timezone.utc)
+        self.session.flush()
+        return rebuild
+
     def _rebuild_positions_from_surviving_lots(self, account_id: int) -> None:
         self.session.query(PaperPosition).filter(PaperPosition.account_id == account_id).delete(
             synchronize_session="fetch"

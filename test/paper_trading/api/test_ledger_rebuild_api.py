@@ -146,7 +146,9 @@ def test_account_ledger_rebuild_api_repairs_creation_provenance(monkeypatch, sql
     repo = PaperTradingRepository(sqlite_session)
     account = repo.create_account("ledger-rebuild-provenance", Decimal("100000"))
     initial_ledger = repo.list_cash_ledger(account.id)[0]
-    initial_snapshot = repo.list_snapshots(account.id)[0]
+    initial_snapshot = next(
+        snapshot for snapshot in repo.list_snapshots(account.id) if snapshot.point_type == "initial"
+    )
     initial_snapshot.trade_date = date(2026, 7, 23)
     initial_ledger.trade_date = None
     initial_ledger.event_time_provenance = None
@@ -194,7 +196,9 @@ def test_account_ledger_rebuild_api_records_failed_audit_without_partial_rebuild
     account = repo.create_account("ledger-rebuild-failure", Decimal("100000"))
     account.migration_repair_reason = MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
     initial_ledger = repo.list_cash_ledger(account.id)[0]
-    initial_snapshot = repo.list_snapshots(account.id)[0]
+    initial_snapshot = next(
+        snapshot for snapshot in repo.list_snapshots(account.id) if snapshot.point_type == "initial"
+    )
     initial_ledger.event_time_provenance = None
     initial_snapshot.event_time_provenance = None
     repo.session.flush()
@@ -234,7 +238,10 @@ def test_account_ledger_rebuild_api_records_failed_audit_without_partial_rebuild
     assert "forced replay failure" in failed.error_details
     assert failed_account.migration_repair_reason == MigrationRepairReason.LEGACY_ORDERING_UNCERTAIN.value
     assert repo.list_cash_ledger(account.id)[0].event_time_provenance is None
-    assert repo.list_snapshots(account.id)[0].event_time_provenance is None
+    persisted_initial_snapshot = next(
+        snapshot for snapshot in repo.list_snapshots(account.id) if snapshot.point_type == "initial"
+    )
+    assert persisted_initial_snapshot.event_time_provenance is None
 
 
 def test_account_ledger_rebuild_api_rolls_back_failed_match_outcome(monkeypatch, sqlite_session):
