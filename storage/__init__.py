@@ -1,10 +1,13 @@
 from .config import StorageConfig
 from .model import (
+    AuthToken,
     BlackroomRecord,
     Forecast,
     ForecastSSFCandidate,
     SSFChangeSignal,
+    User,
     tb_name_a_stock_basic,
+    tb_name_auth_tokens,
     tb_name_blackroom_record,
     tb_name_daily_basic_a_stock,
     tb_name_etf_net_flow,
@@ -29,6 +32,7 @@ from .model import (
     tb_name_stk_holdernumber,
     tb_name_stk_limit_a_stock,
     tb_name_top10_floatholders,
+    tb_name_users,
 )
 from .storage_db import (
     ConnectionError,
@@ -46,6 +50,10 @@ __all__ = [
     "DataNotFoundError",
     "ConnectionError",
     "StorageConfig",
+    "User",
+    "AuthToken",
+    "tb_name_users",
+    "tb_name_auth_tokens",
     "get_storage",
     "get_table_name",
     "reset_storage",

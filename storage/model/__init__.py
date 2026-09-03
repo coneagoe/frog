@@ -1,4 +1,5 @@
 from .a_stock_basic import AStockBasic, tb_name_a_stock_basic
+from .auth import AuthToken, User, tb_name_auth_tokens, tb_name_users
 from .base import Base
 from .blackroom_record import BlackroomRecord, tb_name_blackroom_record
 from .daily_basic_a_stock import DailyBasicAStock, tb_name_daily_basic_a_stock
@@ -92,6 +93,10 @@ from .top10_floatholders import Top10Floatholders, tb_name_top10_floatholders
 
 __all__ = [
     "Base",
+    "User",
+    "AuthToken",
+    "tb_name_users",
+    "tb_name_auth_tokens",
     "AStockBasic",
     "ETFBasic",
     "ETFDaily",
