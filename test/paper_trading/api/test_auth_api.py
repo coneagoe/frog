@@ -68,6 +68,30 @@ def test_register_rejects_weak_password(auth_client):
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("email", ["", "@example.com", "user@", "user@example"])
+def test_register_rejects_invalid_email_without_creating_user(auth_client, email):
+    client, factory = auth_client
+    response = _register(client, email=email)
+    assert response.status_code == 422
+    with factory() as session:
+        assert session.scalar(select(User)) is None
+
+
+def test_login_rejects_invalid_email_with_client_validation_response(auth_client, monkeypatch):
+    client, _ = auth_client
+    calls = []
+
+    def verify(password, password_hash):
+        calls.append((password, password_hash))
+        return False
+
+    monkeypatch.setattr("paper_trading.api.routers.auth.verify_password", verify)
+    response = _login(client, email="missing@example")
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == "email"
+    assert calls == []
+
+
 def test_register_rejects_duplicate_normalized_email_with_409(auth_client):
     client, _ = auth_client
     assert _register(client).status_code == 201

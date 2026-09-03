@@ -20,6 +20,7 @@ from storage.model.auth import User
 _JWT_ALGORITHM = "HS256"
 _USER_ID_RE = re.compile(r"^[0-9]+$")
 _PASSWORD_LETTER_RE = re.compile(r"[A-Za-z]")
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _password_hasher = PasswordHasher()
 
 
@@ -33,6 +34,13 @@ class SessionClaims:
 
 def normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def validate_email(email: str) -> str:
+    normalized = normalize_email(email)
+    if not _EMAIL_RE.fullmatch(normalized):
+        raise ValueError("Enter a valid email address")
+    return normalized
 
 
 def validate_password(password: str) -> None:

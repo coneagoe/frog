@@ -2,7 +2,7 @@ import secrets
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -15,7 +15,7 @@ from paper_trading.auth import (
     clear_auth_cookies,
     create_session_token,
     hash_password,
-    normalize_email,
+    validate_email,
     validate_password,
     verify_password,
 )
@@ -32,6 +32,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 class Credentials(BaseModel):
     email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def email_is_valid(cls, value: str) -> str:
+        try:
+            return validate_email(value)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class RegistrationCredentials(Credentials):
@@ -57,7 +65,7 @@ def _generic_unauthorized() -> HTTPException:
 
 @router.post("/register", response_model=Identity, status_code=status.HTTP_201_CREATED)
 def register(credentials: RegistrationCredentials, session: Session = Depends(get_session)) -> Identity:
-    email = normalize_email(credentials.email)
+    email = credentials.email
     try:
         validate_password(credentials.password)
         user = User(email=email, password_hash=hash_password(credentials.password))
@@ -81,7 +89,7 @@ def login(
     response: Response,
     session: Session = Depends(get_session),
 ) -> Identity:
-    user = session.scalar(select(User).where(User.email == normalize_email(credentials.email)))
+    user = session.scalar(select(User).where(User.email == credentials.email))
     password_hash = user.password_hash if user is not None and credentials.password else _DUMMY_PASSWORD_HASH
     password_valid = verify_password(credentials.password, password_hash)
     if user is None or not password_valid or user.email_verified_at is None:

@@ -23,6 +23,7 @@ __all__ = [
     "hash_password",
     "new_auth_token",
     "normalize_email",
+    "validate_email",
     "validate_auth_settings",
     "validate_password",
     "verify_password",
@@ -80,6 +81,7 @@ from .service import (  # noqa: E402
     hash_password,
     new_auth_token,
     normalize_email,
+    validate_email,
     validate_password,
     verify_password,
 )
