@@ -1,12 +1,14 @@
 """Authentication configuration contracts."""
 
 import os
+import re
 from dataclasses import dataclass
 
 _DEFAULT_JWT_SECRET = "local-development-secret"
 _DEFAULT_JWT_TTL_SECONDS = 3600
 _DEFAULT_SESSION_COOKIE_NAME = "paper_trading_session"
 _DEFAULT_CSRF_COOKIE_NAME = "paper_trading_csrf"
+_COOKIE_NAME_RE = re.compile(r"^[^\x00-\x20\x7f()<>@,;:\\\"/\[\]?={}]+$")
 
 
 def _parse_bool(value: str, variable_name: str) -> bool:
@@ -49,15 +51,18 @@ class AuthSettings:
 
 
 def validate_auth_settings(settings: AuthSettings, environment: str | None = None) -> None:
-    current_environment = environment or os.getenv("FROG_ENV", "local")
+    current_environment = environment if environment is not None else os.getenv("FROG_ENV", "local")
+    current_environment = current_environment.strip().lower()
     if settings.jwt_ttl_seconds <= 0:
         raise ValueError("JWT TTL must be positive")
-    if not settings.session_cookie_name:
-        raise ValueError("Session cookie name must not be empty")
-    if not settings.csrf_cookie_name:
-        raise ValueError("CSRF cookie name must not be empty")
-    if current_environment.lower() == "production":
-        if not settings.jwt_secret or settings.jwt_secret == _DEFAULT_JWT_SECRET:
+    for cookie_name, label in (
+        (settings.session_cookie_name, "Session"),
+        (settings.csrf_cookie_name, "CSRF"),
+    ):
+        if not cookie_name or not _COOKIE_NAME_RE.fullmatch(cookie_name):
+            raise ValueError(f"{label} cookie name is invalid")
+    if current_environment == "production":
+        if not settings.jwt_secret.strip() or settings.jwt_secret == _DEFAULT_JWT_SECRET:
             raise ValueError("JWT secret is required in production")
         if not settings.cookie_secure:
             raise ValueError("secure cookies are required in production")
