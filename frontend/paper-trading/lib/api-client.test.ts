@@ -12,12 +12,45 @@ import {
   updateOrderComment,
   withdrawCash
 } from "./api-client";
+import { getCurrentUser, login, logout, register } from "./api-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("api client", () => {
+  it("uses same-origin auth URLs and credentials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1, email: "user@example.com", email_verified_at: null }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await login({ email: "user@example.com", password: "Validpassword1" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/auth/login", expect.objectContaining({ credentials: "same-origin" }));
+  });
+
+  it("exposes auth methods and parses structured errors", async () => {
+    const identity = { id: 1, email: "user@example.com", email_verified_at: null };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(identity), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(identity), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(identity), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: "UNAUTHORIZED", message: "Unauthorized" }), { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(register({ email: identity.email, password: "Validpassword1" })).resolves.toEqual(identity);
+    await expect(login({ email: identity.email, password: "Validpassword1" })).resolves.toEqual(identity);
+    await expect(getCurrentUser()).resolves.toEqual(identity);
+    await expect(logout()).rejects.toMatchObject({ status: 401, code: "UNAUTHORIZED" });
+  });
+
+  it("sends logout CSRF header for a valid cookie and omits it for malformed cookies", async () => {
+    document.cookie = "paper_trading_csrf=csrf%2Dvalue";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await logout();
+    expect((fetchMock.mock.calls[0][1].headers as Headers).get("X-CSRF-Token")).toBe("csrf-value");
+
+    document.cookie = "paper_trading_csrf=%%%";
+    await logout();
+    expect((fetchMock.mock.calls[1][1].headers as Headers).has("X-CSRF-Token")).toBe(false);
+  });
   it("parses successful JSON responses", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: 1 }]), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

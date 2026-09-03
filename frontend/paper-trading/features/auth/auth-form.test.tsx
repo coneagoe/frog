@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { login, register } from "@/lib/api-client";
@@ -9,9 +9,8 @@ vi.mock("@/lib/api-client", () => ({
   register: vi.fn()
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn() })
-}));
+const pushMock = vi.fn();
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 const loginMock = vi.mocked(login);
 const registerMock = vi.mocked(register);
@@ -19,6 +18,7 @@ const identity = { id: 1, email: "trader@example.com", email_verified_at: null }
 
 describe("AuthForm", () => {
   beforeEach(() => {
+    cleanup();
     vi.resetAllMocks();
     loginMock.mockResolvedValue(identity);
     registerMock.mockResolvedValue(identity);
@@ -80,8 +80,44 @@ describe("AuthForm", () => {
   });
 
   it("uses register mode for registration", async () => {
+    const user = userEvent.setup();
     render(<AuthForm mode="register" />);
-    expect(screen.getByRole("button", { name: "Create account" })).toBeInTheDocument();
-    expect(registerMock).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText("Email address"), "new@example.com");
+    await user.type(screen.getByLabelText("Password"), "Validpassword1");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    await waitFor(() => expect(registerMock).toHaveBeenCalledWith({ email: "new@example.com", password: "Validpassword1" }));
+    expect(pushMock).toHaveBeenCalledWith("/login");
+  });
+
+  it("calls onSuccess before navigating after login", async () => {
+    const user = userEvent.setup();
+    const onSuccess = vi.fn();
+    render(<AuthForm mode="login" onSuccess={onSuccess} />);
+    await user.type(screen.getByLabelText("Email address"), "user@example.com");
+    await user.type(screen.getByLabelText("Password"), "Validpassword1");
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(identity));
+    expect(pushMock).toHaveBeenCalledWith("/accounts");
+  });
+
+  it("clears errors on edit and only marks the invalid field", async () => {
+    const user = userEvent.setup();
+    render(<AuthForm mode="login" />);
+    await user.type(screen.getByLabelText("Email address"), "user@example.com");
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    expect(screen.getByLabelText("Password")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Email address")).toHaveAttribute("aria-invalid", "false");
+    await user.type(screen.getByLabelText("Password"), "Validpassword1");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Password")).toHaveAttribute("aria-invalid", "false");
+  });
+
+  it.each(["1234567890a", "abcdefghijkl", "123456789012"])("rejects password boundary %s", async (invalidPassword) => {
+    const user = userEvent.setup();
+    render(<AuthForm mode="login" />);
+    await user.type(screen.getByLabelText("Email address"), "user@example.com");
+    await user.type(screen.getByLabelText("Password"), invalidPassword);
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    expect(loginMock).not.toHaveBeenCalled();
   });
 });

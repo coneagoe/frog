@@ -15,6 +15,8 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState(false);
+  const [passwordError, setPasswordError] = useState(false);
   const [pending, setPending] = useState(false);
   const isRegister = mode === "register";
   const actionLabel = isRegister ? "Create account" : "Log in";
@@ -23,8 +25,7 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
   function validate(): string | null {
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail || !/^\S+@\S+\.\S+$/.test(normalizedEmail)) return "Enter a valid email address.";
-    if (password.length < 12) return "Password must be at least 12 characters and include a letter and a number.";
-    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return "Password must be at least 12 characters and include a letter and a number.";
+    if (password.length < 12 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return "Password must be at least 12 characters and include a letter and a number.";
     return null;
   }
 
@@ -33,16 +34,20 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
     const validationError = validate();
     if (validationError) {
       setFieldError(validationError);
+      setEmailError(!email.trim() || !/^\S+@\S+\.\S+$/.test(email.trim()));
+      setPasswordError(password.length < 12 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password));
       return;
     }
     setFieldError(null);
+    setEmailError(false);
+    setPasswordError(false);
     setError(null);
     setPending(true);
     try {
       const input = { email: email.trim().toLowerCase(), password };
       const identity = isRegister ? await register(input) : await login(input);
       await onSuccess?.(identity);
-      router.push("/accounts");
+      router.push(isRegister ? "/login" : "/accounts");
     } catch {
       setError(isRegister ? "We couldn't create your account. Check your details and try again." : "We couldn't sign you in. Check your details and try again.");
     } finally {
@@ -62,12 +67,12 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
       <form className="form auth-form" onSubmit={handleSubmit} noValidate>
         <label htmlFor="auth-email">
           Email address
-          <input id="auth-email" name="email" type="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); setError(null); setFieldError(null); }} aria-invalid={Boolean(fieldError)} aria-describedby={describedBy} required />
+          <input id="auth-email" name="email" type="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); setError(null); setFieldError(null); setEmailError(false); }} aria-invalid={emailError} aria-describedby={describedBy} required />
         </label>
         <label htmlFor="auth-password">
           Password
           <span className="auth-form__password">
-            <input id="auth-password" name="password" type={showPassword ? "text" : "password"} autoComplete={isRegister ? "new-password" : "current-password"} value={password} onChange={(event) => { setPassword(event.target.value); setError(null); setFieldError(null); }} aria-invalid={Boolean(fieldError)} aria-describedby={describedBy} required />
+            <input id="auth-password" name="password" type={showPassword ? "text" : "password"} autoComplete={isRegister ? "new-password" : "current-password"} value={password} onChange={(event) => { setPassword(event.target.value); setError(null); setFieldError(null); setPasswordError(false); }} aria-invalid={passwordError} aria-describedby={describedBy} required />
             <button className="auth-form__visibility" type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword}>
               {showPassword ? "Hide" : "Show"}
             </button>

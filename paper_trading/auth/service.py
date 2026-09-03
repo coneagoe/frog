@@ -19,6 +19,7 @@ from storage.model.auth import User
 
 _JWT_ALGORITHM = "HS256"
 _USER_ID_RE = re.compile(r"^[0-9]+$")
+_PASSWORD_LETTER_RE = re.compile(r"[A-Za-z]")
 _password_hasher = PasswordHasher()
 
 
@@ -35,10 +36,10 @@ def normalize_email(email: str) -> str:
 
 
 def validate_password(password: str) -> None:
-    if len(password) < 8 or not any(char.isalpha() for char in password):
-        raise ValueError("Password must be at least 8 characters and contain a letter and a number")
+    if len(password) < 12 or not _PASSWORD_LETTER_RE.search(password):
+        raise ValueError("Password must be at least 12 characters and contain a letter and a number")
     if not any(char.isdigit() for char in password):
-        raise ValueError("Password must be at least 8 characters and contain a letter and a number")
+        raise ValueError("Password must be at least 12 characters and contain a letter and a number")
 
 
 def hash_password(password: str) -> str:

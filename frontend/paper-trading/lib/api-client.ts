@@ -66,7 +66,12 @@ async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 function readCsrfToken(): string | undefined {
   const cookie = document.cookie.split("; ").find((item) => item.startsWith("paper_trading_csrf="));
-  return cookie ? decodeURIComponent(cookie.slice("paper_trading_csrf=".length)) : undefined;
+  if (!cookie) return undefined;
+  try {
+    return decodeURIComponent(cookie.slice("paper_trading_csrf=".length));
+  } catch {
+    return undefined;
+  }
 }
 
 export function register(input: AuthInput): Promise<AuthIdentity> {

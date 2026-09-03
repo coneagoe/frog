@@ -197,7 +197,7 @@ def test_normalize_email_trims_and_lowercases():
     assert normalize_email("  User@Example.COM ") == "user@example.com"
 
 
-@pytest.mark.parametrize("password", ["short1", "allletters", "12345678"])
+@pytest.mark.parametrize("password", ["short1", "shortpassword", "123456789012"])
 def test_validate_password_rejects_short_missing_letter_and_missing_number(password):
     with pytest.raises(ValueError, match="letter and a number"):
         validate_password(password)

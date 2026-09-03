@@ -33,11 +33,11 @@ def auth_client(monkeypatch, tmp_path):
     engine.dispose()
 
 
-def _register(client: TestClient, email="User@Example.com", password="StrongPass1"):
+def _register(client: TestClient, email="User@Example.com", password="StrongPassword1"):
     return client.post("/auth/register", json={"email": email, "password": password})
 
 
-def _verified_user(factory, email="user@example.com", password="StrongPass1") -> User:
+def _verified_user(factory, email="user@example.com", password="StrongPassword1") -> User:
     with factory() as session:
         user = User(email=email, password_hash=hash_password(password), email_verified_at=datetime.now(timezone.utc))
         session.add(user)
@@ -46,7 +46,7 @@ def _verified_user(factory, email="user@example.com", password="StrongPass1") ->
         return user
 
 
-def _login(client: TestClient, email="user@example.com", password="StrongPass1"):
+def _login(client: TestClient, email="user@example.com", password="StrongPassword1"):
     return client.post("/auth/login", json={"email": email, "password": password})
 
 
@@ -60,7 +60,7 @@ def test_register_normalizes_email_and_stores_only_argon2_hash(auth_client):
         user = session.scalar(select(User))
         assert user is not None
         assert user.password_hash.startswith("$argon2")
-        assert "StrongPass1" not in user.password_hash
+        assert "StrongPassword1" not in user.password_hash
 
 
 def test_register_rejects_weak_password(auth_client):
@@ -78,7 +78,7 @@ def test_register_does_not_map_non_email_integrity_error_to_409(auth_client, mon
     client, _ = auth_client
     monkeypatch.setattr("paper_trading.api.routers.auth.hash_password", lambda _: None)
     with pytest.raises(IntegrityError):
-        client.post("/auth/register", json={"email": "integrity@example.com", "password": "StrongPass1"})
+        client.post("/auth/register", json={"email": "integrity@example.com", "password": "StrongPassword1"})
 
 
 def test_login_requires_verified_user_but_uses_generic_401(auth_client):
