@@ -2,6 +2,8 @@
 
 ## Commits
 
+- `f9a6ca0` `fix: align auth email validation`
+- `32d77c6` `fix: validate auth email inputs`
 - `7accb8b` `fix: align auth validation and login handling`
 - `ee1d850` `fix: use dummy hash for empty auth passwords`
 - `82221d2` `fix: preserve auth cookies through proxy`
