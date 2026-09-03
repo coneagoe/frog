@@ -1,6 +1,7 @@
 import os
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from sqlalchemy import Enum, create_engine, inspect, select
@@ -15,8 +16,9 @@ def test_auth_schema_is_fresh_and_idempotent_on_postgresql():
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    postgresql_url = cast(str, url)
 
-    engine = create_engine(url)
+    engine = create_engine(postgresql_url)
     tables = [User.__table__, AuthToken.__table__]
     try:
         Base.metadata.drop_all(engine, tables=tables)
@@ -60,8 +62,9 @@ def test_canonical_trading_snapshot_is_utc_aware_and_idempotent_on_postgresql():
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    postgresql_url = cast(str, url)
 
-    engine = create_engine(url)
+    engine = create_engine(postgresql_url)
     tables = [PaperAccount.__table__, PaperCashLedger.__table__, PaperAccountSnapshot.__table__]
     trade_date = date(2026, 8, 25)
     try:

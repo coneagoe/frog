@@ -442,9 +442,7 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         (CashEventType.TRADE.value, Decimal("324.9675"), sell.id, trades[1].id),
     ]
     snapshots = repo.list_snapshots(account.id)
-    trading_snapshots = [
-        snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value
-    ]
+    trading_snapshots = [snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value]
     assert len(snapshots) == 3
     assert len(trading_snapshots) == 2
     assert {snapshot.trade_date for snapshot in trading_snapshots} == {buy_date, sell_date}
@@ -766,9 +764,7 @@ def test_matching_snapshot_retry_resolves_gap_without_duplicate_fill(tmp_path):
     snapshots = repo.list_snapshots(account.id)
     assert sum(row.point_type == SnapshotPointType.INITIAL.value for row in snapshots) == 1
     trading_snapshot = next(
-        row
-        for row in snapshots
-        if row.point_type == SnapshotPointType.TRADING.value and row.trade_date == trade_date
+        row for row in snapshots if row.point_type == SnapshotPointType.TRADING.value and row.trade_date == trade_date
     )
     gap = repo.get_valuation_gap(account.id, trade_date)
     assert gap is not None
@@ -890,9 +886,7 @@ def test_matching_stale_suspended_snapshot_does_not_add_warning(tmp_path):
     assert len(snapshots) == 2
     assert run.warning_count == 0
     assert run.status == "completed"
-    trading_snapshots = [
-        snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value
-    ]
+    trading_snapshots = [snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value]
     assert len(trading_snapshots) == 1
     trading_snapshot = next(
         snapshot

@@ -52,12 +52,14 @@ def validate_password(password: str) -> None:
 
 def hash_password(password: str) -> str:
     validate_password(password)
-    return _password_hasher.hash(password)
+    hashed_password: str = _password_hasher.hash(password)
+    return hashed_password
 
 
 def verify_password(password: str, password_hash: str) -> bool:
     try:
-        return _password_hasher.verify(password_hash, password)
+        verified: bool = _password_hasher.verify(password_hash, password)
+        return verified
     except (InvalidHashError, VerificationError, VerifyMismatchError):
         return False
 
@@ -76,7 +78,8 @@ def create_session_token(
         "iat": int(issued_at.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
-    return jwt.encode(claims, settings.jwt_secret, algorithm=_JWT_ALGORITHM)
+    session_token: str = jwt.encode(claims, settings.jwt_secret, algorithm=_JWT_ALGORITHM)
+    return session_token
 
 
 def decode_session_token(

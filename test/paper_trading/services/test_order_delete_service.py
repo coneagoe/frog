@@ -113,9 +113,7 @@ def test_delete_filled_order_rebuilds_account_from_remaining_orders(session):
     snapshots = repo.list_snapshots(account.id)
     assert len(snapshots) == 2
     assert sum(snapshot.point_type == SnapshotPointType.INITIAL.value for snapshot in snapshots) == 1
-    trading_snapshots = [
-        snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value
-    ]
+    trading_snapshots = [snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value]
     assert len(trading_snapshots) == 1
     trading_snapshot = next(
         snapshot
@@ -238,10 +236,13 @@ def test_delete_order_preserves_initial_snapshot_and_regenerates_trading_points(
     snapshots = repo.list_snapshots(account.id)
     assert len(snapshots) == 2
     assert sum(point.point_type == SnapshotPointType.INITIAL.value for point in snapshots) == 1
-    assert sum(
-        point.point_type == SnapshotPointType.TRADING.value and point.trade_date == date(2026, 7, 18)
-        for point in snapshots
-    ) == 1
+    assert (
+        sum(
+            point.point_type == SnapshotPointType.TRADING.value and point.trade_date == date(2026, 7, 18)
+            for point in snapshots
+        )
+        == 1
+    )
     initial_snapshot = next(point for point in snapshots if point.point_type == SnapshotPointType.INITIAL.value)
     trading_snapshot = next(
         point
@@ -1638,9 +1639,7 @@ def test_delete_snapshot_per_date_not_final_state(session):
     snapshots = repo.list_snapshots(account.id)
     assert len(snapshots) == 3
     assert sum(snapshot.point_type == SnapshotPointType.INITIAL.value for snapshot in snapshots) == 1
-    trading_snapshots = [
-        snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value
-    ]
+    trading_snapshots = [snapshot for snapshot in snapshots if snapshot.point_type == SnapshotPointType.TRADING.value]
     assert len(trading_snapshots) == 2
     assert {snapshot.trade_date for snapshot in trading_snapshots} == {
         date(2026, 7, 17),

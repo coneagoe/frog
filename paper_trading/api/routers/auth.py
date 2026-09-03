@@ -22,8 +22,7 @@ from paper_trading.auth import (
 from storage.model.auth import User
 
 _DUMMY_PASSWORD_HASH = (
-    "$argon2id$v=19$m=65536,t=3,p=4$NGJ2+MUUColXDcqLKM6NHw$"
-    "VmCfSMah6ivG0JZGbbYZXPdKVCu4ZbZI+Ye9FoFzh+M"
+    "$argon2id$v=19$m=65536,t=3,p=4$NGJ2+MUUColXDcqLKM6NHw$VmCfSMah6ivG0JZGbbYZXPdKVCu4ZbZI+Ye9FoFzh+M"
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])

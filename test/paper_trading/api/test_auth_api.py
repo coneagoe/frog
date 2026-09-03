@@ -171,12 +171,10 @@ def test_login_sets_http_only_lax_session_and_readable_csrf_cookie(auth_client):
     assert session_cookie and csrf_cookie
     set_cookie = response.headers.get_list("set-cookie")
     assert any(
-        "paper_trading_session=" in value and "HttpOnly" in value and "SameSite=lax" in value
-        for value in set_cookie
+        "paper_trading_session=" in value and "HttpOnly" in value and "SameSite=lax" in value for value in set_cookie
     )
     assert any(
-        "paper_trading_csrf=" in value and "HttpOnly" not in value and "SameSite=lax" in value
-        for value in set_cookie
+        "paper_trading_csrf=" in value and "HttpOnly" not in value and "SameSite=lax" in value for value in set_cookie
     )
     assert all("Path=/" in value and "Max-Age=3600" in value and "Secure" not in value for value in set_cookie)
 
@@ -215,12 +213,10 @@ def test_logout_bumps_session_version_and_clears_cookies(auth_client):
         assert session.get(User, user.id).session_version == 2
     assert client.get("/auth/me").status_code == 401
     assert any(
-        "paper_trading_session=" in value and "Max-Age=0" in value
-        for value in response.headers.get_list("set-cookie")
+        "paper_trading_session=" in value and "Max-Age=0" in value for value in response.headers.get_list("set-cookie")
     )
     assert any(
-        "paper_trading_csrf=" in value and "Max-Age=0" in value
-        for value in response.headers.get_list("set-cookie")
+        "paper_trading_csrf=" in value and "Max-Age=0" in value for value in response.headers.get_list("set-cookie")
     )
     assert all("Path=/" in value and "Secure" not in value for value in response.headers.get_list("set-cookie"))
 

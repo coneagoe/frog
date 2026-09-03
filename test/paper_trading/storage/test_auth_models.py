@@ -69,8 +69,6 @@ def test_user_email_is_unique(sqlite_session):
     duplicate_user = User(email="operator@example.com", password_hash="b")
     assert normalized_user.email == "operator@example.com"
     assert duplicate_user.email == "operator@example.com"
-    sqlite_session.add_all(
-        [normalized_user, duplicate_user]
-    )
+    sqlite_session.add_all([normalized_user, duplicate_user])
     with pytest.raises(IntegrityError):
         sqlite_session.flush()

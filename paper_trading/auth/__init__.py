@@ -60,9 +60,7 @@ class AuthSettings:
             jwt_secret=os.getenv("PAPER_TRADING_JWT_SECRET", _DEFAULT_JWT_SECRET),
             jwt_ttl_seconds=jwt_ttl_seconds,
             cookie_secure=_parse_bool(secure_value, "PAPER_TRADING_COOKIE_SECURE"),
-            session_cookie_name=os.getenv(
-                "PAPER_TRADING_SESSION_COOKIE_NAME", _DEFAULT_SESSION_COOKIE_NAME
-            ),
+            session_cookie_name=os.getenv("PAPER_TRADING_SESSION_COOKIE_NAME", _DEFAULT_SESSION_COOKIE_NAME),
             csrf_cookie_name=os.getenv("PAPER_TRADING_CSRF_COOKIE_NAME", _DEFAULT_CSRF_COOKIE_NAME),
         )
         validate_auth_settings(settings)
