@@ -16,10 +16,10 @@
 
 ## Validation
 
-- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_service.py -q`: PASS, 78 tests.
+- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_auth_service.py -q`: PASS, 78 tests.
 - `tools/run_tests.sh test/paper_trading/api/test_auth_api.py test/paper_trading/storage/test_auth_models.py -q`: PASS, 21 tests against a fresh PostgreSQL test database. The runner created and waited for `issue-89-auth-foundation-test_db-1`; cleanup completed.
-- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_service.py test/paper_trading/storage/test_auth_models.py -q`: PASS, 85 tests.
-- `uv run ruff check paper_trading/auth/__init__.py paper_trading/auth/service.py paper_trading/api/routers/auth.py test/paper_trading/auth/test_service.py test/paper_trading/api/test_auth_api.py test/paper_trading/storage/test_auth_models.py`: PASS.
+- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_auth_service.py test/paper_trading/storage/test_auth_models.py -q`: PASS, 85 tests.
+- `uv run ruff check paper_trading/auth/__init__.py paper_trading/auth/service.py paper_trading/api/routers/auth.py test/paper_trading/auth/test_auth_service.py test/paper_trading/api/test_auth_api.py test/paper_trading/storage/test_auth_models.py`: PASS.
 - `uv run mypy paper_trading/auth/__init__.py paper_trading/auth/service.py paper_trading/api/routers/auth.py`: PASS.
 - Frontend auth focused tests: PASS, 38 tests.
 - Frontend `npm run lint`: PASS.
@@ -41,7 +41,7 @@
 
 ### Validation
 
-- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_service.py -q`: PASS, 78 tests.
+- `uv run pytest test/paper_trading/api/test_auth_api.py test/paper_trading/auth/test_auth_service.py -q`: PASS, 78 tests.
 - `tools/run_tests.sh test/paper_trading/api/test_auth_api.py test/paper_trading/storage/test_auth_models.py test/paper_trading/storage/test_auth_postgresql.py -q`: PASS, 23 tests, fresh PostgreSQL database.
 - Same `tools/run_tests.sh ...` command a second time: PASS, 23 tests, fresh PostgreSQL database.
 - Frontend auth tests: PASS, 39 tests.
@@ -55,3 +55,21 @@
 
 - The full frontend suite retains the two existing analytics failures; no analytics code was changed.
 - Existing backend test warnings remain for Starlette/httpx and short test JWT keys.
+
+## Final Verification: Test Module Rename
+
+- Renamed `test/paper_trading/auth/test_service.py` to `test/paper_trading/auth/test_auth_service.py` to avoid pytest's duplicate-basename imported-module mismatch with `test/forecast_snapshot/test_service.py`.
+- Synchronized active Task 1 and Task 3 briefs/reports and Task 6 command references. Historical review diffs and pytest cache entries were left unchanged as historical/generated artifacts.
+- No runtime source, analytics, `PRODUCT.md`, or `data/` files were changed.
+
+### Validation
+
+- `tools/run_tests.sh`: collection completed successfully; 2487 passed, 9 skipped, 17 unrelated pre-existing business-test failures. The prior imported-module mismatch did not recur.
+- `uv run pytest test/paper_trading/auth/test_auth_service.py -v`: PASS, 64 tests.
+- `uv run ruff check paper_trading/auth test/paper_trading/auth/test_auth_service.py`: PASS.
+- `uv run mypy paper_trading/auth`: PASS, no issues found in 2 source files.
+- `git diff --check`: PASS.
+
+### Concerns
+
+- The full backend suite remains non-green because of 17 unrelated existing failures in corporate actions, ledger rebuild, historical ETF repair, matching, order deletion, and repository replay tests. The failure set is unrelated to this filename-only change.
