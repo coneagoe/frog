@@ -27,9 +27,10 @@ async function proxy(request: Request, context: RouteContext) {
     const response = await fetch(targetUrl.toString(), init);
     const responseHeaders = new Headers();
     const contentType = response.headers.get("content-type");
-    const setCookie = response.headers.get("set-cookie");
     if (contentType) responseHeaders.set("content-type", contentType);
-    if (setCookie) responseHeaders.set("set-cookie", setCookie);
+    for (const setCookie of response.headers.getSetCookie()) {
+      responseHeaders.append("set-cookie", setCookie);
+    }
     const text = await response.text();
     return new Response(response.status === 204 ? null : text, { status: response.status, headers: responseHeaders });
   } catch {

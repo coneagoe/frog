@@ -38,4 +38,23 @@ describe("auth proxy", () => {
     expect(response.headers.get("set-cookie")).toContain("paper_trading_session=token");
     await expect(response.json()).resolves.toEqual({ code: "UNAUTHORIZED", message: "Unauthorized" });
   });
+
+  it("preserves both cookies from a login response", async () => {
+    process.env.PAPER_TRADING_API_BASE_URL = "http://backend.test";
+    const backendResponse = new Response(JSON.stringify({ id: 1 }), { status: 200 });
+    backendResponse.headers.append("set-cookie", "paper_trading_session=session-token; HttpOnly; SameSite=Lax");
+    backendResponse.headers.append("set-cookie", "paper_trading_csrf=csrf-token; SameSite=Lax");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(backendResponse));
+
+    const response = await POST(new Request("http://localhost/api/auth/login", { method: "POST" }), {
+      params: Promise.resolve({ path: ["login"] })
+    });
+
+    const cookies = response.headers.getSetCookie();
+    expect(cookies).toHaveLength(2);
+    expect(cookies).toEqual(expect.arrayContaining([
+      "paper_trading_session=session-token; HttpOnly; SameSite=Lax",
+      "paper_trading_csrf=csrf-token; SameSite=Lax"
+    ]));
+  });
 });
