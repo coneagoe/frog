@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -13,6 +14,9 @@ from storage.model.base import Base
 class _MarketData:
     def get_daily_bar(self, symbol, trade_date):
         return Decimal("10")
+
+    def is_trade_date(self, trade_date):
+        return trade_date.weekday() < 5
 
 
 def _client(monkeypatch, sqlite_session):
@@ -41,10 +45,24 @@ def _payload(action_type: str, key: str = "key-1") -> dict:
     }
 
 
+def _set_creation_baseline(repo, account_id: int, event_at: datetime) -> None:
+    account = repo.get_account(account_id)
+    if account is None:
+        raise AssertionError(f"account {account_id} was not created")
+    account.created_at = event_at
+    initial_snapshot = next(row for row in repo.list_snapshots(account_id) if row.point_type == "initial")
+    initial_snapshot.event_at = event_at
+    initial_snapshot.trade_date = event_at.date()
+    initial_cash = repo.list_cash_ledger(account_id)[0]
+    initial_cash.occurred_at = event_at
+    initial_cash.trade_date = event_at.date()
+
+
 @pytest.mark.parametrize("action_type", [item.value for item in CorporateActionType])
 def test_create_corporate_action_returns_event_impact_and_recalculation(monkeypatch, sqlite_session, action_type):
     client, headers, repo = _client(monkeypatch, sqlite_session)
     account = repo.create_account(f"corporate-{action_type}", Decimal("100000"))
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
     sqlite_session.commit()
 
     response = client.post(
@@ -92,6 +110,7 @@ def test_create_corporate_action_rejects_invalid_payload(monkeypatch, sqlite_ses
 def test_corporate_action_errors_and_list_filters(monkeypatch, sqlite_session):
     client, headers, repo = _client(monkeypatch, sqlite_session)
     account = repo.create_account("corporate-list", Decimal("100000"))
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 1, 9, tzinfo=timezone.utc))
     sqlite_session.commit()
     missing = client.post("/paper/accounts/999/corporate-actions", json=_payload("dividend"), headers=headers)
     assert missing.status_code == 404
@@ -120,6 +139,26 @@ def test_corporate_action_errors_and_list_filters(monkeypatch, sqlite_session):
     )
     assert response.status_code == 200
     assert [item["event_type"] for item in response.json()] == ["split"]
+
+
+def test_corporate_action_before_baseline_is_rejected(monkeypatch, sqlite_session):
+    client, headers, repo = _client(monkeypatch, sqlite_session)
+    account = repo.create_account("corporate-before-baseline", Decimal("100000"))
+    _set_creation_baseline(repo, account.id, datetime(2026, 8, 20, 9, tzinfo=timezone.utc))
+    sqlite_session.commit()
+
+    request = _payload("dividend")
+    request["event_at"] = "2026-08-10T09:30:00+08:00"
+
+    response = client.post(
+        f"/paper/accounts/{account.id}/corporate-actions",
+        json=request,
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert "proven baseline" in response.json()["detail"]
+    assert repo.list_corporate_actions(account.id) == []
 
 
 @pytest.mark.parametrize(
