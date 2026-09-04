@@ -8,6 +8,7 @@ from jwt import decode, encode
 from paper_trading.auth import (
     AuthSettings,
     build_csrf_cookie,
+    build_password_reset_url,
     build_session_cookie,
     bump_session_version,
     clear_auth_cookies,
@@ -313,6 +314,16 @@ def test_new_auth_token_returns_only_hash_for_storage():
     assert raw_token
     assert token_hash == hash_auth_token(raw_token)
     assert raw_token != token_hash
+
+
+def test_password_reset_url_requires_explicit_public_base_url(monkeypatch):
+    with pytest.raises(ValueError, match="AUTH_PUBLIC_BASE_URL"):
+        build_password_reset_url("raw-token")
+
+    assert (
+        build_password_reset_url("raw-token", "https://public.example.com/app/")
+        == "https://public.example.com/app/auth/reset-password?token=raw-token"
+    )
 
 
 def test_session_and_csrf_cookies_have_expected_attributes():

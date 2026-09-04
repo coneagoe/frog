@@ -3,6 +3,7 @@ import type {
   Account,
   AuthIdentity,
   AuthInput,
+  ForgotPasswordInput,
   AnalyticsResponse,
   CashFlowInput,
   CashFlowResult,
@@ -24,6 +25,7 @@ import type {
   Position,
   Snapshot,
   TradePage,
+  ResetPasswordInput,
   UpdateAccountFeesInput
 } from "./types";
 
@@ -80,6 +82,14 @@ export function register(input: AuthInput): Promise<AuthIdentity> {
 
 export function login(input: AuthInput): Promise<AuthIdentity> {
   return authRequest<AuthIdentity>("/auth/login", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function forgotPassword(input: ForgotPasswordInput): Promise<void> {
+  return authRequest<void>("/auth/forgot-password", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function resetPassword(input: ResetPasswordInput): Promise<void> {
+  return authRequest<void>("/auth/reset-password", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function getCurrentUser(): Promise<AuthIdentity> {

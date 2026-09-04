@@ -12,7 +12,7 @@ import {
   updateOrderComment,
   withdrawCash
 } from "./api-client";
-import { getCurrentUser, login, logout, register } from "./api-client";
+import { forgotPassword, getCurrentUser, login, logout, register, resetPassword } from "./api-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -38,6 +38,15 @@ describe("api client", () => {
     await expect(login({ email: identity.email, password: "Validpassword1" })).resolves.toEqual(identity);
     await expect(getCurrentUser()).resolves.toEqual(identity);
     await expect(logout()).rejects.toMatchObject({ status: 401, code: "UNAUTHORIZED" });
+  });
+
+  it("posts forgot-password and reset-password requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await forgotPassword({ email: "user@example.com" });
+    await resetPassword({ token: "reset-token", password: "Validpassword1" });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/auth/forgot-password", expect.objectContaining({ method: "POST", body: JSON.stringify({ email: "user@example.com" }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/auth/reset-password", expect.objectContaining({ method: "POST", body: JSON.stringify({ token: "reset-token", password: "Validpassword1" }) }));
   });
 
   it("sends logout CSRF header for a valid cookie and omits it for malformed cookies", async () => {

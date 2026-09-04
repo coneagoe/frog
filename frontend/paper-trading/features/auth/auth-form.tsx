@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
-import { login, register } from "@/lib/api-client";
+import { ApiError, forgotPassword, login, register, resetPassword } from "@/lib/api-client";
 import type { AuthIdentity } from "@/lib/types";
 
-type AuthMode = "login" | "register";
+type AuthMode = "login" | "register" | "forgot-password" | "reset-password";
 
-export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (identity: AuthIdentity) => void | Promise<void> }) {
+export function AuthForm({ mode, token, onSuccess }: { mode: AuthMode; token?: string; onSuccess?: (identity: AuthIdentity) => void | Promise<void> }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,14 +18,21 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
   const [emailError, setEmailError] = useState(false);
   const [passwordError, setPasswordError] = useState(false);
   const [pending, setPending] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [expired, setExpired] = useState(mode === "reset-password" && !token);
   const isRegister = mode === "register";
-  const actionLabel = isRegister ? "Create account" : "Log in";
-  const pendingLabel = isRegister ? "Creating account..." : "Logging in...";
+  const isLogin = mode === "login";
+  const isForgot = mode === "forgot-password";
+  const isReset = mode === "reset-password";
+  const actionLabel = isRegister ? "Create account" : isForgot ? "Send reset link" : isReset ? "Reset password" : "Log in";
+  const pendingLabel = isRegister ? "Creating account..." : isForgot ? "Sending reset link..." : isReset ? "Resetting password..." : "Logging in...";
+
+  if (expired) return <section className="auth-card" aria-labelledby="auth-title"><div className="auth-card__intro"><p className="auth-card__eyebrow">Paper Trading</p><h1 id="auth-title">Reset your password</h1><p role="alert">This password reset link is invalid or has expired.</p></div><p className="auth-card__switch"><Link href="/forgot-password">Request a new reset link</Link></p></section>;
 
   function validate(): string | null {
     const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return "Enter a valid email address.";
-    if (password.length < 12 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return "Password must be at least 12 characters and include a letter and a number.";
+    if ((isLogin || isRegister || isForgot) && (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail))) return "Enter a valid email address.";
+    if ((isLogin || isRegister || isReset) && (password.length < 12 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password))) return "Password must be at least 12 characters and include a letter and a number.";
     return null;
   }
 
@@ -34,22 +41,35 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
     const validationError = validate();
     if (validationError) {
       setFieldError(validationError);
-      setEmailError(!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()));
-      setPasswordError(password.length < 12 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password));
+      setEmailError((isLogin || isRegister || isForgot) && (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())));
+      setPasswordError((isLogin || isRegister || isReset) && (password.length < 12 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)));
       return;
     }
     setFieldError(null);
     setEmailError(false);
     setPasswordError(false);
     setError(null);
+    setSuccess(null);
     setPending(true);
     try {
-      const input = { email: email.trim().toLowerCase(), password };
-      const identity = isRegister ? await register(input) : await login(input);
-      await onSuccess?.(identity);
-      router.push(isRegister ? "/login" : "/accounts");
-    } catch {
-      setError(isRegister ? "We couldn't create your account. Check your details and try again." : "We couldn't sign you in. Check your details and try again.");
+      const normalizedEmail = email.trim().toLowerCase();
+      if (isRegister || isLogin) {
+        const identity = isRegister ? await register({ email: normalizedEmail, password }) : await login({ email: normalizedEmail, password });
+        await onSuccess?.(identity);
+        router.push(isRegister ? "/login" : "/accounts");
+      } else if (isForgot) {
+        await forgotPassword({ email: normalizedEmail });
+        setSuccess("If an account exists for that email address, we sent a password reset link.");
+      } else {
+        await resetPassword({ token: token ?? "", password });
+        setSuccess("Your password has been reset. You can now log in.");
+      }
+    } catch (requestError) {
+      if (isReset && requestError instanceof ApiError && (requestError.status === 400 || requestError.status === 410)) {
+        setExpired(true);
+      } else {
+        setError(isRegister ? "We couldn't create your account. Check your details and try again." : isForgot ? "We couldn't send a password reset link. Try again." : isReset ? "We couldn't reset your password. Try again." : "We couldn't sign you in. Check your details and try again.");
+      }
     } finally {
       setPending(false);
     }
@@ -61,31 +81,32 @@ export function AuthForm({ mode, onSuccess }: { mode: AuthMode; onSuccess?: (ide
     <section className="auth-card" aria-labelledby="auth-title">
       <div className="auth-card__intro">
         <p className="auth-card__eyebrow">Paper Trading</p>
-        <h1 id="auth-title">{isRegister ? "Create your operator account" : "Welcome back"}</h1>
-        <p>{isRegister ? "Set up secure access to your trading desk." : "Sign in to continue to your trading desk."}</p>
+        <h1 id="auth-title">{isRegister ? "Create your operator account" : isForgot ? "Reset your password" : isReset ? "Choose a new password" : "Welcome back"}</h1>
+        <p>{isRegister ? "Set up secure access to your trading desk." : isForgot ? "We will send a reset link to the email address on file." : isReset ? "Choose a new password for your account." : "Sign in to continue to your trading desk."}</p>
       </div>
       <form className="form auth-form" onSubmit={handleSubmit} noValidate>
-        <label htmlFor="auth-email">
+        {(isLogin || isRegister || isForgot) && <label htmlFor="auth-email">
           Email address
           <input id="auth-email" name="email" type="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); setError(null); setFieldError(null); setEmailError(false); }} aria-invalid={emailError} aria-describedby={describedBy} required />
-        </label>
-        <label htmlFor="auth-password">
-          Password
+        </label>}
+        {(isLogin || isRegister || isReset) && <label htmlFor="auth-password">
+          {isReset ? "New password" : "Password"}
           <span className="auth-form__password">
-            <input id="auth-password" name="password" type={showPassword ? "text" : "password"} autoComplete={isRegister ? "new-password" : "current-password"} value={password} onChange={(event) => { setPassword(event.target.value); setError(null); setFieldError(null); setPasswordError(false); }} aria-invalid={passwordError} aria-describedby={describedBy} required />
+            <input id="auth-password" name="password" type={showPassword ? "text" : "password"} autoComplete={isRegister || isReset ? "new-password" : "current-password"} value={password} onChange={(event) => { setPassword(event.target.value); setError(null); setFieldError(null); setPasswordError(false); }} aria-invalid={passwordError} aria-describedby={describedBy} required />
             <button className="auth-form__visibility" type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword}>
               {showPassword ? "Hide" : "Show"}
             </button>
           </span>
-        </label>
+        </label>}
         {fieldError && <p className="filter-error" id="auth-field-error" role="alert">{fieldError}</p>}
         {error && <p className="error-banner" id="auth-server-error" role="alert">{error}</p>}
+        {success && <p role="status">{success}</p>}
         <button className="button auth-form__submit" type="submit" disabled={pending} aria-busy={pending}>
           {pending ? pendingLabel : actionLabel}
         </button>
       </form>
       <p className="auth-card__switch">
-        {isRegister ? "Already have an account?" : "New to Paper Trading?"} {isRegister ? <Link href="/login">Back to login</Link> : <Link href="/register">Create an account</Link>}
+        {isRegister ? "Already have an account?" : isForgot || isReset ? "Need to sign in?" : "New to Paper Trading?"} {isRegister || isForgot || isReset ? <Link href="/login">Back to login</Link> : <><Link href="/register">Create an account</Link> <Link href="/forgot-password">Forgot password?</Link></>}
       </p>
     </section>
   );

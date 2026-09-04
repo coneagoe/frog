@@ -15,6 +15,7 @@ __all__ = [
     "SessionClaims",
     "build_csrf_cookie",
     "build_session_cookie",
+    "build_password_reset_url",
     "bump_session_version",
     "clear_auth_cookies",
     "create_session_token",
@@ -70,6 +71,7 @@ class AuthSettings:
 from .service import (  # noqa: E402
     SessionClaims,
     build_csrf_cookie,
+    build_password_reset_url,
     build_session_cookie,
     bump_session_version,
     clear_auth_cookies,

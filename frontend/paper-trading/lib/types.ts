@@ -9,6 +9,9 @@ export type AuthInput = {
   password: string;
 };
 
+export type ForgotPasswordInput = { email: string };
+export type ResetPasswordInput = { token: string; password: string };
+
 export type Account = {
   id: number;
   name: string;

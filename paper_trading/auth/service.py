@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import quote
 
 import jwt
 from argon2 import PasswordHasher
@@ -22,6 +24,7 @@ _USER_ID_RE = re.compile(r"^[0-9]+$")
 _PASSWORD_LETTER_RE = re.compile(r"[A-Za-z]")
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _password_hasher = PasswordHasher()
+_PASSWORD_RESET_ROUTE = "/auth/reset-password"
 
 
 @dataclass(frozen=True)
@@ -131,6 +134,14 @@ def decode_session_token(
 def new_auth_token() -> tuple[str, str]:
     raw_token = secrets.token_urlsafe(32)
     return raw_token, hash_auth_token(raw_token)
+
+
+def build_password_reset_url(raw_token: str, base_url: str | None = None) -> str:
+    configured_base_url = base_url if base_url is not None else os.getenv("AUTH_PUBLIC_BASE_URL")
+    if configured_base_url is None or not configured_base_url.strip():
+        raise ValueError("AUTH_PUBLIC_BASE_URL is required")
+    normalized_base_url = configured_base_url.strip().rstrip("/")
+    return f"{normalized_base_url}{_PASSWORD_RESET_ROUTE}?token={quote(raw_token, safe='')}"
 
 
 def hash_auth_token(raw_token: str) -> str:

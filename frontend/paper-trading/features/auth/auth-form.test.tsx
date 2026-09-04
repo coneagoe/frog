@@ -1,12 +1,23 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { login, register } from "@/lib/api-client";
+import { forgotPassword, login, register, resetPassword } from "@/lib/api-client";
 import { AuthForm } from "./auth-form";
 
+const { MockApiError } = vi.hoisted(() => ({
+  MockApiError: class MockApiError extends Error {
+    constructor(public readonly status: number, public readonly code: string, message: string) {
+      super(message);
+    }
+  }
+}));
+
 vi.mock("@/lib/api-client", () => ({
+  ApiError: MockApiError,
+  forgotPassword: vi.fn(),
   login: vi.fn(),
-  register: vi.fn()
+  register: vi.fn(),
+  resetPassword: vi.fn()
 }));
 
 const pushMock = vi.fn();
@@ -14,6 +25,8 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 const loginMock = vi.mocked(login);
 const registerMock = vi.mocked(register);
+const forgotPasswordMock = vi.mocked(forgotPassword);
+const resetPasswordMock = vi.mocked(resetPassword);
 const identity = { id: 1, email: "trader@example.com", email_verified_at: null };
 
 describe("AuthForm", () => {
@@ -22,6 +35,8 @@ describe("AuthForm", () => {
     vi.resetAllMocks();
     loginMock.mockResolvedValue(identity);
     registerMock.mockResolvedValue(identity);
+    forgotPasswordMock.mockResolvedValue(undefined);
+    resetPasswordMock.mockResolvedValue(undefined);
   });
 
   it("renders associated email and password fields", () => {
@@ -129,5 +144,57 @@ describe("AuthForm", () => {
     await user.click(screen.getByRole("button", { name: "Log in" }));
     expect(screen.getByRole("alert")).toHaveTextContent("valid email address");
     expect(loginMock).not.toHaveBeenCalled();
+  });
+
+  it("validates, submits, and confirms a password reset link request", async () => {
+    const user = userEvent.setup();
+    render(<AuthForm mode="forgot-password" />);
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("valid email address");
+    await user.type(screen.getByLabelText("Email address"), " TRADER@example.com ");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    await waitFor(() => expect(forgotPasswordMock).toHaveBeenCalledWith({ email: "trader@example.com" }));
+    expect(screen.getByRole("status")).toHaveTextContent("If an account exists for that email address, we sent a password reset link.");
+  });
+
+  it("shows loading and generic error states when requesting a password reset link", async () => {
+    const user = userEvent.setup();
+    forgotPasswordMock.mockReturnValue(new Promise(() => undefined));
+    render(<AuthForm mode="forgot-password" />);
+    await user.type(screen.getByLabelText("Email address"), "trader@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    expect(screen.getByRole("button", { name: "Sending reset link..." })).toBeDisabled();
+
+    cleanup();
+    forgotPasswordMock.mockRejectedValue(new Error("sensitive server error"));
+    render(<AuthForm mode="forgot-password" />);
+    await user.type(screen.getByLabelText("Email address"), "trader@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't send a password reset link. Try again.");
+  });
+
+  it("validates and resets a password with the supplied reset token", async () => {
+    const user = userEvent.setup();
+    render(<AuthForm mode="reset-password" token="reset-token" />);
+    await user.click(screen.getByRole("button", { name: "Reset password" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("12 characters");
+    await user.type(screen.getByLabelText("New password"), "Validpassword1");
+    await user.click(screen.getByRole("button", { name: "Reset password" }));
+    await waitFor(() => expect(resetPasswordMock).toHaveBeenCalledWith({ token: "reset-token", password: "Validpassword1" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Your password has been reset. You can now log in.");
+  });
+
+  it("shows expired-link states for missing and rejected reset tokens", async () => {
+    const user = userEvent.setup();
+    render(<AuthForm mode="reset-password" />);
+    expect(screen.getByText("This password reset link is invalid or has expired.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Request a new reset link" })).toHaveAttribute("href", "/forgot-password");
+
+    cleanup();
+    resetPasswordMock.mockRejectedValue(new MockApiError(410, "RESET_TOKEN_EXPIRED", "expired"));
+    render(<AuthForm mode="reset-password" token="expired-token" />);
+    await user.type(screen.getByLabelText("New password"), "Validpassword1");
+    await user.click(screen.getByRole("button", { name: "Reset password" }));
+    expect(await screen.findByText("This password reset link is invalid or has expired.")).toBeInTheDocument();
   });
 });
