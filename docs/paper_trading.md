@@ -4,13 +4,53 @@ The paper trading backend provides a FastAPI API for simulated trading. It suppo
 
 ## Docker (Recommended)
 
-The paper trading backend is containerized. Add `PAPER_TRADING_API_TOKEN`, `FROG_ENV`, `AUTH_REGISTRATION_ENABLED`, and `AUTH_PUBLIC_BASE_URL` to your `.env` file:
+The paper trading backend is containerized. Set the paper-trading environment variables in your `.env` file; secrets must never be committed.
+
+| Variable | Purpose | Required / default | Security / format notes |
+| --- | --- | --- | --- |
+| `FROG_ENV` | Selects runtime mode for auth settings. | Required; accepted values are `local`, `test`, `production`. | Production rejects the built-in JWT secret and requires secure cookies. |
+| `AUTH_REGISTRATION_ENABLED` | Enables browser registration. | Required in Compose; registration only works when the value is exactly `true`. | Any other value leaves registration disabled. |
+| `AUTH_PUBLIC_BASE_URL` | Public base URL used when generating password-reset and email-verification links. | Required in Compose. | Must be an absolute `https://` URL. |
+| `PAPER_TRADING_JWT_SECRET` | Signs browser session JWTs. | Required in production; otherwise defaults to the local-development secret. | Use a non-default secret in production. |
+| `PAPER_TRADING_JWT_TTL_SECONDS` | Browser session token lifetime. | Optional; defaults to `3600`. | Must be a positive integer. |
+| `PAPER_TRADING_COOKIE_SECURE` | Marks session and CSRF cookies as secure. | Required in Compose; defaults to `false` outside production. | Production requires `true`. |
+| `PAPER_TRADING_SESSION_COOKIE_NAME` | Session cookie name. | Optional; defaults to `paper_trading_session`. | Must be a valid cookie token. |
+| `PAPER_TRADING_CSRF_COOKIE_NAME` | CSRF cookie name. | Optional; defaults to `paper_trading_csrf`. | Must be a valid cookie token. |
+| `PAPER_TRADING_API_TOKEN` | Bearer token for the backend API and the server-side frontend proxy. | Required in Compose and frontend startup. | Treat as a secret; browser code does not receive it. |
+| `REDIS_URL` | Redis connection used by auth rate limiting. | Optional; defaults to `redis://redis:6379/0`. | If Redis is unavailable, auth operations fail closed. |
+| `MAIL_SERVER` | SMTP host for verification and password-reset mail. | Required when auth mail is used. | Set by Compose from `SMTP_HOST`. |
+| `MAIL_PORT` | SMTP port for verification and password-reset mail. | Required when auth mail is used. | Set by Compose from `SMTP_PORT`; must be numeric. |
+| `MAIL_SENDER` | From address for auth email. | Required when auth mail is used. | Set by Compose from `SMTP_MAIL_FROM`. |
+| `MAIL_PASSWORD` | SMTP password for auth email. | Required when auth mail is used. | Set by Compose from `SMTP_PASSWORD`; treat as a secret. |
+
+For manual backend startup, set the database connection fields that the paper-trading API actually reads from `StorageConfig`:
+
+| Variable | Purpose | Required / default | Security / format notes |
+| --- | --- | --- | --- |
+| `db_host` | PostgreSQL host used by the paper-trading backend. | Required outside Compose. | Use the database host reachable from the API process. |
+| `db_port` | PostgreSQL port used by the paper-trading backend. | Required outside Compose. | Must be a valid port number. |
+| `db_username` | PostgreSQL username used by the paper-trading backend. | Required outside Compose. | Secret; do not commit it. |
+| `db_password` | PostgreSQL password used by the paper-trading backend. | Required outside Compose. | Secret; do not commit it. |
+
+Complete Docker Compose `.env` example:
 
 ```bash
-echo 'PAPER_TRADING_API_TOKEN="change-me"' >> .env
 echo 'FROG_ENV="local"' >> .env
 echo 'AUTH_REGISTRATION_ENABLED="true"' >> .env
 echo 'AUTH_PUBLIC_BASE_URL="https://paper-trading.example.com"' >> .env
+echo 'PAPER_TRADING_JWT_SECRET="change-me"' >> .env
+echo 'PAPER_TRADING_JWT_TTL_SECONDS="3600"' >> .env
+echo 'PAPER_TRADING_COOKIE_SECURE="true"' >> .env
+echo 'PAPER_TRADING_SESSION_COOKIE_NAME="paper_trading_session"' >> .env
+echo 'PAPER_TRADING_CSRF_COOKIE_NAME="paper_trading_csrf"' >> .env
+echo 'PAPER_TRADING_API_TOKEN="change-me"' >> .env
+echo 'REDIS_URL="redis://redis:6379/0"' >> .env
+echo 'SMTP_HOST="smtp.example.com"' >> .env
+echo 'SMTP_PORT="465"' >> .env
+echo 'SMTP_MAIL_FROM="sender@example.com"' >> .env
+echo 'SMTP_PASSWORD="change-me"' >> .env
+echo 'SMTP_USER="smtp-user"' >> .env
+echo 'ALERT_EMAILS="ops@example.com"' >> .env
 ```
 
 Then start the service:
@@ -19,11 +59,12 @@ Then start the service:
 docker compose up -d paper-trading
 ```
 
-The API listens on `http://localhost:8000`. All other environment variables (DB connection, auth defaults, etc.) are wired via the common Docker Compose config.
+The API listens on `http://localhost:8000`. Compose wires `SMTP_HOST`, `SMTP_PORT`, `SMTP_MAIL_FROM`, and `SMTP_PASSWORD` into the backend's `MAIL_*` variables; `SMTP_USER` and `ALERT_EMAILS` are stack-level prerequisites for the shared email wiring.
 
 `FROG_ENV` accepts `local`, `test`, or `production`.
 `local` and `test` keep the development JWT secret and insecure cookie defaults used by the static Bearer-token tests.
-`production` requires `PAPER_TRADING_JWT_SECRET` and `PAPER_TRADING_COOKIE_SECURE=true`.
+`production` requires `PAPER_TRADING_JWT_SECRET` to be set to a non-default value and `PAPER_TRADING_COOKIE_SECURE=true`.
+If Redis or auth mail is unavailable, the auth endpoints fail closed instead of opening registration or email flows.
 
 ## Manual Start
 
@@ -32,6 +73,18 @@ If running outside Docker, set environment variables and start the API directly:
 ```bash
 export PAPER_TRADING_API_TOKEN="change-me"
 export FROG_ENV=local
+export AUTH_REGISTRATION_ENABLED=true
+export AUTH_PUBLIC_BASE_URL="https://paper-trading.example.com"
+export PAPER_TRADING_JWT_SECRET="change-me"
+export PAPER_TRADING_JWT_TTL_SECONDS=3600
+export PAPER_TRADING_COOKIE_SECURE=false
+export PAPER_TRADING_SESSION_COOKIE_NAME=paper_trading_session
+export PAPER_TRADING_CSRF_COOKIE_NAME=paper_trading_csrf
+export REDIS_URL="redis://localhost:6379/0"
+export MAIL_SERVER="smtp.example.com"
+export MAIL_PORT=465
+export MAIL_SENDER="sender@example.com"
+export MAIL_PASSWORD="change-me"
 export db_host=localhost
 export db_port=5432
 export db_username=quant
@@ -46,6 +99,8 @@ Authorization: Bearer change-me
 ```
 
 When `FROG_ENV=production`, the API refuses to start unless `PAPER_TRADING_JWT_SECRET` is set to a non-default value and `PAPER_TRADING_COOKIE_SECURE=true`.
+`AUTH_PUBLIC_BASE_URL` must be an absolute HTTPS URL because it is embedded in password-reset and email-verification links.
+`AUTH_REGISTRATION_ENABLED` only enables registration when the value is exactly `true`.
 
 ## Start The Frontend
 
@@ -60,6 +115,11 @@ Open `http://localhost:3000/accounts`. The frontend container talks to the backe
 ## Manual Frontend Start
 
 The paper trading frontend lives in `frontend/paper-trading` and proxies browser requests to the FastAPI backend.
+
+| Variable | Purpose | Required / default | Security / format notes |
+| --- | --- | --- | --- |
+| `PAPER_TRADING_API_BASE_URL` | Base URL used by the Next.js server-side routes to reach the paper-trading backend. | Required for local frontend startup; Compose sets it to the backend service URL. | Must point to the backend the server can reach. |
+| `PAPER_TRADING_API_TOKEN` | Bearer token used by the server-side proxy when calling the backend. | Required for local frontend startup and Compose. | Server-side only; browser code does not receive it. Treat as a secret. |
 
 ```bash
 cd frontend/paper-trading

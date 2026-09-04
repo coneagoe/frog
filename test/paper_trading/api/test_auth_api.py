@@ -280,6 +280,7 @@ def test_register_rolls_back_when_commit_fails_after_smtp_send(auth_client, monk
     monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", RecordingSMTP)
 
     commit_calls = []
+
     def failing_commit(self):
         commit_calls.append(True)
         raise RuntimeError("commit failed")
