@@ -18,6 +18,7 @@ from storage.model.base import Base
 def auth_client(monkeypatch, tmp_path):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "api-secret")
     monkeypatch.setenv("PAPER_TRADING_JWT_SECRET", "test-jwt-secret")
+    monkeypatch.setattr("paper_trading.api.app.get_storage", lambda: None)
     engine = create_engine(f"sqlite:///{tmp_path / 'auth.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)

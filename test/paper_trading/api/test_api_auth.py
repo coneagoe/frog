@@ -11,6 +11,7 @@ from storage.model.base import Base
 
 def test_api_requires_bearer_token(monkeypatch, tmp_path):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    monkeypatch.setattr("paper_trading.api.app.get_storage", lambda: None)
     engine = create_engine(f"sqlite:///{tmp_path / 'auth.db'}")
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine)()
@@ -50,6 +51,7 @@ def test_app_startup_accepts_normalized_production_environment(monkeypatch):
     monkeypatch.setenv("FROG_ENV", " PRODUCTION ")
     monkeypatch.setenv("PAPER_TRADING_JWT_SECRET", "production-secret")
     monkeypatch.setenv("PAPER_TRADING_COOKIE_SECURE", "true")
+    monkeypatch.setattr("paper_trading.api.app.get_storage", lambda: None)
 
     with TestClient(create_app()):
         pass
@@ -59,6 +61,7 @@ def test_app_startup_accepts_normalized_production_environment(monkeypatch):
 def test_app_startup_accepts_local_and_test_auth_defaults(monkeypatch, environment):
     monkeypatch.setenv("FROG_ENV", environment)
     monkeypatch.delenv("PAPER_TRADING_JWT_SECRET", raising=False)
+    monkeypatch.setattr("paper_trading.api.app.get_storage", lambda: None)
 
     with TestClient(create_app()):
         assert AuthSettings.from_environment().jwt_secret == "local-development-secret"

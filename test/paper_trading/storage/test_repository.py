@@ -49,6 +49,7 @@ from storage.domain_enums import (
     ProviderOutcomeStatus,
     validate_provider_outcomes,
 )
+from storage.model.auth import User
 from storage.model.base import Base
 from storage.model.etf_basic import ETFBasic
 from storage.model.paper_trading import DailyBarDiagnostic
@@ -1975,6 +1976,46 @@ def test_create_account_deposits_initial_cash(tmp_path):
 
     assert account.id is not None
     assert repo.get_cash_available(account.id) == Decimal("100000.0000")
+    engine.dispose()
+
+
+def test_backfill_account_ownership_uses_verified_owner_email(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'repo.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    monkeypatch.setenv("AUTH_OWNER_EMAIL", "owner@example.com")
+    owner = User(email="owner@example.com", password_hash="hash", email_verified_at=datetime.now(timezone.utc))
+    other = User(email="other@example.com", password_hash="hash", email_verified_at=datetime.now(timezone.utc))
+    session.add_all([owner, other])
+    session.flush()
+    session.add_all(
+        [
+            PaperAccount(name="legacy-1", initial_cash=Decimal("100000.00")),
+            PaperAccount(name="legacy-2", initial_cash=Decimal("100000.00")),
+        ]
+    )
+    session.flush()
+
+    repo = PaperTradingRepository(session)
+    updated = repo.backfill_account_ownership("owner@example.com")
+    session.commit()
+
+    assert updated == 2
+    assert {account.owner_user_id for account in repo.list_accounts()} == {owner.id}
+    engine.dispose()
+
+
+def test_backfill_account_ownership_fails_closed_without_verified_unique_owner(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'repo.db'}")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    session.add(PaperAccount(name="legacy", initial_cash=Decimal("100000.00")))
+    session.flush()
+
+    repo = PaperTradingRepository(session)
+    monkeypatch.delenv("AUTH_OWNER_EMAIL", raising=False)
+    with pytest.raises(RuntimeError, match="exactly one verified user"):
+        repo.backfill_account_ownership(None)
     engine.dispose()
 
 

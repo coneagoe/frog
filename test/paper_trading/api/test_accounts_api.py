@@ -6,22 +6,53 @@ from fastapi.testclient import TestClient
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_position_valuation_service, get_security_name_provider, get_session
+from paper_trading.auth import AuthSettings, create_session_token, hash_password
 from paper_trading.domain.enums import Market, MigrationRepairReason
 from paper_trading.services.position_valuation_service import PositionValuation
 from paper_trading.storage.models import PaperAccountSnapshot, PaperCashLedger
 from paper_trading.storage.repository import PaperTradingRepository
+from storage.model.auth import User
 from storage.model.base import Base
 from test.paper_trading.fakes import _FakeSecurityNameProvider
 
 
 def _client(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    monkeypatch.setattr("paper_trading.api.app.get_storage", lambda: None)
     session = sqlite_session
     Base.metadata.create_all(session.get_bind())
     app = create_app()
     app.dependency_overrides[get_session] = lambda: session
     app.dependency_overrides[get_position_valuation_service] = lambda: _FakePositionValuationService({})
     return TestClient(app), {"Authorization": "Bearer secret"}, session
+
+
+def _browser_client(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    monkeypatch.setenv("PAPER_TRADING_JWT_SECRET", "test-jwt-secret")
+    monkeypatch.setattr("paper_trading.api.app.get_storage", lambda: None)
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_position_valuation_service] = lambda: _FakePositionValuationService({})
+    client = TestClient(app)
+    with session.begin():
+        user = User(
+            email="owner@example.com",
+            password_hash=hash_password("StrongPassword1"),
+            email_verified_at=datetime.now(timezone.utc),
+        )
+        other = User(
+            email="other@example.com",
+            password_hash=hash_password("StrongPassword1"),
+            email_verified_at=datetime.now(timezone.utc),
+        )
+        session.add_all([user, other])
+    settings = AuthSettings.from_environment()
+    client.cookies.set("paper_trading_session", create_session_token(user.id, user.session_version, settings))
+    client.cookies.set("paper_trading_csrf", "csrf-token")
+    return client, {"X-CSRF-Token": "csrf-token"}, session, user, other
 
 
 def _create_account(client, headers):
@@ -330,6 +361,51 @@ def test_update_account_fees_returns_404_for_missing_account(monkeypatch, sqlite
 
     assert response.status_code == 404
     assert response.json()["detail"] == "paper account not found: 999"
+
+
+def test_browser_user_is_scoped_to_own_accounts(monkeypatch, sqlite_session):
+    client, csrf_headers, session, user, other = _browser_client(monkeypatch, sqlite_session)
+    repo = PaperTradingRepository(session)
+    owned = repo.create_account("owned", Decimal("100000.00"), owner_user_id=user.id)
+    other_account = repo.create_account("other", Decimal("100000.00"), owner_user_id=other.id)
+    session.commit()
+
+    list_response = client.get("/paper/accounts")
+    own_response = client.get(f"/paper/accounts/{owned.id}")
+    missing_response = client.get(f"/paper/accounts/{other_account.id}")
+    delete_response = client.delete(f"/paper/accounts/{other_account.id}", headers=csrf_headers)
+
+    assert list_response.status_code == 200
+    assert [item["id"] for item in list_response.json()] == [owned.id]
+    assert own_response.status_code == 200
+    assert own_response.json()["id"] == owned.id
+    assert missing_response.status_code == 404
+    assert delete_response.status_code == 404
+
+
+def test_bearer_token_bypasses_account_ownership(monkeypatch, sqlite_session):
+    client, headers, session = _client(monkeypatch, sqlite_session)
+    owner = User(
+        email="owner@example.com",
+        password_hash=hash_password("StrongPassword1"),
+        email_verified_at=datetime.now(timezone.utc),
+    )
+    other = User(
+        email="other@example.com",
+        password_hash=hash_password("StrongPassword1"),
+        email_verified_at=datetime.now(timezone.utc),
+    )
+    session.add_all([owner, other])
+    session.flush()
+    repo = PaperTradingRepository(session)
+    first = repo.create_account("first", Decimal("100000.00"), owner_user_id=owner.id)
+    second = repo.create_account("second", Decimal("100000.00"), owner_user_id=other.id)
+    session.commit()
+
+    response = client.get("/paper/accounts", headers=headers)
+
+    assert response.status_code == 200
+    assert {item["id"] for item in response.json()} == {first.id, second.id}
 
 
 # ---------------------------------------------------------------------------

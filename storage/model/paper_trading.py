@@ -91,6 +91,7 @@ class PaperAccount(Base):
     __tablename__ = tb_name_paper_accounts
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     initial_cash: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False)
     share_count: Mapped[Decimal] = mapped_column(Numeric(30, 12), nullable=False, server_default=text("0"))

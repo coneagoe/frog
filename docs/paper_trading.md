@@ -4,10 +4,11 @@ The paper trading backend provides a FastAPI API for simulated trading. It suppo
 
 ## Docker (Recommended)
 
-The paper trading backend is containerized. Add `PAPER_TRADING_API_TOKEN` to your `.env` file:
+The paper trading backend is containerized. Add `PAPER_TRADING_API_TOKEN` and `FROG_ENV` to your `.env` file:
 
 ```bash
 echo 'PAPER_TRADING_API_TOKEN="change-me"' >> .env
+echo 'FROG_ENV="local"' >> .env
 ```
 
 Then start the service:
@@ -16,7 +17,11 @@ Then start the service:
 docker compose up -d paper-trading
 ```
 
-The API listens on `http://localhost:8000`. All other environment variables (DB connection, etc.) are wired via the common Docker Compose config.
+The API listens on `http://localhost:8000`. All other environment variables (DB connection, auth defaults, etc.) are wired via the common Docker Compose config.
+
+`FROG_ENV` accepts `local`, `test`, or `production`.
+`local` and `test` keep the development JWT secret and insecure cookie defaults used by the static Bearer-token tests.
+`production` requires `PAPER_TRADING_JWT_SECRET` and `PAPER_TRADING_COOKIE_SECURE=true`.
 
 ## Manual Start
 
@@ -24,6 +29,7 @@ If running outside Docker, set environment variables and start the API directly:
 
 ```bash
 export PAPER_TRADING_API_TOKEN="change-me"
+export FROG_ENV=local
 export db_host=localhost
 export db_port=5432
 export db_username=quant
@@ -36,6 +42,8 @@ All endpoints require a bearer token:
 ```bash
 Authorization: Bearer change-me
 ```
+
+When `FROG_ENV=production`, the API refuses to start unless `PAPER_TRADING_JWT_SECRET` is set to a non-default value and `PAPER_TRADING_COOKIE_SECURE=true`.
 
 ## Start The Frontend
 

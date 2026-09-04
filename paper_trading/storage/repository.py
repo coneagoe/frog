@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable, cast
 
-from sqlalchemy import String, func, or_
+from sqlalchemy import String, func, or_, select
 from sqlalchemy import cast as sa_cast
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -67,6 +67,7 @@ from storage.domain_enums import (
     DailyBarDiagnosticClassification,
     validate_provider_outcomes,
 )
+from storage.model.auth import User
 from storage.model.etf_basic import ETFBasic
 
 _BARE_ETF_SYMBOL = re.compile(r"^\d{6}$")
@@ -101,8 +102,29 @@ def _require_fee_update(**values: Decimal | None) -> None:
 
 
 class PaperTradingRepository:
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, owner_user_id: int | None = None):
         self.session = session
+        self.owner_user_id = owner_user_id
+
+    def backfill_account_ownership(self, owner_email: str | None) -> int:
+        unowned_accounts = self.session.query(PaperAccount).filter(PaperAccount.owner_user_id.is_(None))
+        if unowned_accounts.first() is None:
+            return 0
+        if not owner_email or not owner_email.strip():
+            raise RuntimeError("AUTH_OWNER_EMAIL must identify exactly one verified user for paper account ownership")
+        owner_email = owner_email.strip().lower()
+        users = list(self.session.scalars(select(User).where(User.email == owner_email)).all())
+        verified_users = [user for user in users if user.email_verified_at is not None]
+        if len(verified_users) != 1:
+            raise RuntimeError("AUTH_OWNER_EMAIL must identify exactly one verified user for paper account ownership")
+        owner_user_id = verified_users[0].id
+        updated = (
+            self.session.query(PaperAccount)
+            .filter(PaperAccount.owner_user_id.is_(None))
+            .update({PaperAccount.owner_user_id: owner_user_id}, synchronize_session=False)
+        )
+        self.session.flush()
+        return int(updated)
 
     def _get_decimal_value(self, column: Any, *criteria: Any) -> Decimal | None:
         """Read a numeric column without SQLite's ORM float conversion."""
@@ -298,6 +320,7 @@ class PaperTradingRepository:
         stamp_duty_rate: Decimal | None = None,
         transfer_fee_rate: Decimal | None = None,
         etf_commission_rate: Decimal | None = None,
+        owner_user_id: int | None = None,
     ) -> PaperAccount:
         _validate_fee_values(
             commission_rate=commission_rate,
@@ -316,6 +339,7 @@ class PaperTradingRepository:
         initial_shares = quantize_shares(cash)
         initial_deposit = quantize_account_money(cash)
         account = PaperAccount(
+            owner_user_id=self.owner_user_id if owner_user_id is None else owner_user_id,
             name=name,
             initial_cash=cash,
             fee_preset=preset_name,
@@ -354,10 +378,33 @@ class PaperTradingRepository:
         return account
 
     def get_account(self, account_id: int) -> PaperAccount | None:
+        account = cast(PaperAccount | None, self.session.get(PaperAccount, account_id))
+        if account is None:
+            return None
+        if self.owner_user_id is not None and account.owner_user_id != self.owner_user_id:
+            return None
+        return account
+
+    def get_account_for_bypass(self, account_id: int) -> PaperAccount | None:
         return cast(PaperAccount | None, self.session.get(PaperAccount, account_id))
 
+    def require_account(self, account_id: int) -> PaperAccount:
+        account = self.get_account(account_id)
+        if account is None:
+            raise KeyError(f"paper account not found: {account_id}")
+        return account
+
+    def require_account_for_bypass(self, account_id: int) -> PaperAccount:
+        account = self.get_account_for_bypass(account_id)
+        if account is None:
+            raise KeyError(f"paper account not found: {account_id}")
+        return account
+
     def lock_account(self, account_id: int) -> PaperAccount:
-        account = self.session.query(PaperAccount).filter(PaperAccount.id == account_id).with_for_update().one_or_none()
+        query = self.session.query(PaperAccount).filter(PaperAccount.id == account_id)
+        if self.owner_user_id is not None:
+            query = query.filter(PaperAccount.owner_user_id == self.owner_user_id)
+        account = query.with_for_update().one_or_none()
         if account is None:
             raise KeyError(f"paper account not found: {account_id}")
         return account
@@ -368,7 +415,10 @@ class PaperTradingRepository:
         return account
 
     def list_accounts(self) -> list[PaperAccount]:
-        return list(self.session.query(PaperAccount).order_by(PaperAccount.id.asc()).all())
+        query = self.session.query(PaperAccount)
+        if self.owner_user_id is not None:
+            query = query.filter(PaperAccount.owner_user_id == self.owner_user_id)
+        return list(query.order_by(PaperAccount.id.asc()).all())
 
     def update_account_fees(
         self,
@@ -568,6 +618,8 @@ class PaperTradingRepository:
         return account
 
     def get_cash_available(self, account_id: int) -> Decimal:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return Decimal("0.0000")
         total = (
             self.session.query(func.coalesce(func.sum(PaperCashLedger.amount), 0))
             .filter(PaperCashLedger.account_id == account_id)
@@ -1078,6 +1130,8 @@ class PaperTradingRepository:
         return int(changed)
 
     def list_cash_ledger(self, account_id: int) -> list[PaperCashLedger]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         return list(
             self.session.query(PaperCashLedger)
             .filter(PaperCashLedger.account_id == account_id)
@@ -1573,6 +1627,8 @@ class PaperTradingRepository:
         )
 
     def get_positions(self, account_id: int) -> list[PaperPosition]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         return list(
             self.session.query(PaperPosition)
             .filter(PaperPosition.account_id == account_id, PaperPosition.total_quantity > 0)

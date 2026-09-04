@@ -157,5 +157,16 @@ def get_position_valuation_service(
     return PositionValuationService(market_data)
 
 
+def get_paper_trading_repository(
+    session: Session = Depends(get_session),
+    user: User | None = Depends(require_browser_user),
+) -> PaperTradingRepository:
+    return PaperTradingRepository(session, owner_user_id=None if user is None else user.id)
+
+
+def get_paper_trading_repository_for_system(session: Session = Depends(get_session)) -> PaperTradingRepository:
+    return PaperTradingRepository(session)
+
+
 SessionDep = Depends(get_session)
 AuthDep = Depends(require_api_token)

@@ -4147,6 +4147,20 @@ class StorageDb:
 
         if has_paper_accounts:
             account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
+            if "owner_user_id" not in account_columns:
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN owner_user_id INTEGER"))
+                    if self.engine.dialect.name == "postgresql":
+                        conn.execute(
+                            text(
+                                f"ALTER TABLE {tb_name_paper_accounts} "
+                                "ADD CONSTRAINT fk_paper_accounts_owner_user_id_users "
+                                "FOREIGN KEY (owner_user_id) REFERENCES users(id)"
+                            )
+                        )
+                account_columns = {
+                    column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)
+                }
             account_fee_columns = {
                 "fee_preset": "VARCHAR(30) NOT NULL DEFAULT 'a_share'",
                 "commission_rate": "NUMERIC(20, 8) NOT NULL DEFAULT 0.0003",
@@ -4197,6 +4211,8 @@ class StorageDb:
                 )
                 with self.engine.begin() as conn:
                     conn.execute(text(f"UPDATE {tb_name_paper_accounts} SET {assignments}"))
+            if "owner_user_id" in account_columns:
+                self._backfill_paper_account_ownership()
             if self.engine.dialect.name != "postgresql":
                 self._ensure_sqlite_paper_account_repair_metadata()
         has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
@@ -4338,6 +4354,36 @@ class StorageDb:
         with self.engine.begin() as conn:
             self._ensure_sqlite_snapshot_trading_identity(conn)
             self._classify_sqlite_legacy_paper_account_chronology(conn)
+
+    def _backfill_paper_account_ownership(self) -> None:
+        if not inspect(self.engine).has_table(tb_name_paper_accounts):
+            return
+        with self.engine.begin() as conn:
+            has_unowned = conn.execute(
+                text(f"SELECT 1 FROM {tb_name_paper_accounts} WHERE owner_user_id IS NULL LIMIT 1")
+            ).first()
+        if has_unowned is None:
+            return
+        owner_email = os.environ.get("AUTH_OWNER_EMAIL")
+        if not owner_email or not owner_email.strip():
+            raise RuntimeError("AUTH_OWNER_EMAIL must identify exactly one verified user for paper account ownership")
+        owner_email = owner_email.strip().lower()
+        if not inspect(self.engine).has_table("users"):
+            raise RuntimeError("AUTH_OWNER_EMAIL must identify exactly one verified user for paper account ownership")
+        with self.engine.begin() as conn:
+            matches = conn.execute(
+                text("SELECT id FROM users WHERE email = :email AND email_verified_at IS NOT NULL ORDER BY id ASC"),
+                {"email": owner_email},
+            ).fetchall()
+            if len(matches) != 1:
+                raise RuntimeError(
+                    "AUTH_OWNER_EMAIL must identify exactly one verified user for paper account ownership"
+                )
+            owner_user_id = matches[0][0]
+            conn.execute(
+                text(f"UPDATE {tb_name_paper_accounts} SET owner_user_id = :owner_user_id WHERE owner_user_id IS NULL"),
+                {"owner_user_id": owner_user_id},
+            )
 
     def _classify_sqlite_legacy_paper_account_chronology(self, conn) -> None:
         if not inspect(conn).has_table(tb_name_paper_accounts):

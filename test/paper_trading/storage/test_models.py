@@ -109,6 +109,13 @@ def test_account_has_nullable_etf_commission_rate_column():
     assert str(column.type) == "NUMERIC(20, 8)"
 
 
+def test_account_has_nullable_owner_user_id_column():
+    column = PaperAccount.__table__.c.owner_user_id
+
+    assert column.nullable is True
+    assert column.foreign_keys
+
+
 def test_account_has_nullable_migration_repair_reason_column():
     column = PaperAccount.__table__.c.migration_repair_reason
 
