@@ -101,7 +101,8 @@ describe("AuthForm", () => {
     await user.type(screen.getByLabelText("Password"), "Validpassword1");
     await user.click(screen.getByRole("button", { name: "Create account" }));
     await waitFor(() => expect(registerMock).toHaveBeenCalledWith({ email: "new@example.com", password: "Validpassword1" }));
-    expect(pushMock).toHaveBeenCalledWith("/login");
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("Check your email for a verification link before signing in.");
   });
 
   it("calls onSuccess before navigating after login", async () => {

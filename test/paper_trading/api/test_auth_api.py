@@ -22,12 +22,42 @@ class _FakeRedis:
         self.counts: dict[str, int] = {}
         self.expirations: dict[str, int] = {}
 
+    class _Pipeline:
+        def __init__(self, redis_client: "_FakeRedis"):
+            self.redis_client = redis_client
+            self.operations: list[tuple[str, tuple]] = []
+
+        def incr(self, key: str):
+            self.operations.append(("incr", (key,)))
+            return self
+
+        def expire(self, key: str, ttl: int, nx: bool = False):
+            self.operations.append(("expire", (key, ttl, nx)))
+            return self
+
+        def execute(self):
+            results = []
+            for operation, args in self.operations:
+                if operation == "incr":
+                    results.append(self.redis_client.incr(*args))
+                elif operation == "expire":
+                    self.redis_client.expire(*args)
+                    results.append(True)
+            self.operations.clear()
+            return results
+
     def incr(self, key: str) -> int:
         self.counts[key] = self.counts.get(key, 0) + 1
         return self.counts[key]
 
-    def expire(self, key: str, ttl: int) -> None:
+    def expire(self, key: str, ttl: int, nx: bool = False) -> bool:
+        if nx and key in self.expirations:
+            return False
         self.expirations[key] = ttl
+        return True
+
+    def pipeline(self, transaction: bool = True):
+        return self._Pipeline(self)
 
 
 class _RecordingSMTP:
@@ -78,7 +108,18 @@ def clear_password_reset_environment(monkeypatch):
 def auth_client(monkeypatch, tmp_path):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "api-secret")
     monkeypatch.setenv("PAPER_TRADING_JWT_SECRET", "test-jwt-secret")
+    monkeypatch.setenv("AUTH_REGISTRATION_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PUBLIC_BASE_URL", "https://public.example.com/app")
+    monkeypatch.setenv("MAIL_SERVER", "smtp.example.com")
+    monkeypatch.setenv("MAIL_PORT", "465")
+    monkeypatch.setenv("MAIL_SENDER", "sender@example.com")
+    monkeypatch.setenv("MAIL_PASSWORD", "smtp-password")
+    monkeypatch.setenv("MAIL_RECEIVERS", "ops@example.com")
     monkeypatch.setattr("paper_trading.api.app.get_storage", lambda: None)
+    redis_client = _FakeRedis()
+    _RecordingSMTP.instances.clear()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
     engine = create_engine(f"sqlite:///{tmp_path / 'auth.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
@@ -120,6 +161,24 @@ def _set_password_reset_env(monkeypatch):
     monkeypatch.setenv("MAIL_RECEIVERS", "ops@example.com")
 
 
+def _set_verification_env(monkeypatch):
+    monkeypatch.setenv("AUTH_REGISTRATION_ENABLED", "true")
+    monkeypatch.setenv("AUTH_PUBLIC_BASE_URL", "https://public.example.com/app")
+    monkeypatch.setenv("MAIL_SERVER", "smtp.example.com")
+    monkeypatch.setenv("MAIL_PORT", "465")
+    monkeypatch.setenv("MAIL_SENDER", "sender@example.com")
+    monkeypatch.setenv("MAIL_PASSWORD", "smtp-password")
+    monkeypatch.setenv("MAIL_RECEIVERS", "ops@example.com")
+
+
+def _extract_verification_link(message: EmailMessage) -> str:
+    content = cast(str, message.get_content())
+    for line in content.splitlines():
+        if line.startswith("https://"):
+            return line
+    raise AssertionError("verification link not found")
+
+
 def _extract_reset_link(message: EmailMessage) -> str:
     content = cast(str, message.get_content())
     for line in content.splitlines():
@@ -139,6 +198,152 @@ def test_register_normalizes_email_and_stores_only_argon2_hash(auth_client):
         assert user is not None
         assert user.password_hash.startswith("$argon2")
         assert "StrongPassword1" not in user.password_hash
+
+
+def test_register_is_disabled_without_explicit_flag(auth_client, monkeypatch):
+    monkeypatch.setenv("AUTH_REGISTRATION_ENABLED", "false")
+
+    response = _register(auth_client[0])
+
+    assert response.status_code == 403
+
+
+def test_register_creates_unverified_user_and_hashed_verification_token(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
+
+    response = _register(client)
+
+    assert response.status_code == 201
+    assert response.json()["email_verified_at"] is None
+    verification_link = _extract_verification_link(_RecordingSMTP.instances[-1].messages[-1])
+    raw_token = parse_qs(urlparse(verification_link).query)["token"][0]
+    with factory() as session:
+        user = session.scalar(select(User))
+        token_row = session.scalar(select(AuthToken))
+        assert user is not None
+        assert user.email_verified_at is None
+        assert token_row is not None
+        assert token_row.user_id == user.id
+        assert token_row.purpose == "email_verification"
+        assert token_row.token_hash == hash_auth_token(raw_token)
+
+
+def test_register_fails_closed_when_redis_is_unavailable(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    monkeypatch.setattr(
+        "paper_trading.api.routers.auth._get_redis_client", lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
+    )
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", pytest.fail)
+
+    response = _register(client)
+
+    assert response.status_code == 503
+    with factory() as session:
+        assert session.scalar(select(User)) is None
+        assert session.scalar(select(AuthToken)) is None
+
+
+def test_register_fails_closed_when_smtp_send_fails(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+
+    class FailingSMTP(_RecordingSMTP):
+        def send_message(self, message) -> None:
+            raise RuntimeError("smtp provider failed")
+
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", FailingSMTP)
+
+    response = _register(client)
+
+    assert response.status_code == 503
+    with factory() as session:
+        assert session.scalar(select(User)) is None
+        assert session.scalar(select(AuthToken)) is None
+
+
+def test_register_rolls_back_when_commit_fails_after_smtp_send(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+
+    class RecordingSMTP(_RecordingSMTP):
+        pass
+
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", RecordingSMTP)
+
+    commit_calls = []
+    def failing_commit(self):
+        commit_calls.append(True)
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr("sqlalchemy.orm.session.Session.commit", failing_commit)
+
+    response = _register(client, "durable-failure@example.com")
+
+    assert response.status_code == 503
+    assert _RecordingSMTP.instances[-1].messages
+    assert commit_calls == [True]
+    with factory() as session:
+        assert session.scalar(select(User).where(User.email == "durable-failure@example.com")) is None
+        assert session.scalar(select(AuthToken)) is None
+
+
+def test_register_rate_limits_by_ip_and_normalized_email(auth_client, monkeypatch):
+    client, _ = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
+
+    responses = [_register(client, email=f"User{index}@Example.com") for index in range(4)]
+
+    assert [response.status_code for response in responses] == [201, 201, 201, 429]
+    assert redis_client.counts["paper_trading:auth:registration:ip:testclient"] == 4
+    assert redis_client.counts["paper_trading:auth:registration:email:user0@example.com"] == 1
+    assert "paper_trading:auth:verification_email:ip:testclient" not in redis_client.counts
+    assert "paper_trading:auth:verification_email:email:user0@example.com" not in redis_client.counts
+
+
+def test_register_uses_atomic_limiter_expiration_for_first_hit(auth_client, monkeypatch):
+    client, _ = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
+
+    response = _register(client, email="atomic@example.com")
+
+    assert response.status_code == 201
+    assert redis_client.counts["paper_trading:auth:registration:ip:testclient"] == 1
+    assert redis_client.counts["paper_trading:auth:registration:email:atomic@example.com"] == 1
+    assert redis_client.expirations["paper_trading:auth:registration:ip:testclient"] == 3600
+    assert redis_client.expirations["paper_trading:auth:registration:email:atomic@example.com"] == 3600
+
+
+def test_register_rejects_unverified_login_until_email_is_verified(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
+
+    response = _register(client)
+    assert response.status_code == 201
+
+    assert _login(client).status_code == 401
+
+    verification_link = _extract_verification_link(_RecordingSMTP.instances[-1].messages[-1])
+    raw_token = parse_qs(urlparse(verification_link).query)["token"][0]
+    assert client.get("/auth/verify-email", params={"token": raw_token}).status_code == 200
+    assert _login(client).status_code == 200
 
 
 def test_register_rejects_weak_password(auth_client):
@@ -170,21 +375,40 @@ def test_login_rejects_invalid_email_with_client_validation_response(auth_client
     assert calls == []
 
 
-def test_register_rejects_duplicate_normalized_email_with_409(auth_client):
+def test_register_rejects_duplicate_normalized_email_without_account_hint(
+    auth_client,
+    monkeypatch,
+):
     client, _ = auth_client
+    _set_verification_env(monkeypatch)
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", _FakeRedis)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
     assert _register(client).status_code == 201
-    assert _register(client, " USER@example.COM ").status_code == 409
+    response = _register(client, " USER@example.COM ")
+    assert response.status_code == 409
+    assert "already registered" not in response.text.lower()
+    assert "email exists" not in response.text.lower()
+    assert "user@example.com" not in response.text.lower()
+    assert "registration failed" in response.text.lower()
 
 
 def test_register_does_not_map_non_email_integrity_error_to_409(auth_client, monkeypatch):
     client, _ = auth_client
-    monkeypatch.setattr("paper_trading.api.routers.auth.hash_password", lambda _: None)
+
+    def raise_integrity_error(_: str):
+        raise IntegrityError("statement", {"email": "integrity@example.com"}, RuntimeError("hash failed"))
+
+    monkeypatch.setattr("paper_trading.api.routers.auth.hash_password", raise_integrity_error)
+
     with pytest.raises(IntegrityError):
         client.post("/auth/register", json={"email": "integrity@example.com", "password": "StrongPassword1"})
 
 
-def test_login_requires_verified_user_but_uses_generic_401(auth_client):
+def test_login_requires_verified_user_but_uses_generic_401(auth_client, monkeypatch):
     client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", _FakeRedis)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
     assert _register(client).status_code == 201
     assert _login(client).status_code == 401
     _verified_user(factory, "verified@example.com")
@@ -192,6 +416,141 @@ def test_login_requires_verified_user_but_uses_generic_401(auth_client):
     incorrect = _login(client, password="WrongPass1")
     assert unknown.status_code == incorrect.status_code == 401
     assert unknown.json() == incorrect.json()
+
+
+def test_verify_email_marks_user_verified_and_consumes_token(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
+
+    assert _register(client).status_code == 201
+    verification_link = _extract_verification_link(_RecordingSMTP.instances[-1].messages[-1])
+    raw_token = parse_qs(urlparse(verification_link).query)["token"][0]
+
+    response = client.get("/auth/verify-email", params={"token": raw_token})
+
+    assert response.status_code == 200
+    with factory() as session:
+        user = session.scalar(select(User))
+        token_row = session.scalar(select(AuthToken))
+        assert user is not None and user.email_verified_at is not None
+        assert token_row is not None and token_row.used_at is not None
+        assert token_row.token_hash == hash_auth_token(raw_token)
+    assert client.get("/auth/verify-email", params={"token": raw_token}).status_code == 400
+
+
+def test_verify_email_rejects_expired_token_without_verifying_user(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
+
+    assert _register(client).status_code == 201
+    verification_link = _extract_verification_link(_RecordingSMTP.instances[-1].messages[-1])
+    raw_token = parse_qs(urlparse(verification_link).query)["token"][0]
+
+    with factory() as session:
+        token_row = session.scalar(select(AuthToken))
+        assert token_row is not None
+        token_row.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        session.commit()
+
+    response = client.get("/auth/verify-email", params={"token": raw_token})
+
+    assert response.status_code == 400
+    with factory() as session:
+        user = session.scalar(select(User))
+        assert user is not None and user.email_verified_at is None
+
+
+def test_resend_verification_email_returns_generic_response_for_unknown_and_unverified_addresses(
+    auth_client, monkeypatch
+):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
+
+    with factory() as session:
+        session.add(User(email="unverified@example.com", password_hash=hash_password("StrongPassword1")))
+        session.commit()
+
+    unknown = client.post("/auth/resend-verification-email", json={"email": "missing@example.com"})
+    unverified = client.post("/auth/resend-verification-email", json={"email": "unverified@example.com"})
+
+    assert unknown.status_code == unverified.status_code == 202
+    assert unknown.json() == unverified.json()
+    assert unknown.json()["message"] == "If the email exists, verification instructions have been sent."
+
+
+def test_resend_verification_email_fails_closed_when_redis_is_unavailable(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    monkeypatch.setattr(
+        "paper_trading.api.routers.auth._get_redis_client", lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
+    )
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", pytest.fail)
+
+    with factory() as session:
+        session.add(User(email="redis@example.com", password_hash=hash_password("StrongPassword1")))
+        session.commit()
+
+    response = client.post("/auth/resend-verification-email", json={"email": "redis@example.com"})
+
+    assert response.status_code == 202
+    assert response.json()["message"] == "If the email exists, verification instructions have been sent."
+    with factory() as session:
+        assert session.query(AuthToken).count() == 0
+
+
+def test_resend_verification_email_fails_closed_when_smtp_is_unavailable(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+
+    class FailingSMTP(_RecordingSMTP):
+        def send_message(self, message) -> None:
+            raise RuntimeError("smtp provider failed")
+
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", FailingSMTP)
+
+    with factory() as session:
+        session.add(User(email="smtp@example.com", password_hash=hash_password("StrongPassword1")))
+        session.commit()
+
+    response = client.post("/auth/resend-verification-email", json={"email": "smtp@example.com"})
+
+    assert response.status_code == 202
+    with factory() as session:
+        assert session.query(AuthToken).count() == 0
+
+
+def test_resend_verification_email_rate_limits_by_ip_and_normalized_email(auth_client, monkeypatch):
+    client, factory = auth_client
+    _set_verification_env(monkeypatch)
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+    monkeypatch.setattr("paper_trading.api.routers.auth.smtplib.SMTP_SSL", _RecordingSMTP)
+
+    with factory() as session:
+        session.add(User(email="resend@example.com", password_hash=hash_password("StrongPassword1")))
+        session.commit()
+
+    responses = [
+        client.post("/auth/resend-verification-email", json={"email": email})
+        for email in ["Resend@example.com", " resend@example.com ", "RESEND@example.com", "resend@example.com"]
+    ]
+
+    assert [response.status_code for response in responses] == [202, 202, 202, 429]
+    assert redis_client.counts["paper_trading:auth:verification_email:ip:testclient"] == 4
+    assert redis_client.counts["paper_trading:auth:verification_email:email:resend@example.com"] == 4
+    assert "paper_trading:auth:registration:ip:testclient" not in redis_client.counts
+    assert "paper_trading:auth:registration:email:resend@example.com" not in redis_client.counts
 
 
 def test_login_unknown_user_runs_password_verification_path(auth_client, monkeypatch):

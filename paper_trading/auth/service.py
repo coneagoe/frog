@@ -9,7 +9,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import jwt
 from argon2 import PasswordHasher
@@ -25,6 +25,7 @@ _PASSWORD_LETTER_RE = re.compile(r"[A-Za-z]")
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _password_hasher = PasswordHasher()
 _PASSWORD_RESET_ROUTE = "/auth/reset-password"
+_EMAIL_VERIFICATION_ROUTE = "/auth/verify-email"
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,17 @@ def build_password_reset_url(raw_token: str, base_url: str | None = None) -> str
         raise ValueError("AUTH_PUBLIC_BASE_URL is required")
     normalized_base_url = configured_base_url.strip().rstrip("/")
     return f"{normalized_base_url}{_PASSWORD_RESET_ROUTE}?token={quote(raw_token, safe='')}"
+
+
+def build_verification_url(raw_token: str, base_url: str | None = None) -> str:
+    configured_base_url = base_url if base_url is not None else os.getenv("AUTH_PUBLIC_BASE_URL")
+    if configured_base_url is None or not configured_base_url.strip():
+        raise ValueError("AUTH_PUBLIC_BASE_URL is required")
+    normalized_base_url = configured_base_url.strip().rstrip("/")
+    parsed_base_url = urlparse(normalized_base_url)
+    if parsed_base_url.scheme != "https" or not parsed_base_url.netloc:
+        raise ValueError("AUTH_PUBLIC_BASE_URL must be an HTTPS URL")
+    return f"{normalized_base_url}{_EMAIL_VERIFICATION_ROUTE}?token={quote(raw_token, safe='')}"
 
 
 def hash_auth_token(raw_token: str) -> str:

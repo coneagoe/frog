@@ -11,6 +11,7 @@ export type AuthInput = {
 
 export type ForgotPasswordInput = { email: string };
 export type ResetPasswordInput = { token: string; password: string };
+export type ResendVerificationEmailInput = { email: string };
 
 export type Account = {
   id: number;

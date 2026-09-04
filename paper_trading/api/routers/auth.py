@@ -17,6 +17,7 @@ from paper_trading.auth import (
     build_csrf_cookie,
     build_password_reset_url,
     build_session_cookie,
+    build_verification_url,
     clear_auth_cookies,
     create_session_token,
     hash_auth_token,
@@ -37,6 +38,13 @@ _PASSWORD_RESET_TTL_SECONDS = 900
 _PASSWORD_RESET_EMAIL_RATE_LIMIT = 3
 _PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS = 3600
 _PASSWORD_RESET_RESPONSE = {"message": "If the email exists, password reset instructions have been sent."}
+_EMAIL_VERIFICATION_PURPOSE = "email_verification"
+_EMAIL_VERIFICATION_TTL_SECONDS = 900
+_EMAIL_VERIFICATION_EMAIL_RATE_LIMIT = 3
+_EMAIL_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS = 3600
+_REGISTRATION_RATE_LIMIT_KEY_PREFIX = "paper_trading:auth:registration"
+_VERIFICATION_EMAIL_RATE_LIMIT_KEY_PREFIX = "paper_trading:auth:verification_email"
+_EMAIL_VERIFICATION_RESPONSE = {"message": "If the email exists, verification instructions have been sent."}
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -76,6 +84,10 @@ class ForgotPasswordRequest(BaseModel):
             raise ValueError(str(exc)) from exc
 
 
+class ResendVerificationRequest(ForgotPasswordRequest):
+    pass
+
+
 class ResetPasswordRequest(BaseModel):
     token: str
     password: str = Field(min_length=1)
@@ -96,18 +108,59 @@ def _get_redis_client() -> redis.Redis:
     return redis.Redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
 
 
-def _rate_limit(redis_client: redis.Redis, ip_address: str, email: str) -> bool:
-    keys = (
-        f"paper_trading:auth:password_reset:ip:{ip_address}",
-        f"paper_trading:auth:password_reset:email:{email}",
+def _password_reset_rate_limit(redis_client: redis.Redis, ip_address: str, email: str) -> bool:
+    return _rate_limit(
+        redis_client,
+        ip_address,
+        email,
+        key_prefix="paper_trading:auth:password_reset",
+        window_seconds=_PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS,
+        limit=_PASSWORD_RESET_EMAIL_RATE_LIMIT,
     )
-    counts = []
+
+
+def _rate_limit(
+    redis_client: redis.Redis,
+    ip_address: str,
+    email: str,
+    *,
+    key_prefix: str,
+    window_seconds: int,
+    limit: int,
+) -> bool:
+    keys = (
+        f"{key_prefix}:ip:{ip_address}",
+        f"{key_prefix}:email:{email}",
+    )
+    pipeline = redis_client.pipeline(transaction=True)
     for key in keys:
-        count = int(redis_client.incr(key))
-        if count == 1:
-            redis_client.expire(key, _PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS)
-        counts.append(count)
-    return max(counts) <= _PASSWORD_RESET_EMAIL_RATE_LIMIT
+        pipeline.incr(key)
+        pipeline.expire(key, window_seconds, nx=True)
+    results = pipeline.execute()
+    counts = [int(results[index]) for index in range(0, len(results), 2)]
+    return max(counts) <= limit
+
+
+def _registration_rate_limit(redis_client: redis.Redis, ip_address: str, email: str) -> bool:
+    return _rate_limit(
+        redis_client,
+        ip_address,
+        email,
+        key_prefix=_REGISTRATION_RATE_LIMIT_KEY_PREFIX,
+        window_seconds=_EMAIL_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS,
+        limit=_EMAIL_VERIFICATION_EMAIL_RATE_LIMIT,
+    )
+
+
+def _verification_email_rate_limit(redis_client: redis.Redis, ip_address: str, email: str) -> bool:
+    return _rate_limit(
+        redis_client,
+        ip_address,
+        email,
+        key_prefix=_VERIFICATION_EMAIL_RATE_LIMIT_KEY_PREFIX,
+        window_seconds=_EMAIL_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS,
+        limit=_EMAIL_VERIFICATION_EMAIL_RATE_LIMIT,
+    )
 
 
 def _send_password_reset_email(raw_token: str, email: str) -> None:
@@ -122,15 +175,50 @@ def _send_password_reset_email(raw_token: str, email: str) -> None:
         smtp.send_message(message)
 
 
+def _send_verification_email(raw_token: str, email: str) -> None:
+    verification_url = build_verification_url(raw_token)
+    message = EmailMessage()
+    message["Subject"] = "Verify your email"
+    message["From"] = os.environ["MAIL_SENDER"]
+    message["To"] = email
+    message.set_content(f"Use this link to verify your email:\n{verification_url}\n")
+    with smtplib.SMTP_SSL(os.environ["MAIL_SERVER"], int(os.environ["MAIL_PORT"])) as smtp:
+        smtp.login(os.environ["MAIL_SENDER"], os.environ["MAIL_PASSWORD"])
+        smtp.send_message(message)
+
+
 @router.post("/register", response_model=Identity, status_code=status.HTTP_201_CREATED)
-def register(credentials: RegistrationCredentials, session: Session = Depends(get_session)) -> Identity:
+def register(
+    credentials: RegistrationCredentials, request: Request, session: Session = Depends(get_session)
+) -> Identity:
+    if os.getenv("AUTH_REGISTRATION_ENABLED", "").strip().lower() != "true":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Registration is disabled")
     email = credentials.email
     try:
+        redis_client = _get_redis_client()
+        if not _registration_rate_limit(redis_client, request.client.host if request.client else "unknown", email):
+            raise HTTPException(
+                status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests", "details": {}}
+            )
         validate_password(credentials.password)
         user = User(email=email, password_hash=hash_password(credentials.password))
         session.add(user)
+        session.flush()
+        raw_token, token_hash = new_auth_token()
+        token = AuthToken(
+            user_id=user.id,
+            purpose=_EMAIL_VERIFICATION_PURPOSE,
+            token_hash=token_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=_EMAIL_VERIFICATION_TTL_SECONDS),
+        )
+        session.add(token)
+        session.flush()
+        _send_verification_email(raw_token, user.email)
         session.commit()
         session.refresh(user)
+    except HTTPException:
+        session.rollback()
+        raise
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -138,8 +226,89 @@ def register(credentials: RegistrationCredentials, session: Session = Depends(ge
         session.rollback()
         if not _is_email_unique_violation(exc):
             raise
-        raise HTTPException(status_code=409, detail="email is already registered") from exc
+        raise HTTPException(status_code=409, detail="Registration failed") from exc
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(status_code=503, detail="Registration is temporarily unavailable") from exc
     return _identity(user)
+
+
+@router.get("/verify-email")
+def verify_email(token: str, session: Session = Depends(get_session)) -> dict[str, str]:
+    try:
+        now = datetime.now(timezone.utc)
+        token_row = session.scalar(
+            select(AuthToken).where(
+                AuthToken.token_hash == hash_auth_token(token),
+                AuthToken.purpose == _EMAIL_VERIFICATION_PURPOSE,
+                AuthToken.used_at.is_(None),
+                AuthToken.expires_at > now,
+            )
+        )
+        if token_row is None:
+            raise ValueError
+        claim_result = session.execute(
+            update(AuthToken)
+            .where(
+                AuthToken.id == token_row.id,
+                AuthToken.used_at.is_(None),
+                AuthToken.expires_at > now,
+            )
+            .values(used_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if getattr(claim_result, "rowcount", 0) != 1:
+            raise ValueError
+        user = session.get(User, token_row.user_id)
+        if user is None:
+            raise ValueError
+        user.email_verified_at = now
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "BAD_REQUEST", "message": "Invalid verification token", "details": {}},
+        ) from exc
+    return {"message": "Email has been verified."}
+
+
+@router.post("/resend-verification-email", status_code=status.HTTP_202_ACCEPTED)
+def resend_verification_email(
+    payload: ResendVerificationRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> dict[str, str]:
+    normalized_email = normalize_email(payload.email)
+    try:
+        redis_client = _get_redis_client()
+        if not _verification_email_rate_limit(
+            redis_client, request.client.host if request.client else "unknown", normalized_email
+        ):
+            raise HTTPException(
+                status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests", "details": {}}
+            )
+        user = session.scalar(select(User).where(User.email == normalized_email, User.email_verified_at.is_(None)))
+        if user is None:
+            return _EMAIL_VERIFICATION_RESPONSE
+        raw_token, token_hash = new_auth_token()
+        session.add(
+            AuthToken(
+                user_id=user.id,
+                purpose=_EMAIL_VERIFICATION_PURPOSE,
+                token_hash=token_hash,
+                expires_at=datetime.now(timezone.utc) + timedelta(seconds=_EMAIL_VERIFICATION_TTL_SECONDS),
+            )
+        )
+        session.flush()
+        _send_verification_email(raw_token, user.email)
+        session.commit()
+    except HTTPException:
+        session.rollback()
+        raise
+    except Exception:
+        session.rollback()
+    return _EMAIL_VERIFICATION_RESPONSE
 
 
 @router.post("/login", response_model=Identity)
@@ -164,7 +333,9 @@ def forgot_password(
     normalized_email = normalize_email(payload.email)
     try:
         redis_client = _get_redis_client()
-        if not _rate_limit(redis_client, request.client.host if request.client else "unknown", normalized_email):
+        if not _password_reset_rate_limit(
+            redis_client, request.client.host if request.client else "unknown", normalized_email
+        ):
             raise HTTPException(
                 status_code=429, detail={"code": "RATE_LIMITED", "message": "Too many requests", "details": {}}
             )

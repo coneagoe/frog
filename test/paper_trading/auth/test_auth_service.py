@@ -10,6 +10,7 @@ from paper_trading.auth import (
     build_csrf_cookie,
     build_password_reset_url,
     build_session_cookie,
+    build_verification_url,
     bump_session_version,
     clear_auth_cookies,
     create_session_token,
@@ -323,6 +324,28 @@ def test_password_reset_url_requires_explicit_public_base_url(monkeypatch):
     assert (
         build_password_reset_url("raw-token", "https://public.example.com/app/")
         == "https://public.example.com/app/auth/reset-password?token=raw-token"
+    )
+
+
+def test_verification_url_requires_explicit_https_public_base_url(monkeypatch):
+    with pytest.raises(ValueError, match="AUTH_PUBLIC_BASE_URL"):
+        build_verification_url("raw-token")
+
+    with pytest.raises(ValueError, match="AUTH_PUBLIC_BASE_URL"):
+        build_verification_url("raw-token", "http://public.example.com/app/")
+
+    assert (
+        build_verification_url("raw-token", "https://public.example.com/app/")
+        == "https://public.example.com/app/auth/verify-email?token=raw-token"
+    )
+
+
+def test_verification_url_quotes_token(monkeypatch):
+    monkeypatch.setenv("AUTH_PUBLIC_BASE_URL", "https://public.example.com/app/")
+
+    assert (
+        build_verification_url("raw token?+/")
+        == "https://public.example.com/app/auth/verify-email?token=raw%20token%3F%2B%2F"
     )
 
 

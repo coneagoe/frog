@@ -55,8 +55,12 @@ export function AuthForm({ mode, token, onSuccess }: { mode: AuthMode; token?: s
       const normalizedEmail = email.trim().toLowerCase();
       if (isRegister || isLogin) {
         const identity = isRegister ? await register({ email: normalizedEmail, password }) : await login({ email: normalizedEmail, password });
-        await onSuccess?.(identity);
-        router.push(isRegister ? "/login" : "/accounts");
+        if (isRegister) {
+          setSuccess("Check your email for a verification link before signing in.");
+        } else {
+          await onSuccess?.(identity);
+          router.push("/accounts");
+        }
       } else if (isForgot) {
         await forgotPassword({ email: normalizedEmail });
         setSuccess("If an account exists for that email address, we sent a password reset link.");

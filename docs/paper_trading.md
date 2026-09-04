@@ -4,11 +4,13 @@ The paper trading backend provides a FastAPI API for simulated trading. It suppo
 
 ## Docker (Recommended)
 
-The paper trading backend is containerized. Add `PAPER_TRADING_API_TOKEN` and `FROG_ENV` to your `.env` file:
+The paper trading backend is containerized. Add `PAPER_TRADING_API_TOKEN`, `FROG_ENV`, `AUTH_REGISTRATION_ENABLED`, and `AUTH_PUBLIC_BASE_URL` to your `.env` file:
 
 ```bash
 echo 'PAPER_TRADING_API_TOKEN="change-me"' >> .env
 echo 'FROG_ENV="local"' >> .env
+echo 'AUTH_REGISTRATION_ENABLED="true"' >> .env
+echo 'AUTH_PUBLIC_BASE_URL="https://paper-trading.example.com"' >> .env
 ```
 
 Then start the service:

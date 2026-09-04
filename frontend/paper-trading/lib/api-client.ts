@@ -26,6 +26,7 @@ import type {
   Snapshot,
   TradePage,
   ResetPasswordInput,
+  ResendVerificationEmailInput,
   UpdateAccountFeesInput
 } from "./types";
 
@@ -86,6 +87,18 @@ export function login(input: AuthInput): Promise<AuthIdentity> {
 
 export function forgotPassword(input: ForgotPasswordInput): Promise<void> {
   return authRequest<void>("/auth/forgot-password", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function verifyEmail(token: string): Promise<{ message: string }> {
+  const query = new URLSearchParams({ token });
+  return authRequest<{ message: string }>(`/auth/verify-email?${query.toString()}`);
+}
+
+export function resendVerificationEmail(input: ResendVerificationEmailInput): Promise<{ message: string }> {
+  return authRequest<{ message: string }>("/auth/resend-verification-email", {
+    method: "POST",
+    body: JSON.stringify(input)
+  });
 }
 
 export function resetPassword(input: ResetPasswordInput): Promise<void> {

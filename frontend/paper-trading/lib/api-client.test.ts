@@ -12,7 +12,7 @@ import {
   updateOrderComment,
   withdrawCash
 } from "./api-client";
-import { forgotPassword, getCurrentUser, login, logout, register, resetPassword } from "./api-client";
+import { forgotPassword, getCurrentUser, login, logout, register, resendVerificationEmail, resetPassword, verifyEmail } from "./api-client";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -47,6 +47,17 @@ describe("api client", () => {
     await resetPassword({ token: "reset-token", password: "Validpassword1" });
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/auth/forgot-password", expect.objectContaining({ method: "POST", body: JSON.stringify({ email: "user@example.com" }) }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/auth/reset-password", expect.objectContaining({ method: "POST", body: JSON.stringify({ token: "reset-token", password: "Validpassword1" }) }));
+  });
+
+  it("posts verification requests", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "ok" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "ok" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await verifyEmail("verify token");
+    await resendVerificationEmail({ email: "user@example.com" });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/auth/verify-email?token=verify+token", expect.objectContaining({ credentials: "same-origin" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/auth/resend-verification-email", expect.objectContaining({ method: "POST", body: JSON.stringify({ email: "user@example.com" }) }));
   });
 
   it("sends logout CSRF header for a valid cookie and omits it for malformed cookies", async () => {
