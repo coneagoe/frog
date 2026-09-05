@@ -25,6 +25,7 @@ __all__ = [
     "hash_password",
     "new_auth_token",
     "normalize_email",
+    "validate_public_base_url",
     "validate_email",
     "validate_auth_settings",
     "validate_password",
@@ -83,6 +84,7 @@ from .service import (  # noqa: E402
     hash_password,
     new_auth_token,
     normalize_email,
+    validate_public_base_url,
     validate_email,
     validate_password,
     verify_password,
@@ -110,3 +112,4 @@ def validate_auth_settings(settings: AuthSettings, environment: str | None = Non
             raise ValueError("JWT secret is required in production")
         if not settings.cookie_secure:
             raise ValueError("secure cookies are required in production")
+        validate_public_base_url()

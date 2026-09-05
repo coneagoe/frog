@@ -35,6 +35,7 @@ def clear_auth_environment(monkeypatch):
         "PAPER_TRADING_COOKIE_SECURE",
         "PAPER_TRADING_SESSION_COOKIE_NAME",
         "PAPER_TRADING_CSRF_COOKIE_NAME",
+        "AUTH_PUBLIC_BASE_URL",
     ):
         monkeypatch.delenv(variable_name, raising=False)
 
@@ -122,6 +123,7 @@ def test_cookie_names_can_be_overridden(monkeypatch):
 
 def test_explicit_environment_is_used_and_trimmed(monkeypatch):
     monkeypatch.setenv("FROG_ENV", "local")
+    monkeypatch.setenv("AUTH_PUBLIC_BASE_URL", "https://public.example.com/app")
     settings = AuthSettings(
         jwt_secret="production-secret",
         jwt_ttl_seconds=3600,
@@ -147,7 +149,8 @@ def test_explicit_empty_environment_is_rejected(monkeypatch):
         validate_auth_settings(settings, environment="")
 
 
-def test_valid_production_settings():
+def test_valid_production_settings(monkeypatch):
+    monkeypatch.setenv("AUTH_PUBLIC_BASE_URL", "https://public.example.com/app")
     settings = AuthSettings(
         jwt_secret="production-secret",
         jwt_ttl_seconds=900,
@@ -317,35 +320,48 @@ def test_new_auth_token_returns_only_hash_for_storage():
     assert raw_token != token_hash
 
 
-def test_password_reset_url_requires_explicit_public_base_url(monkeypatch):
+@pytest.mark.parametrize(
+    "url_builder, route",
+    [
+        (build_password_reset_url, "/auth/reset-password"),
+        (build_verification_url, "/auth/verify-email"),
+    ],
+)
+def test_auth_urls_require_an_explicit_valid_https_public_base_url(url_builder, route):
     with pytest.raises(ValueError, match="AUTH_PUBLIC_BASE_URL"):
-        build_password_reset_url("raw-token")
+        url_builder("raw-token")
 
     assert (
-        build_password_reset_url("raw-token", "https://public.example.com/app/")
-        == "https://public.example.com/app/auth/reset-password?token=raw-token"
+        url_builder("raw-token", "https://public.example.com/app/")
+        == f"https://public.example.com/app{route}?token=raw-token"
     )
 
 
-def test_verification_url_requires_explicit_https_public_base_url(monkeypatch):
-    with pytest.raises(ValueError, match="AUTH_PUBLIC_BASE_URL"):
-        build_verification_url("raw-token")
+@pytest.mark.parametrize("url_builder", [build_password_reset_url, build_verification_url])
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://public.example.com/app", "https:///app", "https://user@/app"],
+)
+def test_auth_urls_reject_invalid_public_base_urls_without_leaking_configuration(url_builder, base_url):
+    with pytest.raises(ValueError, match="AUTH_PUBLIC_BASE_URL") as error:
+        url_builder("raw-token", base_url)
 
-    with pytest.raises(ValueError, match="AUTH_PUBLIC_BASE_URL"):
-        build_verification_url("raw-token", "http://public.example.com/app/")
-
-    assert (
-        build_verification_url("raw-token", "https://public.example.com/app/")
-        == "https://public.example.com/app/auth/verify-email?token=raw-token"
-    )
+    assert base_url not in str(error.value)
 
 
-def test_verification_url_quotes_token(monkeypatch):
+@pytest.mark.parametrize(
+    "url_builder, route",
+    [
+        (build_password_reset_url, "/auth/reset-password"),
+        (build_verification_url, "/auth/verify-email"),
+    ],
+)
+def test_auth_urls_preserve_path_prefix_and_quote_tokens(monkeypatch, url_builder, route):
     monkeypatch.setenv("AUTH_PUBLIC_BASE_URL", "https://public.example.com/app/")
 
     assert (
-        build_verification_url("raw token?+/")
-        == "https://public.example.com/app/auth/verify-email?token=raw%20token%3F%2B%2F"
+        url_builder("raw token?+/")
+        == f"https://public.example.com/app{route}?token=raw%20token%3F%2B%2F"
     )
 
 

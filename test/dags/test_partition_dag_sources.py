@@ -172,6 +172,31 @@ def test_warning_summary_runs_matching_with_same_business_date(monkeypatch):
     run_rebuild.assert_called_once()
 
 
+def test_matching_dag_passes_the_configured_bearer_token_to_both_cli_calls(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "dag-token")
+    monkeypatch.setenv("PAPER_TRADING_API_BASE_URL", "http://paper-trading:8000")
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: date(2026, 7, 28))
+    run_matching = Mock(return_value={"id": 7})
+    run_rebuild = Mock(return_value={"rebuilt_account_ids": []})
+    monkeypatch.setattr(dag_module, "run_paper_trading_matching", run_matching)
+    monkeypatch.setattr(dag_module, "run_paper_trading_ledger_rebuild", run_rebuild)
+
+    dag_module.run_paper_trading_matching_for_active_accounts(
+        data_interval_end=pendulum.datetime(2026, 7, 28, 8, tz="UTC")
+    )
+
+    assert run_matching.call_args.kwargs == {
+        "trade_date": "2026-07-28",
+        "base_url": "http://paper-trading:8000",
+        "token": "dag-token",
+    }
+    assert run_rebuild.call_args.kwargs == {"base_url": "http://paper-trading:8000", "token": "dag-token"}
+
+
 def test_daily_dag_rebuild_failures_are_not_swallowed():
     source = read_source(ROOT / "dags/download_stock_history_daily.py")
     matching_source = source[source.index("def run_paper_trading_matching_for_active_accounts") :]

@@ -6,7 +6,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_PLACEHOLDERS = (
     "placeholder:25:placeholder:placeholder:"
-    "placeholder@example.invalid:placeholder@example.invalid:placeholder:placeholder"
+    "placeholder@example.invalid:placeholder@example.invalid:placeholder:placeholder:"
+    "false:https://placeholder.example.invalid:owner@example.invalid"
 )
 
 
@@ -24,12 +25,13 @@ def _run_test_runner(
         "#!/usr/bin/env bash\n"
         "printf 'docker %s TEST_DB_HOST_PORT=%s TEST_POSTGRESQL_URL=%s "
         "FROG_ENV=%s PAPER_TRADING_JWT_SECRET=%s PAPER_TRADING_COOKIE_SECURE=%s "
-        "COMPOSE_PLACEHOLDERS=%s:%s:%s:%s:%s:%s:%s:%s\\n' "
+        "COMPOSE_PLACEHOLDERS=%s:%s:%s:%s:%s:%s:%s:%s:%s:%s:%s\\n' "
         '"${*}" "${TEST_DB_HOST_PORT:-}" "${TEST_POSTGRESQL_URL:-}" '
         '"${FROG_ENV:-}" "${PAPER_TRADING_JWT_SECRET:-}" "${PAPER_TRADING_COOKIE_SECURE:-}" '
         '"${SMTP_HOST:-}" "${SMTP_PORT:-}" "${SMTP_USER:-}" '
         '"${SMTP_PASSWORD:-}" "${SMTP_MAIL_FROM:-}" "${ALERT_EMAILS:-}" '
         '"${TUSHARE_TOKEN:-}" "${PAPER_TRADING_API_TOKEN:-}" '
+        '"${AUTH_REGISTRATION_ENABLED:-}" "${AUTH_PUBLIC_BASE_URL:-}" "${AUTH_OWNER_EMAIL:-}" '
         '>> "$COMMAND_LOG"\n',
         encoding="utf-8",
     )
@@ -70,6 +72,9 @@ def _run_test_runner(
         "ALERT_EMAILS",
         "TUSHARE_TOKEN",
         "PAPER_TRADING_API_TOKEN",
+        "AUTH_REGISTRATION_ENABLED",
+        "AUTH_PUBLIC_BASE_URL",
+        "AUTH_OWNER_EMAIL",
     ):
         environment.pop(name, None)
     for name in ("FROG_ENV", "PAPER_TRADING_JWT_SECRET", "PAPER_TRADING_COOKIE_SECURE"):
@@ -115,6 +120,17 @@ def test_runner_starts_test_database_runs_pytest_and_cleans_up(tmp_path: Path):
         "test-jwt-secret-for-runner-defaults-1234567890 PAPER_TRADING_COOKIE_SECURE=false "
         f"COMPOSE_PLACEHOLDERS={COMPOSE_PLACEHOLDERS}",
     ]
+
+
+def test_compose_contract_keeps_paper_trading_on_shared_smtp_and_redis_dependencies():
+    compose_file = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    paper_trading_block = compose_file.split("  paper-trading:\n", maxsplit=1)[1].split("  paper-trading-frontend:\n", maxsplit=1)[0]
+
+    assert "redis:\n        condition: service_started" in paper_trading_block
+    assert "<<: [*db-common-env, *airflow-email-env]" in paper_trading_block
+    assert "REDIS_URL: redis://redis:6379/0" in paper_trading_block
+    assert "MAIL_SERVER: ${SMTP_HOST:?SMTP_HOST is required}" in compose_file
+    assert "MAIL_RECEIVERS: ${ALERT_EMAILS:?ALERT_EMAILS is required}" in compose_file
 
 
 def test_runner_preserves_explicit_auth_environment(tmp_path: Path):

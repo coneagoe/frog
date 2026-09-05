@@ -10,6 +10,9 @@ compose() {
     SMTP_MAIL_FROM=placeholder@example.invalid \
     ALERT_EMAILS=placeholder@example.invalid \
     TUSHARE_TOKEN=placeholder \
+    AUTH_REGISTRATION_ENABLED=false \
+    AUTH_PUBLIC_BASE_URL=https://placeholder.example.invalid \
+    AUTH_OWNER_EMAIL=owner@example.invalid \
     PAPER_TRADING_API_TOKEN=placeholder \
     docker compose "$@"
 }

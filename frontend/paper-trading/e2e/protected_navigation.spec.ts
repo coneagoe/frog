@@ -28,6 +28,41 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("browser registration, email verification, login, and protected navigation use session and CSRF cookies", async ({ page, request }, testInfo) => {
+  const email = `e2e-auth-${testInfo.project.name}-${testInfo.parallelIndex}@example.test`;
+  const password = "Validpassword1";
+
+  await page.goto("/accounts");
+  await expect(page).toHaveURL(/\/login\?return_to=%2Faccounts$/);
+
+  await page.goto("/register");
+  await page.getByLabel("Email address").fill(email);
+  await page.locator("#auth-password").fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("status")).toHaveText(/Check your email/);
+
+  const capturedMail = await request.get(`http://127.0.0.1:8100/__test__/mail/latest?email=${encodeURIComponent(email)}`);
+  expect(capturedMail.ok()).toBeTruthy();
+  const { verificationPath } = await capturedMail.json() as { verificationPath: string };
+
+  await page.goto(verificationPath);
+  await expect(page.getByRole("status")).toHaveText(/has been verified/);
+  await page.getByRole("link", { name: "Back to login" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await page.getByLabel("Email address").fill(email);
+  await page.locator("#auth-password").fill(password);
+  const [loginResponse] = await Promise.all([
+    page.waitForResponse("**/api/auth/login"),
+    page.getByRole("button", { name: "Log in" }).click()
+  ]);
+  expect(loginResponse.ok()).toBeTruthy();
+
+  await expect.poll(async () => (await page.context().cookies()).map((cookie) => cookie.name)).toEqual(expect.arrayContaining(["paper_trading_session", "paper_trading_csrf"]));
+  await page.goto("/accounts");
+  await expect(page).toHaveURL(/\/accounts$/);
+  await expect(page.getByRole("heading", { name: "Continuation Account" })).toBeVisible();
+});
+
 test("protected navigation resumes after login with session and CSRF cookies", async ({ page }) => {
   await page.route("**/api/auth/login", async (route) => {
     await route.fulfill({

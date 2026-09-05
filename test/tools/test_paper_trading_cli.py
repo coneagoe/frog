@@ -2081,6 +2081,17 @@ class TestGlobalFlags:
         assert exit_code == EXIT_CODES["OK"]
         assert client.token == "explicit"
 
+    @patch.dict(os.environ, {"PAPER_TRADING_API_TOKEN": "env-token"}, clear=True)
+    def test_client_uses_bearer_token_without_browser_cookies(self):
+        session = MagicMock()
+        session.headers = {}
+        with patch("tools.paper_trading_cli.requests.Session", return_value=session):
+            client = PaperTradingApiClient()
+
+        assert client.token == "env-token"
+        assert session.headers == {"Authorization": "Bearer env-token"}
+        assert not hasattr(session, "cookies") or not session.cookies.called
+
 
 # ---------------------------------------------------------------------------
 # Error handling

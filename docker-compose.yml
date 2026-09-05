@@ -250,9 +250,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     environment:
-      <<: *db-common-env
+      <<: [*db-common-env, *airflow-email-env]
       DATABASE_URL: postgresql://quant:quant@db:5432/quant
+      REDIS_URL: redis://redis:6379/0
       FROG_ENV: ${FROG_ENV:?FROG_ENV is required for paper-trading}
       AUTH_REGISTRATION_ENABLED: ${AUTH_REGISTRATION_ENABLED:?AUTH_REGISTRATION_ENABLED is required for paper-trading}
       AUTH_PUBLIC_BASE_URL: ${AUTH_PUBLIC_BASE_URL:?AUTH_PUBLIC_BASE_URL is required for paper-trading}

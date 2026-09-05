@@ -11,6 +11,7 @@ The paper trading backend is containerized. Set the paper-trading environment va
 | `FROG_ENV` | Selects runtime mode for auth settings. | Required; accepted values are `local`, `test`, `production`. | Production rejects the built-in JWT secret and requires secure cookies. |
 | `AUTH_REGISTRATION_ENABLED` | Enables browser registration. | Required in Compose; registration only works when the value is exactly `true`. | Any other value leaves registration disabled. |
 | `AUTH_PUBLIC_BASE_URL` | Public base URL used when generating password-reset and email-verification links. | Required in Compose. | Must be an absolute `https://` URL. |
+| `AUTH_OWNER_EMAIL` | Verified user that receives ownership of pre-existing unowned paper accounts. | Required in Compose when such accounts exist. | Create and verify this user before the ownership backfill; it must identify exactly one user. |
 | `PAPER_TRADING_JWT_SECRET` | Signs browser session JWTs. | Required in production; otherwise defaults to the local-development secret. | Use a non-default secret in production. |
 | `PAPER_TRADING_JWT_TTL_SECONDS` | Browser session token lifetime. | Optional; defaults to `3600`. | Must be a positive integer. |
 | `PAPER_TRADING_COOKIE_SECURE` | Marks session and CSRF cookies as secure. | Required in Compose; defaults to `false` outside production. | Production requires `true`. |
@@ -38,6 +39,7 @@ Complete Docker Compose `.env` example:
 echo 'FROG_ENV="local"' >> .env
 echo 'AUTH_REGISTRATION_ENABLED="true"' >> .env
 echo 'AUTH_PUBLIC_BASE_URL="https://paper-trading.example.com"' >> .env
+echo 'AUTH_OWNER_EMAIL="owner@example.com"' >> .env
 echo 'PAPER_TRADING_JWT_SECRET="change-me"' >> .env
 echo 'PAPER_TRADING_JWT_TTL_SECONDS="3600"' >> .env
 echo 'PAPER_TRADING_COOKIE_SECURE="true"' >> .env
@@ -53,10 +55,20 @@ echo 'SMTP_USER="smtp-user"' >> .env
 echo 'ALERT_EMAILS="ops@example.com"' >> .env
 ```
 
-Then start the service:
+Before the first deployment that enables browser ownership, register and verify
+`AUTH_OWNER_EMAIL`. During the maintenance window, stop API, CLI, Celery, and
+Airflow writers; take and verify a database backup; then run the account
+ownership backfill with that verified, unique owner. It fails closed if the
+email is missing, ambiguous, or unverified, and must be recorded with the
+deployment owner and output. Start the API only after the backfill succeeds,
+then start the frontend and resume workers and schedules. New browser-created
+accounts are owned by the authenticated user; do not use the backfill as a
+routine reassignment tool.
+
+Then start the services:
 
 ```bash
-docker compose up -d paper-trading
+docker compose up -d paper-trading paper-trading-frontend
 ```
 
 The API listens on `http://localhost:8000`. Compose wires `SMTP_HOST`, `SMTP_PORT`, `SMTP_MAIL_FROM`, and `SMTP_PASSWORD` into the backend's `MAIL_*` variables; `SMTP_USER` and `ALERT_EMAILS` are stack-level prerequisites for the shared email wiring.
@@ -75,6 +87,7 @@ export PAPER_TRADING_API_TOKEN="change-me"
 export FROG_ENV=local
 export AUTH_REGISTRATION_ENABLED=true
 export AUTH_PUBLIC_BASE_URL="https://paper-trading.example.com"
+export AUTH_OWNER_EMAIL="owner@example.com"
 export PAPER_TRADING_JWT_SECRET="change-me"
 export PAPER_TRADING_JWT_TTL_SECONDS=3600
 export PAPER_TRADING_COOKIE_SECURE=false
@@ -92,11 +105,25 @@ export db_password=quant
 uv run uvicorn paper_trading.api.app:create_app --factory --host 0.0.0.0 --port 8000
 ```
 
-All endpoints require a bearer token:
+## Authentication modes
+
+Browser users authenticate through registration, email verification, and login.
+Login issues an HttpOnly session cookie plus a readable CSRF cookie. Browser
+requests use the same-origin frontend proxy; unsafe methods include the CSRF
+value in `X-CSRF-Token`. Do not put `PAPER_TRADING_API_TOKEN` in browser code,
+browser environment variables, or frontend requests.
+
+Bearer-token authentication is for trusted automation only: the repo CLI,
+operator scripts, and direct backend API calls. Those clients must send:
 
 ```bash
 Authorization: Bearer change-me
 ```
+
+Keep that token in a secret store and never paste production values into logs,
+examples, browser tests, or email links. Browser sessions and Bearer tokens are
+separate credentials; a browser session is not a substitute for automation,
+and a Bearer token is not a browser login mechanism.
 
 When `FROG_ENV=production`, the API refuses to start unless `PAPER_TRADING_JWT_SECRET` is set to a non-default value and `PAPER_TRADING_COOKIE_SECURE=true`.
 `AUTH_PUBLIC_BASE_URL` must be an absolute HTTPS URL because it is embedded in password-reset and email-verification links.

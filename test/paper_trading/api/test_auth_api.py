@@ -669,6 +669,10 @@ def test_cookie_authenticated_mutation_requires_matching_csrf(auth_client):
 
 def test_static_bearer_token_remains_compatible_and_csrf_exempt(auth_client):
     client, _ = auth_client
+    # A CLI/service request must remain bearer-authenticated even if the client
+    # happens to carry stale browser cookies.
+    client.cookies.set("paper_trading_session", "malformed-browser-session")
+    client.cookies.set("paper_trading_csrf", "stale-csrf-token")
     headers = {"Authorization": "Bearer api-secret"}
     response = client.post(
         "/paper/accounts",
@@ -676,6 +680,7 @@ def test_static_bearer_token_remains_compatible_and_csrf_exempt(auth_client):
         headers=headers,
     )
     assert response.status_code == 200
+    assert response.headers.get("set-cookie") is None
     assert client.post("/auth/logout", headers=headers).status_code == 401
 
 

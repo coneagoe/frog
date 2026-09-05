@@ -32,9 +32,17 @@ export default defineConfig({
       use: { ...devices["Pixel 5"], viewport: { width: 390, height: 844 } }
     }
   ],
-  webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 3100",
-    reuseExistingServer: false,
-    url: "http://127.0.0.1:3100"
-  }
+  webServer: [
+    {
+      command: "node e2e/auth_test_server.mjs",
+      reuseExistingServer: false,
+      url: "http://127.0.0.1:8100"
+    },
+    {
+      command: "npm run dev -- --hostname 127.0.0.1 --port 3100",
+      env: { PAPER_TRADING_API_BASE_URL: "http://127.0.0.1:8100" },
+      reuseExistingServer: false,
+      url: "http://127.0.0.1:3100"
+    }
+  ]
 });
