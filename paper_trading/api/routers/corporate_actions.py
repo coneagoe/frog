@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from paper_trading.api.deps import get_market_data_provider, get_session, require_api_token
+from paper_trading.api.deps import get_market_data_provider, get_paper_trading_repository, get_session, require_csrf
 from paper_trading.domain.enums import CorporateActionType
 from paper_trading.domain.errors import CorporateActionError
 from paper_trading.schemas.corporate_actions import (
@@ -18,7 +18,7 @@ from paper_trading.services.corporate_action_service import CorporateActionIdemp
 from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 
-router = APIRouter(prefix="/paper/accounts", dependencies=[Depends(require_api_token)])
+router = APIRouter(prefix="/paper/accounts")
 
 
 def _aware(value: datetime | None, name: str) -> datetime | None:
@@ -58,9 +58,10 @@ def create_corporate_action(
     account_id: int,
     request: CorporateActionCreateRequest,
     session: Session = Depends(get_session),
+    repo: PaperTradingRepository = Depends(get_paper_trading_repository),
+    _: None = Depends(require_csrf),
     market_data: MarketDataProvider = Depends(get_market_data_provider),
 ):
-    repo = PaperTradingRepository(session)
     service = CorporateActionService(repo, market_data=market_data)
     try:
         result = service.apply(
@@ -74,7 +75,8 @@ def create_corporate_action(
         )
     except KeyError as exc:
         session.rollback()
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        detail = f"paper account not found: {account_id}" if repo.owner_user_id is None else "paper account not found"
+        raise HTTPException(status_code=404, detail=detail) from exc
     except CorporateActionIdempotencyConflict as exc:
         session.rollback()
         raise HTTPException(
@@ -99,11 +101,11 @@ def list_corporate_actions(
     event_type: CorporateActionType | None = None,
     start_at: Annotated[datetime | None, Query()] = None,
     end_at: Annotated[datetime | None, Query()] = None,
-    session: Session = Depends(get_session),
+    repo: PaperTradingRepository = Depends(get_paper_trading_repository),
 ):
-    repo = PaperTradingRepository(session)
     if repo.get_account(account_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
+        detail = f"paper account not found: {account_id}" if repo.owner_user_id is None else "paper account not found"
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return [
         CorporateActionEventResponse.model_validate(action)
         for action in repo.list_corporate_actions(

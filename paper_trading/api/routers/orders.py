@@ -8,9 +8,10 @@ from paper_trading.api.deps import (
     get_etf_eligibility_service,
     get_hk_metadata_provider,
     get_market_data_provider,
+    get_paper_trading_repository,
     get_security_name_provider,
     get_session,
-    require_api_token,
+    require_csrf,
 )
 from paper_trading.api.response_enrichment import enrich_security_names
 from paper_trading.domain.errors import PaperTradingError
@@ -32,7 +33,14 @@ from paper_trading.storage.market_data import MarketDataProvider
 from paper_trading.storage.repository import PaperTradingRepository
 from paper_trading.storage.security_metadata import SecurityNameProvider
 
-router = APIRouter(prefix="/paper", dependencies=[Depends(require_api_token)])
+router = APIRouter(prefix="/paper")
+
+
+def _not_found(repo: PaperTradingRepository, resource: str, identifier: int) -> HTTPException:
+    detail = (
+        f"paper {resource} not found: {identifier}" if repo.owner_user_id is None else f"paper {resource} not found"
+    )
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
 
 @router.post("/accounts/{account_id}/orders", response_model=OrderResponse)
@@ -40,13 +48,14 @@ def create_order(
     account_id: int,
     request: CreateOrderRequest,
     session: Session = Depends(get_session),
+    repo: PaperTradingRepository = Depends(get_paper_trading_repository),
+    _: None = Depends(require_csrf),
     market_data: MarketDataProvider = Depends(get_market_data_provider),
     hk_metadata: HkConnectMetadataProvider = Depends(get_hk_metadata_provider),
     etf_eligibility_service: ETFEligibilityService = Depends(get_etf_eligibility_service),
 ):
-    repo = PaperTradingRepository(session)
     if repo.get_account(account_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper account not found: {account_id}")
+        raise _not_found(repo, "account", account_id)
     order_service = OrderService(repo, market_data, hk_metadata=hk_metadata, etf_eligibility=etf_eligibility_service)
     try:
         order = order_service.place_order(
@@ -70,18 +79,16 @@ def create_order(
 def list_orders(
     account_id: int,
     query: Annotated[OrderListQuery, Query()],
-    session: Session = Depends(get_session),
+    repo: PaperTradingRepository = Depends(get_paper_trading_repository),
     provider: SecurityNameProvider = Depends(get_security_name_provider),
 ):
-    rows, total_count = PaperTradingRepository(session).list_orders_page(
-        account_id, query.start_date, query.end_date, query.page, query.page_size
-    )
+    if repo.get_account(account_id) is None:
+        raise _not_found(repo, "account", account_id)
+    rows, total_count = repo.list_orders_page(account_id, query.start_date, query.end_date, query.page, query.page_size)
     total_pages = ceil(total_count / query.page_size)
     page = min(query.page, total_pages) if total_pages else 1
     if page != query.page:
-        rows, total_count = PaperTradingRepository(session).list_orders_page(
-            account_id, query.start_date, query.end_date, page, query.page_size
-        )
+        rows, total_count = repo.list_orders_page(account_id, query.start_date, query.end_date, page, query.page_size)
     return OrderListResponse(
         items=enrich_security_names(rows, OrderResponse, provider),
         page=page,
@@ -92,18 +99,25 @@ def list_orders(
 
 
 @router.get("/orders/{order_id}", response_model=OrderResponse)
-def get_order(order_id: int, session: Session = Depends(get_session)):
-    return PaperTradingRepository(session).get_order(order_id)
+def get_order(order_id: int, repo: PaperTradingRepository = Depends(get_paper_trading_repository)):
+    try:
+        return repo.get_order(order_id)
+    except KeyError as exc:
+        raise _not_found(repo, "order", order_id) from exc
 
 
 @router.post("/orders/{order_id}/cancel", response_model=OrderResponse)
 def cancel_order(
     order_id: int,
     session: Session = Depends(get_session),
+    repo: PaperTradingRepository = Depends(get_paper_trading_repository),
+    _: None = Depends(require_csrf),
     market_data: MarketDataProvider = Depends(get_market_data_provider),
 ):
-    repo = PaperTradingRepository(session)
-    order = OrderService(repo, market_data).cancel_order(order_id)
+    try:
+        order = OrderService(repo, market_data).cancel_order(order_id)
+    except KeyError as exc:
+        raise _not_found(repo, "order", order_id) from exc
     session.commit()
     return order
 
@@ -112,13 +126,14 @@ def cancel_order(
 def delete_order(
     order_id: int,
     session: Session = Depends(get_session),
+    repo: PaperTradingRepository = Depends(get_paper_trading_repository),
+    _: None = Depends(require_csrf),
     market_data: MarketDataProvider = Depends(get_market_data_provider),
     hk_metadata: HkConnectMetadataProvider = Depends(get_hk_metadata_provider),
 ):
-    repo = PaperTradingRepository(session)
     deleted = OrderDeleteService(repo, market_data, hk_metadata=hk_metadata).delete_order(order_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper order not found: {order_id}")
+        raise _not_found(repo, "order", order_id)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -128,13 +143,14 @@ def update_order_comment(
     order_id: int,
     request: UpdateOrderCommentRequest,
     session: Session = Depends(get_session),
+    repo: PaperTradingRepository = Depends(get_paper_trading_repository),
+    _: None = Depends(require_csrf),
     market_data: MarketDataProvider = Depends(get_market_data_provider),
 ):
-    repo = PaperTradingRepository(session)
     try:
         order = OrderService(repo, market_data).update_order_comment(order_id, request.comment)
-    except KeyError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"paper order not found: {order_id}")
+    except KeyError as exc:
+        raise _not_found(repo, "order", order_id) from exc
     session.commit()
     return order
 
@@ -143,11 +159,17 @@ def update_order_comment(
     "/accounts/{account_id}/orders/{order_id}/validity-checks",
     response_model=list[TradeValidityCheckResponse],
 )
-def list_order_validity_checks(account_id: int, order_id: int, session: Session = Depends(get_session)):
-    repo = PaperTradingRepository(session)
-    order = repo.get_order(order_id)
+def list_order_validity_checks(
+    account_id: int, order_id: int, repo: PaperTradingRepository = Depends(get_paper_trading_repository)
+):
+    if repo.get_account(account_id) is None:
+        raise _not_found(repo, "account", account_id)
+    try:
+        order = repo.get_order(order_id)
+    except KeyError as exc:
+        raise _not_found(repo, "order", order_id) from exc
     if order.account_id != account_id:
-        return []
+        raise _not_found(repo, "order", order_id)
     return repo.list_trade_validity_checks(order_id)
 
 
@@ -155,10 +177,11 @@ def list_order_validity_checks(account_id: int, order_id: int, session: Session 
 def list_trades(
     account_id: int,
     query: Annotated[OrderListQuery, Query()],
-    session: Session = Depends(get_session),
+    repo: PaperTradingRepository = Depends(get_paper_trading_repository),
     provider: SecurityNameProvider = Depends(get_security_name_provider),
 ):
-    repo = PaperTradingRepository(session)
+    if repo.get_account(account_id) is None:
+        raise _not_found(repo, "account", account_id)
     rows, total_count = repo.list_trades_page(account_id, query.start_date, query.end_date, query.page, query.page_size)
     total_pages = ceil(total_count / query.page_size)
     page = min(query.page, total_pages) if total_pages else 1

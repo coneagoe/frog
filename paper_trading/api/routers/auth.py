@@ -44,6 +44,9 @@ _EMAIL_VERIFICATION_EMAIL_RATE_LIMIT = 3
 _EMAIL_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS = 3600
 _REGISTRATION_RATE_LIMIT_KEY_PREFIX = "paper_trading:auth:registration"
 _VERIFICATION_EMAIL_RATE_LIMIT_KEY_PREFIX = "paper_trading:auth:verification_email"
+_LOGIN_RATE_LIMIT_KEY_PREFIX = "paper_trading:auth:login"
+_LOGIN_RATE_LIMIT = 3
+_LOGIN_RATE_LIMIT_WINDOW_SECONDS = 3600
 _EMAIL_VERIFICATION_RESPONSE = {"message": "If the email exists, verification instructions have been sent."}
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -160,6 +163,17 @@ def _verification_email_rate_limit(redis_client: redis.Redis, ip_address: str, e
         key_prefix=_VERIFICATION_EMAIL_RATE_LIMIT_KEY_PREFIX,
         window_seconds=_EMAIL_VERIFICATION_RATE_LIMIT_WINDOW_SECONDS,
         limit=_EMAIL_VERIFICATION_EMAIL_RATE_LIMIT,
+    )
+
+
+def _login_rate_limit(redis_client: redis.Redis, ip_address: str, email: str) -> bool:
+    return _rate_limit(
+        redis_client,
+        ip_address,
+        email,
+        key_prefix=_LOGIN_RATE_LIMIT_KEY_PREFIX,
+        window_seconds=_LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+        limit=_LOGIN_RATE_LIMIT,
     )
 
 
@@ -312,10 +326,31 @@ def resend_verification_email(
 
 
 @router.post("/login", response_model=Identity)
-def login(credentials: Credentials, response: Response, session: Session = Depends(get_session)) -> Identity:
-    user = session.scalar(select(User).where(User.email == credentials.email))
+def login(
+    credentials: Credentials,
+    response: Response,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> Identity:
+    email = normalize_email(credentials.email)
+    try:
+        redis_client = _get_redis_client()
+        if not _login_rate_limit(redis_client, request.client.host if request.client else "unknown", email):
+            raise _generic_unauthorized()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Login is temporarily unavailable") from exc
+
+    try:
+        user = session.scalar(select(User).where(User.email == email))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Login is temporarily unavailable") from exc
     password_hash = user.password_hash if user is not None and credentials.password else _DUMMY_PASSWORD_HASH
-    password_valid = verify_password(credentials.password, password_hash)
+    try:
+        password_valid = verify_password(credentials.password, password_hash)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Login is temporarily unavailable") from exc
     if user is None or not password_valid or user.email_verified_at is None:
         raise _generic_unauthorized()
     settings = AuthSettings.from_environment()

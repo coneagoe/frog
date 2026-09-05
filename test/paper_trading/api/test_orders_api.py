@@ -590,6 +590,37 @@ def test_get_order_validity_checks_returns_evidence(monkeypatch, sqlite_session)
     assert payload[0]["data_granularity"] == "daily"
 
 
+def test_get_foreign_order_validity_checks_returns_404(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    session = sqlite_session
+    Base.metadata.create_all(session.get_bind())
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_market_data_provider] = lambda: StorageMarketDataProvider(
+        FakeHistoryStorage({}), FakeTradeCalendar([date(2026, 6, 16)])
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret"}
+    repo = PaperTradingRepository(session)
+    first = repo.create_account("first", Decimal("100000"))
+    second = repo.create_account("second", Decimal("100000"))
+    order = repo.create_order(
+        first.id,
+        "000001",
+        OrderSide.BUY,
+        100,
+        Decimal("10"),
+        date(2026, 6, 16),
+        OrderStatus.ACCEPTED,
+    )
+    session.commit()
+
+    response = client.get(f"/paper/accounts/{second.id}/orders/{order.id}/validity-checks", headers=headers)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == f"paper order not found: {order.id}"
+
+
 def test_order_comment_is_created_copied_to_trade_and_updated(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
     session = sqlite_session
