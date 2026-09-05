@@ -4,8 +4,7 @@ type RouteContext = { params: Promise<{ path: string[] }> };
 
 async function proxy(request: Request, context: RouteContext) {
   const baseUrl = process.env.PAPER_TRADING_API_BASE_URL;
-  const token = process.env.PAPER_TRADING_API_TOKEN;
-  if (!baseUrl || !token) {
+  if (!baseUrl) {
     return NextResponse.json(
       { code: "FRONTEND_CONFIG_ERROR", message: "Paper trading API configuration is missing" },
       { status: 500 }
@@ -18,9 +17,12 @@ async function proxy(request: Request, context: RouteContext) {
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
 
   try {
-    const headers = new Headers({ authorization: `Bearer ${token}` });
-    if (body) {
-      headers.set("content-type", request.headers.get("content-type") ?? "application/json");
+    const headers = new Headers();
+    for (const header of ["cookie", "content-type", "x-csrf-token"]) {
+      const value = request.headers.get(header);
+      if (value) {
+        headers.set(header, value);
+      }
     }
     const init: RequestInit & { duplex?: "half" } = {
       method: request.method,
@@ -31,10 +33,9 @@ async function proxy(request: Request, context: RouteContext) {
       init.duplex = "half";
     }
     const response = await fetch(targetUrl.toString(), init);
-    const text = await response.text();
-    return new Response(response.status === 204 ? null : text, {
+    return new Response(response.status === 204 ? null : response.body, {
       status: response.status,
-      headers: { "content-type": response.headers.get("content-type") ?? "application/json" }
+      headers: response.headers
     });
   } catch {
     return NextResponse.json({ code: "BACKEND_UNAVAILABLE", message: "Paper trading backend is unavailable" }, { status: 502 });

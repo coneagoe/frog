@@ -16,7 +16,7 @@ The paper trading backend is containerized. Set the paper-trading environment va
 | `PAPER_TRADING_COOKIE_SECURE` | Marks session and CSRF cookies as secure. | Required in Compose; defaults to `false` outside production. | Production requires `true`. |
 | `PAPER_TRADING_SESSION_COOKIE_NAME` | Session cookie name. | Optional; defaults to `paper_trading_session`. | Must be a valid cookie token. |
 | `PAPER_TRADING_CSRF_COOKIE_NAME` | CSRF cookie name. | Optional; defaults to `paper_trading_csrf`. | Must be a valid cookie token. |
-| `PAPER_TRADING_API_TOKEN` | Bearer token for the backend API and the server-side frontend proxy. | Required in Compose and frontend startup. | Treat as a secret; browser code does not receive it. |
+| `PAPER_TRADING_API_TOKEN` | Bearer token for backend API and CLI access. | Required in Compose. | Treat as a secret. The browser frontend uses session and CSRF cookies instead. |
 | `REDIS_URL` | Redis connection used by auth rate limiting. | Optional; defaults to `redis://redis:6379/0`. | If Redis is unavailable, auth operations fail closed. |
 | `MAIL_SERVER` | SMTP host for verification and password-reset mail. | Required when auth mail is used. | Set by Compose from `SMTP_HOST`. |
 | `MAIL_PORT` | SMTP port for verification and password-reset mail. | Required when auth mail is used. | Set by Compose from `SMTP_PORT`; must be numeric. |
@@ -119,13 +119,11 @@ The paper trading frontend lives in `frontend/paper-trading` and proxies browser
 | Variable | Purpose | Required / default | Security / format notes |
 | --- | --- | --- | --- |
 | `PAPER_TRADING_API_BASE_URL` | Base URL used by the Next.js server-side routes to reach the paper-trading backend. | Required for local frontend startup; Compose sets it to the backend service URL. | Must point to the backend the server can reach. |
-| `PAPER_TRADING_API_TOKEN` | Bearer token used by the server-side proxy when calling the backend. | Required for local frontend startup and Compose. | Server-side only; browser code does not receive it. Treat as a secret. |
 
 ```bash
 cd frontend/paper-trading
 npm install
 export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
-export PAPER_TRADING_API_TOKEN="change-me"
 npm run dev
 ```
 
@@ -137,7 +135,11 @@ Open `http://localhost:3000/accounts`. The frontend has separate workspaces for 
 - `Trades`: review historical executions in pages of 25, filter by Asia/Shanghai trade date (today, trailing 7 or 30 days, or a custom inclusive range), preserve the account, date range, and page in the URL, and keep the execution history read-only.
 - `Analytics`: review snapshots, total assets, trades, and cash movements. Repair-marked legacy accounts keep the stored snapshot chart but show a repair-required state instead of performance panels.
 
-The bearer token is read only by Next.js route handlers. Browser code calls local `/api/paper/*` endpoints and does not receive `PAPER_TRADING_API_TOKEN`.
+Browser code calls local `/api/paper/*` endpoints with its session cookie. The
+frontend adds the readable CSRF cookie as `X-CSRF-Token` on POST, PATCH, and
+DELETE requests; the proxy forwards the browser's cookies, content type, and
+CSRF header to the backend. The frontend does not require
+`PAPER_TRADING_API_TOKEN`.
 
 ## CLI Wrapper
 

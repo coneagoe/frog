@@ -116,6 +116,24 @@ describe("AuthForm", () => {
     expect(pushMock).toHaveBeenCalledWith("/accounts");
   });
 
+  it("uses a validated local return path after login", async () => {
+    const user = userEvent.setup();
+    render(<AuthForm mode="login" returnTo="/orders?status=open" />);
+    await user.type(screen.getByLabelText("Email address"), "user@example.com");
+    await user.type(screen.getByLabelText("Password"), "Validpassword1");
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/orders?status=open"));
+  });
+
+  it("falls back to accounts for unsafe return paths", async () => {
+    const user = userEvent.setup();
+    render(<AuthForm mode="login" returnTo="https://example.com/orders" />);
+    await user.type(screen.getByLabelText("Email address"), "user@example.com");
+    await user.type(screen.getByLabelText("Password"), "Validpassword1");
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledWith("/accounts"));
+  });
+
   it("clears errors on edit and only marks the invalid field", async () => {
     const user = userEvent.setup();
     render(<AuthForm mode="login" />);

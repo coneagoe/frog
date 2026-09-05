@@ -256,6 +256,7 @@ services:
       FROG_ENV: ${FROG_ENV:?FROG_ENV is required for paper-trading}
       AUTH_REGISTRATION_ENABLED: ${AUTH_REGISTRATION_ENABLED:?AUTH_REGISTRATION_ENABLED is required for paper-trading}
       AUTH_PUBLIC_BASE_URL: ${AUTH_PUBLIC_BASE_URL:?AUTH_PUBLIC_BASE_URL is required for paper-trading}
+      AUTH_OWNER_EMAIL: ${AUTH_OWNER_EMAIL:?AUTH_OWNER_EMAIL is required when paper accounts need ownership backfill}
       PAPER_TRADING_JWT_SECRET: ${PAPER_TRADING_JWT_SECRET:?PAPER_TRADING_JWT_SECRET is required for paper-trading}
       PAPER_TRADING_COOKIE_SECURE: ${PAPER_TRADING_COOKIE_SECURE:?PAPER_TRADING_COOKIE_SECURE is required for paper-trading}
       PAPER_TRADING_API_TOKEN: ${PAPER_TRADING_API_TOKEN:?PAPER_TRADING_API_TOKEN is required in .env}
@@ -269,7 +270,6 @@ services:
     depends_on: [paper-trading]
     environment:
       PAPER_TRADING_API_BASE_URL: http://paper-trading:8000
-      PAPER_TRADING_API_TOKEN: ${PAPER_TRADING_API_TOKEN:?PAPER_TRADING_API_TOKEN is required in .env}
     ports:
       - "3000:3000"
 

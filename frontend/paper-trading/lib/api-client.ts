@@ -37,6 +37,12 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
+  if (["POST", "PATCH", "DELETE"].includes(init?.method?.toUpperCase() ?? "GET")) {
+    const csrfToken = readCsrfToken();
+    if (csrfToken) {
+      headers.set("X-CSRF-Token", csrfToken);
+    }
+  }
   const response = await fetch(`/api/paper${path}`, {
     ...init,
     headers

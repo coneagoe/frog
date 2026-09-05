@@ -76,7 +76,7 @@ export function VerifyEmailPanel({ token }: { token?: string }) {
             required
           />
         </label>
-        {resendError && <p role="alert">We couldn't send a verification link. Try again.</p>}
+        {resendError && <p role="alert">We couldn&apos;t send a verification link. Try again.</p>}
         {resendNotice && <p role="status">{resendNotice}</p>}
         <button className="button auth-form__submit" type="submit" disabled={resendPending} aria-busy={resendPending}>
           {resendPending ? "Sending verification link..." : "Resend verification email"}

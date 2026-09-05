@@ -8,7 +8,11 @@ import type { AuthIdentity } from "@/lib/types";
 
 type AuthMode = "login" | "register" | "forgot-password" | "reset-password";
 
-export function AuthForm({ mode, token, onSuccess }: { mode: AuthMode; token?: string; onSuccess?: (identity: AuthIdentity) => void | Promise<void> }) {
+function getSafeReturnPath(returnTo?: string) {
+  return typeof returnTo === "string" && /^\/(?!\/)/.test(returnTo) && !returnTo.includes("\\") ? returnTo : "/accounts";
+}
+
+export function AuthForm({ mode, token, returnTo, onSuccess }: { mode: AuthMode; token?: string; returnTo?: string; onSuccess?: (identity: AuthIdentity) => void | Promise<void> }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,6 +30,7 @@ export function AuthForm({ mode, token, onSuccess }: { mode: AuthMode; token?: s
   const isReset = mode === "reset-password";
   const actionLabel = isRegister ? "Create account" : isForgot ? "Send reset link" : isReset ? "Reset password" : "Log in";
   const pendingLabel = isRegister ? "Creating account..." : isForgot ? "Sending reset link..." : isReset ? "Resetting password..." : "Logging in...";
+  const loginTarget = getSafeReturnPath(returnTo);
 
   if (expired) return <section className="auth-card" aria-labelledby="auth-title"><div className="auth-card__intro"><p className="auth-card__eyebrow">Paper Trading</p><h1 id="auth-title">Reset your password</h1><p role="alert">This password reset link is invalid or has expired.</p></div><p className="auth-card__switch"><Link href="/forgot-password">Request a new reset link</Link></p></section>;
 
@@ -59,7 +64,7 @@ export function AuthForm({ mode, token, onSuccess }: { mode: AuthMode; token?: s
           setSuccess("Check your email for a verification link before signing in.");
         } else {
           await onSuccess?.(identity);
-          router.push("/accounts");
+          router.push(loginTarget);
         }
       } else if (isForgot) {
         await forgotPassword({ email: normalizedEmail });

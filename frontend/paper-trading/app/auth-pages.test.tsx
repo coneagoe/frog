@@ -24,8 +24,8 @@ vi.mock("next/navigation", () => ({
 describe("auth pages", () => {
   afterEach(cleanup);
 
-  it("renders login and register pages with the correct mode", () => {
-    render(<LoginPage />);
+  it("renders login and register pages with the correct mode", async () => {
+    render(await LoginPage({ searchParams: Promise.resolve(undefined) }));
     expect(screen.getByTestId("auth-form-login")).toBeInTheDocument();
     expect(authFormMock.mock.lastCall?.[0]).toEqual({ mode: "login" });
 
@@ -33,6 +33,12 @@ describe("auth pages", () => {
     render(<RegisterPage />);
     expect(screen.getByTestId("auth-form-register")).toBeInTheDocument();
     expect(authFormMock.mock.lastCall?.[0]).toEqual({ mode: "register" });
+  });
+
+  it("passes through the login return_to search param", async () => {
+    render(await LoginPage({ searchParams: Promise.resolve({ return_to: "/trades?symbol=600000" }) }));
+    expect(screen.getByTestId("auth-form-login")).toBeInTheDocument();
+    expect(authFormMock.mock.lastCall?.[0]).toEqual({ mode: "login", returnTo: "/trades?symbol=600000" });
   });
 
   it("renders forgot-password and reset-password pages with the correct mode", async () => {

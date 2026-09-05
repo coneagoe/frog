@@ -4,6 +4,7 @@ import {
   apiGet,
   createCorporateAction,
   createAccount,
+  deleteAccount,
   depositCash,
   importPositions,
   listOrders,
@@ -16,6 +17,7 @@ import { forgotPassword, getCurrentUser, login, logout, register, resendVerifica
 
 afterEach(() => {
   vi.restoreAllMocks();
+  document.cookie = "paper_trading_csrf=; Max-Age=0; path=/";
 });
 
 describe("api client", () => {
@@ -94,6 +96,7 @@ describe("api client", () => {
   });
 
   it("posts account creation payloads", async () => {
+    document.cookie = "paper_trading_csrf=csrf%2Dvalue";
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await createAccount({ name: "demo", initial_cash: "100000.00" });
@@ -101,6 +104,21 @@ describe("api client", () => {
       "/api/paper/accounts",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "demo", initial_cash: "100000.00" }) })
     );
+    expect((fetchMock.mock.calls[0][1].headers as Headers).get("X-CSRF-Token")).toBe("csrf-value");
+  });
+
+  it("adds the CSRF header to PATCH and DELETE business requests", async () => {
+    document.cookie = "paper_trading_csrf=csrf%2Dvalue";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1, comment: "updated" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateOrderComment(42, "updated");
+    await deleteAccount(1);
+
+    expect((fetchMock.mock.calls[0][1].headers as Headers).get("X-CSRF-Token")).toBe("csrf-value");
+    expect((fetchMock.mock.calls[1][1].headers as Headers).get("X-CSRF-Token")).toBe("csrf-value");
   });
 
   it("sends updateOrderComment PATCH", async () => {
