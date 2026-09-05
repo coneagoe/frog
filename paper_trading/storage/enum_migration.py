@@ -33,6 +33,8 @@ from paper_trading.domain.enums import (
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import (
+    AuthToken,
+    Base,
     DailyBarDiagnostic,
     ETFEligibility,
     PaperAccount,
@@ -49,6 +51,7 @@ from storage.model import (
     PaperTrade,
     PaperTradeValidityCheck,
     PaperValuationGap,
+    User,
 )
 from storage.model.paper_trading import (
     ETF_ELIGIBILITY_SYMBOL_CHECK_NAME,
@@ -556,6 +559,7 @@ def _adapter_apply(connection: Connection) -> bool:
     changed = bool(missing_tables) or _has_pending_enum_column_changes(connection, groups)
     changed = _ensure_etf_eligibility_symbol_check(connection) or changed
     if missing_tables:
+        _ensure_auth_tables(connection)
         for group in groups:
             _create_type(connection, group)
         _create_missing_tables(
@@ -838,6 +842,11 @@ def _create_missing_tables(
     if tables:
         # Metadata creates the mapped native types and respects foreign-key order.
         tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
+
+
+def _ensure_auth_tables(connection: Connection) -> None:
+    """Create auth tables before paper accounts and their user foreign key."""
+    Base.metadata.create_all(connection, tables=[User.__table__, AuthToken.__table__], checkfirst=True)
 
 
 def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:

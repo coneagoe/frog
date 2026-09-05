@@ -404,6 +404,7 @@ def test_ensure_paper_trading_schema_upgrades_hk_connect_columns(storage, paper_
     assert tb_name_daily_bar_diagnostics in inspector.get_table_names()
     account_columns = {column["name"] for column in inspector.get_columns(tb_name_paper_accounts)}
     assert {
+        "owner_user_id",
         "hk_commission_rate",
         "hk_min_commission",
         "hk_stamp_duty_rate",

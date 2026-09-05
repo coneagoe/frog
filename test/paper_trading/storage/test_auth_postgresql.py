@@ -76,10 +76,7 @@ def test_storage_startup_backfills_legacy_account_owner_once_on_postgresql(monke
             )
             connection.execute(text("CREATE TABLE paper_accounts (id INTEGER PRIMARY KEY, owner_user_id INTEGER)"))
             connection.execute(
-                text(
-                    "INSERT INTO users (id, email, email_verified_at) "
-                    "VALUES (1, 'owner@example.com', NOW())"
-                )
+                text("INSERT INTO users (id, email, email_verified_at) VALUES (1, 'owner@example.com', NOW())")
             )
             connection.execute(text("INSERT INTO paper_accounts (id, owner_user_id) VALUES (1, NULL), (2, NULL)"))
 
@@ -89,11 +86,200 @@ def test_storage_startup_backfills_legacy_account_owner_once_on_postgresql(monke
         storage._backfill_paper_account_ownership()
 
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT owner_user_id FROM paper_accounts ORDER BY id")).scalars().all() == [1, 1]
+            owner_ids = connection.execute(text("SELECT owner_user_id FROM paper_accounts ORDER BY id")).scalars().all()
+            assert owner_ids == [1, 1]
     finally:
         with engine.begin() as connection:
             connection.execute(text("DROP TABLE IF EXISTS paper_accounts CASCADE"))
             connection.execute(text("DROP TABLE IF EXISTS users CASCADE"))
+        engine.dispose()
+
+
+def _startup_storage(engine, monkeypatch) -> StorageDb:
+    monkeypatch.setattr(
+        "paper_trading.storage.enum_migration.migrate_paper_trading_enums",
+        lambda connection: None,
+    )
+    storage = object.__new__(StorageDb)
+    storage.engine = engine
+    return storage
+
+
+def _drop_startup_ownership_tables(connection) -> None:
+    connection.execute(text("DROP TABLE IF EXISTS paper_orders CASCADE"))
+    connection.execute(text("DROP TABLE IF EXISTS paper_accounts CASCADE"))
+    connection.execute(text("DROP TABLE IF EXISTS auth_tokens CASCADE"))
+    connection.execute(text("DROP TABLE IF EXISTS users CASCADE"))
+
+
+def test_storage_startup_migrates_pre_auth_legacy_accounts_to_verified_owner_postgresql(monkeypatch):
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    engine = create_engine(cast(str, url))
+    monkeypatch.setenv("AUTH_OWNER_EMAIL", "rollout-owner@example.com")
+    try:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+            connection.execute(
+                text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, email_verified_at TIMESTAMPTZ)")
+            )
+            connection.execute(text("INSERT INTO users VALUES (7, 'rollout-owner@example.com', NOW())"))
+            connection.execute(text("CREATE TABLE paper_accounts (id INTEGER PRIMARY KEY, initial_cash NUMERIC)"))
+            connection.execute(text("INSERT INTO paper_accounts VALUES (1, 100), (2, 200)"))
+
+        storage = _startup_storage(engine, monkeypatch)
+        storage.ensure_paper_trading_schema()
+        storage.ensure_paper_trading_schema()
+
+        inspector = inspect(engine)
+        assert inspector.has_table("auth_tokens")
+        assert "owner_user_id" in {column["name"] for column in inspector.get_columns("paper_accounts")}
+        assert any(
+            foreign_key["constrained_columns"] == ["owner_user_id"] and foreign_key["referred_table"] == "users"
+            for foreign_key in inspector.get_foreign_keys("paper_accounts")
+        )
+        with engine.connect() as connection:
+            owner_ids = connection.execute(text("SELECT owner_user_id FROM paper_accounts ORDER BY id")).scalars().all()
+            assert owner_ids == [7, 7]
+    finally:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("owner_email", "users"),
+    [
+        ("rollout-owner@example.com", []),
+        ("rollout-owner@example.com", [(7, "rollout-owner@example.com", False)]),
+        (
+            "rollout-owner@example.com",
+            [(7, "rollout-owner@example.com", True), (8, "rollout-owner@example.com", True)],
+        ),
+    ],
+    ids=["no-user", "unverified", "ambiguous"],
+)
+def test_storage_startup_fails_closed_for_unowned_pre_auth_accounts_postgresql(monkeypatch, owner_email, users):
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    engine = create_engine(cast(str, url))
+    if owner_email is None:
+        monkeypatch.delenv("AUTH_OWNER_EMAIL", raising=False)
+    else:
+        monkeypatch.setenv("AUTH_OWNER_EMAIL", owner_email)
+    try:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+            connection.execute(
+                text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, email_verified_at TIMESTAMPTZ)")
+            )
+            connection.execute(text("CREATE TABLE paper_accounts (id INTEGER PRIMARY KEY, initial_cash NUMERIC)"))
+            for user_id, email, verified in users:
+                connection.execute(
+                    text("INSERT INTO users VALUES (:id, :email, :verified_at)"),
+                    {"id": user_id, "email": email, "verified_at": "2026-01-01T00:00:00+00:00" if verified else None},
+                )
+            connection.execute(text("INSERT INTO paper_accounts VALUES (1, 100)"))
+
+        with pytest.raises(RuntimeError, match="exactly one verified user"):
+            _startup_storage(engine, monkeypatch).ensure_paper_trading_schema()
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT owner_user_id FROM paper_accounts")).scalar_one_or_none() is None
+    finally:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+        engine.dispose()
+
+
+def test_storage_startup_repairs_missing_account_owner_foreign_key_postgresql(monkeypatch):
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    engine = create_engine(cast(str, url))
+    monkeypatch.setenv("AUTH_OWNER_EMAIL", "rollout-owner@example.com")
+    try:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+            connection.execute(
+                text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, email_verified_at TIMESTAMPTZ)")
+            )
+            connection.execute(text("INSERT INTO users VALUES (7, 'rollout-owner@example.com', NOW())"))
+            connection.execute(
+                text(
+                    "CREATE TABLE paper_accounts (id INTEGER PRIMARY KEY, owner_user_id INTEGER, initial_cash NUMERIC)"
+                )
+            )
+            connection.execute(text("INSERT INTO paper_accounts VALUES (1, NULL, 100), (2, 7, 200)"))
+
+        _startup_storage(engine, monkeypatch).ensure_paper_trading_schema()
+
+        inspector = inspect(engine)
+        assert any(
+            foreign_key["constrained_columns"] == ["owner_user_id"] and foreign_key["referred_table"] == "users"
+            for foreign_key in inspector.get_foreign_keys("paper_accounts")
+        )
+        with engine.connect() as connection:
+            owner_ids = connection.execute(text("SELECT owner_user_id FROM paper_accounts ORDER BY id")).scalars().all()
+            assert owner_ids == [7, 7]
+    finally:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+        engine.dispose()
+
+
+def test_storage_startup_preserves_unrelated_pre_auth_accounts_without_owner_email_postgresql(monkeypatch):
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    engine = create_engine(cast(str, url))
+    monkeypatch.delenv("AUTH_OWNER_EMAIL", raising=False)
+    try:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+            connection.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL)"))
+            connection.execute(text("CREATE TABLE paper_accounts (id INTEGER PRIMARY KEY, initial_cash NUMERIC)"))
+            connection.execute(text("INSERT INTO users VALUES (7, 'unrelated@example.com')"))
+            connection.execute(text("INSERT INTO paper_accounts VALUES (1, 100)"))
+
+        _startup_storage(engine, monkeypatch).ensure_paper_trading_schema()
+
+        assert "owner_user_id" not in {column["name"] for column in inspect(engine).get_columns("paper_accounts")}
+    finally:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+        engine.dispose()
+
+
+def test_storage_startup_fails_closed_without_owner_email_for_auth_owned_accounts_postgresql(monkeypatch):
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    engine = create_engine(cast(str, url))
+    monkeypatch.delenv("AUTH_OWNER_EMAIL", raising=False)
+    try:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
+            connection.execute(
+                text("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL, email_verified_at TIMESTAMPTZ)")
+            )
+            connection.execute(text("CREATE TABLE auth_tokens (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL)"))
+            connection.execute(
+                text(
+                    "CREATE TABLE paper_accounts (id INTEGER PRIMARY KEY, owner_user_id INTEGER, initial_cash NUMERIC)"
+                )
+            )
+            connection.execute(text("INSERT INTO users VALUES (7, 'owner@example.com', NULL)"))
+            connection.execute(text("INSERT INTO paper_accounts VALUES (1, NULL, 100)"))
+
+        with pytest.raises(RuntimeError, match="exactly one verified user"):
+            _startup_storage(engine, monkeypatch).ensure_paper_trading_schema()
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT owner_user_id FROM paper_accounts")).scalar_one_or_none() is None
+    finally:
+        with engine.begin() as connection:
+            _drop_startup_ownership_tables(connection)
         engine.dispose()
 
 

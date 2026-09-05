@@ -109,6 +109,7 @@ from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, Mo
 from .config import StorageConfig
 from .domain_enums import ForecastSnapshotStatus, SSFChangeSignalStatus, validate_ssf_event_types
 from .model import (
+    AuthToken,
     Base,
     ETFBasic,
     ETFNetFlow,
@@ -116,6 +117,7 @@ from .model import (
     ForecastSnapshotRecord,
     ForecastSnapshotRun,
     IndexDailyTurnover,
+    User,
     tb_name_a_stock_basic,
     tb_name_blackroom_record,
     tb_name_daily_bar_diagnostics,
@@ -513,6 +515,53 @@ def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
 
     excluded_tables = _ENUM_GOVERNED_PAPER_TRADING_TABLES | _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS
     return [table for table in tables if table.name not in excluded_tables]
+
+
+def _has_current_schema_table(bind: Any, table_name: str) -> bool:
+    if getattr(bind, "dialect", None) is not None and bind.dialect.name != "postgresql":
+        return cast(bool, inspect(bind).has_table(table_name))
+    statement = text(
+        "SELECT EXISTS ("
+        "SELECT 1 FROM pg_class AS c "
+        "JOIN pg_namespace AS n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = current_schema() AND c.relname = :table_name"
+        ")"
+    )
+    if hasattr(bind, "execute"):
+        return cast(bool, bind.execute(statement, {"table_name": table_name}).scalar_one())
+    with bind.connect() as connection:
+        return cast(bool, connection.execute(statement, {"table_name": table_name}).scalar_one())
+
+
+def _current_schema_columns(bind: Any, table_name: str) -> set[str]:
+    statement = text(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = :table_name"
+    )
+    if hasattr(bind, "execute"):
+        return set(bind.execute(statement, {"table_name": table_name}).scalars())
+    with bind.connect() as connection:
+        return set(connection.execute(statement, {"table_name": table_name}).scalars())
+
+
+def _has_paper_account_owner_foreign_key(bind: Any) -> bool:
+    if bind.dialect.name != "postgresql":
+        return False
+    inspector = inspect(bind)
+    return any(
+        foreign_key["constrained_columns"] == ["owner_user_id"] and foreign_key["referred_table"] == "users"
+        for foreign_key in inspector.get_foreign_keys(tb_name_paper_accounts)
+    )
+
+
+def _has_verified_auth_user(bind: Any) -> bool:
+    if not _has_current_schema_table(bind, "users"):
+        return False
+    statement = text("SELECT EXISTS (SELECT 1 FROM users WHERE email_verified_at IS NOT NULL)")
+    if hasattr(bind, "execute"):
+        return cast(bool, bind.execute(statement).scalar_one())
+    with bind.connect() as connection:
+        return cast(bool, connection.execute(statement).scalar_one())
 
 
 # Tables keyed by ETF/fund code instead of stock code.
@@ -4008,6 +4057,10 @@ class StorageDb:
 
         has_paper_orders = inspect(self.engine).has_table(tb_name_paper_orders)
         has_paper_accounts = inspect(self.engine).has_table(tb_name_paper_accounts)
+        has_current_users = _has_current_schema_table(self.engine, "users")
+        ownership_schema_present = self.engine.dialect.name == "postgresql" and (
+            "owner_user_id" in _current_schema_columns(self.engine, tb_name_paper_accounts) and has_current_users
+        )
         if self.engine.dialect.name == "postgresql":
             from paper_trading.storage.enum_migration import migrate_paper_trading_enums
 
@@ -4049,7 +4102,14 @@ class StorageDb:
                     )
                     conn.execute(text(f"UPDATE {tb_name_paper_position_lots} SET projected_cost_price = cost_price"))
 
+        if self.engine.dialect.name == "sqlite" and has_paper_accounts:
+            account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
+            if "owner_user_id" not in account_columns:
+                with self.engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN owner_user_id INTEGER"))
+
         if not has_paper_orders:
+            self._ensure_postgresql_paper_account_ownership(ownership_schema_present, has_paper_accounts)
             self._ensure_paper_account_repair_without_orders()
             return
 
@@ -4147,20 +4207,6 @@ class StorageDb:
 
         if has_paper_accounts:
             account_columns = {column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)}
-            if "owner_user_id" not in account_columns:
-                with self.engine.begin() as conn:
-                    conn.execute(text(f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN owner_user_id INTEGER"))
-                    if self.engine.dialect.name == "postgresql":
-                        conn.execute(
-                            text(
-                                f"ALTER TABLE {tb_name_paper_accounts} "
-                                "ADD CONSTRAINT fk_paper_accounts_owner_user_id_users "
-                                "FOREIGN KEY (owner_user_id) REFERENCES users(id)"
-                            )
-                        )
-                account_columns = {
-                    column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_accounts)
-                }
             account_fee_columns = {
                 "fee_preset": "VARCHAR(30) NOT NULL DEFAULT 'a_share'",
                 "commission_rate": "NUMERIC(20, 8) NOT NULL DEFAULT 0.0003",
@@ -4211,8 +4257,6 @@ class StorageDb:
                 )
                 with self.engine.begin() as conn:
                     conn.execute(text(f"UPDATE {tb_name_paper_accounts} SET {assignments}"))
-            if "owner_user_id" in account_columns:
-                self._backfill_paper_account_ownership()
             if self.engine.dialect.name != "postgresql":
                 self._ensure_sqlite_paper_account_repair_metadata()
         has_paper_snapshots = inspect(self.engine).has_table(tb_name_paper_account_snapshots)
@@ -4222,6 +4266,7 @@ class StorageDb:
         elif has_paper_snapshots:
             self._ensure_sqlite_paper_account_snapshot_series()
 
+        self._ensure_postgresql_paper_account_ownership(ownership_schema_present, has_paper_accounts)
         if inspect(self.engine).has_table(tb_name_paper_ledger_rebuilds):
             rebuild_columns = {
                 column["name"] for column in inspect(self.engine).get_columns(tb_name_paper_ledger_rebuilds)
@@ -4281,6 +4326,38 @@ class StorageDb:
             self._ensure_sqlite_paper_account_repair_metadata()
         if has_paper_snapshots:
             self._ensure_sqlite_paper_account_snapshot_series()
+
+    def _ensure_postgresql_paper_account_ownership(
+        self, schema_signal: bool | None = None, had_accounts_at_startup: bool = True
+    ) -> None:
+        if self.engine.dialect.name != "postgresql" or not _has_current_schema_table(
+            self.engine, tb_name_paper_accounts
+        ):
+            return
+        account_columns = _current_schema_columns(self.engine, tb_name_paper_accounts)
+        has_users = _has_current_schema_table(self.engine, "users")
+        has_auth_schema = (
+            schema_signal if schema_signal is not None else "owner_user_id" in account_columns and has_users
+        )
+        if not had_accounts_at_startup and not schema_signal:
+            return
+        if not has_auth_schema and not os.environ.get("AUTH_OWNER_EMAIL", "").strip():
+            return
+        if not has_users or not _has_current_schema_table(self.engine, "auth_tokens"):
+            Base.metadata.create_all(self.engine, tables=[User.__table__, AuthToken.__table__], checkfirst=True)
+        if "owner_user_id" not in account_columns:
+            with self.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {tb_name_paper_accounts} ADD COLUMN owner_user_id INTEGER"))
+        self._backfill_paper_account_ownership()
+        if not _has_paper_account_owner_foreign_key(self.engine):
+            with self.engine.begin() as conn:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {tb_name_paper_accounts} "
+                        "ADD CONSTRAINT fk_paper_accounts_owner_user_id_users "
+                        "FOREIGN KEY (owner_user_id) REFERENCES users(id)"
+                    )
+                )
 
     def _ensure_sqlite_paper_account_repair_metadata(self) -> None:
         if not inspect(self.engine).has_table(tb_name_paper_accounts):
@@ -4356,7 +4433,7 @@ class StorageDb:
             self._classify_sqlite_legacy_paper_account_chronology(conn)
 
     def _backfill_paper_account_ownership(self) -> None:
-        if not inspect(self.engine).has_table(tb_name_paper_accounts):
+        if not _has_current_schema_table(self.engine, tb_name_paper_accounts):
             return
         with self.engine.begin() as conn:
             has_unowned = conn.execute(
@@ -4368,7 +4445,7 @@ class StorageDb:
         if not owner_email or not owner_email.strip():
             raise RuntimeError("AUTH_OWNER_EMAIL must identify exactly one verified user for paper account ownership")
         owner_email = owner_email.strip().lower()
-        if not inspect(self.engine).has_table("users"):
+        if not _has_current_schema_table(self.engine, "users"):
             raise RuntimeError("AUTH_OWNER_EMAIL must identify exactly one verified user for paper account ownership")
         with self.engine.begin() as conn:
             matches = conn.execute(

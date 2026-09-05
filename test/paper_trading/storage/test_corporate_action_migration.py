@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from paper_trading.domain.enums import CashEventType, CorporateActionProcessingStatus, CorporateActionType
 from paper_trading.storage.enum_migration import _GOVERNED_TABLES, migrate_paper_trading_enums
 from paper_trading.storage.models import PaperOrderEvent, tb_name_paper_order_events
-from storage.model import Base
+from storage.model import AuthToken, Base, User
 from storage.storage_db import StorageDb
 
 
@@ -25,6 +25,13 @@ def _storage(engine: Engine) -> StorageDb:
 
 
 def _create_paper_trading_tables(connection: Connection) -> None:
+    Base.metadata.create_all(connection, tables=[User.__table__, AuthToken.__table__])
+    connection.execute(
+        text(
+            "INSERT INTO users (email, password_hash, email_verified_at) "
+            "VALUES ('migration-owner@example.com', 'test-hash', NOW())"
+        )
+    )
     tables = list(_GOVERNED_TABLES)
     enum_types = {
         column.type for table in tables for column in table.columns if isinstance(column.type, SqlAlchemyEnum)
@@ -474,8 +481,8 @@ def test_postgresql_startup_widening_is_monotonic_and_preserves_legacy_state():
             )
             connection.execute(
                 text(
-                    "INSERT INTO paper_accounts (name, initial_cash, share_count) "
-                    "VALUES ('legacy', 123.4567, 9.87654321)"
+                    "INSERT INTO paper_accounts (owner_user_id, name, initial_cash, share_count) "
+                    "VALUES (1, 'legacy', 123.4567, 9.87654321)"
                 )
             )
             connection.execute(

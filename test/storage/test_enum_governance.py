@@ -488,6 +488,8 @@ def test_global_migration_bootstraps_empty_schema_without_partial_storage_domain
         expected_types = {group.type_name for group in _all_enum_groups()}
         expected_tables = {column.table_name for group in _all_enum_groups() for column in group.columns}
         assert result.converted is True
+        assert connection.execute(text("SELECT to_regclass('users')")).scalar_one() == "users"
+        assert connection.execute(text("SELECT to_regclass('auth_tokens')")).scalar_one() == "auth_tokens"
         assert _all_managed_enum_types(connection) == expected_types
         assert {
             table_name
