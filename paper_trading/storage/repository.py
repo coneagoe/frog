@@ -628,6 +628,8 @@ class PaperTradingRepository:
         return Decimal(str(total)).quantize(Decimal("0.0001"))
 
     def get_cash_available_internal(self, account_id: int) -> Decimal:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return Decimal("0")
         amount_query: Any = self.session.query(PaperCashLedger.amount)
         if self.session.bind is not None and self.session.bind.dialect.name == "sqlite":
             amount_query = self.session.query(sa_cast(PaperCashLedger.amount, String))
@@ -671,6 +673,8 @@ class PaperTradingRepository:
         return self.get_cash_frozen_internal(account_id).quantize(Decimal("0.0001"))
 
     def get_cash_frozen_internal(self, account_id: int) -> Decimal:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return Decimal("0")
         query: Any = self.session.query(PaperOrder.frozen_cash).filter(
             PaperOrder.account_id == account_id,
             PaperOrder.status == OrderStatus.ACCEPTED.value,
@@ -985,6 +989,8 @@ class PaperTradingRepository:
         )
 
     def get_order_by_idempotency_key(self, account_id: int, idempotency_key: str) -> PaperOrder | None:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return None
         return (
             self.session.query(PaperOrder)
             .filter(PaperOrder.account_id == account_id, PaperOrder.idempotency_key == idempotency_key)
@@ -992,6 +998,8 @@ class PaperTradingRepository:
         )
 
     def get_corporate_action_by_idempotency_key(self, account_id: int, key: str) -> PaperCorporateAction | None:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return None
         return (
             self.session.query(PaperCorporateAction)
             .filter(PaperCorporateAction.account_id == account_id, PaperCorporateAction.idempotency_key == key)
@@ -999,6 +1007,8 @@ class PaperTradingRepository:
         )
 
     def lock_corporate_action_by_idempotency_key(self, account_id: int, key: str) -> PaperCorporateAction | None:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return None
         query = self.session.query(PaperCorporateAction).filter(
             PaperCorporateAction.account_id == account_id,
             PaperCorporateAction.idempotency_key == key,
@@ -1048,6 +1058,8 @@ class PaperTradingRepository:
         start_at: datetime | None = None,
         end_at: datetime | None = None,
     ) -> list[PaperCorporateAction]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         query = self.session.query(PaperCorporateAction).filter(PaperCorporateAction.account_id == account_id)
         if symbol is not None:
             query = query.filter(PaperCorporateAction.symbol == symbol)
@@ -1067,11 +1079,13 @@ class PaperTradingRepository:
 
     def get_order(self, order_id: int) -> PaperOrder:
         order = self.session.get(PaperOrder, order_id)
-        if order is None:
+        if order is None or (self.owner_user_id is not None and self.get_account(order.account_id) is None):
             raise KeyError(f"paper order not found: {order_id}")
         return order
 
     def list_orders(self, account_id: int) -> list[PaperOrder]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         return list(
             self.session.query(PaperOrder)
             .filter(PaperOrder.account_id == account_id)
@@ -1087,6 +1101,8 @@ class PaperTradingRepository:
         page: int,
         page_size: int,
     ) -> tuple[list[PaperOrder], int]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return [], 0
         query = self.session.query(PaperOrder).filter(
             PaperOrder.account_id == account_id,
             PaperOrder.trade_date >= start_date,
@@ -1467,6 +1483,8 @@ class PaperTradingRepository:
         return None
 
     def list_trades(self, account_id: int) -> list[PaperTrade]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         return list(
             self.session.query(PaperTrade)
             .filter(PaperTrade.account_id == account_id)
@@ -1482,6 +1500,8 @@ class PaperTradingRepository:
         page: int,
         page_size: int,
     ) -> tuple[list[PaperTrade], int]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return [], 0
         query = self.session.query(PaperTrade).filter(
             PaperTrade.account_id == account_id,
             PaperTrade.trade_date >= start_date,
@@ -1495,6 +1515,8 @@ class PaperTradingRepository:
         return list(trades), total
 
     def list_snapshots(self, account_id: int) -> list[PaperAccountSnapshot]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         return list(
             self.session.query(PaperAccountSnapshot)
             .filter(PaperAccountSnapshot.account_id == account_id)
@@ -1505,6 +1527,8 @@ class PaperTradingRepository:
     def list_trading_snapshots_in_date_range(
         self, account_id: int, start_date: date, end_date: date
     ) -> list[PaperAccountSnapshot]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         return list(
             self.session.query(PaperAccountSnapshot)
             .filter(
@@ -1550,6 +1574,8 @@ class PaperTradingRepository:
         return gap
 
     def get_valuation_gap(self, account_id: int, trade_date: date) -> PaperValuationGap | None:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return None
         return (
             self.session.query(PaperValuationGap).filter_by(account_id=account_id, trade_date=trade_date).one_or_none()
         )
@@ -1619,6 +1645,10 @@ class PaperTradingRepository:
         return check
 
     def list_trade_validity_checks(self, order_id: int) -> list[PaperTradeValidityCheck]:
+        if self.owner_user_id is not None:
+            order = self.session.get(PaperOrder, order_id)
+            if order is None or self.get_account(order.account_id) is None:
+                return []
         return list(
             self.session.query(PaperTradeValidityCheck)
             .filter(PaperTradeValidityCheck.order_id == order_id)
@@ -1637,6 +1667,8 @@ class PaperTradingRepository:
         )
 
     def count_position_lots(self, account_id: int) -> int:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return 0
         return int(
             self.session.query(func.count(PaperPositionLot.id))
             .filter(PaperPositionLot.account_id == account_id)
@@ -2030,6 +2062,8 @@ class PaperTradingRepository:
         return order
 
     def get_position(self, account_id: int, market: str | Market, symbol: str) -> PaperPosition | None:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return None
         market = Market(market).value
         return (
             self.session.query(PaperPosition)
@@ -2042,6 +2076,8 @@ class PaperTradingRepository:
         )
 
     def lock_position(self, account_id: int, market: str | Market, symbol: str) -> PaperPosition | None:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return None
         query = self.session.query(PaperPosition).filter(
             PaperPosition.account_id == account_id,
             PaperPosition.market == Market(market).value,
@@ -2052,6 +2088,8 @@ class PaperTradingRepository:
         return query.one_or_none()
 
     def lock_lots(self, account_id: int, market: str | Market, symbol: str) -> list[PaperPositionLot]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         query = self.session.query(PaperPositionLot).filter(
             PaperPositionLot.account_id == account_id,
             PaperPositionLot.market == Market(market).value,
@@ -2066,6 +2104,8 @@ class PaperTradingRepository:
         self.session.flush()
 
     def get_lots(self, account_id: int, market: str | Market, symbol: str) -> list[PaperPositionLot]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         market = Market(market).value
         return list(
             self.session.query(PaperPositionLot)
@@ -2103,6 +2143,8 @@ class PaperTradingRepository:
         return cycle
 
     def get_open_round_trip(self, account_id: int, market: str | Market, symbol: str) -> PaperPositionRoundTrip | None:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return None
         market = Market(market).value
         return (
             self.session.query(PaperPositionRoundTrip)
@@ -2124,6 +2166,8 @@ class PaperTradingRepository:
         return cycle
 
     def list_round_trips(self, account_id: int) -> list[PaperPositionRoundTrip]:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return []
         return list(
             self.session.query(PaperPositionRoundTrip)
             .filter(PaperPositionRoundTrip.account_id == account_id)
@@ -2132,6 +2176,8 @@ class PaperTradingRepository:
         )
 
     def delete_round_trips(self, account_id: int) -> int:
+        if self.owner_user_id is not None and self.get_account(account_id) is None:
+            return 0
         deleted = (
             self.session.query(PaperPositionRoundTrip)
             .filter(PaperPositionRoundTrip.account_id == account_id)
@@ -2142,7 +2188,7 @@ class PaperTradingRepository:
 
     def delete_order(self, order_id: int) -> PaperOrder | None:
         order = cast(PaperOrder | None, self.session.get(PaperOrder, order_id))
-        if order is None:
+        if order is None or (self.owner_user_id is not None and self.get_account(order.account_id) is None):
             return None
         self.session.delete(order)
         return order

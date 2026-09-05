@@ -419,6 +419,93 @@ def test_login_requires_verified_user_but_uses_generic_401(auth_client, monkeypa
     assert unknown.json() == incorrect.json()
 
 
+def test_login_rate_limits_by_ip_and_normalized_email(auth_client, monkeypatch):
+    client, _ = auth_client
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+
+    responses = [
+        _login(client, email)
+        for email in ["Rate@Example.com", " rate@example.com ", "RATE@example.com", "rate@example.com"]
+    ]
+
+    assert [response.status_code for response in responses] == [401, 401, 401, 401]
+    assert redis_client.counts["paper_trading:auth:login:ip:testclient"] == 4
+    assert redis_client.counts["paper_trading:auth:login:email:rate@example.com"] == 4
+    assert redis_client.expirations["paper_trading:auth:login:ip:testclient"] == 3600
+    assert redis_client.expirations["paper_trading:auth:login:email:rate@example.com"] == 3600
+
+
+def test_login_limit_uses_generic_unauthorized_response(auth_client, monkeypatch):
+    client, _ = auth_client
+    redis_client = _FakeRedis()
+    monkeypatch.setattr("paper_trading.api.routers.auth._get_redis_client", lambda: redis_client)
+
+    unknown = _login(client, "missing@example.com")
+    for _ in range(2):
+        assert _login(client, "other@example.com").status_code == 401
+    limited = _login(client, "known@example.com")
+
+    assert limited.status_code == unknown.status_code == 401
+    assert limited.json() == unknown.json()
+
+
+def test_login_redis_failure_skips_database_and_password_verification(auth_client, monkeypatch):
+    client, _ = auth_client
+    database_calls = []
+    password_calls = []
+
+    def fail_database_lookup(*args, **kwargs):
+        database_calls.append((args, kwargs))
+        raise AssertionError("database lookup must not run")
+
+    def fail_password_verification(*args, **kwargs):
+        password_calls.append((args, kwargs))
+        raise AssertionError("password verification must not run")
+
+    monkeypatch.setattr(
+        "paper_trading.api.routers.auth._get_redis_client", lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
+    )
+    monkeypatch.setattr("sqlalchemy.orm.session.Session.scalar", fail_database_lookup)
+    monkeypatch.setattr("paper_trading.api.routers.auth.verify_password", fail_password_verification)
+
+    response = _login(client)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Login is temporarily unavailable"
+    assert database_calls == []
+    assert password_calls == []
+
+
+def test_login_database_failure_returns_generic_503(auth_client, monkeypatch):
+    client, _ = auth_client
+
+    def fail_database_lookup(*args, **kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr("sqlalchemy.orm.session.Session.scalar", fail_database_lookup)
+
+    response = _login(client)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Login is temporarily unavailable"
+
+
+def test_login_password_verification_failure_returns_generic_503(auth_client, monkeypatch):
+    client, factory = auth_client
+    _verified_user(factory)
+
+    monkeypatch.setattr(
+        "paper_trading.api.routers.auth.verify_password",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("verifier unavailable")),
+    )
+
+    response = _login(client)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Login is temporarily unavailable"
+
+
 def test_verify_email_marks_user_verified_and_consumes_token(auth_client, monkeypatch):
     client, factory = auth_client
     _set_verification_env(monkeypatch)

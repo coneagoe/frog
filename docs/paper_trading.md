@@ -168,6 +168,14 @@ DELETE requests; the proxy forwards the browser's cookies, content type, and
 CSRF header to the backend. The frontend does not require
 `PAPER_TRADING_API_TOKEN`.
 
+Cookie-authenticated requests are limited to the logged-in user's paper
+accounts across account details, orders, trades, analytics, snapshots, and
+corporate actions. Missing or another user's account is returned as the same
+not-found response. The system Bearer token remains the unrestricted interface
+for trusted automation, including matching, repairs, snapshot recalculation,
+and global ETF eligibility operations. Login attempts are rate-limited by
+client IP and normalized email; Redis failures fail closed.
+
 ## CLI Wrapper
 
 For day-to-day account, order, trade, matching, snapshot, and import management, prefer the repo-local CLI wrapper instead of hand-written `curl`:

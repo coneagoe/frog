@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -64,6 +65,46 @@ def _create_account(client, headers):
     return resp.json()["id"]
 
 
+def test_account_scoped_routers_share_cookie_scope_and_system_bearer_access(monkeypatch, sqlite_session):
+    client, csrf_headers, session, user, other = _browser_client(monkeypatch, sqlite_session)
+    owner_repo = PaperTradingRepository(session, owner_user_id=user.id)
+    foreign_repo = PaperTradingRepository(session, owner_user_id=other.id)
+    owned = owner_repo.create_account("owned", Decimal("100000"))
+    foreign = foreign_repo.create_account("foreign", Decimal("100000"))
+    session.commit()
+
+    scoped_reads = (
+        f"/paper/accounts/{owned.id}/orders",
+        f"/paper/accounts/{owned.id}/analytics",
+        f"/paper/accounts/{owned.id}/snapshots",
+        f"/paper/accounts/{owned.id}/corporate-actions",
+    )
+    for path in scoped_reads:
+        assert client.get(path).status_code == 200
+        assert client.get(path.replace(str(owned.id), str(foreign.id))).status_code == 404
+        assert client.get(path.replace(str(owned.id), "999999")).status_code == 404
+
+    unauthenticated = TestClient(create_app())
+    for path in scoped_reads:
+        assert unauthenticated.get(path).status_code == 401
+
+    bearer = {"Authorization": "Bearer secret"}
+    for path in scoped_reads:
+        assert client.get(path.replace(str(owned.id), str(foreign.id)), headers=bearer).status_code == 200
+
+    no_csrf = client.cookies.delete("paper_trading_csrf")
+    del no_csrf
+    cases: tuple[tuple[str, str, dict[str, Any]], ...] = (
+        ("post", f"/paper/accounts/{owned.id}/orders", {"json": {}}),
+        ("post", f"/paper/accounts/{owned.id}/corporate-actions", {"json": {}}),
+        ("post", "/paper/orders/999/cancel", {}),
+        ("delete", "/paper/orders/999", {}),
+        ("patch", "/paper/orders/999/comment", {"json": {}}),
+    )
+    for method, path, kwargs in cases:
+        assert getattr(client, method)(path, **kwargs).status_code == 403
+
+
 class _FakePositionValuationService:
     def __init__(self, values):
         self.values = values
@@ -112,7 +153,7 @@ def test_delete_missing_account_returns_404(monkeypatch, sqlite_session):
     response = client.delete("/paper/accounts/999", headers=headers)
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "paper account not found: 999"
+    assert response.json()["detail"] == "paper account not found"
 
 
 def test_create_account_accepts_and_returns_fee_config(monkeypatch, sqlite_session):
@@ -360,7 +401,7 @@ def test_update_account_fees_returns_404_for_missing_account(monkeypatch, sqlite
     )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "paper account not found: 999"
+    assert response.json()["detail"] == "paper account not found"
 
 
 def test_browser_user_is_scoped_to_own_accounts(monkeypatch, sqlite_session):
@@ -406,6 +447,37 @@ def test_bearer_token_bypasses_account_ownership(monkeypatch, sqlite_session):
 
     assert response.status_code == 200
     assert {item["id"] for item in response.json()} == {first.id, second.id}
+
+
+def test_account_routes_enforce_dual_auth_scope_and_csrf(monkeypatch, sqlite_session):
+    client, csrf_headers, session, user, other = _browser_client(monkeypatch, sqlite_session)
+    repo = PaperTradingRepository(session)
+    owned = repo.create_account("owned", Decimal("100000.00"), owner_user_id=user.id)
+    foreign = repo.create_account("foreign", Decimal("100000.00"), owner_user_id=other.id)
+    session.commit()
+
+    unauthenticated = TestClient(client.app).get("/paper/accounts")
+    own = client.get(f"/paper/accounts/{owned.id}")
+    missing = client.get("/paper/accounts/999")
+    foreign_get = client.get(f"/paper/accounts/{foreign.id}")
+    foreign_delete = client.delete(f"/paper/accounts/{foreign.id}", headers=csrf_headers)
+    missing_delete = client.delete("/paper/accounts/999", headers=csrf_headers)
+    csrf_rejected = client.patch(f"/paper/accounts/{owned.id}", json={"commission_rate": "0.0002"})
+    bearer_foreign = client.patch(
+        f"/paper/accounts/{foreign.id}",
+        json={"commission_rate": "0.0002"},
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    assert unauthenticated.status_code == 401
+    assert own.status_code == 200
+    assert missing.status_code == foreign_get.status_code == 404
+    assert missing.json() == foreign_get.json()
+    assert missing_delete.status_code == foreign_delete.status_code == 404
+    assert missing_delete.json() == foreign_delete.json()
+    assert csrf_rejected.status_code == 403
+    assert bearer_foreign.status_code == 200
+    assert bearer_foreign.json()["id"] == foreign.id
 
 
 # ---------------------------------------------------------------------------
