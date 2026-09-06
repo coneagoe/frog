@@ -115,7 +115,7 @@ export function AuthForm({ mode, token, returnTo, onSuccess }: { mode: AuthMode;
         </button>
       </form>
       <p className="auth-card__switch">
-        {isRegister ? "Already have an account?" : isForgot || isReset ? "Need to sign in?" : "New to Paper Trading?"} {isRegister || isForgot || isReset ? <Link href="/login">Back to login</Link> : <><Link href="/register">Create an account</Link> <Link href="/forgot-password">Forgot password?</Link></>}
+        {isRegister ? "Already have an account?" : isForgot || isReset ? "Need to sign in?" : <><Link href="/register">Create an account</Link> or <Link href="/forgot-password">Forgot password?</Link></>} {isRegister || isForgot || isReset ? <Link href="/login">Back to login</Link> : null}
       </p>
     </section>
   );

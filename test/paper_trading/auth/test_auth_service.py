@@ -323,8 +323,8 @@ def test_new_auth_token_returns_only_hash_for_storage():
 @pytest.mark.parametrize(
     "url_builder, route",
     [
-        (build_password_reset_url, "/auth/reset-password"),
-        (build_verification_url, "/auth/verify-email"),
+        (build_password_reset_url, "/reset-password"),
+        (build_verification_url, "/verify-email"),
     ],
 )
 def test_auth_urls_require_an_explicit_valid_https_public_base_url(url_builder, route):
@@ -352,8 +352,8 @@ def test_auth_urls_reject_invalid_public_base_urls_without_leaking_configuration
 @pytest.mark.parametrize(
     "url_builder, route",
     [
-        (build_password_reset_url, "/auth/reset-password"),
-        (build_verification_url, "/auth/verify-email"),
+        (build_password_reset_url, "/reset-password"),
+        (build_verification_url, "/verify-email"),
     ],
 )
 def test_auth_urls_preserve_path_prefix_and_quote_tokens(monkeypatch, url_builder, route):

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { forgotPassword, login, register, resetPassword } from "@/lib/api-client";
@@ -43,6 +43,16 @@ describe("AuthForm", () => {
     render(<AuthForm mode="login" />);
     expect(screen.getByLabelText("Email address")).toHaveAttribute("type", "email");
     expect(screen.getByLabelText("Password")).toHaveAttribute("type", "password");
+  });
+
+  it("separates account creation and password recovery links in the login footer", () => {
+    render(<AuthForm mode="login" />);
+    const createAccountLink = screen.getByRole("link", { name: "Create an account" });
+    const footer = createAccountLink.closest("p");
+    expect(footer).toHaveTextContent("Create an account or Forgot password?");
+    if (!footer) throw new Error("Login footer was not rendered.");
+    expect(within(footer).getByRole("link", { name: "Create an account" })).toHaveAttribute("href", "/register");
+    expect(within(footer).getByRole("link", { name: "Forgot password?" })).toHaveAttribute("href", "/forgot-password");
   });
 
   it("rejects passwords shorter than 12 characters or without a letter and number", async () => {

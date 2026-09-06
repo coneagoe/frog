@@ -24,8 +24,8 @@ _USER_ID_RE = re.compile(r"^[0-9]+$")
 _PASSWORD_LETTER_RE = re.compile(r"[A-Za-z]")
 _EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _password_hasher = PasswordHasher()
-_PASSWORD_RESET_ROUTE = "/auth/reset-password"
-_EMAIL_VERIFICATION_ROUTE = "/auth/verify-email"
+_PASSWORD_RESET_ROUTE = "/reset-password"
+_EMAIL_VERIFICATION_ROUTE = "/verify-email"
 
 
 @dataclass(frozen=True)
