@@ -10,6 +10,7 @@ from paper_trading.api.routers import (
     corporate_actions,
     etf_eligibility,
     matching,
+    monitor_targets,
     orders,
     repairs,
     snapshot_recalculation,
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(orders.router)
     app.include_router(matching.router)
+    app.include_router(monitor_targets.router)
     app.include_router(snapshots.router)
     app.include_router(snapshot_recalculation.router)
     app.include_router(analytics.router)
