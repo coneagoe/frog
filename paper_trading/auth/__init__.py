@@ -84,9 +84,9 @@ from .service import (  # noqa: E402
     hash_password,
     new_auth_token,
     normalize_email,
-    validate_public_base_url,
     validate_email,
     validate_password,
+    validate_public_base_url,
     verify_password,
 )
 

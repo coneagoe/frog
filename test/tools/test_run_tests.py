@@ -124,7 +124,9 @@ def test_runner_starts_test_database_runs_pytest_and_cleans_up(tmp_path: Path):
 
 def test_compose_contract_keeps_paper_trading_on_shared_smtp_and_redis_dependencies():
     compose_file = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    paper_trading_block = compose_file.split("  paper-trading:\n", maxsplit=1)[1].split("  paper-trading-frontend:\n", maxsplit=1)[0]
+    paper_trading_block = compose_file.split("  paper-trading:\n", maxsplit=1)[1].split(
+        "  paper-trading-frontend:\n", maxsplit=1
+    )[0]
 
     assert "redis:\n        condition: service_started" in paper_trading_block
     assert "<<: [*db-common-env, *airflow-email-env]" in paper_trading_block

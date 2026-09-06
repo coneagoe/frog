@@ -359,10 +359,7 @@ def test_auth_urls_reject_invalid_public_base_urls_without_leaking_configuration
 def test_auth_urls_preserve_path_prefix_and_quote_tokens(monkeypatch, url_builder, route):
     monkeypatch.setenv("AUTH_PUBLIC_BASE_URL", "https://public.example.com/app/")
 
-    assert (
-        url_builder("raw token?+/")
-        == f"https://public.example.com/app{route}?token=raw%20token%3F%2B%2F"
-    )
+    assert url_builder("raw token?+/") == f"https://public.example.com/app{route}?token=raw%20token%3F%2B%2F"
 
 
 def test_session_and_csrf_cookies_have_expected_attributes():
