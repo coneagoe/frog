@@ -56,6 +56,9 @@ class ManualMonitorTargetStorage:
         )
 
     def update_monitor_target(self, target_id: int, **updates: Any) -> Any | None:
+        condition = updates.get("condition")
+        if isinstance(condition, dict) and condition.get("workflow") is not None:
+            raise TargetValidationError("workflow-owned targets cannot be updated here")
         return self._storage.update_manual_monitor_target(target_id, **updates)
 
     def delete_monitor_target(self, target_id: int) -> bool:

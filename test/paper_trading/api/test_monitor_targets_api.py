@@ -64,6 +64,8 @@ class FakeMonitorStorage:
         target = self.get_manual_monitor_target(target_id)
         if target is None:
             return None
+        if updates.get("condition", {}).get("workflow") is not None:
+            raise ValueError("workflow-owned targets cannot be updated here")
         for field, value in updates.items():
             setattr(target, field, value)
         return target
@@ -175,3 +177,23 @@ def test_monitor_target_validation_and_workflow_targets_are_not_found(monkeypatc
         assert getattr(client, method)(path, **kwargs).status_code == 404
     assert storage.targets[1].note == "initial"
     assert storage.targets[1].enabled is True
+
+
+def test_monitor_target_patch_rejects_workflow_condition(monkeypatch, sqlite_session):
+    client, csrf_headers, storage = _client(monkeypatch, sqlite_session)
+
+    response = client.patch(
+        "/paper/monitor-targets/1",
+        headers=csrf_headers,
+        json={
+            "condition": {
+                "type": "price_threshold",
+                "direction": "above",
+                "value": 100,
+                "workflow": "scheduled",
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert "workflow" not in storage.targets[0].condition
