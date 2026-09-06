@@ -12,6 +12,15 @@ class MonitorFrequency(StrEnum):
     INTRADAY = "intraday"
 
 
+class MonitorConditionType(StrEnum):
+    PRICE_THRESHOLD = "price_threshold"
+    MA_CROSS = "ma_cross"
+    CHANGE_PCT = "change_pct"
+    PRICE_CROSS_MA = "price_cross_ma"
+    CLOSE_CROSS_MA = "close_cross_ma"
+    RSI = "rsi"
+
+
 class MonitorResetMode(StrEnum):
     AUTO = "auto"
     MANUAL = "manual"

@@ -3,6 +3,7 @@ import pytest
 from monitor.condition_validation import validate_condition
 from monitor.domain_enums import (
     ForecastSSFCandidateState,
+    MonitorConditionType,
     MonitorFrequency,
     MonitorMarket,
     MonitorResetMode,
@@ -14,6 +15,14 @@ def test_enum_values_match_persisted_contract():
     assert [value.value for value in MonitorFrequency] == ["daily", "intraday"]
     assert [value.value for value in MonitorResetMode] == ["auto", "manual"]
     assert "delisted_or_unlisted" in {value.value for value in ForecastSSFCandidateState}
+    assert [value.value for value in MonitorConditionType] == [
+        "price_threshold",
+        "ma_cross",
+        "change_pct",
+        "price_cross_ma",
+        "close_cross_ma",
+        "rsi",
+    ]
 
 
 def test_validate_condition_rejects_price_vs_ma_condition():

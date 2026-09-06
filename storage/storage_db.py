@@ -3076,6 +3076,50 @@ class StorageDb:
         finally:
             session.close()
 
+    def list_manual_monitor_targets(
+        self,
+        *,
+        frequency: str | None = None,
+        enabled: bool | None = None,
+        market: str | None = None,
+        condition_type: str | None = None,
+    ) -> list[Any]:
+        """查询未归属工作流的监控目标。"""
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            query = session.query(StockMonitorTarget).filter(StockMonitorTarget.workflow.is_(None))
+            if frequency is not None:
+                query = query.filter_by(frequency=frequency)
+            if enabled is not None:
+                query = query.filter_by(enabled=enabled)
+            if market is not None:
+                query = query.filter_by(market=market)
+            if condition_type is not None:
+                query = query.filter(StockMonitorTarget.condition["type"].as_string() == condition_type)
+            return cast(list[Any], query.order_by(StockMonitorTarget.id.asc()).all())
+        finally:
+            session.close()
+
+    def get_manual_monitor_target(self, target_id: int) -> Any | None:
+        """按 ID 查询未归属工作流的监控目标。"""
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return (
+                session.query(StockMonitorTarget)
+                .filter(StockMonitorTarget.id == target_id, StockMonitorTarget.workflow.is_(None))
+                .first()
+            )
+        finally:
+            session.close()
+
     def create_monitor_target(
         self,
         stock_code: str,
@@ -3118,6 +3162,24 @@ class StorageDb:
             raise
         finally:
             session.close()
+
+    def create_manual_monitor_target(
+        self,
+        stock_code: str,
+        market: str,
+        condition: Dict[str, Any],
+        note: Optional[str] = None,
+        frequency: str = "daily",
+        reset_mode: str = "auto",
+        enabled: bool = True,
+        last_state: bool = False,
+    ) -> Any:
+        """创建未归属工作流的监控目标。"""
+        if condition.get("workflow") is not None:
+            raise ValueError("manual monitor target condition cannot include a workflow marker")
+        return self.create_monitor_target(
+            stock_code, market, condition, note, frequency, reset_mode, enabled, last_state
+        )
 
     def update_monitor_target(self, target_id: int, **updates: Any) -> Optional[Any]:
         """更新监控目标。目标不存在时返回 None。"""
@@ -3173,6 +3235,57 @@ class StorageDb:
         finally:
             session.close()
 
+    def update_manual_monitor_target(self, target_id: int, **updates: Any) -> Any | None:
+        """更新未归属工作流的监控目标。目标不存在或属于工作流时返回 None。"""
+        allowed_fields = {
+            "stock_code",
+            "market",
+            "condition",
+            "note",
+            "frequency",
+            "reset_mode",
+            "enabled",
+            "last_state",
+            "triggered_at",
+        }
+        invalid_fields = set(updates) - allowed_fields
+        if invalid_fields:
+            raise ValueError(f"不支持更新字段: {sorted(invalid_fields)}")
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            target = (
+                session.query(StockMonitorTarget)
+                .filter(StockMonitorTarget.id == target_id, StockMonitorTarget.workflow.is_(None))
+                .first()
+            )
+            if target is None:
+                return None
+            for field, enum_type in (
+                ("market", MonitorMarket),
+                ("frequency", MonitorFrequency),
+                ("reset_mode", MonitorResetMode),
+            ):
+                if field in updates:
+                    self._validate_monitor_enum_value(updates[field], field, enum_type)
+            if "condition" in updates:
+                updates["condition"] = validate_condition(updates["condition"])
+                if updates["condition"].get("workflow") is not None:
+                    raise ValueError("manual monitor target condition cannot include a workflow marker")
+            for key, value in updates.items():
+                setattr(target, key, value)
+            session.commit()
+            session.refresh(target)
+            return target
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def delete_monitor_target(self, target_id: int) -> bool:
         """删除监控目标。删除成功返回 True，目标不存在返回 False。"""
         self.ensure_monitor_targets_table()
@@ -3182,6 +3295,30 @@ class StorageDb:
         session = self.Session()
         try:
             target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+            if target is None:
+                return False
+            session.delete(target)
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def delete_manual_monitor_target(self, target_id: int) -> bool:
+        """删除未归属工作流的监控目标。"""
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            target = (
+                session.query(StockMonitorTarget)
+                .filter(StockMonitorTarget.id == target_id, StockMonitorTarget.workflow.is_(None))
+                .first()
+            )
             if target is None:
                 return False
             session.delete(target)

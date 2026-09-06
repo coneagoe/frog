@@ -1,6 +1,11 @@
 from collections.abc import Mapping
 from typing import Any
 
+from monitor.domain_enums import MonitorConditionType
+
+
+SUPPORTED_CONDITION_TYPES = tuple(condition_type.value for condition_type in MonitorConditionType)
+
 
 def validate_condition(condition: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(condition, Mapping):
@@ -8,6 +13,8 @@ def validate_condition(condition: Mapping[str, Any]) -> dict[str, Any]:
 
     normalized = dict(condition)
     condition_type = normalized.get("type")
+    if condition_type not in SUPPORTED_CONDITION_TYPES:
+        raise ValueError(f"condition.type unsupported: {condition_type!r}")
     if condition_type == "price_threshold":
         _validate_direction(normalized, {"above", "below"})
         _required_number(normalized, "value")
@@ -33,8 +40,6 @@ def validate_condition(condition: Mapping[str, Any]) -> dict[str, Any]:
         value = _required_number(normalized, "value")
         if not 0 <= value <= 100:
             raise ValueError("condition.value must be between 0 and 100")
-    else:
-        raise ValueError(f"condition.type unsupported: {condition_type!r}")
     return normalized
 
 

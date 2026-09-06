@@ -1001,6 +1001,34 @@ def test_manual_monitor_target_rejects_condition_workflow_marker(tmp_path):
     assert persisted.workflow is None
 
 
+def test_manual_monitor_target_methods_exclude_workflow_targets_and_compose_filters(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    manual = db.create_manual_monitor_target(
+        "600001", "A", _typed_condition(), note="manual", enabled=True
+    )
+    db.create_manual_monitor_target(
+        "00700", "HK", _typed_condition(direction="below", value=8), frequency="intraday", enabled=False
+    )
+    workflow_target = _create_target(db, workflow="forecast_ssf_ma20")
+    original_note = workflow_target.note
+
+    assert manual.workflow is None
+    assert [
+        target.id
+        for target in db.list_manual_monitor_targets(
+            frequency="daily", enabled=True, market="A", condition_type="price_threshold"
+        )
+    ] == [manual.id]
+    assert db.get_manual_monitor_target(manual.id).id == manual.id
+    assert db.update_manual_monitor_target(manual.id, note="updated manual").note == "updated manual"
+    assert db.get_manual_monitor_target(workflow_target.id) is None
+    assert db.update_manual_monitor_target(workflow_target.id, note="blocked") is None
+    assert db.delete_manual_monitor_target(workflow_target.id) is False
+    assert db.get_monitor_target(workflow_target.id).note == original_note
+    assert db.delete_manual_monitor_target(manual.id) is True
+    assert db.get_manual_monitor_target(manual.id) is None
+
+
 def test_workflow_monitor_target_scope_does_not_mutate_intraday_target(tmp_path):
     db = _sqlite_storage(tmp_path)
     intraday = db.create_monitor_target(
