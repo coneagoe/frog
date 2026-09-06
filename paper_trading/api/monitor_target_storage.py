@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from monitor.monitor_target_service import TargetValidationError
 
@@ -21,11 +21,14 @@ class ManualMonitorTargetStorage:
         market: str | None = None,
         condition_type: str | None = None,
     ) -> list[Any]:
-        return self._storage.list_manual_monitor_targets(
-            frequency=frequency,
-            enabled=enabled,
-            market=market,
-            condition_type=condition_type,
+        return cast(
+            list[Any],
+            self._storage.list_manual_monitor_targets(
+                frequency=frequency,
+                enabled=enabled,
+                market=market,
+                condition_type=condition_type,
+            ),
         )
 
     def get_monitor_target(self, target_id: int) -> Any | None:
@@ -62,4 +65,4 @@ class ManualMonitorTargetStorage:
         return self._storage.update_manual_monitor_target(target_id, **updates)
 
     def delete_monitor_target(self, target_id: int) -> bool:
-        return self._storage.delete_manual_monitor_target(target_id)
+        return cast(bool, self._storage.delete_manual_monitor_target(target_id))
