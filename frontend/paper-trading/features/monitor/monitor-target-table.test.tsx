@@ -7,7 +7,7 @@ const otherTarget = { ...target, id: 18, stock_code: "000002" };
 
 describe("MonitorTargetTable", () => {
   it("disables every action on the busy target while leaving other targets operable", () => {
-    render(<MonitorTargetTable targets={[target, otherTarget]} busyActions={new Set([`${target.id}:toggle`])} onEdit={vi.fn()} onToggle={vi.fn()} onDelete={vi.fn()} />);
+    render(<MonitorTargetTable targets={[target, otherTarget]} busyTargetIds={new Set([target.id])} onEdit={vi.fn()} onToggle={vi.fn()} onDelete={vi.fn()} />);
 
     expect(screen.getAllByRole("button", { name: "Edit" })[0]).toBeDisabled();
     expect(screen.getByRole("button", { name: "Disable 000001" })).toBeDisabled();
@@ -18,7 +18,7 @@ describe("MonitorTargetTable", () => {
   });
 
   it("disables a row for any in-flight action", () => {
-    render(<MonitorTargetTable targets={[target]} busyActions={new Set([`${target.id}:delete`])} onEdit={vi.fn()} onToggle={vi.fn()} onDelete={vi.fn()} />);
+    render(<MonitorTargetTable targets={[target]} busyTargetIds={new Set([target.id])} onEdit={vi.fn()} onToggle={vi.fn()} onDelete={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Disable 000001" })).toBeDisabled();

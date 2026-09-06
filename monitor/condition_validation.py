@@ -3,7 +3,6 @@ from typing import Any
 
 from monitor.domain_enums import MonitorConditionType
 
-
 SUPPORTED_CONDITION_TYPES = tuple(condition_type.value for condition_type in MonitorConditionType)
 
 

@@ -3,12 +3,12 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from monitor.monitor_target_service import MonitorTargetService
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
-from paper_trading.api.routers.monitor_targets import get_monitor_target_service
 from paper_trading.api.monitor_target_storage import ManualMonitorTargetStorage
+from paper_trading.api.routers.monitor_targets import get_monitor_target_service
 from paper_trading.auth import AuthSettings, create_session_token, hash_password
-from monitor.monitor_target_service import MonitorTargetService
 from storage.model.auth import User
 from storage.model.base import Base
 
