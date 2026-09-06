@@ -12,6 +12,7 @@ export function SiteHeader() {
         <Link href="/orders">Orders</Link>
         <Link href="/trades">Trades</Link>
         <Link href="/analytics">Analytics</Link>
+        <Link href="/monitor">Monitor</Link>
       </nav>
     </header>
   );

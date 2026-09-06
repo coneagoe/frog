@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password", "/verify-email"];
-const PROTECTED_PREFIXES = ["/accounts", "/orders", "/trades", "/trade", "/analytics"];
+const PROTECTED_PREFIXES = ["/accounts", "/orders", "/trades", "/trade", "/analytics", "/monitor"];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -37,5 +37,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/accounts/:path*", "/orders/:path*", "/trades/:path*", "/trade/:path*", "/analytics/:path*", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email"]
+  matcher: ["/accounts/:path*", "/orders/:path*", "/trades/:path*", "/trade/:path*", "/analytics/:path*", "/monitor/:path*", "/login", "/register", "/forgot-password", "/reset-password", "/verify-email"]
 };

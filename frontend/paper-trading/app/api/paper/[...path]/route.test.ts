@@ -12,13 +12,13 @@ describe("paper API proxy", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: 1 }]), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await GET(new Request("http://localhost/api/paper/accounts?x=1", { headers: { cookie: "paper_trading_session=session" } }), {
-      params: Promise.resolve({ path: ["accounts"] })
+    const response = await GET(new Request("http://localhost/api/paper/monitor/targets?enabled=true", { headers: { cookie: "paper_trading_session=session" } }), {
+      params: Promise.resolve({ path: ["monitor", "targets"] })
     });
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://backend.test/paper/accounts?x=1",
+      "http://backend.test/paper/monitor/targets?enabled=true",
       expect.objectContaining({ headers: expect.any(Headers) })
     );
     const headers = fetchMock.mock.calls[0][1].headers as Headers;
@@ -53,23 +53,24 @@ describe("paper API proxy", () => {
     process.env.PAPER_TRADING_API_BASE_URL = "http://backend.test";
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    const body = JSON.stringify({ commission_rate: "0.0001" });
+    const body = JSON.stringify({ enabled: false });
 
     await PATCH(
-      new Request("http://localhost/api/paper/accounts/1", {
+      new Request("http://localhost/api/paper/monitor/targets/1", {
         method: "PATCH",
-        headers: { "content-type": "application/json", "x-csrf-token": "csrf-token" },
+        headers: { cookie: "paper_trading_session=session", "content-type": "application/json", "x-csrf-token": "csrf-token" },
         body
       }),
-      { params: Promise.resolve({ path: ["accounts", "1"] }) }
+      { params: Promise.resolve({ path: ["monitor", "targets", "1"] }) }
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://backend.test/paper/accounts/1",
+      "http://backend.test/paper/monitor/targets/1",
       expect.objectContaining({ method: "PATCH", headers: expect.any(Headers) })
     );
     expect(fetchMock.mock.calls[0][1].body).toBeInstanceOf(ReadableStream);
     const headers = fetchMock.mock.calls[0][1].headers as Headers;
+    expect(headers.get("cookie")).toBe("paper_trading_session=session");
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get("x-csrf-token")).toBe("csrf-token");
   });
@@ -79,16 +80,22 @@ describe("paper API proxy", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await DELETE(new Request("http://localhost/api/paper/accounts/1", { method: "DELETE" }), {
-      params: Promise.resolve({ path: ["accounts", "1"] })
-    });
+    const response = await DELETE(
+      new Request("http://localhost/api/paper/monitor/targets/1", {
+        method: "DELETE",
+        headers: { cookie: "paper_trading_session=session", "x-csrf-token": "csrf-token" }
+      }),
+      { params: Promise.resolve({ path: ["monitor", "targets", "1"] }) }
+    );
 
     expect(response.status).toBe(204);
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://backend.test/paper/accounts/1",
+      "http://backend.test/paper/monitor/targets/1",
       expect.objectContaining({ method: "DELETE", body: null })
     );
     const headers = fetchMock.mock.calls[0][1].headers as Headers;
+    expect(headers.get("cookie")).toBe("paper_trading_session=session");
+    expect(headers.get("x-csrf-token")).toBe("csrf-token");
     expect(headers.has("authorization")).toBe(false);
     expect(headers.has("content-type")).toBe(false);
   });

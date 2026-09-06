@@ -11,7 +11,8 @@ describe("SiteHeader", () => {
       { name: "Trade", href: "/trade" },
       { name: "Orders", href: "/orders" },
       { name: "Trades", href: "/trades" },
-      { name: "Analytics", href: "/analytics" }
+      { name: "Analytics", href: "/analytics" },
+      { name: "Monitor", href: "/monitor" }
     ];
 
     for (const { name, href } of links) {

@@ -23,6 +23,12 @@ describe("middleware", () => {
     expect(response.headers.get("location")).toBe("http://localhost:3000/login?return_to=%2Forders%3Fstatus%3Dopen");
   });
 
+  it("redirects anonymous visitors from the monitor console to login", () => {
+    const response = middleware(request("http://localhost:3000/monitor"));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://localhost:3000/login?return_to=%2Fmonitor");
+  });
+
   it("preserves public auth routes", () => {
     const response = middleware(request("http://localhost:3000/login?return_to=/orders"));
     expect(response.headers.get("location")).toBeNull();
@@ -31,6 +37,12 @@ describe("middleware", () => {
 
   it("allows authenticated requests through", () => {
     const response = middleware(request("http://localhost:3000/accounts", "paper_trading_session=session"));
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.status).toBe(200);
+  });
+
+  it("allows authenticated monitor console requests through", () => {
+    const response = middleware(request("http://localhost:3000/monitor", "paper_trading_session=session"));
     expect(response.headers.get("location")).toBeNull();
     expect(response.status).toBe(200);
   });
