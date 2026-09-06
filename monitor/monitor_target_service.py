@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from monitor.condition_validation import validate_condition
-from monitor.domain_enums import MonitorFrequency, MonitorMarket, MonitorResetMode
+from monitor.domain_enums import MonitorConditionType, MonitorFrequency, MonitorMarket, MonitorResetMode
 from storage import get_storage
 
 
@@ -94,7 +94,7 @@ class MonitorTargetService:
     }
 
     def __init__(self, storage: Any = None) -> None:
-        self.storage = get_storage() if storage is None else storage
+        self.storage: Any = get_storage() if storage is None else storage
 
     def add_target(
         self,
@@ -206,20 +206,49 @@ class MonitorTargetService:
     def get(self, target_id: int) -> dict[str, Any]:
         return self.get_target(target_id)
 
-    def list_targets(self, frequency: Optional[str] = None, enabled: Optional[bool] = None) -> dict[str, Any]:
+    def list_targets(
+        self,
+        frequency: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        market: Optional[str] = None,
+        condition_type: Optional[str] = None,
+    ) -> dict[str, Any]:
         try:
             if frequency is not None:
                 self._validate_frequency(frequency)
             if enabled is not None:
                 self._validate_bool(enabled, "enabled")
-            targets = self.storage.list_monitor_targets(frequency=frequency, enabled=enabled)
+            if market is not None:
+                self._validate_market(market)
+            if condition_type is not None:
+                self._validate_condition_type(condition_type)
+            if market is None and condition_type is None:
+                targets = self.storage.list_monitor_targets(frequency=frequency, enabled=enabled)
+            else:
+                targets = self.storage.list_monitor_targets(
+                    frequency=frequency,
+                    enabled=enabled,
+                    market=market,
+                    condition_type=condition_type,
+                )
             data = [self._serialize_target(target) for target in targets]
             return self._result(True, "OK", "targets listed", data)
         except TargetValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
 
-    def list(self, frequency: Optional[str] = None, enabled: Optional[bool] = None) -> dict[str, Any]:
-        return self.list_targets(frequency=frequency, enabled=enabled)
+    def list(
+        self,
+        frequency: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        market: Optional[str] = None,
+        condition_type: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return self.list_targets(
+            frequency=frequency,
+            enabled=enabled,
+            market=market,
+            condition_type=condition_type,
+        )
 
     def update(self, target_id: int, **updates: Any) -> dict[str, Any]:
         return self.update_target(target_id, **updates)
@@ -301,6 +330,10 @@ class MonitorTargetService:
     def _validate_frequency(self, frequency: Any) -> None:
         if not isinstance(frequency, str) or frequency not in MonitorFrequency:
             raise TargetValidationError(f"frequency 必须是 {sorted(MonitorFrequency)} 之一")
+
+    def _validate_condition_type(self, condition_type: Any) -> None:
+        if not isinstance(condition_type, str) or condition_type not in MonitorConditionType:
+            raise TargetValidationError(f"condition_type 必须是 {sorted(MonitorConditionType)} 之一")
 
     @staticmethod
     def _validate_condition_scope(condition: dict[str, Any], market: str, frequency: str) -> None:

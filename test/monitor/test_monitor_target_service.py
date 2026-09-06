@@ -8,6 +8,7 @@ from monitor.monitor_target_service import (
     TargetValidationError,
     format_monitor_target_label,
 )
+from paper_trading.api.monitor_target_storage import ManualMonitorTargetStorage
 
 
 def _make_target(**overrides):
@@ -129,6 +130,70 @@ def test_list_targets_returns_serialized_targets():
     assert result["code"] == "OK"
     assert [item["id"] for item in result["data"]] == [1, 2]
     storage.list_monitor_targets.assert_called_once_with(frequency="daily", enabled=True)
+
+
+def test_list_targets_forwards_market_and_condition_type_filters():
+    storage = MagicMock()
+    storage.list_monitor_targets.return_value = [_make_target()]
+    service = MonitorTargetService(storage=storage)
+
+    result = service.list_targets(market="A", condition_type="rsi")
+
+    assert result["success"] is True
+    storage.list_monitor_targets.assert_called_once_with(
+        frequency=None, enabled=None, market="A", condition_type="rsi"
+    )
+
+
+def test_list_targets_rejects_invalid_market_or_condition_type_filters():
+    storage = MagicMock()
+    service = MonitorTargetService(storage=storage)
+
+    invalid_market = service.list_targets(market="US")
+    invalid_condition_type = service.list(market="A", condition_type="invalid")
+
+    assert invalid_market["code"] == "VALIDATION_ERROR"
+    assert invalid_condition_type["code"] == "VALIDATION_ERROR"
+    storage.list_monitor_targets.assert_not_called()
+
+
+def test_manual_monitor_target_storage_uses_only_manual_storage_operations():
+    storage = MagicMock()
+    adapter = ManualMonitorTargetStorage(storage)
+
+    adapter.list_monitor_targets(frequency="daily", enabled=True, market="A", condition_type="rsi")
+    adapter.get_monitor_target(1)
+    adapter.create_monitor_target("600519", "A", {"type": "rsi", "direction": "below", "value": 30})
+    adapter.update_monitor_target(1, note="updated")
+    adapter.delete_monitor_target(1)
+
+    storage.list_manual_monitor_targets.assert_called_once_with(
+        frequency="daily", enabled=True, market="A", condition_type="rsi"
+    )
+    storage.get_manual_monitor_target.assert_called_once_with(1)
+    storage.create_manual_monitor_target.assert_called_once()
+    storage.update_manual_monitor_target.assert_called_once_with(1, note="updated")
+    storage.delete_manual_monitor_target.assert_called_once_with(1)
+    storage.create_monitor_target.assert_not_called()
+    storage.update_monitor_target.assert_not_called()
+    storage.delete_monitor_target.assert_not_called()
+
+
+def test_manual_monitor_target_storage_rejects_workflow_owned_creation():
+    storage = MagicMock()
+
+    try:
+        ManualMonitorTargetStorage(storage).create_monitor_target(
+            "600519",
+            "A",
+            {"type": "rsi", "workflow": "forecast_ssf_ma20"},
+        )
+    except TargetValidationError as exc:
+        assert str(exc) == "workflow-owned targets cannot be created here"
+    else:
+        raise AssertionError("workflow-owned target creation must fail")
+
+    storage.create_manual_monitor_target.assert_not_called()
 
 
 def test_new_method_aliases_are_wired_to_existing_behaviors():
