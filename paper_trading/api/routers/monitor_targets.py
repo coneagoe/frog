@@ -30,7 +30,10 @@ ServiceDep = Annotated[MonitorTargetService, Depends(get_monitor_target_service)
 
 def _response(result: dict) -> MonitorTargetResponse:
     _raise_for_result(result)
-    return MonitorTargetResponse.model_validate(cast(dict[str, object], result["data"]))
+    return cast(
+        MonitorTargetResponse,
+        MonitorTargetResponse.model_validate(cast(dict[str, object], result["data"])),
+    )
 
 
 def _raise_for_result(result: dict) -> None:
