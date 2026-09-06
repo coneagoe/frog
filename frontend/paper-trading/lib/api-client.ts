@@ -16,6 +16,9 @@ import type {
   CreateOrderInput,
   ImportPositionsInput,
   ImportPositionsResult,
+  CreateMonitorTargetInput,
+  ListMonitorTargetsParams,
+  MonitorTarget,
   ListOrdersParams,
   ListCorporateActionsParams,
   ListTradesParams,
@@ -27,7 +30,8 @@ import type {
   TradePage,
   ResetPasswordInput,
   ResendVerificationEmailInput,
-  UpdateAccountFeesInput
+  UpdateAccountFeesInput,
+  UpdateMonitorTargetInput
 } from "./types";
 
 export { ApiError };
@@ -238,4 +242,39 @@ export function listCorporateActions(accountId: number, params?: ListCorporateAc
   return apiGet<CorporateActionEvent[]>(
     `/accounts/${accountId}/corporate-actions${queryString ? `?${queryString}` : ""}`
   );
+}
+
+export function listMonitorTargets(params?: ListMonitorTargetsParams): Promise<MonitorTarget[]> {
+  const query = new URLSearchParams();
+  if (params) {
+    for (const key of ["market", "frequency", "enabled", "condition_type"] as const) {
+      const value = params[key];
+      if (value !== undefined) query.set(key, String(value));
+    }
+  }
+  const queryString = query.toString();
+  return apiGet<MonitorTarget[]>(`/monitor-targets${queryString ? `?${queryString}` : ""}`);
+}
+
+export function createMonitorTarget(input: CreateMonitorTargetInput): Promise<MonitorTarget> {
+  return apiRequest<MonitorTarget>("/monitor-targets", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function getMonitorTarget(targetId: number): Promise<MonitorTarget> {
+  return apiGet<MonitorTarget>(`/monitor-targets/${targetId}`);
+}
+
+export function updateMonitorTarget(targetId: number, input: UpdateMonitorTargetInput): Promise<MonitorTarget> {
+  return apiRequest<MonitorTarget>(`/monitor-targets/${targetId}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function setMonitorTargetEnabled(targetId: number, enabled: boolean): Promise<MonitorTarget> {
+  return apiRequest<MonitorTarget>(`/monitor-targets/${targetId}/enabled`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled })
+  });
+}
+
+export function deleteMonitorTarget(targetId: number): Promise<void> {
+  return apiRequest<void>(`/monitor-targets/${targetId}`, { method: "DELETE" });
 }

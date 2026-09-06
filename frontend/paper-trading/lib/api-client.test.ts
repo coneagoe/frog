@@ -5,15 +5,22 @@ import {
   createCorporateAction,
   createAccount,
   deleteAccount,
+  deleteMonitorTarget,
   depositCash,
+  createMonitorTarget,
+  getMonitorTarget,
   importPositions,
+  listMonitorTargets,
   listOrders,
   listCorporateActions,
   listTrades,
+  setMonitorTargetEnabled,
+  updateMonitorTarget,
   updateOrderComment,
   withdrawCash
 } from "./api-client";
 import { forgotPassword, getCurrentUser, login, logout, register, resendVerificationEmail, resetPassword, verifyEmail } from "./api-client";
+import type { MonitorTarget } from "./types";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -263,6 +270,68 @@ describe("ApiError", () => {
       code: "HTTP_ERROR",
       message: "backend failed"
     });
+  });
+
+  it.each([
+    [{ detail: "at least one update is required" }, "at least one update is required"],
+    [{ detail: { field: "condition", reason: "invalid" } }, "field: condition, reason: invalid"],
+    [{ detail: [{ loc: ["body", "market"], msg: "Field required", type: "missing" }] }, "body.market: Field required"]
+  ])("uses FastAPI detail payloads as usable errors", async (payload, message) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status: 422 })));
+
+    await expect(apiGet("/accounts")).rejects.toMatchObject({ status: 422, code: "HTTP_ERROR", message });
+  });
+});
+
+describe("monitor target API", () => {
+  const target: MonitorTarget = {
+    id: 7,
+    stock_code: "00700",
+    market: "HK",
+    condition: { type: "price_threshold", direction: "below", value: 300 },
+    note: "watch Tencent",
+    frequency: "daily",
+    reset_mode: "auto",
+    enabled: true,
+    last_state: false,
+    triggered_at: null,
+    created_at: "2026-09-06T09:30:00Z"
+  };
+
+  it("retains false list filters and encodes defined filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([target]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listMonitorTargets({ enabled: false, market: "HK" })).resolves.toEqual([target]);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/paper/monitor-targets?market=HK&enabled=false", expect.anything());
+  });
+
+  it("sends monitor target CRUD requests with CSRF protection", async () => {
+    document.cookie = "paper_trading_csrf=csrf%2Dvalue";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(target), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(target), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...target, note: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...target, enabled: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { stock_code: "00700", market: "HK" as const, condition: target.condition, note: target.note };
+
+    await createMonitorTarget(input);
+    await getMonitorTarget(target.id);
+    await updateMonitorTarget(target.id, { note: null });
+    await setMonitorTargetEnabled(target.id, false);
+    await deleteMonitorTarget(target.id);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/paper/monitor-targets", expect.objectContaining({ method: "POST", body: JSON.stringify(input) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/paper/monitor-targets/7", expect.anything());
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/paper/monitor-targets/7", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ note: null }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/paper/monitor-targets/7/enabled", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/paper/monitor-targets/7", expect.objectContaining({ method: "DELETE" }));
+    for (const [, init] of [fetchMock.mock.calls[0], fetchMock.mock.calls[2], fetchMock.mock.calls[3], fetchMock.mock.calls[4]]) {
+      expect((init.headers as Headers).get("X-CSRF-Token")).toBe("csrf-value");
+    }
   });
 });
 

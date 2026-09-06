@@ -434,3 +434,48 @@ export type ListCorporateActionsParams = {
   start_at?: string;
   end_at?: string;
 };
+
+export type MonitorCondition =
+  | { type: "price_threshold"; direction: "above" | "below"; value: number }
+  | { type: "ma_cross"; direction: "golden" | "death"; fast: number; slow: number }
+  | { type: "change_pct"; direction: "above" | "below"; value: number }
+  | { type: "price_cross_ma"; direction: "above" | "below"; period: number }
+  | { type: "close_cross_ma"; direction: "above"; period: number }
+  | { type: "rsi"; direction: "above" | "below"; value: number; period?: number };
+
+export type MonitorMarket = "A" | "HK" | "ETF";
+export type MonitorFrequency = "daily" | "intraday";
+export type MonitorResetMode = "auto" | "manual";
+
+export type MonitorTarget = {
+  id: number;
+  stock_code: string;
+  market: MonitorMarket;
+  condition: MonitorCondition;
+  note: string | null;
+  frequency: MonitorFrequency;
+  reset_mode: MonitorResetMode;
+  enabled: boolean;
+  last_state: boolean;
+  triggered_at: string | null;
+  created_at: string | null;
+};
+
+export type ListMonitorTargetsParams = {
+  frequency?: MonitorFrequency;
+  enabled?: boolean;
+  market?: MonitorMarket;
+  condition_type?: MonitorCondition["type"];
+};
+
+export type CreateMonitorTargetInput = {
+  stock_code: string;
+  market: MonitorMarket;
+  condition: MonitorCondition;
+  note?: string | null;
+  frequency?: MonitorFrequency;
+  reset_mode?: MonitorResetMode;
+  enabled?: boolean;
+};
+
+export type UpdateMonitorTargetInput = Partial<CreateMonitorTargetInput>;
