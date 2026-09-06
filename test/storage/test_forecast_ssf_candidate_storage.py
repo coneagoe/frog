@@ -1001,6 +1001,22 @@ def test_manual_monitor_target_rejects_condition_workflow_marker(tmp_path):
     assert persisted.workflow is None
 
 
+@pytest.mark.parametrize("workflow", ["forecast_ssf", ""])
+def test_create_manual_monitor_target_rejects_non_null_condition_workflow(tmp_path, workflow):
+    db = _sqlite_storage(tmp_path)
+
+    with pytest.raises(ValueError, match="manual monitor target condition cannot include a workflow marker"):
+        db.create_manual_monitor_target("600001", "A", _typed_condition(workflow=workflow))
+
+
+def test_list_manual_monitor_targets_excludes_workflow_owned_records_without_filters(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    manual = db.create_manual_monitor_target("600001", "A", _typed_condition())
+    _create_target(db, workflow="forecast_ssf")
+
+    assert [target.id for target in db.list_manual_monitor_targets()] == [manual.id]
+
+
 def test_manual_monitor_target_methods_exclude_workflow_targets_and_compose_filters(tmp_path):
     db = _sqlite_storage(tmp_path)
     manual = db.create_manual_monitor_target(

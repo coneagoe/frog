@@ -44,6 +44,29 @@ describe("MonitorPage", () => {
     await waitFor(() => expect(listMonitorTargets).toHaveBeenCalledTimes(2));
   });
 
+  it("keeps a later in-flight row action disabled when an earlier action completes", async () => {
+    let resolveToggle!: () => void;
+    let resolveDelete!: () => void;
+    vi.mocked(listMonitorTargets).mockResolvedValue([target, { ...target, id: 18, stock_code: "000002" }]);
+    vi.mocked(setMonitorTargetEnabled).mockImplementationOnce(() => new Promise((resolve) => { resolveToggle = resolve; }));
+    vi.mocked(deleteMonitorTarget).mockImplementationOnce(() => new Promise((resolve) => { resolveDelete = resolve; }));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<MonitorPage />);
+    await screen.findByText("000001");
+
+    await userEvent.click(screen.getByRole("button", { name: "Disable 000001" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete 000002" }));
+    expect(screen.getByRole("button", { name: "Delete 000002" })).toBeDisabled();
+
+    resolveToggle();
+    await waitFor(() => expect(listMonitorTargets).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Delete 000002" })).toBeDisabled();
+
+    resolveDelete();
+    await waitFor(() => expect(listMonitorTargets).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole("button", { name: "Delete 000002" })).toBeEnabled();
+  });
+
   it("suppresses stale list responses", async () => {
     let resolveFirst!: (items: typeof target[]) => void;
     vi.mocked(listMonitorTargets).mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; })).mockResolvedValueOnce([]);
