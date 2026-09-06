@@ -36,9 +36,7 @@ def _response(result: dict) -> MonitorTargetResponse:
 def _raise_for_result(result: dict) -> None:
     if result["success"]:
         return
-    status_code = (
-        status.HTTP_404_NOT_FOUND if result["code"] == "NOT_FOUND" else status.HTTP_422_UNPROCESSABLE_CONTENT
-    )
+    status_code = status.HTTP_404_NOT_FOUND if result["code"] == "NOT_FOUND" else status.HTTP_422_UNPROCESSABLE_CONTENT
     raise HTTPException(status_code=status_code, detail=result["message"])
 
 

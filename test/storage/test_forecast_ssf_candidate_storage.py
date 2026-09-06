@@ -1019,9 +1019,7 @@ def test_list_manual_monitor_targets_excludes_workflow_owned_records_without_fil
 
 def test_manual_monitor_target_methods_exclude_workflow_targets_and_compose_filters(tmp_path):
     db = _sqlite_storage(tmp_path)
-    manual = db.create_manual_monitor_target(
-        "600001", "A", _typed_condition(), note="manual", enabled=True
-    )
+    manual = db.create_manual_monitor_target("600001", "A", _typed_condition(), note="manual", enabled=True)
     db.create_manual_monitor_target(
         "00700", "HK", _typed_condition(direction="below", value=8), frequency="intraday", enabled=False
     )

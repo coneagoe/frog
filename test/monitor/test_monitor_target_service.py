@@ -140,9 +140,7 @@ def test_list_targets_forwards_market_and_condition_type_filters():
     result = service.list_targets(market="A", condition_type="rsi")
 
     assert result["success"] is True
-    storage.list_monitor_targets.assert_called_once_with(
-        frequency=None, enabled=None, market="A", condition_type="rsi"
-    )
+    storage.list_monitor_targets.assert_called_once_with(frequency=None, enabled=None, market="A", condition_type="rsi")
 
 
 def test_list_targets_rejects_invalid_market_or_condition_type_filters():

@@ -151,7 +151,9 @@ def test_monitor_target_manual_crud_filters_and_safe_schema(monkeypatch, sqlite_
     assert cleared.json()["note"] is None
     assert client.patch(f"/paper/monitor-targets/{target_id}", headers=csrf_headers, json={}).status_code == 422
 
-    disabled = client.patch(f"/paper/monitor-targets/{target_id}/enabled", headers=csrf_headers, json={"enabled": False})
+    disabled = client.patch(
+        f"/paper/monitor-targets/{target_id}/enabled", headers=csrf_headers, json={"enabled": False}
+    )
     assert disabled.status_code == 200
     assert disabled.json()["enabled"] is False
     assert client.delete(f"/paper/monitor-targets/{target_id}", headers=csrf_headers).status_code == 204
