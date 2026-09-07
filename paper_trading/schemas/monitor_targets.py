@@ -3,7 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from monitor.domain_enums import MonitorFrequency, MonitorMarket, MonitorResetMode
+from monitor.domain_enums import MonitorEvaluationErrorKind, MonitorFrequency, MonitorMarket, MonitorResetMode
+from monitor.monitor_health_service import MonitorOperationalState
 
 
 class MonitorTargetResponse(BaseModel):
@@ -18,6 +19,51 @@ class MonitorTargetResponse(BaseModel):
     last_state: bool
     triggered_at: datetime | None
     created_at: datetime | None
+
+
+class MonitorTargetHealthErrorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: MonitorEvaluationErrorKind
+    summary: str
+    detail: str | None
+    occurred_at: datetime
+
+
+class MonitorTargetHealthSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total: int
+    running: int
+    paused: int
+    disabled: int
+    triggered: int
+    daily: int
+    intraday: int
+
+
+class MonitorTargetHealthItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    stock_code: str
+    market: MonitorMarket
+    frequency: MonitorFrequency
+    workflow: str | None
+    enabled: bool
+    paused: bool
+    operational_state: MonitorOperationalState
+    last_state: bool
+    last_checked_at: datetime | None
+    triggered_at: datetime | None
+    latest_error: MonitorTargetHealthErrorResponse | None
+
+
+class MonitorTargetHealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: MonitorTargetHealthSummaryResponse
+    targets: list[MonitorTargetHealthItemResponse]
 
 
 class CreateMonitorTargetRequest(BaseModel):

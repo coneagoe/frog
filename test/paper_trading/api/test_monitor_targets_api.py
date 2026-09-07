@@ -4,10 +4,11 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from monitor.monitor_target_service import MonitorTargetService
+from monitor.monitor_health_service import MonitorTargetHealthService
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
 from paper_trading.api.monitor_target_storage import ManualMonitorTargetStorage
-from paper_trading.api.routers.monitor_targets import get_monitor_target_service
+from paper_trading.api.routers.monitor_targets import get_monitor_target_health_service, get_monitor_target_service
 from paper_trading.auth import AuthSettings, create_session_token, hash_password
 from storage.model.auth import User
 from storage.model.base import Base
@@ -37,6 +38,10 @@ class FakeMonitorStorage:
             "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
             "workflow": workflow,
             "paused": workflow is not None,
+            "last_checked_at": None,
+            "latest_error_kind": None,
+            "latest_error_detail": None,
+            "latest_error_at": None,
         }
         values.update(updates)
         return SimpleNamespace(**values)
@@ -50,6 +55,9 @@ class FakeMonitorStorage:
                 else:
                     targets = [target for target in targets if getattr(target, field) == value]
         return targets
+
+    def list_monitor_target_health(self):
+        return self.targets
 
     def get_manual_monitor_target(self, target_id):
         return next((target for target in self.targets if target.id == target_id and target.workflow is None), None)
@@ -89,6 +97,7 @@ def _client(monkeypatch, sqlite_session):
     app.dependency_overrides[get_monitor_target_service] = lambda: MonitorTargetService(
         storage=ManualMonitorTargetStorage(storage)
     )
+    app.dependency_overrides[get_monitor_target_health_service] = lambda: MonitorTargetHealthService(storage=storage)
     client = TestClient(app)
     with sqlite_session.begin():
         user = User(
@@ -122,6 +131,40 @@ def test_monitor_target_routes_require_auth_and_preserve_bearer_access(monkeypat
         ).status_code
         == 200
     )
+
+
+def test_monitor_target_health_is_authenticated_read_only_all_target_view(monkeypatch, sqlite_session):
+    client, csrf_headers, storage = _client(monkeypatch, sqlite_session)
+    storage.targets[0].enabled = False
+    storage.targets[0].paused = True
+    storage.targets[0].last_state = True
+
+    assert TestClient(create_app()).get("/paper/monitor-targets/health").status_code == 401
+    response = client.get("/paper/monitor-targets/health")
+    bearer_response = client.get("/paper/monitor-targets/health", headers={"Authorization": "Bearer secret"})
+
+    assert response.status_code == 200
+    assert bearer_response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == {
+        "total": 2,
+        "running": 0,
+        "paused": 1,
+        "disabled": 1,
+        "triggered": 1,
+        "daily": 2,
+        "intraday": 0,
+    }
+    assert payload["targets"][0]["operational_state"] == "disabled"
+    assert payload["targets"][1]["workflow"] == "scheduled"
+    assert "condition" not in payload["targets"][1]
+    assert "note" not in payload["targets"][1]
+
+    before = list(storage.targets)
+    for method in ("post", "patch"):
+        assert getattr(client, method)("/paper/monitor-targets/health", headers=csrf_headers, json={}).status_code >= 300
+    assert client.delete("/paper/monitor-targets/health", headers=csrf_headers).status_code >= 300
+    assert storage.targets == before
 
 
 def test_monitor_target_manual_crud_filters_and_safe_schema(monkeypatch, sqlite_session):

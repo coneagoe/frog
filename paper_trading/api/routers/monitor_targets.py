@@ -3,11 +3,13 @@ from typing import Annotated, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from monitor.domain_enums import MonitorConditionType, MonitorFrequency, MonitorMarket
+from monitor.monitor_health_service import MonitorTargetHealthService
 from monitor.monitor_target_service import MonitorTargetService
 from paper_trading.api.deps import require_browser_user, require_csrf
 from paper_trading.api.monitor_target_storage import ManualMonitorTargetStorage
 from paper_trading.schemas.monitor_targets import (
     CreateMonitorTargetRequest,
+    MonitorTargetHealthResponse,
     MonitorTargetResponse,
     SetMonitorTargetEnabledRequest,
     UpdateMonitorTargetRequest,
@@ -25,15 +27,17 @@ def get_monitor_target_service() -> MonitorTargetService:
     return MonitorTargetService(storage=ManualMonitorTargetStorage(get_storage()))
 
 
+def get_monitor_target_health_service() -> MonitorTargetHealthService:
+    return MonitorTargetHealthService(storage=get_storage())
+
+
 ServiceDep = Annotated[MonitorTargetService, Depends(get_monitor_target_service)]
+HealthServiceDep = Annotated[MonitorTargetHealthService, Depends(get_monitor_target_health_service)]
 
 
 def _response(result: dict) -> MonitorTargetResponse:
     _raise_for_result(result)
-    return cast(
-        MonitorTargetResponse,
-        MonitorTargetResponse.model_validate(cast(dict[str, object], result["data"])),
-    )
+    return MonitorTargetResponse.model_validate(cast(dict[str, object], result["data"]))
 
 
 def _raise_for_result(result: dict) -> None:
@@ -68,6 +72,11 @@ def create_monitor_target(
     _: None = Depends(require_csrf),
 ) -> MonitorTargetResponse:
     return _response(service.add_target(**request.model_dump()))
+
+
+@router.get("/health", response_model=MonitorTargetHealthResponse)
+def get_monitor_targets_health(service: HealthServiceDep) -> MonitorTargetHealthResponse:
+    return MonitorTargetHealthResponse.model_validate(service.get_health())
 
 
 @router.get("/{target_id}", response_model=MonitorTargetResponse)
