@@ -70,7 +70,7 @@ def _create_legacy_schema(connection: Connection) -> None:
             "CREATE TABLE stock_monitor_targets ("
             "id integer primary key, stock_code varchar(10) NOT NULL, market varchar(5) NOT NULL DEFAULT 'A', "
             "condition json NOT NULL, frequency varchar(10) NOT NULL DEFAULT 'daily', "
-            "reset_mode varchar(10) NOT NULL DEFAULT 'auto')"
+            "reset_mode varchar(10) NOT NULL DEFAULT 'auto', latest_error_kind varchar(32))"
         )
     )
     connection.execute(
@@ -188,6 +188,44 @@ def test_adapter_rollback_restores_legacy_columns_and_removes_condition_check(po
         assert _column_type(connection, "forecast_ssf_candidates", "state") == "character varying(32)"
         assert _enum_types(connection) == set()
         assert not _check_exists(connection)
+
+
+def test_evaluation_error_kind_converts_reruns_rejects_unknown_and_rolls_back(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode, latest_error_kind) "
+                "VALUES (1, '600001', 'A', '{\"type\": \"price_threshold\", \"direction\": \"above\", \"value\": 10}'::json, 'daily', 'auto', 'market_data')"
+            )
+        )
+        assert migrate_monitor_enums(connection).converted is True
+        assert _column_type(connection, "stock_monitor_targets", "latest_error_kind") == "monitor_evaluation_error_kind"
+        assert next(group.labels for group in MONITOR_ENUM_GROUPS if group.type_name == "monitor_evaluation_error_kind") == (
+            "market_data", "condition", "workflow_guard", "notification", "storage", "unknown"
+        )
+        audit = MONITOR_ENUM_ADAPTER.audit(connection, rollback=False)
+        error_kind = next(group for group in audit.groups if group.type_name == "monitor_evaluation_error_kind")
+        assert error_kind.ready is True
+        assert error_kind.columns[0].observed_values == ("market_data",)
+        assert migrate_monitor_enums(connection).converted is False
+        assert migrate_monitor_enums(connection, rollback=True).rolled_back is True
+        assert _column_type(connection, "stock_monitor_targets", "latest_error_kind") == "character varying(32)"
+
+
+def test_evaluation_error_kind_unknown_legacy_value_aborts_before_ddl(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode, latest_error_kind) "
+                "VALUES (1, '600001', 'A', '{\"type\": \"price_threshold\", \"direction\": \"above\", \"value\": 10}'::json, 'daily', 'auto', 'provider_secret')"
+            )
+        )
+        with pytest.raises(MonitorEnumMigrationError, match="monitor_evaluation_error_kind"):
+            migrate_monitor_enums(connection)
+        assert _column_type(connection, "stock_monitor_targets", "latest_error_kind") == "character varying(32)"
+        assert _enum_types(connection) == set()
 
 
 def test_coordinator_rollback_is_noop_when_all_governed_tables_are_absent(postgres_schema):

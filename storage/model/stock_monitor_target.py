@@ -6,7 +6,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Enum, Integer, String, Text, tex
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
-from monitor.domain_enums import MonitorFrequency, MonitorMarket, MonitorResetMode
+from monitor.domain_enums import MonitorEvaluationErrorKind, MonitorFrequency, MonitorMarket, MonitorResetMode
 
 from .base import Base
 from .orm_compat import Mapped, mapped_column
@@ -83,6 +83,12 @@ class StockMonitorTarget(Base):
     triggered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, comment="最近触发时间"
     )
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    latest_error_kind: Mapped[str | None] = mapped_column(
+        _value_enum(MonitorEvaluationErrorKind, "monitor_evaluation_error_kind"), nullable=True
+    )
+    latest_error_detail: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    latest_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

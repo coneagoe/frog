@@ -104,7 +104,13 @@ from common.const import (
     SecurityType,
 )
 from monitor.condition_validation import validate_condition
-from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
+from monitor.domain_enums import (
+    ForecastSSFCandidateState,
+    MonitorEvaluationErrorKind,
+    MonitorFrequency,
+    MonitorMarket,
+    MonitorResetMode,
+)
 
 from .config import StorageConfig
 from .domain_enums import ForecastSnapshotStatus, SSFChangeSignalStatus, validate_ssf_event_types
@@ -3076,6 +3082,61 @@ class StorageDb:
         finally:
             session.close()
 
+    def list_monitor_target_health(self) -> list[Any]:
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            return cast(list[Any], session.query(StockMonitorTarget).order_by(StockMonitorTarget.id.asc()).all())
+        finally:
+            session.close()
+
+    def record_monitor_target_evaluation(self, target_id: int, checked_at: datetime) -> bool:
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+            if target is None:
+                return False
+            target.last_checked_at = checked_at
+            target.latest_error_kind = target.latest_error_detail = target.latest_error_at = None
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def record_monitor_target_evaluation_error(
+        self, target_id: int, kind: str, detail: str | None, occurred_at: datetime
+    ) -> bool:
+        self._validate_monitor_enum_value(kind, "kind", MonitorEvaluationErrorKind)
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
+            if target is None:
+                return False
+            target.latest_error_kind = kind
+            target.latest_error_detail = detail
+            target.latest_error_at = occurred_at
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def list_manual_monitor_targets(
         self,
         *,
@@ -3853,8 +3914,26 @@ class StorageDb:
         from .model.stock_monitor_target import StockMonitorTarget  # noqa: F401
 
         StockMonitorTarget.__table__.create(self.engine, checkfirst=True)
+        self._ensure_monitor_target_health_columns()
         self._migrate_sqlite_price_vs_ma_conditions()
         self._ensure_workflow_monitor_target_identity()
+
+    def _ensure_monitor_target_health_columns(self) -> None:
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.engine is not None
+        columns = {column["name"] for column in inspect(self.engine).get_columns(StockMonitorTarget.__tablename__)}
+        timestamp_type = "TIMESTAMP WITH TIME ZONE" if self.engine.dialect.name == "postgresql" else "DATETIME"
+        column_types = {
+            "last_checked_at": timestamp_type,
+            "latest_error_kind": "VARCHAR(32)",
+            "latest_error_detail": "VARCHAR(240)",
+            "latest_error_at": timestamp_type,
+        }
+        with self.engine.begin() as conn:
+            for name, type_sql in column_types.items():
+                if name not in columns:
+                    conn.execute(text(f"ALTER TABLE {StockMonitorTarget.__tablename__} ADD COLUMN {name} {type_sql}"))
 
     def _migrate_sqlite_price_vs_ma_conditions(self) -> None:
         if self.engine is None or self.engine.dialect.name != "sqlite":

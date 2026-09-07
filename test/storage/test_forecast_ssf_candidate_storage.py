@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -122,6 +122,76 @@ def test_sqlite_price_vs_ma_below_direction_migrates_disabled_and_normalized(tmp
     assert json.loads(row[0]) == {"type": "close_cross_ma", "direction": "above", "period": 20}
     assert bool(row[1]) is False
     assert bool(row[2]) is True
+
+
+def test_monitor_health_columns_and_writes_preserve_target_lifecycle_fields(tmp_path):
+    db = _legacy_monitor_target_storage(tmp_path)
+    with db.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO stock_monitor_targets "
+                "(id, stock_code, market, condition, frequency, reset_mode, enabled, last_state, triggered_at) "
+                "VALUES (1, '600001', 'A', :condition, 'daily', 'auto', true, true, :triggered_at)"
+            ),
+            {"condition": json.dumps(_typed_condition()), "triggered_at": "2026-09-07 07:00:00"},
+        )
+
+    db.ensure_monitor_targets_table()
+    db.ensure_monitor_targets_table()
+    assert {column["name"] for column in inspect(db.engine).get_columns("stock_monitor_targets")} >= {
+        "last_checked_at",
+        "latest_error_kind",
+        "latest_error_detail",
+        "latest_error_at",
+    }
+
+    manual = db.get_monitor_target(1)
+    workflow = db.upsert_workflow_monitor_target(
+        "600002", "A", "daily", "forecast_ssf", _typed_condition(workflow="forecast_ssf"), "workflow", True, False
+    )
+    assert [target.id for target in db.list_monitor_target_health()] == [manual.id, workflow.id]
+
+    failed_at = datetime(2026, 9, 7, 7, 30, tzinfo=timezone.utc)
+    assert db.record_monitor_target_evaluation_error(manual.id, "market_data", "unavailable", failed_at)
+    saved = db.get_monitor_target(manual.id)
+    assert (saved.last_checked_at, saved.latest_error_kind, saved.latest_error_detail, saved.latest_error_at) == (
+        None,
+        "market_data",
+        "unavailable",
+        failed_at.replace(tzinfo=None),
+    )
+    assert (saved.last_state, saved.triggered_at, saved.enabled, saved.paused) == (
+        True,
+        manual.triggered_at,
+        True,
+        False,
+    )
+    assert db.record_monitor_target_evaluation(manual.id, failed_at + timedelta(minutes=1))
+    saved = db.get_monitor_target(manual.id)
+    assert saved.last_checked_at == (failed_at + timedelta(minutes=1)).replace(tzinfo=None)
+    assert (saved.latest_error_kind, saved.latest_error_detail, saved.latest_error_at) == (None, None, None)
+    assert not db.record_monitor_target_evaluation(999, failed_at)
+    with pytest.raises(ValueError, match="kind"):
+        db.record_monitor_target_evaluation_error(manual.id, "invalid", None, failed_at)
+
+    assert db.record_monitor_target_evaluation(workflow.id, failed_at)
+    db.record_monitor_target_evaluation_error(workflow.id, "storage", "before", failed_at)
+    db.update_manual_monitor_target(manual.id, note="updated", enabled=False)
+    db.update_manual_monitor_target(manual.id, enabled=True)
+    db.set_workflow_monitor_target_paused(workflow.id, paused=True)
+    db.set_workflow_monitor_target_paused(workflow.id, paused=False)
+    db.upsert_workflow_monitor_target(
+        "600002", "A", "daily", "forecast_ssf", _typed_condition(workflow="forecast_ssf", version=2), "updated", True, False
+    )
+    preserved = db.get_monitor_target(workflow.id)
+    assert (
+        preserved.last_checked_at,
+        preserved.latest_error_kind,
+        preserved.latest_error_detail,
+        preserved.latest_error_at,
+    ) == (
+        failed_at.replace(tzinfo=None), "storage", "before", failed_at.replace(tzinfo=None)
+    )
 
 
 def _typed_condition(**extra: Any) -> dict[str, Any]:

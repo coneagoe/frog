@@ -9,7 +9,13 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
 
 from monitor.condition_validation import validate_condition
-from monitor.domain_enums import ForecastSSFCandidateState, MonitorFrequency, MonitorMarket, MonitorResetMode
+from monitor.domain_enums import (
+    ForecastSSFCandidateState,
+    MonitorEvaluationErrorKind,
+    MonitorFrequency,
+    MonitorMarket,
+    MonitorResetMode,
+)
 from storage.enum_governance_adapter import EnumGovernanceAdapter
 from storage.model import ForecastSSFCandidate, StockMonitorTarget
 
@@ -125,6 +131,11 @@ MONITOR_ENUM_GROUPS = (
                 indexes=(_index("ix_stock_monitor_targets_reset_mode", "stock_monitor_targets", "reset_mode"),),
             ),
         ),
+    ),
+    MonitorEnumGroup(
+        "monitor_evaluation_error_kind",
+        _labels(MonitorEvaluationErrorKind),
+        (_column("stock_monitor_targets", "latest_error_kind", "VARCHAR(32)", nullable=True),),
     ),
     MonitorEnumGroup(
         "forecast_ssf_candidate_state",
