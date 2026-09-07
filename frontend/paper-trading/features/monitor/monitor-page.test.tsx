@@ -79,10 +79,27 @@ describe("MonitorPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Manual refresh unavailable");
   });
 
+  it("updates manual targets while retaining health when a concurrent refresh has a health failure", async () => {
+    const refreshedTarget = { ...target, stock_code: "000002" };
+    vi.mocked(listMonitorTargets).mockResolvedValueOnce([target]).mockResolvedValueOnce([refreshedTarget]);
+    vi.mocked(getMonitorTargetHealth).mockResolvedValueOnce(health).mockRejectedValueOnce(new Error("Health refresh unavailable"));
+    render(<MonitorPage />);
+    await screen.findByText("workflow-only");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh targets" }));
+
+    expect(await screen.findByText("000002")).toBeInTheDocument();
+    expect(screen.queryByText("000001")).not.toBeInTheDocument();
+    expect(screen.getByText("workflow-only")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Health refresh unavailable");
+  });
+
   it("refreshes both resources after successful create and update", async () => {
-    vi.mocked(listMonitorTargets).mockResolvedValue([target]);
+    const createdTarget = { ...target, id: 18, stock_code: "000002" };
+    const updatedTarget = { ...target, stock_code: "000003" };
+    vi.mocked(listMonitorTargets).mockResolvedValueOnce([target]).mockResolvedValueOnce([createdTarget]).mockResolvedValueOnce([updatedTarget]);
     vi.mocked(createMonitorTarget).mockResolvedValue(target);
     vi.mocked(updateMonitorTarget).mockResolvedValue(target);
+    vi.mocked(getMonitorTargetHealth).mockResolvedValueOnce(health).mockResolvedValueOnce({ ...health, targets: [{ ...health.targets[0], stock_code: "created-workflow" }] }).mockResolvedValueOnce({ ...health, targets: [{ ...health.targets[0], stock_code: "updated-workflow" }] });
     const user = userEvent.setup();
     render(<MonitorPage />);
     await screen.findByText("000001");
@@ -91,11 +108,17 @@ describe("MonitorPage", () => {
     await user.type(screen.getByLabelText("Stock code"), "000002");
     await user.click(screen.getByRole("dialog", { name: "Create monitor target" }).querySelector('button[type="submit"]')!);
     await waitFor(() => expect(createMonitorTarget).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("000002")).toBeInTheDocument();
+    expect(await screen.findByText("created-workflow")).toBeInTheDocument();
+    expect(listMonitorTargets).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(getMonitorTargetHealth).toHaveBeenCalledTimes(2));
 
     await user.click(screen.getByRole("button", { name: "Edit" }));
     await user.click(screen.getByRole("dialog", { name: "Edit monitor target" }).querySelector('button[type="submit"]')!);
     await waitFor(() => expect(updateMonitorTarget).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("000003")).toBeInTheDocument();
+    expect(await screen.findByText("updated-workflow")).toBeInTheDocument();
+    expect(listMonitorTargets).toHaveBeenCalledTimes(3);
     await waitFor(() => expect(getMonitorTargetHealth).toHaveBeenCalledTimes(3));
   });
 
