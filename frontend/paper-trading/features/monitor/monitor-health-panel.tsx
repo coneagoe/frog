@@ -17,7 +17,7 @@ function latestError(target: MonitorTargetHealthItem) {
   return error.detail ? `${error.summary} — ${error.detail}` : error.summary;
 }
 
-export function MonitorHealthPanel({ health, loading }: { health: MonitorTargetHealth | null; loading: boolean }) {
+export function MonitorHealthPanel({ error, health, loading }: { error: string | null; health: MonitorTargetHealth | null; loading: boolean }) {
   const columns: Column<MonitorTargetHealthItem>[] = [
     { key: "target", header: "Target", render: (target) => <strong>{target.stock_code}</strong> },
     { key: "scope", header: "Scope", render: (target) => `${target.market} · ${target.frequency}` },
@@ -34,6 +34,7 @@ export function MonitorHealthPanel({ health, loading }: { health: MonitorTargetH
 
   return <section aria-labelledby="monitor-health-title" className="panel monitor-health-panel">
     <div className="monitor-health-heading"><div><p className="monitor-eyebrow">Read-only operations view</p><h2 id="monitor-health-title">Operational health</h2><p className="muted">A live view of every manual and workflow monitor target.</p></div>{loading ? <span className="monitor-health-loading">Updating…</span> : null}</div>
-    {health ? <><div className="monitor-health-summary" aria-label="Health summary">{counters.map(([label, value]) => <div className="monitor-health-counter" key={String(label)}><span>{label}</span><strong>{value}</strong></div>)}</div><DataTable columns={columns} density="compact" emptyTitle="No monitor target health available" getRowKey={(target) => target.id} rows={health.targets} /></> : <p className="monitor-loading">Health data is not available yet.</p>}
+    {error ? <p className="monitor-health-error" role="alert">{error}</p> : null}
+    {health ? <><div className="monitor-health-summary" aria-label="Health summary">{counters.map(([label, value]) => <div className="monitor-health-counter" key={String(label)}><span>{label}</span><strong>{value}</strong></div>)}</div><DataTable columns={columns} density="compact" emptyTitle="No monitor target health available" getRowKey={(target) => target.id} rows={health.targets} /></> : <p className="monitor-loading">{loading ? "Loading operational health…" : "Operational health could not be loaded."}</p>}
   </section>;
 }

@@ -309,6 +309,7 @@ describe("monitor target API", () => {
   });
 
   it("gets the operational health for manual and workflow targets", async () => {
+    document.cookie = "paper_trading_csrf=csrf%2Dvalue";
     const health: MonitorTargetHealth = {
       summary: { total: 2, running: 1, paused: 1, disabled: 0, triggered: 1, daily: 1, intraday: 1 },
       targets: [
@@ -322,6 +323,9 @@ describe("monitor target API", () => {
     await expect(getMonitorTargetHealth()).resolves.toEqual(health);
 
     expect(fetchMock).toHaveBeenCalledWith("/api/paper/monitor-targets/health", expect.anything());
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method ?? "GET").toBe("GET");
+    expect((init.headers as Headers).get("X-CSRF-Token")).toBeNull();
   });
 
   it("sends monitor target CRUD requests with CSRF protection", async () => {

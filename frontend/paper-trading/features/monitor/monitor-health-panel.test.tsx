@@ -13,7 +13,7 @@ const health: MonitorTargetHealth = {
 
 describe("MonitorHealthPanel", () => {
   it("renders the operational overview and read-only target health table", () => {
-    const { container } = render(<MonitorHealthPanel health={health} loading={false} />);
+    const { container } = render(<MonitorHealthPanel error={null} health={health} loading={false} />);
 
     expect(screen.getByRole("heading", { name: "Operational health" })).toBeInTheDocument();
     for (const counter of ["Total", "Running", "Paused", "Disabled", "Triggered", "Daily", "Intraday"]) {
@@ -30,5 +30,19 @@ describe("MonitorHealthPanel", () => {
     expect(container.querySelector('time[datetime="2026-09-07T09:30:00Z"]')).toBeInTheDocument();
     expect(container.querySelectorAll("time")).toHaveLength(2);
     expect(container.querySelectorAll("button, a")).toHaveLength(0);
+  });
+
+  it("announces health errors without hiding the last successful health data", () => {
+    render(<MonitorHealthPanel error="Health service unavailable" health={health} loading={false} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Health service unavailable");
+    expect(screen.getByText("000001")).toBeInTheDocument();
+  });
+
+  it("does not present an initial health failure as unavailable data", () => {
+    render(<MonitorHealthPanel error="Health service unavailable" health={null} loading={false} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Health service unavailable");
+    expect(screen.queryByText("Health data is not available yet.")).not.toBeInTheDocument();
   });
 });

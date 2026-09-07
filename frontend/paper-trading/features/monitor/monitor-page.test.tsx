@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteMonitorTarget, getMonitorTargetHealth, listMonitorTargets, setMonitorTargetEnabled } from "@/lib/api-client";
+import { createMonitorTarget, deleteMonitorTarget, getMonitorTargetHealth, listMonitorTargets, setMonitorTargetEnabled, updateMonitorTarget } from "@/lib/api-client";
 import { MonitorPage } from "./monitor-page";
 
 vi.mock("@/lib/api-client", () => ({ listMonitorTargets: vi.fn(), getMonitorTargetHealth: vi.fn(), createMonitorTarget: vi.fn(), updateMonitorTarget: vi.fn(), setMonitorTargetEnabled: vi.fn(), deleteMonitorTarget: vi.fn() }));
@@ -28,12 +28,75 @@ describe("MonitorPage", () => {
     vi.mocked(listMonitorTargets).mockResolvedValue([]);
     render(<MonitorPage />);
     await screen.findByText("No manual monitor targets yet");
+    const healthCallsBeforeFilters = vi.mocked(getMonitorTargetHealth).mock.calls.length;
     await userEvent.selectOptions(screen.getByLabelText("Market filter"), "A");
     await userEvent.selectOptions(screen.getByLabelText("Frequency filter"), "daily");
     await userEvent.selectOptions(screen.getByLabelText("Status filter"), "true");
     await userEvent.selectOptions(screen.getByLabelText("Condition filter"), "rsi");
     expect(listMonitorTargets).toHaveBeenLastCalledWith({ market: "A", frequency: "daily", enabled: true, condition_type: "rsi" });
     expect(screen.getByText("morning-watch").closest(".monitor-health-panel")?.querySelectorAll("button, a")).toHaveLength(0);
+    expect(getMonitorTargetHealth).toHaveBeenCalledTimes(healthCallsBeforeFilters);
+  });
+
+  it("shows a health error while preserving successful manual rows", async () => {
+    vi.mocked(listMonitorTargets).mockResolvedValue([target]);
+    vi.mocked(getMonitorTargetHealth).mockRejectedValue(new Error("Health service unavailable"));
+    render(<MonitorPage />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Health service unavailable");
+    expect(screen.getByText("000001")).toBeInTheDocument();
+    expect(screen.queryByText("Health data is not available yet.")).not.toBeInTheDocument();
+  });
+
+  it("keeps health visible when manual loading fails", async () => {
+    vi.mocked(listMonitorTargets).mockRejectedValue(new Error("Manual service unavailable"));
+    render(<MonitorPage />);
+
+    expect(await screen.findByText("workflow-only")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Manual service unavailable");
+  });
+
+  it("suppresses stale health responses independently", async () => {
+    let resolveFirst!: (value: typeof health) => void;
+    vi.mocked(listMonitorTargets).mockResolvedValue([]);
+    vi.mocked(getMonitorTargetHealth).mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; })).mockResolvedValueOnce({ ...health, targets: [{ ...health.targets[0], stock_code: "fresh-workflow" }] });
+    render(<MonitorPage />);
+    await userEvent.click(screen.getByRole("button", { name: "Refresh targets" }));
+    expect(await screen.findByText("fresh-workflow")).toBeInTheDocument();
+    resolveFirst(health);
+    await waitFor(() => expect(screen.queryByText("workflow-only")).not.toBeInTheDocument());
+  });
+
+  it("updates health while retaining manual rows when a concurrent refresh has a manual failure", async () => {
+    vi.mocked(listMonitorTargets).mockResolvedValueOnce([target]).mockRejectedValueOnce(new Error("Manual refresh unavailable"));
+    vi.mocked(getMonitorTargetHealth).mockResolvedValueOnce(health).mockResolvedValueOnce({ ...health, targets: [{ ...health.targets[0], stock_code: "updated-workflow" }] });
+    render(<MonitorPage />);
+    await screen.findByText("000001");
+    await userEvent.click(screen.getByRole("button", { name: "Refresh targets" }));
+
+    expect(await screen.findByText("updated-workflow")).toBeInTheDocument();
+    expect(screen.getByText("000001")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Manual refresh unavailable");
+  });
+
+  it("refreshes both resources after successful create and update", async () => {
+    vi.mocked(listMonitorTargets).mockResolvedValue([target]);
+    vi.mocked(createMonitorTarget).mockResolvedValue(target);
+    vi.mocked(updateMonitorTarget).mockResolvedValue(target);
+    const user = userEvent.setup();
+    render(<MonitorPage />);
+    await screen.findByText("000001");
+
+    await user.click(screen.getByRole("button", { name: "Create target" }));
+    await user.type(screen.getByLabelText("Stock code"), "000002");
+    await user.click(screen.getByRole("dialog", { name: "Create monitor target" }).querySelector('button[type="submit"]')!);
+    await waitFor(() => expect(createMonitorTarget).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getMonitorTargetHealth).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("dialog", { name: "Edit monitor target" }).querySelector('button[type="submit"]')!);
+    await waitFor(() => expect(updateMonitorTarget).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getMonitorTargetHealth).toHaveBeenCalledTimes(3));
   });
 
   it("refreshes after enable and keeps rows when a mutation fails", async () => {
@@ -47,6 +110,17 @@ describe("MonitorPage", () => {
     expect(screen.getByText("000001")).toBeInTheDocument();
   });
 
+  it("refreshes both resources after a successful toggle", async () => {
+    vi.mocked(listMonitorTargets).mockResolvedValue([target]);
+    vi.mocked(setMonitorTargetEnabled).mockResolvedValue({ ...target, enabled: false });
+    render(<MonitorPage />);
+    await screen.findByText("000001");
+    await userEvent.click(screen.getByRole("button", { name: "Disable 000001" }));
+
+    await waitFor(() => expect(listMonitorTargets).toHaveBeenCalledTimes(2));
+    expect(getMonitorTargetHealth).toHaveBeenCalledTimes(2);
+  });
+
   it("confirms permanent deletion before refreshing the list", async () => {
     vi.mocked(listMonitorTargets).mockResolvedValue([target]);
     vi.mocked(deleteMonitorTarget).mockResolvedValue(undefined);
@@ -57,6 +131,7 @@ describe("MonitorPage", () => {
     expect(confirm).toHaveBeenCalledWith("Permanently delete monitor target 000001?");
     expect(deleteMonitorTarget).toHaveBeenCalledWith(17);
     await waitFor(() => expect(listMonitorTargets).toHaveBeenCalledTimes(2));
+    expect(getMonitorTargetHealth).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a later in-flight row action disabled when an earlier action completes", async () => {

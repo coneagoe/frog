@@ -584,6 +584,7 @@ select:focus {
 .monitor-health-heading h2 { font-size: 18px; margin: 0 0 4px; }
 .monitor-health-heading .muted { font-size: 14px; margin: 0; }
 .monitor-health-loading { color: var(--muted); font-size: 13px; padding-top: 4px; }
+.monitor-health-error { background: var(--danger-soft); border-bottom: 1px solid var(--danger); color: var(--danger); font-size: 14px; margin: 0; padding: 10px 20px; }
 .monitor-health-summary { border-bottom: 1px solid var(--border); display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .monitor-health-counter { border-right: 1px solid var(--border); display: grid; gap: 4px; padding: 12px 14px; }
 .monitor-health-counter:last-child { border-right: 0; }
