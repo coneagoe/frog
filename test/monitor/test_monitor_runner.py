@@ -575,6 +575,8 @@ def test_banned_workflow_target_is_disabled_without_email():
     email.assert_not_called()
     storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
     storage.update_monitor_target_state.assert_not_called()
+    storage.record_monitor_target_evaluation.assert_not_called()
+    storage.record_monitor_target_evaluation_error.assert_not_called()
     assert events == ["evidence", "blackroom"]
     assert blackroom.is_banned.call_count == 1
     assert summary.skipped == 1

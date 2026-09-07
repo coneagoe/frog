@@ -180,8 +180,6 @@ def run_monitor(
                         if not disabled:
                             raise RuntimeError("failed to disable forecast SSF target for active blackroom")
                         summary.skipped += 1
-                        error_kind = MonitorEvaluationErrorKind.STORAGE
-                        storage.record_monitor_target_evaluation(target.id, _utc_now())
                         continue
                 error_kind = MonitorEvaluationErrorKind.NOTIFICATION
                 _send_alert(target, current_price, change_pct, evidence=evidence)
