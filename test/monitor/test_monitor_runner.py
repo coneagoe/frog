@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from common.const import COL_CLOSE, COL_DATE
 from monitor.monitor_runner import run_monitor
@@ -704,3 +705,114 @@ def test_workflow_email_failure_does_not_update_triggered_state():
 
     storage.update_monitor_target_state.assert_not_called()
     assert summary.errors == 1
+
+
+@pytest.mark.parametrize(
+    ("current_price", "last_state", "reset_mode"),
+    [
+        (1400.0, False, "auto"),  # triggered
+        (1600.0, False, "auto"),  # condition false
+        (1400.0, True, "auto"),  # already triggered
+        (1600.0, True, "manual"),  # completed manual reset
+    ],
+)
+def test_run_monitor_records_each_completed_evaluation(current_price, last_state, reset_mode):
+    target = _make_target(last_state=last_state, reset_mode=reset_mode)
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=current_price),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email"),
+        patch("monitor.monitor_runner._utc_now", return_value=datetime(2026, 9, 7, tzinfo=timezone.utc)),
+    ):
+        summary = run_monitor()
+
+    assert summary.errors == 0
+    storage.record_monitor_target_evaluation.assert_called_once_with(
+        target.id, datetime(2026, 9, 7, tzinfo=timezone.utc)
+    )
+    storage.record_monitor_target_evaluation_error.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        None,
+        pd.DataFrame({COL_DATE: pd.date_range("2026-06-03", periods=21), COL_CLOSE: [10.0] * 21}),
+        pd.DataFrame({COL_DATE: pd.date_range("2026-06-02", periods=21), COL_CLOSE: [10.0] * 21}),
+        pd.DataFrame({COL_DATE: pd.date_range("2026-06-03", periods=21), COL_CLOSE: [10.0] * 20 + [None]}),
+    ],
+)
+def test_final_close_insufficient_data_does_not_record_health(history):
+    target = _make_target(condition={"type": "close_cross_ma", "direction": "above", "period": 20})
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=history),
+    ):
+        summary = run_monitor(as_of_date=date(2026, 6, 3))
+
+    assert summary.skipped == 1
+    storage.record_monitor_target_evaluation.assert_not_called()
+    storage.record_monitor_target_evaluation_error.assert_not_called()
+    storage.update_monitor_target_state.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("stage", "configure"),
+    [
+        ("market_data", lambda storage: patch("monitor.monitor_runner.fetch_current_price", side_effect=RuntimeError("https://secret.example/a"))),
+        ("condition", lambda storage: patch("monitor.monitor_runner.evaluate_condition", side_effect=RuntimeError("condition failed"))),
+        ("workflow_guard", lambda storage: patch("monitor.monitor_runner.BlackroomService", side_effect=RuntimeError("guard failed"))),
+        ("notification", lambda storage: patch("monitor.monitor_runner.send_email", side_effect=RuntimeError("notification failed"))),
+        ("storage", lambda storage: patch.object(storage, "record_monitor_target_evaluation", side_effect=RuntimeError("storage failed"))),
+    ],
+)
+def test_run_monitor_records_sanitized_error_by_stage(stage, configure):
+    target = _make_target()
+    if stage == "workflow_guard":
+        target.workflow = "forecast_ssf_ma20"
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [target]
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+        patch("monitor.monitor_runner.send_email"),
+        configure(storage),
+    ):
+        summary = run_monitor()
+
+    assert summary.errors == 1
+    call = storage.record_monitor_target_evaluation_error.call_args
+    assert call.args[0:2] == (target.id, stage)
+    assert call.args[2] is not None and len(call.args[2]) <= 240
+    assert "https://" not in call.args[2]
+    storage.record_monitor_target_evaluation.assert_not_called()
+
+
+def test_error_health_write_failure_does_not_block_later_targets(caplog):
+    failed, completed = _make_target(id=1), _make_target(id=2, stock_code="000001")
+    storage = MagicMock()
+    storage.load_monitor_targets.return_value = [failed, completed]
+    storage.record_monitor_target_evaluation_error.side_effect = RuntimeError("secondary failure")
+
+    with (
+        patch("monitor.monitor_runner.get_storage", return_value=storage),
+        patch("monitor.monitor_runner.fetch_current_price", side_effect=[RuntimeError("unknown failure"), 1600.0]),
+        patch("monitor.monitor_runner.fetch_history_df", return_value=None),
+    ):
+        summary = run_monitor()
+
+    assert summary.errors == 1
+    assert summary.error_details == ["600519: unknown failure"]
+    storage.record_monitor_target_evaluation_error.assert_called_once()
+    storage.record_monitor_target_evaluation.assert_called_once()
+    assert storage.record_monitor_target_evaluation.call_args.args[0] == completed.id
+    assert "secondary failure" in caplog.text

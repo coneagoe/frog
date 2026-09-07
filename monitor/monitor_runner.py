@@ -11,6 +11,8 @@ import pandas as pd
 from common.const import COL_CLOSE, COL_DATE
 from monitor.blackroom_service import BlackroomService
 from monitor.condition import ConditionResult, evaluate_condition, is_missing_number
+from monitor.domain_enums import MonitorEvaluationErrorKind
+from monitor.monitor_health import sanitize_error_detail
 from monitor.monitor_target_service import format_monitor_target_label, resolve_stock_name
 from monitor.price_fetcher import fetch_current_price, fetch_final_close_history_df, fetch_history_df
 from storage import get_storage
@@ -26,6 +28,10 @@ class MonitorSummary:
     skipped: int = 0
     errors: int = 0
     error_details: list = field(default_factory=list)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _build_history_for_condition(condition: dict, stock_code: str, market: str):
@@ -93,6 +99,7 @@ def run_monitor(
     summary = MonitorSummary(total=len(targets))
 
     for target in targets:
+        error_kind = MonitorEvaluationErrorKind.UNKNOWN
         try:
             condition = target.condition
             ctype = condition.get("type")
@@ -105,6 +112,7 @@ def run_monitor(
                 else:
                     evaluation_date = as_of_date or datetime.now(ZoneInfo("Asia/Shanghai")).date()
                     period = int(condition["period"])
+                    error_kind = MonitorEvaluationErrorKind.MARKET_DATA
                     history_df = fetch_final_close_history_df(
                         target.stock_code, evaluation_date, min_periods=period + 1
                     )
@@ -122,12 +130,14 @@ def run_monitor(
                                 result = ConditionResult.INSUFFICIENT_DATA
                             else:
                                 current_price = float(latest_close)
+                                error_kind = MonitorEvaluationErrorKind.CONDITION
                                 result = evaluate_condition(
                                     condition,
                                     current_price=None,
                                     history_df=history_df,
                                 )
             else:
+                error_kind = MonitorEvaluationErrorKind.MARKET_DATA
                 history_df = _build_history_for_condition(condition, target.stock_code, target.market)
                 current_price = fetch_current_price(target.stock_code, target.market)
                 current_price = _resolve_current_price(frequency, condition, current_price, history_df)
@@ -137,6 +147,7 @@ def run_monitor(
                     if current_price is not None:
                         change_pct = _compute_change_pct(current_price, hist_for_pct)
 
+                error_kind = MonitorEvaluationErrorKind.CONDITION
                 result = evaluate_condition(
                     condition,
                     current_price=current_price,
@@ -157,6 +168,7 @@ def run_monitor(
                 now = datetime.now(timezone.utc)
                 evidence = None
                 if is_forecast_ssf_workflow:
+                    error_kind = MonitorEvaluationErrorKind.WORKFLOW_GUARD
                     candidate = storage.get_forecast_ssf_candidate_for_target(target.id)
                     evidence = getattr(candidate, "evidence", None) if candidate is not None else None
                     blackroom = BlackroomService(storage=storage)
@@ -168,20 +180,36 @@ def run_monitor(
                         if not disabled:
                             raise RuntimeError("failed to disable forecast SSF target for active blackroom")
                         summary.skipped += 1
+                        error_kind = MonitorEvaluationErrorKind.STORAGE
+                        storage.record_monitor_target_evaluation(target.id, _utc_now())
                         continue
+                error_kind = MonitorEvaluationErrorKind.NOTIFICATION
                 _send_alert(target, current_price, change_pct, evidence=evidence)
+                error_kind = MonitorEvaluationErrorKind.STORAGE
                 storage.update_monitor_target_state(target.id, True, triggered_at=now)
                 summary.triggered += 1
                 logger.info(f"[monitor] 告警触发: {target.stock_code} note={target.note!r} price={current_price}")
 
             elif not condition_met and target.last_state and target.reset_mode == "auto":
+                error_kind = MonitorEvaluationErrorKind.STORAGE
                 storage.update_monitor_target_state(target.id, False, triggered_at=None)
                 logger.info(f"[monitor] 自动重置: {target.stock_code} 条件已恢复正常")
 
+            error_kind = MonitorEvaluationErrorKind.STORAGE
+            storage.record_monitor_target_evaluation(target.id, _utc_now())
         except Exception as exc:
             logger.error(f"[monitor] 处理 {target.stock_code} 出错: {exc}", exc_info=True)
             summary.errors += 1
             summary.error_details.append(f"{target.stock_code}: {exc}")
+            try:
+                storage.record_monitor_target_evaluation_error(
+                    target.id, error_kind.value, sanitize_error_detail(exc), _utc_now()
+                )
+            except Exception:
+                logger.error(
+                    f"[monitor] 记录 {target.stock_code} 健康错误失败",
+                    exc_info=True,
+                )
 
     return summary
 
