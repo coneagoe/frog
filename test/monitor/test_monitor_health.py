@@ -1,3 +1,5 @@
+import pytest
+
 from monitor.domain_enums import MonitorEvaluationErrorKind
 from monitor.monitor_health import MONITOR_ERROR_SUMMARIES, sanitize_error_detail
 
@@ -39,3 +41,34 @@ def test_sanitizer_removes_unknown_exception_sensitive_content():
     assert detail is not None
     for sensitive in ("secret-token", "/opt/frog", "Traceback (most recent call last)"):
         assert sensitive not in detail
+
+
+@pytest.mark.parametrize(
+    ("max_length", "expected"),
+    [(0, None), (1, "a"), (2, "ab"), (3, "abc"), (6, "abc...")],
+)
+def test_sanitizer_never_exceeds_requested_max_length(max_length, expected):
+    detail = sanitize_error_detail("abcdefg", max_length=max_length)
+    assert detail == expected
+    assert detail is None or len(detail) <= max_length
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://example.com:bad/path?token=x#fragment-secret",
+        "https://[invalid/path?api_key=x#fragment-secret",
+    ],
+)
+def test_sanitizer_conservatively_redacts_malformed_url_sensitive_content(raw):
+    detail = sanitize_error_detail(raw)
+    assert detail is not None
+    for sensitive in ("token", "api_key", "x", "fragment-secret"):
+        assert sensitive not in detail
+
+
+def test_sanitizer_redacts_url_fragment():
+    detail = sanitize_error_detail("https://example.com/path#fragment-secret")
+    assert detail is not None
+    assert "fragment-secret" not in detail
+    assert "[redacted]" in detail

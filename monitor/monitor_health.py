@@ -1,6 +1,6 @@
 import re
 from collections.abc import Mapping
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from monitor.domain_enums import MonitorEvaluationErrorKind
 
@@ -25,13 +25,11 @@ _TRACEBACK_PATTERN = re.compile(r"traceback \(most recent call last\):?", re.IGN
 
 
 def _sanitize_url(match: re.Match[str]) -> str:
-    url = match.group()
-    parsed = urlsplit(url)
-    netloc = parsed.hostname or ""
-    if parsed.port is not None:
-        netloc = f"{netloc}:{parsed.port}"
-    sanitized = urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
-    return f"{sanitized}[redacted]" if parsed.query or parsed.fragment or parsed.username else sanitized
+    try:
+        urlsplit(match.group())
+    except ValueError:
+        pass
+    return "[redacted]"
 
 
 def sanitize_error_detail(value: object, max_length: int = 240) -> str | None:
@@ -44,8 +42,10 @@ def sanitize_error_detail(value: object, max_length: int = 240) -> str | None:
     detail = _WINDOWS_PATH_PATTERN.sub("[path]", detail)
     detail = _TRACEBACK_PATTERN.sub("", detail)
     detail = " ".join(detail.split())
-    if not detail:
+    if not detail or max_length <= 0:
         return None
     if max_length < len(detail):
+        if max_length <= 3:
+            return detail[:max_length]
         return f"{detail[: max(0, max_length - 3)]}..."
     return detail
