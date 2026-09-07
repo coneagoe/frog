@@ -68,7 +68,9 @@ def test_run_monitor_triggers_alert_and_updates_state():
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
         patch("monitor.monitor_runner.send_email") as mock_email,
     ):
+        before_run = datetime.now(timezone.utc)
         summary = run_monitor(frequency="daily")
+        after_run = datetime.now(timezone.utc)
 
     mock_email.assert_called_once()
     subject, body = mock_email.call_args[0][:2]
@@ -78,7 +80,7 @@ def test_run_monitor_triggers_alert_and_updates_state():
     assert call_args[0] == (1, True)
     triggered_at = call_args[1]["triggered_at"]
     assert isinstance(triggered_at, datetime)
-    assert abs((triggered_at - datetime.now(timezone.utc)).total_seconds()) < 5
+    assert before_run <= triggered_at <= after_run
     assert summary.triggered == 1
 
 
