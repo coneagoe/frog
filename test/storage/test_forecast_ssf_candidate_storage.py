@@ -18,7 +18,7 @@ from common.const import (
     COL_STOCK_NAME,
 )
 from storage import storage_db as storage_db_module
-from storage.model import AStockBasic, Base, ForecastSSFCandidate
+from storage.model import AStockBasic, Base, ForecastSSFCandidate, StockMonitorTarget
 from storage.storage_db import StorageDb
 
 
@@ -203,6 +203,90 @@ def _create_target(db, *, workflow: str | None, enabled: bool = True):
     if workflow is not None:
         condition["workflow"] = workflow
     return db.create_monitor_target("600001", "A", condition, workflow or "manual", enabled=enabled)
+
+
+def _seed_monitor_target_health(db, target_id: int):
+    checked_at = datetime(2026, 9, 7, 7, 0)
+    error_at = checked_at + timedelta(minutes=5)
+    session = db.Session()
+    try:
+        target = session.get(StockMonitorTarget, target_id)
+        target.last_checked_at = checked_at
+        target.latest_error_kind = "storage"
+        target.latest_error_detail = "persist this detail"
+        target.latest_error_at = error_at
+        target.last_state = True
+        target.triggered_at = checked_at - timedelta(minutes=5)
+        session.commit()
+    finally:
+        session.close()
+    return checked_at, error_at, checked_at - timedelta(minutes=5)
+
+
+def _assert_monitor_target_health_preserved(target, checked_at, error_at, triggered_at):
+    assert (
+        target.last_checked_at,
+        target.latest_error_kind,
+        target.latest_error_detail,
+        target.latest_error_at,
+        target.last_state,
+        target.triggered_at,
+    ) == (checked_at, "storage", "persist this detail", error_at, True, triggered_at)
+
+
+def test_monitor_health_manual_update_and_enable_disable_preserve_existing_health(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_manual_monitor_target("600001", "A", _typed_condition(), note="before")
+    health = _seed_monitor_target_health(db, target.id)
+
+    db.update_manual_monitor_target(target.id, note="after")
+    db.update_manual_monitor_target(target.id, enabled=False)
+    updated = db.update_manual_monitor_target(target.id, enabled=True)
+
+    assert updated.enabled is True
+    _assert_monitor_target_health_preserved(updated, *health)
+
+
+def test_monitor_health_workflow_pause_resume_and_upsert_preserve_existing_health(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = db.upsert_workflow_monitor_target(
+        "600001", "A", "daily", "forecast_ssf", _typed_condition(workflow="forecast_ssf"), "before", True, False
+    )
+    health = _seed_monitor_target_health(db, target.id)
+
+    db.set_workflow_monitor_target_paused(target.id, paused=True)
+    db.set_workflow_monitor_target_paused(target.id, paused=False)
+    updated = db.upsert_workflow_monitor_target(
+        "600001", "A", "daily", "forecast_ssf", _typed_condition(workflow="forecast_ssf", version=2), "after", True, False
+    )
+
+    assert updated.enabled is True
+    assert updated.paused is False
+    _assert_monitor_target_health_preserved(updated, *health)
+
+
+def test_monitor_health_forecast_ssf_sync_preserves_existing_target_health(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target, _ = _create_linked_forecast_ssf_target(db, enabled=True, state="eligible")
+    health = _seed_monitor_target_health(db, target.id)
+
+    updated = db.upsert_forecast_ssf_candidate_with_workflow_target(
+        stock_code="600001",
+        market="A",
+        report_end_date=date(2026, 3, 31),
+        state="eligible",
+        state_reason="sync",
+        evidence={"sync": True},
+        workflow="forecast_ssf_ma20",
+        frequency="daily",
+        condition=_typed_condition(workflow="forecast_ssf_ma20", version=2),
+        note="synchronized",
+        target_enabled=True,
+        reset_last_state=False,
+    )
+
+    assert updated.id == target.id
+    _assert_monitor_target_health_preserved(updated, *health)
 
 
 def _create_linked_forecast_ssf_target(db, *, enabled: bool, state: str):
