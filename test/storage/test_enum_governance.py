@@ -119,7 +119,7 @@ def _create_monitor_legacy_schema(connection: Connection) -> None:
             "CREATE TABLE stock_monitor_targets ("
             "id integer primary key, stock_code varchar(10) NOT NULL, market varchar(5) NOT NULL DEFAULT 'A', "
             "condition jsonb NOT NULL, frequency varchar(10) NOT NULL DEFAULT 'daily', "
-            "reset_mode varchar(10) NOT NULL DEFAULT 'auto')"
+            "reset_mode varchar(10) NOT NULL DEFAULT 'auto', latest_error_kind varchar(32))"
         )
     )
     connection.execute(
