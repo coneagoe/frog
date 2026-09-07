@@ -19,6 +19,7 @@ import type {
   CreateMonitorTargetInput,
   ListMonitorTargetsParams,
   MonitorTarget,
+  MonitorTargetHealth,
   ListOrdersParams,
   ListCorporateActionsParams,
   ListTradesParams,
@@ -254,6 +255,10 @@ export function listMonitorTargets(params?: ListMonitorTargetsParams): Promise<M
   }
   const queryString = query.toString();
   return apiGet<MonitorTarget[]>(`/monitor-targets${queryString ? `?${queryString}` : ""}`);
+}
+
+export function getMonitorTargetHealth(): Promise<MonitorTargetHealth> {
+  return apiGet<MonitorTargetHealth>("/monitor-targets/health");
 }
 
 export function createMonitorTarget(input: CreateMonitorTargetInput): Promise<MonitorTarget> {

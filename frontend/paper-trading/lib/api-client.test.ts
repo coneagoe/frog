@@ -9,6 +9,7 @@ import {
   depositCash,
   createMonitorTarget,
   getMonitorTarget,
+  getMonitorTargetHealth,
   importPositions,
   listMonitorTargets,
   listOrders,
@@ -20,7 +21,7 @@ import {
   withdrawCash
 } from "./api-client";
 import { forgotPassword, getCurrentUser, login, logout, register, resendVerificationEmail, resetPassword, verifyEmail } from "./api-client";
-import type { MonitorTarget } from "./types";
+import type { MonitorTarget, MonitorTargetHealth } from "./types";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -305,6 +306,22 @@ describe("monitor target API", () => {
     await expect(listMonitorTargets({ enabled: false, market: "HK" })).resolves.toEqual([target]);
 
     expect(fetchMock).toHaveBeenCalledWith("/api/paper/monitor-targets?market=HK&enabled=false", expect.anything());
+  });
+
+  it("gets the operational health for manual and workflow targets", async () => {
+    const health: MonitorTargetHealth = {
+      summary: { total: 2, running: 1, paused: 1, disabled: 0, triggered: 1, daily: 1, intraday: 1 },
+      targets: [
+        { id: 7, stock_code: "00700", market: "HK", frequency: "daily", workflow: null, enabled: true, paused: false, operational_state: "running", last_state: true, last_checked_at: "2026-09-07T09:30:00Z", triggered_at: "2026-09-07T09:30:00Z", latest_error: null },
+        { id: 8, stock_code: "000001", market: "A", frequency: "intraday", workflow: "morning-watch", enabled: true, paused: true, operational_state: "paused", last_state: false, last_checked_at: null, triggered_at: null, latest_error: { kind: "market_data", summary: "Quote unavailable", detail: "Provider timeout", occurred_at: "2026-09-07T09:31:00Z" } }
+      ]
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(health), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getMonitorTargetHealth()).resolves.toEqual(health);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/paper/monitor-targets/health", expect.anything());
   });
 
   it("sends monitor target CRUD requests with CSRF protection", async () => {

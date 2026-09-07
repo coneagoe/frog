@@ -579,8 +579,21 @@ select:focus {
 .monitor-actions { flex-wrap: nowrap; }
 .monitor-delete:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
 .monitor-loading { color: var(--muted); margin: 0; padding: 18px 0; }
+.monitor-health-panel { overflow: hidden; padding: 0; }
+.monitor-health-heading { align-items: flex-start; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 20px 20px 16px; }
+.monitor-health-heading h2 { font-size: 18px; margin: 0 0 4px; }
+.monitor-health-heading .muted { font-size: 14px; margin: 0; }
+.monitor-health-loading { color: var(--muted); font-size: 13px; padding-top: 4px; }
+.monitor-health-summary { border-bottom: 1px solid var(--border); display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.monitor-health-counter { border-right: 1px solid var(--border); display: grid; gap: 4px; padding: 12px 14px; }
+.monitor-health-counter:last-child { border-right: 0; }
+.monitor-health-counter span { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.monitor-health-counter strong { font-family: Georgia, "Times New Roman", serif; font-size: 22px; line-height: 1; }
+.monitor-health-panel .table-wrap { border: 0; border-radius: 0; }
+@media (max-width: 900px) { .monitor-health-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); } .monitor-health-counter:nth-child(4) { border-right: 0; } }
 @media (max-width: 760px) { .monitor-filter-bar, .monitor-form-grid { grid-template-columns: 1fr 1fr; } .monitor-actions { flex-wrap: wrap; } }
 @media (max-width: 460px) { .monitor-filter-bar, .monitor-form-grid { grid-template-columns: 1fr; } .monitor-enabled { padding-top: 0; } }
+@media (max-width: 560px) { .monitor-health-heading { display: block; } .monitor-health-loading { display: block; padding-top: 10px; } .monitor-health-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .monitor-health-counter { border-bottom: 1px solid var(--border); } .monitor-health-counter:nth-child(2n) { border-right: 0; } }
 
 .modal__header {
   align-items: center;

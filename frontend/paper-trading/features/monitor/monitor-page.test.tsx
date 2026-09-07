@@ -1,14 +1,29 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { deleteMonitorTarget, listMonitorTargets, setMonitorTargetEnabled } from "@/lib/api-client";
+import { deleteMonitorTarget, getMonitorTargetHealth, listMonitorTargets, setMonitorTargetEnabled } from "@/lib/api-client";
 import { MonitorPage } from "./monitor-page";
 
-vi.mock("@/lib/api-client", () => ({ listMonitorTargets: vi.fn(), createMonitorTarget: vi.fn(), updateMonitorTarget: vi.fn(), setMonitorTargetEnabled: vi.fn(), deleteMonitorTarget: vi.fn() }));
+vi.mock("@/lib/api-client", () => ({ listMonitorTargets: vi.fn(), getMonitorTargetHealth: vi.fn(), createMonitorTarget: vi.fn(), updateMonitorTarget: vi.fn(), setMonitorTargetEnabled: vi.fn(), deleteMonitorTarget: vi.fn() }));
 const target = { id: 17, stock_code: "000001", market: "A" as const, frequency: "daily" as const, reset_mode: "auto" as const, enabled: true, last_state: false, triggered_at: null, created_at: null, note: "watch", condition: { type: "price_threshold" as const, direction: "above" as const, value: 10 } };
+const health = { summary: { total: 1, running: 1, paused: 0, disabled: 0, triggered: 0, daily: 1, intraday: 0 }, targets: [{ id: 99, stock_code: "workflow-only", market: "A" as const, frequency: "daily" as const, workflow: "morning-watch", enabled: true, paused: false, operational_state: "running" as const, last_state: false, last_checked_at: null, triggered_at: null, latest_error: null }] };
 
 describe("MonitorPage", () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => { vi.resetAllMocks(); vi.mocked(getMonitorTargetHealth).mockResolvedValue(health); });
+  it("loads operational health above manual targets and refreshes both resources", async () => {
+    vi.mocked(listMonitorTargets).mockResolvedValue([target]);
+    render(<MonitorPage />);
+
+    await screen.findByRole("heading", { name: "Operational health" });
+    expect(listMonitorTargets).toHaveBeenCalledWith({});
+    expect(getMonitorTargetHealth).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("morning-watch")).toBeInTheDocument();
+    expect(screen.getByText("morning-watch").closest(".monitor-health-panel")?.querySelectorAll("button, a")).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh targets" }));
+    await waitFor(() => expect(getMonitorTargetHealth).toHaveBeenCalledTimes(2));
+    expect(listMonitorTargets).toHaveBeenCalledTimes(2);
+  });
   it("filters by all four supported fields and has no workflow controls", async () => {
     vi.mocked(listMonitorTargets).mockResolvedValue([]);
     render(<MonitorPage />);
@@ -18,7 +33,7 @@ describe("MonitorPage", () => {
     await userEvent.selectOptions(screen.getByLabelText("Status filter"), "true");
     await userEvent.selectOptions(screen.getByLabelText("Condition filter"), "rsi");
     expect(listMonitorTargets).toHaveBeenLastCalledWith({ market: "A", frequency: "daily", enabled: true, condition_type: "rsi" });
-    expect(screen.queryByText(/pause|resume/i)).not.toBeInTheDocument();
+    expect(screen.getByText("morning-watch").closest(".monitor-health-panel")?.querySelectorAll("button, a")).toHaveLength(0);
   });
 
   it("refreshes after enable and keeps rows when a mutation fails", async () => {

@@ -479,3 +479,10 @@ export type CreateMonitorTargetInput = {
 };
 
 export type UpdateMonitorTargetInput = Partial<CreateMonitorTargetInput>;
+
+export type MonitorEvaluationErrorKind = "market_data" | "condition" | "workflow_guard" | "notification" | "storage" | "unknown";
+export type MonitorOperationalState = "running" | "paused" | "disabled";
+export type MonitorTargetHealthError = { kind: MonitorEvaluationErrorKind; summary: string; detail: string | null; occurred_at: string };
+export type MonitorTargetHealthSummary = { total: number; running: number; paused: number; disabled: number; triggered: number; daily: number; intraday: number };
+export type MonitorTargetHealthItem = { id: number; stock_code: string; market: MonitorMarket; frequency: MonitorFrequency; workflow: string | null; enabled: boolean; paused: boolean; operational_state: MonitorOperationalState; last_state: boolean; last_checked_at: string | null; triggered_at: string | null; latest_error: MonitorTargetHealthError | null };
+export type MonitorTargetHealth = { summary: MonitorTargetHealthSummary; targets: MonitorTargetHealthItem[] };
