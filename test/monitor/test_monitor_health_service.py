@@ -112,7 +112,7 @@ def test_get_health_resanitizes_legacy_sensitive_valid_error_detail():
                 _target(
                     1,
                     latest_error_kind="storage",
-                    latest_error_detail='ValueError: X-Api-Key: leaked https://example.com/x#fragment /srv/frog/a.py',
+                    latest_error_detail="ValueError: X-Api-Key: leaked https://example.com/x#fragment /srv/frog/a.py",
                     latest_error_at=occurred_at,
                 )
             ]

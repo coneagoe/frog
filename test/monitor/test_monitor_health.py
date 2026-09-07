@@ -85,6 +85,24 @@ def test_sanitizer_redacts_complete_paths_containing_spaces(raw):
 
 
 @pytest.mark.parametrize(
+    "raw",
+    [
+        "failed reading /srv/private file.txt",
+        "failed reading ~/private file.txt",
+    ],
+)
+def test_sanitizer_redacts_complete_paths_with_space_separated_filenames(raw):
+    assert sanitize_error_detail(raw) == "failed reading [path]"
+
+
+def test_sanitizer_preserves_text_after_space_separated_path():
+    assert (
+        sanitize_error_detail("failed reading /srv/private file.txt please retry")
+        == "failed reading [path] please retry"
+    )
+
+
+@pytest.mark.parametrize(
     ("raw", "expected"),
     [
         ("requests.exceptions.HTTPError: request failed", "request failed"),
@@ -108,7 +126,7 @@ def test_sanitizer_removes_exception_prefixes_without_removing_business_text(raw
         '"api_key": "json-secret"',
         "X-Api-Key: header-secret",
         "password: password-secret",
-        "ValueError: File \"/srv/frog/monitor.py\", line 42, in run\nBearer token-secret",
+        'ValueError: File "/srv/frog/monitor.py", line 42, in run\nBearer token-secret',
     ],
 )
 def test_sanitizer_redacts_colon_credentials_exception_prefixes_and_stack_frames(raw):
