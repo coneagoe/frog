@@ -169,6 +169,33 @@ def test_monitor_target_health_is_authenticated_read_only_all_target_view(monkey
     assert storage.targets == before
 
 
+def test_monitor_target_health_api_resanitizes_seeded_sensitive_error_detail(monkeypatch, sqlite_session):
+    client, _, storage = _client(monkeypatch, sqlite_session)
+    storage.targets[1].latest_error_kind = "storage"
+    storage.targets[1].latest_error_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    storage.targets[1].latest_error_detail = (
+        'RuntimeError: "api_key": "api-secret" X-Api-Key: header-secret '
+        "Bearer token-secret https://example.com/private#fragment-secret /srv/frog/monitor.py"
+    )
+
+    response = client.get("/paper/monitor-targets/health")
+
+    assert response.status_code == 200
+    error = response.json()["targets"][1]["latest_error"]
+    assert error["kind"] == "storage"
+    assert error["summary"] == "Monitor state persistence failed"
+    for sensitive in (
+        "RuntimeError:",
+        "api-secret",
+        "header-secret",
+        "token-secret",
+        "example.com",
+        "fragment-secret",
+        "/srv/frog/monitor.py",
+    ):
+        assert sensitive not in (error["detail"] or "")
+
+
 def test_monitor_target_manual_crud_filters_and_safe_schema(monkeypatch, sqlite_session):
     client, csrf_headers, _ = _client(monkeypatch, sqlite_session)
 

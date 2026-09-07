@@ -102,3 +102,25 @@ def test_get_health_serializes_valid_and_corrupt_latest_errors():
         "detail": None,
         "occurred_at": occurred_at,
     }
+
+
+def test_get_health_resanitizes_legacy_sensitive_valid_error_detail():
+    occurred_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    service = MonitorTargetHealthService(
+        storage=FakeStorage(
+            [
+                _target(
+                    1,
+                    latest_error_kind="storage",
+                    latest_error_detail='ValueError: X-Api-Key: leaked https://example.com/x#fragment /srv/frog/a.py',
+                    latest_error_at=occurred_at,
+                )
+            ]
+        )
+    )
+
+    error = service.get_health()["targets"][0]["latest_error"]
+    assert error["kind"] == MonitorEvaluationErrorKind.STORAGE
+    assert error["summary"] == MONITOR_ERROR_SUMMARIES[MonitorEvaluationErrorKind.STORAGE]
+    for sensitive in ("ValueError:", "leaked", "example.com", "fragment", "/srv/frog/a.py"):
+        assert sensitive not in (error["detail"] or "")

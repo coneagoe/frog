@@ -68,3 +68,30 @@ def test_sanitizer_redacts_url_fragment():
     assert detail is not None
     assert "fragment-secret" not in detail
     assert "[redacted]" in detail
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "api_key: yaml-secret",
+        '"api_key": "json-secret"',
+        "X-Api-Key: header-secret",
+        "password: password-secret",
+        "ValueError: File \"/srv/frog/monitor.py\", line 42, in run\nBearer token-secret",
+    ],
+)
+def test_sanitizer_redacts_colon_credentials_exception_prefixes_and_stack_frames(raw):
+    detail = sanitize_error_detail(raw)
+
+    assert detail is not None
+    for sensitive in (
+        "yaml-secret",
+        "json-secret",
+        "header-secret",
+        "password-secret",
+        "ValueError:",
+        "/srv/frog/monitor.py",
+        "line 42",
+        "token-secret",
+    ):
+        assert sensitive not in detail

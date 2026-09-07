@@ -174,6 +174,18 @@ def test_monitor_health_columns_and_writes_preserve_target_lifecycle_fields(tmp_
     with pytest.raises(ValueError, match="kind"):
         db.record_monitor_target_evaluation_error(manual.id, "invalid", None, failed_at)
 
+    unsafe_detail = 'RuntimeError: api_key: storage-secret File "/srv/frog/monitor.py", line 42'
+    assert db.record_monitor_target_evaluation_error(manual.id, "storage", unsafe_detail, failed_at)
+    saved = db.get_monitor_target(manual.id)
+    assert saved.latest_error_detail is not None
+    for sensitive in ("RuntimeError:", "storage-secret", "/srv/frog/monitor.py", "line 42"):
+        assert sensitive not in saved.latest_error_detail
+    assert (saved.last_checked_at, saved.last_state, saved.triggered_at) == (
+        (failed_at + timedelta(minutes=1)).replace(tzinfo=None),
+        True,
+        manual.triggered_at,
+    )
+
     assert db.record_monitor_target_evaluation(workflow.id, failed_at)
     db.record_monitor_target_evaluation_error(workflow.id, "storage", "before", failed_at)
     db.update_manual_monitor_target(manual.id, note="updated", enabled=False)

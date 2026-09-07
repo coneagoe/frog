@@ -111,6 +111,7 @@ from monitor.domain_enums import (
     MonitorMarket,
     MonitorResetMode,
 )
+from monitor.monitor_health import sanitize_error_detail
 
 from .config import StorageConfig
 from .domain_enums import ForecastSnapshotStatus, SSFChangeSignalStatus, validate_ssf_event_types
@@ -3127,7 +3128,7 @@ class StorageDb:
             if target is None:
                 return False
             target.latest_error_kind = kind
-            target.latest_error_detail = detail
+            target.latest_error_detail = sanitize_error_detail(detail) if detail is not None else None
             target.latest_error_at = occurred_at
             session.commit()
             return True

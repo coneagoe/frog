@@ -2,7 +2,7 @@ from enum import StrEnum
 from typing import Any
 
 from monitor.domain_enums import MonitorEvaluationErrorKind
-from monitor.monitor_health import MONITOR_ERROR_SUMMARIES
+from monitor.monitor_health import MONITOR_ERROR_SUMMARIES, sanitize_error_detail
 from storage import get_storage
 
 
@@ -34,7 +34,9 @@ class MonitorTargetHealthService:
             kind = MonitorEvaluationErrorKind.UNKNOWN
             detail = None
         else:
-            detail = target.latest_error_detail
+            detail = (
+                sanitize_error_detail(target.latest_error_detail) if target.latest_error_detail is not None else None
+            )
         return {
             "kind": kind,
             "summary": MONITOR_ERROR_SUMMARIES[kind],
