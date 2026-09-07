@@ -1,6 +1,5 @@
 import re
 from collections.abc import Mapping
-from urllib.parse import urlsplit
 
 from monitor.domain_enums import MonitorEvaluationErrorKind
 
@@ -22,20 +21,10 @@ _ASSIGNMENT_PATTERN = re.compile(
 _POSIX_PATH_PATTERN = re.compile(r"(?:~|/)[^\s\"']+")
 _WINDOWS_PATH_PATTERN = re.compile(r"\b[A-Za-z]:\\[^\s\"']+")
 _TRACEBACK_PATTERN = re.compile(r"traceback \(most recent call last\):?", re.IGNORECASE)
-
-
-def _sanitize_url(match: re.Match[str]) -> str:
-    try:
-        urlsplit(match.group())
-    except ValueError:
-        pass
-    return "[redacted]"
-
-
 def sanitize_error_detail(value: object, max_length: int = 240) -> str | None:
     """Return a concise error detail without credentials, paths, or traceback markers."""
     detail = str(value)
-    detail = _URL_PATTERN.sub(_sanitize_url, detail)
+    detail = _URL_PATTERN.sub("[redacted]", detail)
     detail = _BEARER_PATTERN.sub("[redacted]", detail)
     detail = _ASSIGNMENT_PATTERN.sub("[redacted]", detail)
     detail = _POSIX_PATH_PATTERN.sub("[path]", detail)
