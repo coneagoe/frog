@@ -73,6 +73,37 @@ def test_sanitizer_redacts_url_fragment():
 @pytest.mark.parametrize(
     "raw",
     [
+        'File "/srv/private dir/credentials.py", line 9',
+        r"C:\Program Files\secret.txt",
+    ],
+)
+def test_sanitizer_redacts_complete_paths_containing_spaces(raw):
+    detail = sanitize_error_detail(raw)
+
+    for sensitive in ("private", "dir/credentials.py", r"Files\secret.txt", "secret.txt"):
+        assert detail is None or sensitive not in detail
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("requests.exceptions.HTTPError: request failed", "request failed"),
+        ("ProviderFailure: provider failed", "provider failed"),
+        (
+            'Traceback (most recent call last):\nFile "/srv/app.py", line 9\n'
+            "requests.exceptions.HTTPError: request failed",
+            "request failed",
+        ),
+        ("market data: unavailable", "market data: unavailable"),
+    ],
+)
+def test_sanitizer_removes_exception_prefixes_without_removing_business_text(raw, expected):
+    assert sanitize_error_detail(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
         "api_key: yaml-secret",
         '"api_key": "json-secret"',
         "X-Api-Key: header-secret",

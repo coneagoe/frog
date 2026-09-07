@@ -18,11 +18,18 @@ _SECRET_VALUE_PATTERN = re.compile(
     r"(?:\b|[\"'])(?:x-api-key|token|api[_-]?token|api[_-]?key|access[_-]?token|secret|password|authorization)(?:\b|[\"'])\s*(?:=|:)\s*(?:\"[^\"]*\"|'[^']*'|\S+)",
     re.IGNORECASE,
 )
-_POSIX_PATH_PATTERN = re.compile(r"(?:~|/)[^\s\"']+")
-_WINDOWS_PATH_PATTERN = re.compile(r"\b[A-Za-z]:\\[^\s\"']+")
+_POSIX_PATH_PATTERN = re.compile(
+    r"(?:~|/)[^\s\"']+(?:\s+[^\s\"']*[\\/][^\s\"']*)*"
+)
+_WINDOWS_PATH_PATTERN = re.compile(r"\b[A-Za-z]:\\[^\r\n\"']+")
 _TRACEBACK_PATTERN = re.compile(r"traceback \(most recent call last\):?", re.IGNORECASE)
-_STACK_FRAME_PATTERN = re.compile(r"File\s+[\"'][^\"']+[\"'],\s*line\s+\d+(?:,\s*in\s+\S+)?", re.IGNORECASE)
-_EXCEPTION_PREFIX_PATTERN = re.compile(r"\b\w+(?:Error|Exception):\s*", re.IGNORECASE)
+_STACK_FRAME_PATTERN = re.compile(
+    r"File\s+[\"'][^\"']+[\"'],\s*line\s+\d+(?:,\s*in\s+\S+)?", re.IGNORECASE
+)
+_EXCEPTION_PREFIX_PATTERN = re.compile(
+    r"^(?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*(?:Error|Exception|Failure):\s*",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def sanitize_error_detail(value: object, max_length: int = 240) -> str | None:
