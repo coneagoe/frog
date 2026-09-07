@@ -21,6 +21,8 @@ _ASSIGNMENT_PATTERN = re.compile(
 _POSIX_PATH_PATTERN = re.compile(r"(?:~|/)[^\s\"']+")
 _WINDOWS_PATH_PATTERN = re.compile(r"\b[A-Za-z]:\\[^\s\"']+")
 _TRACEBACK_PATTERN = re.compile(r"traceback \(most recent call last\):?", re.IGNORECASE)
+
+
 def sanitize_error_detail(value: object, max_length: int = 240) -> str | None:
     """Return a concise error detail without credentials, paths, or traceback markers."""
     detail = str(value)

@@ -770,11 +770,32 @@ def test_final_close_insufficient_data_does_not_record_health(history):
 @pytest.mark.parametrize(
     ("stage", "configure"),
     [
-        ("market_data", lambda storage: patch("monitor.monitor_runner.fetch_current_price", side_effect=RuntimeError("https://secret.example/a"))),
-        ("condition", lambda storage: patch("monitor.monitor_runner.evaluate_condition", side_effect=RuntimeError("condition failed"))),
-        ("workflow_guard", lambda storage: patch("monitor.monitor_runner.BlackroomService", side_effect=RuntimeError("guard failed"))),
-        ("notification", lambda storage: patch("monitor.monitor_runner.send_email", side_effect=RuntimeError("notification failed"))),
-        ("storage", lambda storage: patch.object(storage, "record_monitor_target_evaluation", side_effect=RuntimeError("storage failed"))),
+        (
+            "market_data",
+            lambda storage: patch(
+                "monitor.monitor_runner.fetch_current_price", side_effect=RuntimeError("https://secret.example/a")
+            ),
+        ),
+        (
+            "condition",
+            lambda storage: patch(
+                "monitor.monitor_runner.evaluate_condition", side_effect=RuntimeError("condition failed")
+            ),
+        ),
+        (
+            "workflow_guard",
+            lambda storage: patch("monitor.monitor_runner.BlackroomService", side_effect=RuntimeError("guard failed")),
+        ),
+        (
+            "notification",
+            lambda storage: patch("monitor.monitor_runner.send_email", side_effect=RuntimeError("notification failed")),
+        ),
+        (
+            "storage",
+            lambda storage: patch.object(
+                storage, "record_monitor_target_evaluation", side_effect=RuntimeError("storage failed")
+            ),
+        ),
     ],
 )
 def test_run_monitor_records_sanitized_error_by_stage(stage, configure):

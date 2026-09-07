@@ -16,11 +16,7 @@ def test_summaries_cover_all_error_kinds():
 
 
 def test_sanitizer_filters_then_truncates():
-    raw = (
-        "Bearer abc token=secret https://u:p@example.com/x?api_key=s "
-        "/opt/frog/a.py C:\\frog\\a.ini "
-        + "x" * 300
-    )
+    raw = "Bearer abc token=secret https://u:p@example.com/x?api_key=s /opt/frog/a.py C:\\frog\\a.ini " + "x" * 300
     detail = sanitize_error_detail(raw)
     assert detail is not None and len(detail) <= 240 and detail.endswith("...")
     assert "[redacted]" in detail and "[path]" in detail

@@ -181,7 +181,14 @@ def test_monitor_health_columns_and_writes_preserve_target_lifecycle_fields(tmp_
     db.set_workflow_monitor_target_paused(workflow.id, paused=True)
     db.set_workflow_monitor_target_paused(workflow.id, paused=False)
     db.upsert_workflow_monitor_target(
-        "600002", "A", "daily", "forecast_ssf", _typed_condition(workflow="forecast_ssf", version=2), "updated", True, False
+        "600002",
+        "A",
+        "daily",
+        "forecast_ssf",
+        _typed_condition(workflow="forecast_ssf", version=2),
+        "updated",
+        True,
+        False,
     )
     preserved = db.get_monitor_target(workflow.id)
     assert (
@@ -189,9 +196,7 @@ def test_monitor_health_columns_and_writes_preserve_target_lifecycle_fields(tmp_
         preserved.latest_error_kind,
         preserved.latest_error_detail,
         preserved.latest_error_at,
-    ) == (
-        failed_at.replace(tzinfo=None), "storage", "before", failed_at.replace(tzinfo=None)
-    )
+    ) == (failed_at.replace(tzinfo=None), "storage", "before", failed_at.replace(tzinfo=None))
 
 
 def _typed_condition(**extra: Any) -> dict[str, Any]:
@@ -257,7 +262,14 @@ def test_monitor_health_workflow_pause_resume_and_upsert_preserve_existing_healt
     db.set_workflow_monitor_target_paused(target.id, paused=True)
     db.set_workflow_monitor_target_paused(target.id, paused=False)
     updated = db.upsert_workflow_monitor_target(
-        "600001", "A", "daily", "forecast_ssf", _typed_condition(workflow="forecast_ssf", version=2), "after", True, False
+        "600001",
+        "A",
+        "daily",
+        "forecast_ssf",
+        _typed_condition(workflow="forecast_ssf", version=2),
+        "after",
+        True,
+        False,
     )
 
     assert updated.enabled is True

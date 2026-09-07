@@ -201,9 +201,9 @@ def test_evaluation_error_kind_converts_reruns_rejects_unknown_and_rolls_back(po
         )
         assert migrate_monitor_enums(connection).converted is True
         assert _column_type(connection, "stock_monitor_targets", "latest_error_kind") == "monitor_evaluation_error_kind"
-        assert next(group.labels for group in MONITOR_ENUM_GROUPS if group.type_name == "monitor_evaluation_error_kind") == (
-            "market_data", "condition", "workflow_guard", "notification", "storage", "unknown"
-        )
+        assert next(
+            group.labels for group in MONITOR_ENUM_GROUPS if group.type_name == "monitor_evaluation_error_kind"
+        ) == ("market_data", "condition", "workflow_guard", "notification", "storage", "unknown")
         audit = MONITOR_ENUM_ADAPTER.audit(connection, rollback=False)
         error_kind = next(group for group in audit.groups if group.type_name == "monitor_evaluation_error_kind")
         assert error_kind.ready is True

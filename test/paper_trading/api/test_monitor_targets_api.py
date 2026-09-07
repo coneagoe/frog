@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from monitor.monitor_target_service import MonitorTargetService
 from monitor.monitor_health_service import MonitorTargetHealthService
+from monitor.monitor_target_service import MonitorTargetService
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
 from paper_trading.api.monitor_target_storage import ManualMonitorTargetStorage
@@ -162,7 +162,9 @@ def test_monitor_target_health_is_authenticated_read_only_all_target_view(monkey
 
     before = list(storage.targets)
     for method in ("post", "patch"):
-        assert getattr(client, method)("/paper/monitor-targets/health", headers=csrf_headers, json={}).status_code >= 300
+        assert (
+            getattr(client, method)("/paper/monitor-targets/health", headers=csrf_headers, json={}).status_code >= 300
+        )
     assert client.delete("/paper/monitor-targets/health", headers=csrf_headers).status_code >= 300
     assert storage.targets == before
 
