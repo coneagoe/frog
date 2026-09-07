@@ -26,6 +26,15 @@ class MonitorResetMode(StrEnum):
     MANUAL = "manual"
 
 
+class MonitorEvaluationErrorKind(StrEnum):
+    MARKET_DATA = "market_data"
+    CONDITION = "condition"
+    WORKFLOW_GUARD = "workflow_guard"
+    NOTIFICATION = "notification"
+    STORAGE = "storage"
+    UNKNOWN = "unknown"
+
+
 class ForecastSSFCandidateState(StrEnum):
     ELIGIBLE = "eligible"
     INELIGIBLE = "ineligible"
