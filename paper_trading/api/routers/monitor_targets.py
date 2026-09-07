@@ -37,7 +37,10 @@ HealthServiceDep = Annotated[MonitorTargetHealthService, Depends(get_monitor_tar
 
 def _response(result: dict) -> MonitorTargetResponse:
     _raise_for_result(result)
-    return MonitorTargetResponse.model_validate(cast(dict[str, object], result["data"]))
+    response = MonitorTargetResponse.model_validate(cast(dict[str, object], result["data"]))
+    if not isinstance(response, MonitorTargetResponse):
+        raise TypeError("invalid monitor target response")
+    return response
 
 
 def _raise_for_result(result: dict) -> None:
@@ -76,7 +79,10 @@ def create_monitor_target(
 
 @router.get("/health", response_model=MonitorTargetHealthResponse)
 def get_monitor_targets_health(service: HealthServiceDep) -> MonitorTargetHealthResponse:
-    return MonitorTargetHealthResponse.model_validate(service.get_health())
+    response = MonitorTargetHealthResponse.model_validate(service.get_health())
+    if not isinstance(response, MonitorTargetHealthResponse):
+        raise TypeError("invalid monitor target health response")
+    return response
 
 
 @router.get("/{target_id}", response_model=MonitorTargetResponse)
