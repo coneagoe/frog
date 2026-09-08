@@ -112,6 +112,28 @@ def test_claims_due_notifications_and_recovers_stale_leases(tmp_path):
     assert [str(row.id) for row in db.claim_due_monitor_notifications(now, 10)] == [first]
 
 
+def test_stale_claim_cannot_settle_a_newer_claim(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    claimed_at_a = datetime(2026, 9, 8, tzinfo=timezone.utc)
+    notification_id = _notification(db, _target(db).id, claimed_at_a)
+
+    claim_a = db.claim_due_monitor_notifications(claimed_at_a, 1)[0]
+    claimed_at_b = claimed_at_a + timedelta(minutes=31)
+    claim_b = db.claim_due_monitor_notifications(claimed_at_b, 1)[0]
+
+    assert db.mark_monitor_notification_delivered(notification_id, claimed_at_a, claim_a.claimed_at) is None
+    assert (
+        db.record_monitor_notification_failure(notification_id, "delivery failed", claimed_at_a, claim_a.claimed_at)
+        is None
+    )
+    saved = _load(db, notification_id)
+    assert (saved.state, saved.claimed_at, saved.attempt_count) == (
+        NotificationDeliveryState.PROCESSING.value,
+        claim_b.claimed_at.replace(tzinfo=None),
+        0,
+    )
+
+
 def test_delivery_retry_terminal_failure_and_error_sanitization(tmp_path):
     db = _sqlite_storage(tmp_path)
     now = datetime(2026, 9, 8, tzinfo=timezone.utc)
@@ -119,7 +141,7 @@ def test_delivery_retry_terminal_failure_and_error_sanitization(tmp_path):
 
     assert db.claim_due_monitor_notifications(now, 1)
     assert (
-        db.record_monitor_notification_failure(notification_id, "token=secret https://example.test/x", now)
+        db.record_monitor_notification_failure(notification_id, "token=secret https://example.test/x", now, now)
         == NotificationDeliveryState.PENDING
     )
     saved = _load(db, notification_id)
@@ -133,7 +155,7 @@ def test_delivery_retry_terminal_failure_and_error_sanitization(tmp_path):
     for attempt in range(2, 6):
         when = _load(db, notification_id).next_attempt_at
         assert db.claim_due_monitor_notifications(when, 1)
-        state = db.record_monitor_notification_failure(notification_id, "delivery failed", when)
+        state = db.record_monitor_notification_failure(notification_id, "delivery failed", when, when)
     saved = _load(db, notification_id)
     assert (state, saved.state, saved.attempt_count) == (
         NotificationDeliveryState.FAILED,
@@ -141,7 +163,7 @@ def test_delivery_retry_terminal_failure_and_error_sanitization(tmp_path):
         5,
     )
     assert saved.claimed_at is None
-    assert db.mark_monitor_notification_delivered(notification_id, now) is False
+    assert db.mark_monitor_notification_delivered(notification_id, now, now) is None
 
 
 def test_mark_delivered_requires_processing_notification(tmp_path):
@@ -149,9 +171,9 @@ def test_mark_delivered_requires_processing_notification(tmp_path):
     now = datetime(2026, 9, 8, tzinfo=timezone.utc)
     notification_id = _notification(db, _target(db).id, now)
 
-    assert not db.mark_monitor_notification_delivered(notification_id, now)
+    assert db.mark_monitor_notification_delivered(notification_id, now, now) is None
     db.claim_due_monitor_notifications(now, 1)
-    assert db.mark_monitor_notification_delivered(notification_id, now)
+    assert db.mark_monitor_notification_delivered(notification_id, now, now) == NotificationDeliveryState.DELIVERED
     saved = _load(db, notification_id)
     assert saved.state == NotificationDeliveryState.DELIVERED.value
     assert saved.claimed_at is None
@@ -172,6 +194,6 @@ def test_failure_for_cancelled_notification_returns_cancelled(tmp_path):
         session.close()
 
     assert (
-        db.record_monitor_notification_failure(notification_id, "delivery failed", now)
+        db.record_monitor_notification_failure(notification_id, "delivery failed", now, now)
         == NotificationDeliveryState.CANCELLED
     )

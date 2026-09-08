@@ -17,6 +17,7 @@ from monitor.storage.enum_migration import (
     migrate_monitor_enums,
 )
 from storage.enum_governance import migrate_enums
+from storage.storage_db import StorageDb
 
 EXPECTED_TYPE_NAMES = {group.type_name for group in MONITOR_ENUM_GROUPS}
 CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
@@ -63,6 +64,27 @@ def _connection(engine: Engine, schema: str) -> Connection:
     connection = engine.connect()
     connection.execute(text(f'SET search_path TO "{schema}"'))
     return connection
+
+
+def test_runtime_outbox_bootstrap_creates_monitor_enums_before_tables():
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    schema = f"monitor_runtime_bootstrap_{uuid.uuid4().hex}"
+    engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    db = StorageDb.__new__(StorageDb)
+    db.engine = engine
+    try:
+        db.ensure_monitor_notification_tables()
+        with engine.connect() as connection:
+            assert _enum_types(connection) == EXPECTED_TYPE_NAMES
+            assert _column_type(connection, "monitor_notifications", "state") == "monitor_notification_delivery_state"
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        engine.dispose()
 
 
 def _create_legacy_schema(connection: Connection) -> None:

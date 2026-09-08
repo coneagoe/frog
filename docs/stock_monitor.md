@@ -10,6 +10,10 @@
 
 `/monitor` 在保留仅面向手工目标的创建、编辑、启用、禁用和删除操作的同时，为认证用户提供只读运行健康视图。该视图显示手工和工作流目标，并汇总 `running`、`paused`、`disabled`、`triggered`、`daily` 与 `intraday` 数量。目标状态优先级为 `disabled` > `paused` > `running`；`triggered` 独立于 `last_state`。最后检查时间仅表示已完成且数据并非不足的运行器评估，配置变更、同步和刷新不会伪造该时间。错误信息只展示固定的安全摘要，以及已脱敏、截断的详情，不展示原始错误；表格不提供工作流目标的修改操作。
 
+### 告警投递可靠性
+
+触发边沿会先写入 `monitor_notifications` outbox，再由每分钟的投递任务异步发送邮件。PostgreSQL 首次访问 outbox 时会先完成监控域 enum 引导和校验，再创建或使用表。投递任务以 `claimed_at` 作为租约令牌：成功和失败落库都必须匹配当前 `processing` 租约，过期工作者不能覆盖后来工作者的结果。任务统计会分别记录 `cancelled` 和 `lost_claim`；后者表示租约已由其他工作者接管，而非目标被取消。
+
 ## 管理命令入口
 
 统一入口：`stock-monitor`

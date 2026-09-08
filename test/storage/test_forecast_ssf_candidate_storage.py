@@ -479,8 +479,10 @@ def test_target_deletion_cancels_pending_and_processing_notifications(tmp_path, 
         session.close()
     db.claim_due_monitor_notifications(now, 1)
     delivered_id = db.create_monitor_notification_for_trigger(target.id, "delivered", "body", now)
-    db.claim_due_monitor_notifications(now, 1)
-    db.mark_monitor_notification_delivered(delivered_id, now)
+    delivered_claim = db.claim_due_monitor_notifications(now, 1)[0]
+    assert str(delivered_claim.id) == delivered_id
+    assert delivered_claim.claimed_at is not None
+    db.mark_monitor_notification_delivered(delivered_id, now, delivered_claim.claimed_at)
     session = db.Session()
     try:
         session.get(StockMonitorTarget, target.id).last_state = False
@@ -488,9 +490,10 @@ def test_target_deletion_cancels_pending_and_processing_notifications(tmp_path, 
     finally:
         session.close()
     failed_id = db.create_monitor_notification_for_trigger(target.id, "failed", "body", now)
-    db.claim_due_monitor_notifications(now, 1)
+    failed_claim = db.claim_due_monitor_notifications(now, 1)[0]
     for _ in range(5):
-        db.record_monitor_notification_failure(failed_id, "delivery failed", now)
+        assert failed_claim.claimed_at is not None
+        db.record_monitor_notification_failure(failed_id, "delivery failed", now, failed_claim.claimed_at)
         session = db.Session()
         try:
             failed = session.get(MonitorNotification, UUID(failed_id))
@@ -501,7 +504,7 @@ def test_target_deletion_cancels_pending_and_processing_notifications(tmp_path, 
         finally:
             session.close()
         if retry_at is not None:
-            db.claim_due_monitor_notifications(retry_at, 1)
+            failed_claim = db.claim_due_monitor_notifications(retry_at, 1)[0]
 
     assert getattr(db, delete_method)(target.id)
     session = db.Session()

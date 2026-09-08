@@ -3932,6 +3932,12 @@ class StorageDb:
 
     def ensure_monitor_notification_tables(self) -> None:
         """Ensure the monitor target and notification outbox tables exist."""
+        if self.engine.dialect.name == "postgresql":
+            from monitor.storage.enum_migration import migrate_monitor_enums
+
+            with self.engine.begin() as connection:
+                migrate_monitor_enums(connection)
+            return
         self.ensure_monitor_targets_table()
         MonitorNotification.__table__.create(self.engine, checkfirst=True)
 
@@ -4017,21 +4023,34 @@ class StorageDb:
         finally:
             session.close()
 
-    def mark_monitor_notification_delivered(self, notification_id: str, delivered_at: datetime) -> bool:
+    def mark_monitor_notification_delivered(
+        self, notification_id: str, delivered_at: datetime, claimed_at: datetime
+    ) -> NotificationDeliveryState | None:
         self.ensure_monitor_notification_tables()
         assert self.Session is not None
         session = self.Session()
         try:
-            notification = session.get(MonitorNotification, UUID(notification_id))
-            if notification is None or notification.state != NotificationDeliveryState.PROCESSING.value:
+            notification = (
+                session.query(MonitorNotification)
+                .filter_by(
+                    id=UUID(notification_id),
+                    state=NotificationDeliveryState.PROCESSING.value,
+                    claimed_at=claimed_at,
+                )
+                .with_for_update()
+                .first()
+            )
+            if notification is None:
+                current = session.get(MonitorNotification, UUID(notification_id))
+                cancelled = current is not None and current.state == NotificationDeliveryState.CANCELLED.value
                 session.rollback()
-                return False
+                return NotificationDeliveryState.CANCELLED if cancelled else None
             notification.state = NotificationDeliveryState.DELIVERED.value
             notification.claimed_at = None
             notification.delivered_at = delivered_at
             notification.last_error = None
             session.commit()
-            return True
+            return NotificationDeliveryState.DELIVERED
         except Exception:
             session.rollback()
             raise
@@ -4039,21 +4058,27 @@ class StorageDb:
             session.close()
 
     def record_monitor_notification_failure(
-        self, notification_id: str, error: str, occurred_at: datetime
-    ) -> NotificationDeliveryState:
+        self, notification_id: str, error: str, occurred_at: datetime, claimed_at: datetime
+    ) -> NotificationDeliveryState | None:
         self.ensure_monitor_notification_tables()
         assert self.Session is not None
         session = self.Session()
         try:
-            notification = session.get(MonitorNotification, UUID(notification_id))
+            notification = (
+                session.query(MonitorNotification)
+                .filter_by(
+                    id=UUID(notification_id),
+                    state=NotificationDeliveryState.PROCESSING.value,
+                    claimed_at=claimed_at,
+                )
+                .with_for_update()
+                .first()
+            )
             if notification is None:
+                current = session.get(MonitorNotification, UUID(notification_id))
+                cancelled = current is not None and current.state == NotificationDeliveryState.CANCELLED.value
                 session.rollback()
-                return NotificationDeliveryState.FAILED
-            if notification.state != NotificationDeliveryState.PROCESSING.value:
-                session.rollback()
-                if notification.state == NotificationDeliveryState.CANCELLED.value:
-                    return NotificationDeliveryState.CANCELLED
-                return NotificationDeliveryState.FAILED
+                return NotificationDeliveryState.CANCELLED if cancelled else None
 
             notification.attempt_count += 1
             notification.last_error = sanitize_error_detail(error)

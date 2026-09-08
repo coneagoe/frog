@@ -26,17 +26,19 @@ class FakeStorage:
         self.claims.append((now, limit))
         return self.notifications
 
-    def mark_monitor_notification_delivered(self, notification_id, delivered_at):
-        self.deliveries.append((notification_id, delivered_at))
-        return self.delivered
+    def mark_monitor_notification_delivered(self, notification_id, delivered_at, claimed_at):
+        self.deliveries.append((notification_id, delivered_at, claimed_at))
+        return NotificationDeliveryState.DELIVERED if self.delivered else None
 
-    def record_monitor_notification_failure(self, notification_id, error, occurred_at):
-        self.failures.append((notification_id, error, occurred_at))
+    def record_monitor_notification_failure(self, notification_id, error, occurred_at, claimed_at):
+        self.failures.append((notification_id, error, occurred_at, claimed_at))
         return self.failure_state
 
 
-def _notification(notification_id="notification-1", target_id=42, subject="Saved subject", body="Saved body"):
-    return SimpleNamespace(id=notification_id, target_id=target_id, subject=subject, body=body)
+def _notification(
+    notification_id="notification-1", target_id=42, subject="Saved subject", body="Saved body", claimed_at="claim-a"
+):
+    return SimpleNamespace(id=notification_id, target_id=target_id, subject=subject, body=body, claimed_at=claimed_at)
 
 
 def _run(monkeypatch, storage, send_email=lambda *_args: None):
@@ -54,6 +56,7 @@ def test_delivery_returns_empty_summary_when_no_notifications_are_due(monkeypatc
         "retried": 0,
         "failed": 0,
         "cancelled": 0,
+        "lost_claim": 0,
     }
     assert storage.claims[0][1] > 0
 
@@ -70,6 +73,7 @@ def test_delivery_sends_stored_content_and_records_success(monkeypatch):
         "retried": 0,
         "failed": 0,
         "cancelled": 0,
+        "lost_claim": 0,
     }
     assert sent == [("Saved subject", "Saved body")]
     assert storage.deliveries[0][0] == "notification-1"
@@ -86,6 +90,7 @@ def test_delivery_records_retry_when_email_fails_before_terminal_attempt(monkeyp
         "retried": 1,
         "failed": 0,
         "cancelled": 0,
+        "lost_claim": 0,
     }
     assert storage.failures[0][0] == "notification-1"
 
@@ -101,6 +106,7 @@ def test_delivery_records_terminal_failure_when_email_fails_on_final_attempt(mon
         "retried": 0,
         "failed": 1,
         "cancelled": 0,
+        "lost_claim": 0,
     }
 
 
@@ -115,10 +121,11 @@ def test_delivery_counts_cancelled_when_email_fails_after_target_deletion(monkey
         "retried": 0,
         "failed": 0,
         "cancelled": 1,
+        "lost_claim": 0,
     }
 
 
-def test_delivery_counts_claim_lost_before_success_as_cancelled(monkeypatch):
+def test_delivery_counts_claim_lost_before_success_separately(monkeypatch):
     storage = FakeStorage([_notification()], delivered=False)
 
     assert _run(monkeypatch, storage) == {
@@ -126,7 +133,8 @@ def test_delivery_counts_claim_lost_before_success_as_cancelled(monkeypatch):
         "delivered": 0,
         "retried": 0,
         "failed": 0,
-        "cancelled": 1,
+        "cancelled": 0,
+        "lost_claim": 1,
     }
 
 
