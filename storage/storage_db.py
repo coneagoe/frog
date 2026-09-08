@@ -523,7 +523,11 @@ def _non_enum_governed_paper_trading_tables(dialect: Any) -> list[Any]:
     if dialect.name != "postgresql":
         return tables
 
-    excluded_tables = _ENUM_GOVERNED_PAPER_TRADING_TABLES | _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS
+    excluded_tables = (
+        _ENUM_GOVERNED_PAPER_TRADING_TABLES
+        | _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS
+        | {MonitorNotification.__table__.name}
+    )
     return [table for table in tables if table.name not in excluded_tables]
 
 

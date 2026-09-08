@@ -172,6 +172,7 @@ MONITOR_ENUM_GROUPS = (
 )
 
 _GOVERNED_TABLES = (StockMonitorTarget.__table__, ForecastSSFCandidate.__table__, MonitorNotification.__table__)
+_ADDITIVE_GOVERNED_TABLES = frozenset({"monitor_notifications"})
 _CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
 _CONDITION_CHECK_SQL = (
     "CHECK (jsonb_typeof(condition::jsonb) = 'object' AND condition::jsonb ? 'type' "
@@ -212,7 +213,13 @@ def _result(
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     missing_tables = _preflight(connection, rollback=rollback)
-    if missing_tables and len(missing_tables) != len(_GOVERNED_TABLES):
+    if rollback:
+        if missing_tables and len(missing_tables) != len(_GOVERNED_TABLES):
+            raise MonitorEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
+        return
+    required_tables = {table.name for table in _GOVERNED_TABLES} - _ADDITIVE_GOVERNED_TABLES
+    missing_required_tables = missing_tables - _ADDITIVE_GOVERNED_TABLES
+    if missing_required_tables and missing_required_tables != required_tables:
         raise MonitorEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
 
 
@@ -246,7 +253,7 @@ def _apply_monitor_enums(connection: Connection) -> tuple[bool, tuple[PriceVsMaM
 
 
 def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
-    if rollback and all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+    if all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
         return
     _verify(connection, rollback=rollback)
 

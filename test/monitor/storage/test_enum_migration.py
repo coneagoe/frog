@@ -250,6 +250,17 @@ def test_coordinator_rollback_is_noop_when_all_governed_tables_are_absent(postgr
         assert _enum_types(connection) == set()
 
 
+def test_coordinator_forward_preflight_is_noop_when_all_governed_tables_are_absent(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("DROP TABLE monitor_notifications, forecast_ssf_candidates, stock_monitor_targets"))
+
+        result = migrate_enums(connection, adapters=(MONITOR_ENUM_ADAPTER,))
+
+        assert result.converted is False
+        assert _enum_types(connection) == set()
+
+
 def test_dry_run_preflights_without_ddl(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
@@ -281,6 +292,28 @@ def test_apply_bootstraps_missing_governed_tables_after_creating_types(postgres_
             "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
             "VALUES (1, '600001', 'A', '[]'::jsonb, 'daily', 'auto')",
         )
+
+
+def test_preflight_allows_missing_additive_notification_table(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("DROP TABLE monitor_notifications"))
+
+        MONITOR_ENUM_ADAPTER.preflight(connection, rollback=False)
+        converted, _ = MONITOR_ENUM_ADAPTER.apply(connection)
+
+        assert converted is True
+        assert _column_type(connection, "monitor_notifications", "state") == "monitor_notification_delivery_state"
+        assert _index_exists(connection, "ix_monitor_notifications_state_next_attempt_at")
+
+
+def test_preflight_rejects_missing_core_monitor_table(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("DROP TABLE stock_monitor_targets"))
+
+        with pytest.raises(MonitorEnumMigrationError, match="partially missing governed tables"):
+            MONITOR_ENUM_ADAPTER.preflight(connection, rollback=False)
 
 
 def test_unknown_legacy_label_aborts_before_any_ddl(postgres_schema):

@@ -150,6 +150,7 @@ def test_postgresql_storage_startup_excludes_all_enum_governed_paper_tables(monk
             tb_name_blackroom_record,
             tb_name_daily_bar_diagnostics,
             tb_name_ssf_change_signal,
+            "monitor_notifications",
         }
     )
     reset_storage()
