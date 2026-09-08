@@ -104,6 +104,20 @@ def test_delivery_records_terminal_failure_when_email_fails_on_final_attempt(mon
     }
 
 
+def test_delivery_counts_cancelled_when_email_fails_after_target_deletion(monkeypatch):
+    storage = FakeStorage([_notification()], failure_state=NotificationDeliveryState.CANCELLED)
+
+    result = _run(monkeypatch, storage, lambda *_args: (_ for _ in ()).throw(RuntimeError("smtp unavailable")))
+
+    assert result == {
+        "claimed": 1,
+        "delivered": 0,
+        "retried": 0,
+        "failed": 0,
+        "cancelled": 1,
+    }
+
+
 def test_delivery_counts_claim_lost_before_success_as_cancelled(monkeypatch):
     storage = FakeStorage([_notification()], delivered=False)
 

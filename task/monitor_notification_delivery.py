@@ -29,7 +29,9 @@ def deliver_monitor_notifications() -> dict[str, int]:
                 notification.target_id,
             )
             state = storage.record_monitor_notification_failure(notification_id, "email delivery failed", now)
-            if state == NotificationDeliveryState.FAILED:
+            if state == NotificationDeliveryState.CANCELLED:
+                summary["cancelled"] += 1
+            elif state == NotificationDeliveryState.FAILED:
                 summary["failed"] += 1
             else:
                 summary["retried"] += 1

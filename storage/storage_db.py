@@ -4040,8 +4040,13 @@ class StorageDb:
         session = self.Session()
         try:
             notification = session.get(MonitorNotification, UUID(notification_id))
-            if notification is None or notification.state != NotificationDeliveryState.PROCESSING.value:
+            if notification is None:
                 session.rollback()
+                return NotificationDeliveryState.FAILED
+            if notification.state != NotificationDeliveryState.PROCESSING.value:
+                session.rollback()
+                if notification.state == NotificationDeliveryState.CANCELLED.value:
+                    return NotificationDeliveryState.CANCELLED
                 return NotificationDeliveryState.FAILED
 
             notification.attempt_count += 1
