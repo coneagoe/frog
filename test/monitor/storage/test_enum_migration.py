@@ -31,6 +31,7 @@ MANAGED_INDEX_NAMES = (
     "ix_stock_monitor_targets_reset_mode",
     "ix_forecast_ssf_candidates_market",
     "ix_forecast_ssf_candidates_state",
+    "ix_monitor_notifications_state_next_attempt_at",
 )
 
 
@@ -78,6 +79,15 @@ def _create_legacy_schema(connection: Connection) -> None:
             "CREATE TABLE forecast_ssf_candidates ("
             "stock_code varchar(6) primary key, market varchar(5) NOT NULL DEFAULT 'A', "
             "report_end_date date NOT NULL, state varchar(32) NOT NULL, state_reason varchar(128) NOT NULL)"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE TABLE monitor_notifications ("
+            "id uuid primary key, target_id integer NOT NULL, payload json NOT NULL, "
+            "state varchar(16) NOT NULL DEFAULT 'pending', attempt_count integer NOT NULL DEFAULT 0, "
+            "next_attempt_at timestamptz NOT NULL, locked_at timestamptz, delivered_at timestamptz, "
+            "cancelled_at timestamptz, last_error text, created_at timestamptz NOT NULL DEFAULT now())"
         )
     )
 
@@ -231,7 +241,7 @@ def test_evaluation_error_kind_unknown_legacy_value_aborts_before_ddl(postgres_s
 def test_coordinator_rollback_is_noop_when_all_governed_tables_are_absent(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
-        connection.execute(text("DROP TABLE forecast_ssf_candidates, stock_monitor_targets"))
+        connection.execute(text("DROP TABLE monitor_notifications, forecast_ssf_candidates, stock_monitor_targets"))
 
         result = migrate_enums(connection, rollback=True, adapters=(MONITOR_ENUM_ADAPTER,))
 
@@ -255,7 +265,7 @@ def test_dry_run_preflights_without_ddl(postgres_schema):
 def test_apply_bootstraps_missing_governed_tables_after_creating_types(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
-        connection.execute(text("DROP TABLE forecast_ssf_candidates, stock_monitor_targets"))
+        connection.execute(text("DROP TABLE monitor_notifications, forecast_ssf_candidates, stock_monitor_targets"))
 
         assert migrate_monitor_enums(connection).converted is True
 
@@ -383,6 +393,7 @@ def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schem
         assert result.converted is True
         assert _column_type(connection, "stock_monitor_targets", "market") == "monitor_market"
         assert _column_type(connection, "forecast_ssf_candidates", "state") == "forecast_ssf_candidate_state"
+        assert _column_type(connection, "monitor_notifications", "state") == "monitor_notification_delivery_state"
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         assert _check_exists(connection)
         for index_name in MANAGED_INDEX_NAMES:
@@ -406,6 +417,11 @@ def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schem
             connection,
             "INSERT INTO stock_monitor_targets (id, stock_code, market, condition, frequency, reset_mode) "
             "VALUES (1, '600001', 'A', '{\"type\": null}'::jsonb, 'daily', 'auto')",
+        )
+        _assert_insert_rejected(
+            connection,
+            "INSERT INTO monitor_notifications (id, target_id, payload, state, attempt_count, next_attempt_at) "
+            "VALUES ('00000000-0000-0000-0000-000000000001', 1, '{}'::jsonb, 'unknown', 0, now())",
         )
 
 
@@ -656,10 +672,12 @@ def test_rollback_after_normal_apply_restores_legacy_types_defaults_and_removes_
         assert _column_type(connection, "stock_monitor_targets", "reset_mode") == "character varying(10)"
         assert _column_type(connection, "forecast_ssf_candidates", "market") == "character varying(5)"
         assert _column_type(connection, "forecast_ssf_candidates", "state") == "character varying(32)"
+        assert _column_type(connection, "monitor_notifications", "state") == "character varying(16)"
         assert _column_default(connection, "stock_monitor_targets", "market") == "'A'::character varying"
         assert _column_default(connection, "stock_monitor_targets", "frequency") == "'daily'::character varying"
         assert _column_default(connection, "stock_monitor_targets", "reset_mode") == "'auto'::character varying"
         assert _column_default(connection, "forecast_ssf_candidates", "market") == "'A'::character varying"
+        assert _column_default(connection, "monitor_notifications", "state") == "'pending'::character varying"
         assert _enum_types(connection) == set()
         assert not _check_exists(connection)
         for index_name in MANAGED_INDEX_NAMES:

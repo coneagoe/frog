@@ -15,9 +15,10 @@ from monitor.domain_enums import (
     MonitorFrequency,
     MonitorMarket,
     MonitorResetMode,
+    NotificationDeliveryState,
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
-from storage.model import ForecastSSFCandidate, StockMonitorTarget
+from storage.model import ForecastSSFCandidate, MonitorNotification, StockMonitorTarget
 
 logger = logging.getLogger(__name__)
 
@@ -149,9 +150,28 @@ MONITOR_ENUM_GROUPS = (
             ),
         ),
     ),
+    MonitorEnumGroup(
+        "monitor_notification_delivery_state",
+        _labels(NotificationDeliveryState),
+        (
+            _column(
+                "monitor_notifications",
+                "state",
+                "VARCHAR(16)",
+                "'pending'",
+                indexes=(
+                    _index(
+                        "ix_monitor_notifications_state_next_attempt_at",
+                        "monitor_notifications",
+                        "state, next_attempt_at",
+                    ),
+                ),
+            ),
+        ),
+    ),
 )
 
-_GOVERNED_TABLES = (StockMonitorTarget.__table__, ForecastSSFCandidate.__table__)
+_GOVERNED_TABLES = (StockMonitorTarget.__table__, ForecastSSFCandidate.__table__, MonitorNotification.__table__)
 _CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
 _CONDITION_CHECK_SQL = (
     "CHECK (jsonb_typeof(condition::jsonb) = 'object' AND condition::jsonb ? 'type' "
@@ -781,14 +801,17 @@ def _index_facts(connection: Connection, index_name: str) -> tuple[str, bool, tu
 
 
 def _validate_indexes(connection: Connection, column: MonitorEnumColumn, *, required: bool) -> None:
-    for index_name, _ in column.indexes:
+    for index_name, index_sql in column.indexes:
         facts = _index_facts(connection, index_name)
         if facts is None:
             if not required:
                 continue
             raise MonitorEnumMigrationError(f"missing or invalid index {index_name}")
         table_name, unique, columns, predicate = facts
-        if table_name != column.table_name or unique or columns != (column.column_name,) or predicate is not None:
+        index_match = re.search(r"\(([^()]*)\)\s*$", index_sql)
+        assert index_match is not None
+        expected_columns = tuple(part.strip() for part in index_match.group(1).split(","))
+        if table_name != column.table_name or unique or columns != expected_columns or predicate is not None:
             raise MonitorEnumMigrationError(f"missing or invalid index {index_name}")
 
 

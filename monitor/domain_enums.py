@@ -35,6 +35,14 @@ class MonitorEvaluationErrorKind(StrEnum):
     UNKNOWN = "unknown"
 
 
+class NotificationDeliveryState(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class ForecastSSFCandidateState(StrEnum):
     ELIGIBLE = "eligible"
     INELIGIBLE = "ineligible"

@@ -49,6 +49,7 @@ from .ingredient import (
     tb_name_ingredient_300,
     tb_name_ingredient_500,
 )
+from .monitor_notification import MonitorNotification, tb_name_monitor_notification
 from .paper_trading import (
     DailyBarDiagnostic,
     ETFEligibility,
@@ -106,6 +107,7 @@ __all__ = [
     "ForecastSnapshotRun",
     "ForecastSnapshotRecord",
     "ForecastSSFCandidate",
+    "MonitorNotification",
     "HistoryDataDailyAStockBFQ",
     "HistoryDataDailyAStockQFQ",
     "HistoryDataDailyAStockHFQ",
@@ -147,6 +149,7 @@ __all__ = [
     "tb_name_forecast_snapshot_run",
     "tb_name_forecast_snapshot_record",
     "tb_name_forecast_ssf_candidate",
+    "tb_name_monitor_notification",
     "tb_name_history_data_weekly_a_stock_qfq",
     "tb_name_history_data_weekly_a_stock_hfq",
     "HistoryDataDailyHkStockBFQ",
