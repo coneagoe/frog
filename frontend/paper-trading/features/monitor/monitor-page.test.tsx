@@ -24,6 +24,13 @@ describe("MonitorPage", () => {
     await waitFor(() => expect(getMonitorTargetHealth).toHaveBeenCalledTimes(2));
     expect(listMonitorTargets).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps a Chinese alert-only notice visible on the monitor page", async () => {
+    vi.mocked(listMonitorTargets).mockResolvedValue([]);
+    render(<MonitorPage />);
+
+    expect(await screen.findByText("本页面仅用于价格与指标预警，不会执行任何交易。")) .toBeInTheDocument();
+  });
   it("filters by all four supported fields and has no workflow controls", async () => {
     vi.mocked(listMonitorTargets).mockResolvedValue([]);
     render(<MonitorPage />);

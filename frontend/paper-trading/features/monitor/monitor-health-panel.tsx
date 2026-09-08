@@ -34,6 +34,7 @@ export function MonitorHealthPanel({ error, health, loading }: { error: string |
 
   return <section aria-labelledby="monitor-health-title" className="panel monitor-health-panel">
     <div className="monitor-health-heading"><div><p className="monitor-eyebrow">Read-only operations view</p><h2 id="monitor-health-title">Operational health</h2><p className="muted">A live view of every manual and workflow monitor target.</p></div>{loading ? <span className="monitor-health-loading">Updating…</span> : null}</div>
+    <p className="monitor-alert-notice" role="note">本页面仅用于价格与指标预警，不会执行任何交易。</p>
     {error ? <p className="monitor-health-error" role="alert">{error}</p> : null}
     {health ? <><div className="monitor-health-summary" aria-label="Health summary">{counters.map(([label, value]) => <div className="monitor-health-counter" key={String(label)}><span>{label}</span><strong>{value}</strong></div>)}</div><DataTable columns={columns} density="compact" emptyTitle="No monitor target health available" getRowKey={(target) => target.id} rows={health.targets} /></> : <p className="monitor-loading">{loading ? "Loading operational health…" : "Operational health could not be loaded."}</p>}
   </section>;

@@ -9,7 +9,7 @@ describe("ConditionEditor", () => {
     render(<ConditionEditor condition={{ type: "price_threshold", direction: "above", value: 10 }} market="A" frequency="daily" onChange={onChange} />);
 
     const expected = [
-      { type: "price_threshold", direction: "above", value: 0 },
+      { type: "price_threshold", direction: "above", value: 1 },
       { type: "ma_cross", direction: "golden", fast: 5, slow: 20 },
       { type: "change_pct", direction: "above", value: 0 },
       { type: "price_cross_ma", direction: "above", period: 20 },

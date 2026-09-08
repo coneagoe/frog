@@ -573,7 +573,15 @@ select:focus {
 .monitor-filter-bar, .monitor-form-grid { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 16px; }
 .monitor-filter-bar label, .monitor-form-grid label { color: var(--muted); display: grid; font-size: 13px; gap: 6px; }
 .monitor-filter-bar select, .monitor-form-grid select, .monitor-condition input, .monitor-condition select { background: var(--panel-soft); border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text); min-height: var(--control-height); padding: 0 10px; }
-.monitor-modal { max-width: 620px; }
+.monitor-alert-notice { background: var(--accent-soft); border-left: 3px solid var(--accent); color: var(--accent-strong); font-size: 14px; font-weight: 650; margin: -4px 0 0; padding: 10px 14px; }
+.monitor-editor-backdrop { align-items: stretch; background: rgba(31, 41, 51, 0.38); display: flex; inset: 0; justify-content: flex-end; position: fixed; z-index: 100; }
+.monitor-editor-panel { animation: monitor-panel-in 220ms ease-out; background: var(--panel); box-shadow: -16px 0 40px rgba(31, 41, 51, 0.18); display: flex; flex-direction: column; max-width: 620px; overflow-y: auto; width: min(100%, 620px); }
+.monitor-editor-panel form { display: flex; flex: 1; flex-direction: column; }
+.monitor-editor-panel .modal__body { flex: 1; }
+.monitor-editor-close { background: transparent; border: 0; border-radius: var(--radius-control); color: var(--muted); cursor: pointer; font-size: 28px; height: var(--control-height); line-height: 1; padding: 0; width: var(--control-height); }
+.monitor-editor-close:hover:not(:disabled) { background: var(--panel-soft); color: var(--text); }
+.field-error { color: var(--danger); font-size: 12px; line-height: 1.35; }
+@keyframes monitor-panel-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: translateX(0); } }
 .monitor-enabled { align-items: center; grid-template-columns: auto 1fr; padding-top: 25px; }
 .monitor-enabled input { accent-color: var(--accent); height: 18px; width: 18px; }
 .monitor-actions { flex-wrap: nowrap; }
