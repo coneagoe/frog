@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Event
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from monitor.domain_enums import NotificationDeliveryState
-from storage.model import MonitorNotification
+from storage.model import MonitorNotification, StockMonitorTarget
 from storage.storage_db import StorageDb
 
 
 @pytest.fixture()
-def postgres_storage() -> object:
+def postgres_storage() -> Generator[StorageDb, None, None]:
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
@@ -36,7 +38,7 @@ def postgres_storage() -> object:
         engine.dispose()
 
 
-def _target(db: StorageDb):
+def _target(db: StorageDb) -> StockMonitorTarget:
     return db.create_monitor_target("600001", "A", {"type": "price_threshold", "direction": "above", "value": 10})
 
 
@@ -68,12 +70,28 @@ def test_postgresql_concurrent_claims_return_one_notification(postgres_storage: 
     now = datetime(2026, 9, 8, tzinfo=timezone.utc)
     notification_id = _notification(postgres_storage, _target(postgres_storage).id, now)
     workers = (_clone_db(postgres_storage), _clone_db(postgres_storage))
+    first_claim_selected = Event()
+    release_first_claim = Event()
+
+    def hold_first_claim(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+        if "FOR UPDATE SKIP LOCKED" in statement and not first_claim_selected.is_set():
+            first_claim_selected.set()
+            assert release_first_claim.wait(timeout=5)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        claims = list(executor.map(lambda worker: worker.claim_due_monitor_notifications(now, 1), workers))
+        event.listen(postgres_storage.engine, "after_cursor_execute", hold_first_claim)
+        try:
+            first_claim = executor.submit(workers[0].claim_due_monitor_notifications, now, 1)
+            assert first_claim_selected.wait(timeout=5)
+            second_claim = executor.submit(workers[1].claim_due_monitor_notifications, now, 1)
+            assert second_claim.result(timeout=5) == []
+            release_first_claim.set()
+            claims = first_claim.result(timeout=5)
+        finally:
+            release_first_claim.set()
+            event.remove(postgres_storage.engine, "after_cursor_execute", hold_first_claim)
 
-    claimed_ids = [str(row.id) for batch in claims for row in batch]
-    assert claimed_ids.count(notification_id) == 1
+    assert [str(row.id) for row in claims] == [notification_id]
     assert _load(postgres_storage, notification_id).state == NotificationDeliveryState.PROCESSING.value
 
 
@@ -99,11 +117,11 @@ def test_postgresql_target_deletion_cancels_pending_and_processing_notifications
 ) -> None:
     now = datetime(2026, 9, 8, tzinfo=timezone.utc)
     target = _target(postgres_storage)
-    pending_id = _notification(postgres_storage, target.id, now)
-    assert postgres_storage.claim_due_monitor_notifications(now, 1)[0].id == UUID(pending_id)
-    postgres_storage.update_monitor_target_state(target.id, False)
     processing_id = _notification(postgres_storage, target.id, now)
-    assert _load(postgres_storage, processing_id).state == NotificationDeliveryState.PENDING.value
+    assert postgres_storage.claim_due_monitor_notifications(now, 1)[0].id == UUID(processing_id)
+    postgres_storage.update_monitor_target_state(target.id, False)
+    pending_id = _notification(postgres_storage, target.id, now)
+    assert _load(postgres_storage, pending_id).state == NotificationDeliveryState.PENDING.value
 
     assert postgres_storage.delete_monitor_target(target.id) is True
     assert _load(postgres_storage, pending_id).state == NotificationDeliveryState.CANCELLED.value
