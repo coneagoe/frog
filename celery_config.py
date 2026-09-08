@@ -13,4 +13,8 @@ beat_schedule: dict[str, dict[str, Any]] = {
         "task": "task.small_market_capital_2.small_market_capital_2",
         "schedule": crontab(hour=17, minute=30),
     },
+    "deliver_monitor_notifications": {
+        "task": "task.monitor_notification_delivery.deliver_monitor_notifications",
+        "schedule": crontab(minute="*"),
+    },
 }
