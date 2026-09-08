@@ -15,9 +15,10 @@ from monitor.domain_enums import (
     MonitorFrequency,
     MonitorMarket,
     MonitorResetMode,
+    NotificationDeliveryState,
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
-from storage.model import ForecastSSFCandidate, StockMonitorTarget
+from storage.model import ForecastSSFCandidate, MonitorNotification, StockMonitorTarget
 
 logger = logging.getLogger(__name__)
 
@@ -149,9 +150,29 @@ MONITOR_ENUM_GROUPS = (
             ),
         ),
     ),
+    MonitorEnumGroup(
+        "monitor_notification_delivery_state",
+        _labels(NotificationDeliveryState),
+        (
+            _column(
+                "monitor_notifications",
+                "state",
+                "VARCHAR(16)",
+                "'pending'",
+                indexes=(
+                    _index(
+                        "ix_monitor_notifications_state_next_attempt_at",
+                        "monitor_notifications",
+                        "state, next_attempt_at",
+                    ),
+                ),
+            ),
+        ),
+    ),
 )
 
-_GOVERNED_TABLES = (StockMonitorTarget.__table__, ForecastSSFCandidate.__table__)
+_GOVERNED_TABLES = (StockMonitorTarget.__table__, ForecastSSFCandidate.__table__, MonitorNotification.__table__)
+_ADDITIVE_GOVERNED_TABLES = frozenset({"monitor_notifications"})
 _CONDITION_CHECK_NAME = "ck_stock_monitor_targets_condition_type"
 _CONDITION_CHECK_SQL = (
     "CHECK (jsonb_typeof(condition::jsonb) = 'object' AND condition::jsonb ? 'type' "
@@ -192,7 +213,13 @@ def _result(
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     missing_tables = _preflight(connection, rollback=rollback)
-    if missing_tables and len(missing_tables) != len(_GOVERNED_TABLES):
+    if rollback:
+        if missing_tables and len(missing_tables) != len(_GOVERNED_TABLES):
+            raise MonitorEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
+        return
+    required_tables = {table.name for table in _GOVERNED_TABLES} - _ADDITIVE_GOVERNED_TABLES
+    missing_required_tables = missing_tables - _ADDITIVE_GOVERNED_TABLES
+    if missing_required_tables and missing_required_tables != required_tables:
         raise MonitorEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
 
 
@@ -203,7 +230,9 @@ def _adapter_apply(connection: Connection) -> tuple[bool, tuple[PriceVsMaMigrati
 def _apply_monitor_enums(connection: Connection) -> tuple[bool, tuple[PriceVsMaMigrationDiagnostic, ...]]:
     _adapter_preflight(connection, rollback=False)
     missing_tables = _preflight(connection, rollback=False)
-    migrated_price_vs_ma = () if missing_tables else _migrate_price_vs_ma_conditions(connection)
+    migrated_price_vs_ma = (
+        () if "stock_monitor_targets" in missing_tables else _migrate_price_vs_ma_conditions(connection)
+    )
     changed = any(
         not _column_has_type(connection, column, group.type_name)
         for group in MONITOR_ENUM_GROUPS
@@ -214,6 +243,8 @@ def _apply_monitor_enums(connection: Connection) -> tuple[bool, tuple[PriceVsMaM
         for group in MONITOR_ENUM_GROUPS:
             _create_type(connection, group)
         _create_missing_tables(connection, missing_tables)
+        for group in MONITOR_ENUM_GROUPS:
+            _alter_group(connection, group, rollback=False)
         _preflight(connection, rollback=False)
     else:
         for group in MONITOR_ENUM_GROUPS:
@@ -226,7 +257,7 @@ def _apply_monitor_enums(connection: Connection) -> tuple[bool, tuple[PriceVsMaM
 
 
 def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
-    if rollback and all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
+    if all(not _table_exists(connection, table.name) for table in _GOVERNED_TABLES):
         return
     _verify(connection, rollback=rollback)
 
@@ -781,14 +812,17 @@ def _index_facts(connection: Connection, index_name: str) -> tuple[str, bool, tu
 
 
 def _validate_indexes(connection: Connection, column: MonitorEnumColumn, *, required: bool) -> None:
-    for index_name, _ in column.indexes:
+    for index_name, index_sql in column.indexes:
         facts = _index_facts(connection, index_name)
         if facts is None:
             if not required:
                 continue
             raise MonitorEnumMigrationError(f"missing or invalid index {index_name}")
         table_name, unique, columns, predicate = facts
-        if table_name != column.table_name or unique or columns != (column.column_name,) or predicate is not None:
+        index_match = re.search(r"\(([^()]*)\)\s*$", index_sql)
+        assert index_match is not None
+        expected_columns = tuple(part.strip() for part in index_match.group(1).split(","))
+        if table_name != column.table_name or unique or columns != expected_columns or predicate is not None:
             raise MonitorEnumMigrationError(f"missing or invalid index {index_name}")
 
 

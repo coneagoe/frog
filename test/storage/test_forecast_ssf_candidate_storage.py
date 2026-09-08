@@ -2,6 +2,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pandas as pd
 import pytest
@@ -18,7 +19,7 @@ from common.const import (
     COL_STOCK_NAME,
 )
 from storage import storage_db as storage_db_module
-from storage.model import AStockBasic, Base, ForecastSSFCandidate, StockMonitorTarget
+from storage.model import AStockBasic, Base, ForecastSSFCandidate, MonitorNotification, StockMonitorTarget
 from storage.storage_db import StorageDb
 
 
@@ -452,6 +453,74 @@ def test_lifecycle_transition_rejects_stale_link_without_mutation(tmp_path):
         target.id,
         {"forecast": {"ann_date": "2026-01-15"}},
     )
+
+
+@pytest.mark.parametrize("delete_method", ["delete_monitor_target", "delete_manual_monitor_target"])
+def test_target_deletion_cancels_pending_and_processing_notifications(tmp_path, delete_method):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_manual_monitor_target("600001", "A", _typed_condition())
+    now = datetime(2026, 9, 8, tzinfo=timezone.utc)
+    pending_id = db.create_monitor_notification_for_trigger(target.id, "pending", "body", now)
+    session = db.Session()
+    try:
+        target_row = session.get(StockMonitorTarget, target.id)
+        target_row.last_state = False
+        pending = session.get(MonitorNotification, UUID(pending_id))
+        pending.next_attempt_at = now + timedelta(minutes=10)
+        session.commit()
+    finally:
+        session.close()
+    processing_id = db.create_monitor_notification_for_trigger(target.id, "processing", "body", now)
+    session = db.Session()
+    try:
+        session.get(StockMonitorTarget, target.id).last_state = False
+        session.commit()
+    finally:
+        session.close()
+    db.claim_due_monitor_notifications(now, 1)
+    delivered_id = db.create_monitor_notification_for_trigger(target.id, "delivered", "body", now)
+    delivered_claim = db.claim_due_monitor_notifications(now, 1)[0]
+    assert str(delivered_claim.id) == delivered_id
+    assert delivered_claim.claimed_at is not None
+    db.mark_monitor_notification_delivered(delivered_id, now, delivered_claim.claimed_at)
+    session = db.Session()
+    try:
+        session.get(StockMonitorTarget, target.id).last_state = False
+        session.commit()
+    finally:
+        session.close()
+    failed_id = db.create_monitor_notification_for_trigger(target.id, "failed", "body", now)
+    failed_claim = db.claim_due_monitor_notifications(now, 1)[0]
+    for _ in range(5):
+        assert failed_claim.claimed_at is not None
+        db.record_monitor_notification_failure(failed_id, "delivery failed", now, failed_claim.claimed_at)
+        session = db.Session()
+        try:
+            failed = session.get(MonitorNotification, UUID(failed_id))
+            if failed.state == "pending":
+                retry_at = failed.next_attempt_at
+            else:
+                retry_at = None
+        finally:
+            session.close()
+        if retry_at is not None:
+            failed_claim = db.claim_due_monitor_notifications(retry_at, 1)[0]
+
+    assert getattr(db, delete_method)(target.id)
+    session = db.Session()
+    try:
+        states = {
+            notification.id: notification.state
+            for notification in session.query(MonitorNotification).filter_by(target_id=target.id)
+        }
+        assert states == {
+            UUID(pending_id): "cancelled",
+            UUID(processing_id): "cancelled",
+            UUID(delivered_id): "delivered",
+            UUID(failed_id): "failed",
+        }
+    finally:
+        session.close()
 
 
 @pytest.mark.parametrize("operation", ["transition", "blackroom"], ids=["transition", "blackroom_adapter"])
