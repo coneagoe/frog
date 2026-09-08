@@ -73,13 +73,13 @@ test("protected navigation resumes after login with session and CSRF cookies", a
     });
   });
 
-  await page.goto("/orders?status=open");
-  await expect(page).toHaveURL(/\/login\?return_to=%2Forders%3Fstatus%3Dopen$/);
+  await page.goto("/monitor");
+  await expect(page).toHaveURL(/\/login\?return_to=%2Fmonitor$/);
   await page.getByLabel("Email address").fill("trader@example.com");
   await page.locator("#auth-password").fill("Validpassword1");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page).toHaveURL(/\/orders\?status=open$/);
-  await expect(page.getByRole("heading", { name: "Orders" })).toBeVisible();
+  await expect(page).toHaveURL(/\/monitor$/);
+  await expect(page.getByRole("heading", { name: "Operational health" })).toBeVisible();
   await expect.poll(async () => (await page.context().cookies()).map((cookie) => cookie.name)).toEqual(expect.arrayContaining(["paper_trading_session", "paper_trading_csrf"]));
 });
 
