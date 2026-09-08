@@ -614,6 +614,10 @@ def test_workflow_alert_checks_blackroom_after_evidence_before_enqueue():
 
     blackroom.is_banned.side_effect = is_banned
 
+    def build_alert_message(*_: object, **__: object) -> tuple[str, str]:
+        events.append("enqueue")
+        return "subject", "body"
+
     with (
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
@@ -621,7 +625,7 @@ def test_workflow_alert_checks_blackroom_after_evidence_before_enqueue():
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
         patch(
             "monitor.monitor_runner._build_alert_message",
-            side_effect=lambda *_args, **_kwargs: events.append("enqueue") or ("subject", "body"),
+            side_effect=build_alert_message,
         ),
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
