@@ -3991,8 +3991,10 @@ class StorageDb:
                     MonitorNotification.claimed_at <= stale_before,
                 ),
             )
-            query = session.query(MonitorNotification).filter(due).order_by(
-                MonitorNotification.next_attempt_at.asc(), MonitorNotification.created_at.asc()
+            query = (
+                session.query(MonitorNotification)
+                .filter(due)
+                .order_by(MonitorNotification.next_attempt_at.asc(), MonitorNotification.created_at.asc())
             )
             if self.engine.dialect.name == "postgresql":
                 query = query.with_for_update(skip_locked=True)
