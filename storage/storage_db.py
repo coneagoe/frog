@@ -3945,7 +3945,7 @@ class StorageDb:
             if self.engine.dialect.name == "postgresql":
                 query = query.with_for_update()
             target = query.first()
-            if target is None or target.last_state:
+            if target is None or not target.enabled or target.last_state:
                 session.rollback()
                 return None
 
@@ -4021,6 +4021,7 @@ class StorageDb:
                 session.rollback()
                 return False
             notification.state = NotificationDeliveryState.DELIVERED.value
+            notification.claimed_at = None
             notification.delivered_at = delivered_at
             notification.last_error = None
             session.commit()
@@ -4045,12 +4046,12 @@ class StorageDb:
 
             notification.attempt_count += 1
             notification.last_error = sanitize_error_detail(error)
+            notification.claimed_at = None
             if notification.attempt_count >= 5:
                 notification.state = NotificationDeliveryState.FAILED.value
                 notification.next_attempt_at = occurred_at
             else:
                 notification.state = NotificationDeliveryState.PENDING.value
-                notification.claimed_at = None
                 notification.next_attempt_at = occurred_at + timedelta(minutes=2 ** (notification.attempt_count - 1))
             session.commit()
             return NotificationDeliveryState(notification.state)

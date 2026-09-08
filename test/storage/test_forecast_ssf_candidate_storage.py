@@ -460,14 +460,62 @@ def test_target_deletion_cancels_pending_and_processing_notifications(tmp_path, 
     db = _sqlite_storage(tmp_path)
     target = db.create_manual_monitor_target("600001", "A", _typed_condition())
     now = datetime(2026, 9, 8, tzinfo=timezone.utc)
-    notification_id = db.create_monitor_notification_for_trigger(target.id, "subject", "body", now)
+    pending_id = db.create_monitor_notification_for_trigger(target.id, "pending", "body", now)
+    session = db.Session()
+    try:
+        target_row = session.get(StockMonitorTarget, target.id)
+        target_row.last_state = False
+        pending = session.get(MonitorNotification, UUID(pending_id))
+        pending.next_attempt_at = now + timedelta(minutes=10)
+        session.commit()
+    finally:
+        session.close()
+    processing_id = db.create_monitor_notification_for_trigger(target.id, "processing", "body", now)
+    session = db.Session()
+    try:
+        session.get(StockMonitorTarget, target.id).last_state = False
+        session.commit()
+    finally:
+        session.close()
     db.claim_due_monitor_notifications(now, 1)
+    delivered_id = db.create_monitor_notification_for_trigger(target.id, "delivered", "body", now)
+    db.claim_due_monitor_notifications(now, 1)
+    db.mark_monitor_notification_delivered(delivered_id, now)
+    session = db.Session()
+    try:
+        session.get(StockMonitorTarget, target.id).last_state = False
+        session.commit()
+    finally:
+        session.close()
+    failed_id = db.create_monitor_notification_for_trigger(target.id, "failed", "body", now)
+    db.claim_due_monitor_notifications(now, 1)
+    for _ in range(5):
+        db.record_monitor_notification_failure(failed_id, "delivery failed", now)
+        session = db.Session()
+        try:
+            failed = session.get(MonitorNotification, UUID(failed_id))
+            if failed.state == "pending":
+                retry_at = failed.next_attempt_at
+            else:
+                retry_at = None
+        finally:
+            session.close()
+        if retry_at is not None:
+            db.claim_due_monitor_notifications(retry_at, 1)
 
     assert getattr(db, delete_method)(target.id)
     session = db.Session()
     try:
-        notification = session.get(MonitorNotification, UUID(notification_id))
-        assert notification.state == "cancelled"
+        states = {
+            notification.id: notification.state
+            for notification in session.query(MonitorNotification).filter_by(target_id=target.id)
+        }
+        assert states == {
+            UUID(pending_id): "cancelled",
+            UUID(processing_id): "cancelled",
+            UUID(delivered_id): "delivered",
+            UUID(failed_id): "failed",
+        }
     finally:
         session.close()
 

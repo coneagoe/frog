@@ -49,6 +49,29 @@ def test_create_notification_is_atomic_edge_and_noops_after_trigger(tmp_path):
     assert (saved_target.last_state, saved_target.triggered_at) == (True, now.replace(tzinfo=None))
 
 
+def test_create_notification_noops_for_disabled_target(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    target = _target(db)
+    target.enabled = False
+    session = db.Session()
+    try:
+        session.merge(target)
+        session.commit()
+    finally:
+        session.close()
+
+    assert (
+        db.create_monitor_notification_for_trigger(target.id, "Subject", "Body", datetime(2026, 9, 8, tzinfo=timezone.utc))
+        is None
+    )
+    session = db.Session()
+    try:
+        assert session.query(MonitorNotification).count() == 0
+    finally:
+        session.close()
+    assert db.get_monitor_target(target.id).last_state is False
+
+
 def test_create_notification_rolls_back_target_update_when_insert_fails(tmp_path, monkeypatch):
     db = _sqlite_storage(tmp_path)
     target = _target(db)
@@ -100,6 +123,7 @@ def test_delivery_retry_terminal_failure_and_error_sanitization(tmp_path):
         (now + timedelta(minutes=1)).replace(tzinfo=None),
         "[redacted] [redacted]",
     )
+    assert saved.claimed_at is None
 
     for attempt in range(2, 6):
         when = _load(db, notification_id).next_attempt_at
@@ -107,6 +131,7 @@ def test_delivery_retry_terminal_failure_and_error_sanitization(tmp_path):
         state = db.record_monitor_notification_failure(notification_id, "delivery failed", when)
     saved = _load(db, notification_id)
     assert (state, saved.state, saved.attempt_count) == (NotificationDeliveryState.FAILED, NotificationDeliveryState.FAILED.value, 5)
+    assert saved.claimed_at is None
     assert db.mark_monitor_notification_delivered(notification_id, now) is False
 
 
@@ -118,4 +143,6 @@ def test_mark_delivered_requires_processing_notification(tmp_path):
     assert not db.mark_monitor_notification_delivered(notification_id, now)
     db.claim_due_monitor_notifications(now, 1)
     assert db.mark_monitor_notification_delivered(notification_id, now)
-    assert _load(db, notification_id).state == NotificationDeliveryState.DELIVERED.value
+    saved = _load(db, notification_id)
+    assert saved.state == NotificationDeliveryState.DELIVERED.value
+    assert saved.claimed_at is None
