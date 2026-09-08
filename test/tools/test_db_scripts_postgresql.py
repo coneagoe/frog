@@ -23,9 +23,7 @@ STORAGE_ENUM_TYPES = {
     "forecast_snapshot_status",
     "ssf_change_signal_status",
 }
-STORAGE_ENUM_LABELS = {
-    group.type_name: group.labels for group in (*MONITOR_ENUM_GROUPS, *STORAGE_ENUM_GROUPS)
-}
+ENUM_LABELS = {group.type_name: group.labels for group in (*MONITOR_ENUM_GROUPS, *STORAGE_ENUM_GROUPS)}
 
 
 def _engine() -> Engine:
@@ -295,7 +293,7 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
     with engine.connect() as connection:
         for type_name in enum_types:
             assert enum_type_exists(connection, schema, type_name)
-            assert enum_labels(connection, schema, type_name) == STORAGE_ENUM_LABELS[type_name]
+            assert enum_labels(connection, schema, type_name) == ENUM_LABELS[type_name]
         assert table_exists(connection, schema, table)
         for column, type_name in enum_columns:
             assert column_type(connection, schema, table, column) == (schema, type_name)
@@ -319,7 +317,7 @@ def test_selected_monitor_notifications_export_restores_delivery_state_and_pendi
             text(
                 "INSERT INTO stock_monitor_targets "
                 "(id, stock_code, market, condition, frequency, reset_mode) VALUES "
-                "(1, '000001', 'A', '{\"type\": \"price_threshold\", \"direction\": \"above\", \"value\": 1}'::jsonb, "
+                '(1, \'000001\', \'A\', \'{"type": "price_threshold", "direction": "above", "value": 1}\'::jsonb, '
                 "'daily', 'auto')"
             )
         )
@@ -370,9 +368,10 @@ def test_selected_monitor_notifications_export_restores_delivery_state_and_pendi
     assert imported.returncode == 0, imported.stderr
     with engine.connect() as connection:
         assert enum_type_exists(connection, schema, "monitor_notification_delivery_state")
-        assert enum_labels(connection, schema, "monitor_notification_delivery_state") == STORAGE_ENUM_LABELS[
-            "monitor_notification_delivery_state"
-        ]
+        assert (
+            enum_labels(connection, schema, "monitor_notification_delivery_state")
+            == ENUM_LABELS["monitor_notification_delivery_state"]
+        )
         assert column_type(connection, schema, "monitor_notifications", "state") == (
             schema,
             "monitor_notification_delivery_state",
