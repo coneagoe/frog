@@ -70,6 +70,7 @@ def test_runtime_outbox_bootstrap_creates_monitor_enums_before_tables():
     url = os.getenv("TEST_POSTGRESQL_URL")
     if not url:
         pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    assert url is not None
     schema = f"monitor_runtime_bootstrap_{uuid.uuid4().hex}"
     engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
     with engine.begin() as connection:
