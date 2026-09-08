@@ -56,29 +56,28 @@ def _candidate_evidence() -> SimpleNamespace:
 
 
 def test_run_monitor_triggers_alert_and_updates_state():
-    """When condition triggers (last_state was False), sends email and updates state."""
+    """When condition triggers (last_state was False), enqueues an alert."""
     target = _make_target(last_state=False)
 
     mock_storage = MagicMock()
     mock_storage.load_monitor_targets.return_value = [target]
+    mock_storage.create_monitor_notification_for_trigger.return_value = "notification-1"
 
     with (
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as mock_email,
     ):
         before_run = datetime.now(timezone.utc)
         summary = run_monitor(frequency="daily")
         after_run = datetime.now(timezone.utc)
 
-    mock_email.assert_called_once()
-    subject, body = mock_email.call_args[0][:2]
+    enqueue = mock_storage.create_monitor_notification_for_trigger
+    enqueue.assert_called_once()
+    subject, body = enqueue.call_args.args[1:3]
     assert "600519" in subject or "600519" in body
-    call_args = mock_storage.update_monitor_target_state.call_args
-    assert call_args is not None
-    assert call_args[0] == (1, True)
-    triggered_at = call_args[1]["triggered_at"]
+    assert mock_storage.update_monitor_target_state.call_count == 0
+    triggered_at = enqueue.call_args.args[3]
     assert isinstance(triggered_at, datetime)
     assert before_run <= triggered_at <= after_run
     assert summary.triggered == 1
@@ -94,7 +93,6 @@ def test_unfiltered_run_does_not_create_blackroom_or_load_candidate_evidence():
         patch("monitor.monitor_runner.BlackroomService") as blackroom,
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email"),
     ):
         run_monitor()
 
@@ -114,11 +112,9 @@ def test_unfiltered_daily_run_rechecks_workflow_target_blackroom_before_email():
         patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(frequency="daily")
 
-    email.assert_not_called()
     storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
     assert summary.skipped == 1
 
@@ -134,7 +130,6 @@ def test_unfiltered_daily_run_leaves_manual_target_without_blackroom_lookup():
         patch("monitor.monitor_runner.BlackroomService") as blackroom,
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email"),
     ):
         run_monitor(frequency="daily")
 
@@ -152,11 +147,9 @@ def test_run_monitor_no_repeat_alert_when_already_triggered():
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as mock_email,
     ):
         summary = run_monitor(frequency="daily")
 
-    mock_email.assert_not_called()
     assert summary.triggered == 0
 
 
@@ -171,7 +164,6 @@ def test_run_monitor_auto_resets_state_when_condition_clears():
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1600.0),  # above threshold
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email"),
     ):
         run_monitor(frequency="daily")
 
@@ -194,12 +186,10 @@ def test_run_daily_monitor_uses_latest_history_close_for_ma_condition_when_realt
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=np.nan),
         patch("monitor.monitor_runner.fetch_history_df", return_value=history_df),
-        patch("monitor.monitor_runner.send_email") as mock_email,
     ):
         summary = run_monitor(frequency="daily")
 
-    mock_email.assert_called_once()
-    mock_storage.update_monitor_target_state.assert_called_once()
+    mock_storage.create_monitor_notification_for_trigger.assert_called_once()
     assert summary.triggered == 1
 
 
@@ -216,11 +206,11 @@ def test_run_daily_monitor_preserves_realtime_price_for_price_cross_ma():
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=26.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=history_df),
-        patch("monitor.monitor_runner.send_email") as mock_email,
     ):
         run_monitor(frequency="daily")
 
-    assert "当前价格: 26.0" in mock_email.call_args.args[1]
+    body = mock_storage.create_monitor_notification_for_trigger.call_args.args[2]
+    assert "当前价格: 26.0" in body
 
 
 def test_final_close_runner_uses_hfq_storage_and_never_fetches_realtime_price():
@@ -233,13 +223,11 @@ def test_final_close_runner_uses_hfq_storage_and_never_fetches_realtime_price():
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=history) as fetch_final,
         patch("monitor.monitor_runner.fetch_current_price") as realtime,
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(frequency="daily", as_of_date=date(2026, 6, 3))
 
     fetch_final.assert_called_once_with("600519", date(2026, 6, 3), min_periods=21)
     realtime.assert_not_called()
-    email.assert_called_once()
     assert summary.triggered == 1
 
 
@@ -267,7 +255,6 @@ def test_reenabled_workflow_target_above_ma_waits_for_later_close_crossover():
         patch("monitor.monitor_runner.fetch_final_close_history_df", side_effect=histories) as fetch_final,
         patch("monitor.monitor_runner.fetch_current_price") as realtime,
         patch("monitor.monitor_runner.BlackroomService") as blackroom,
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         first = run_monitor(workflow="forecast_ssf_ma20", as_of_date=date(2026, 6, 3))
         target.last_state = False
@@ -280,9 +267,8 @@ def test_reenabled_workflow_target_above_ma_waits_for_later_close_crossover():
     state_updates = storage.update_monitor_target_state.call_args_list
     assert state_updates[0].args == (1, False)
     assert state_updates[0].kwargs == {"triggered_at": None}
-    assert state_updates[1].args == (1, True)
-    assert isinstance(state_updates[1].kwargs["triggered_at"], datetime)
-    email.assert_called_once()
+    triggered_at = storage.create_monitor_notification_for_trigger.call_args.args[3]
+    assert isinstance(triggered_at, datetime)
     blackroom.return_value.is_banned.assert_called_once_with("600519", "A")
     assert (first.triggered, first.skipped, first.errors) == (0, 0, 0)
     assert (second.triggered, second.skipped, second.errors) == (0, 0, 0)
@@ -302,12 +288,10 @@ def test_final_close_stale_bar_preserves_state_and_sends_no_email():
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=stale_history),
         patch("monitor.monitor_runner.fetch_current_price") as realtime,
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(frequency="daily", as_of_date=date(2026, 6, 3))
 
     realtime.assert_not_called()
-    email.assert_not_called()
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
 
@@ -325,13 +309,11 @@ def test_final_close_non_a_target_skips_without_provider_or_state_update():
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_final_close_history_df") as fetch_final,
         patch("monitor.monitor_runner.fetch_current_price") as realtime,
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(frequency="daily", as_of_date=date(2026, 6, 3))
 
     fetch_final.assert_not_called()
     realtime.assert_not_called()
-    email.assert_not_called()
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
 
@@ -349,13 +331,11 @@ def test_final_close_intraday_target_skips_without_provider_or_state_update():
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_final_close_history_df") as fetch_final,
         patch("monitor.monitor_runner.fetch_current_price") as realtime,
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(frequency="intraday")
 
     fetch_final.assert_not_called()
     realtime.assert_not_called()
-    email.assert_not_called()
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
 
@@ -375,13 +355,11 @@ def test_final_close_without_as_of_date_uses_current_shanghai_date(monkeypatch):
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=None) as fetch_final,
         patch("monitor.monitor_runner.fetch_current_price") as realtime,
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(frequency="daily")
 
     fetch_final.assert_called_once_with("600519", date(2026, 6, 4), min_periods=21)
     realtime.assert_not_called()
-    email.assert_not_called()
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
 
@@ -399,12 +377,10 @@ def test_final_close_missing_close_skips_without_email_or_state_update():
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_final_close_history_df", return_value=history),
         patch("monitor.monitor_runner.fetch_current_price") as realtime,
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(frequency="daily", as_of_date=date(2026, 6, 3))
 
     realtime.assert_not_called()
-    email.assert_not_called()
     storage.update_monitor_target_state.assert_not_called()
     assert summary.skipped == 1
 
@@ -420,7 +396,6 @@ def test_run_monitor_manual_mode_does_not_auto_reset():
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1600.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email"),
     ):
         run_monitor(frequency="daily")
 
@@ -439,7 +414,6 @@ def test_workflow_auto_resets_without_blackroom_recheck_when_condition_clears():
         patch("monitor.monitor_runner.BlackroomService") as blackroom,
         patch("monitor.monitor_runner.fetch_current_price", return_value=1600.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email"),
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
@@ -460,11 +434,10 @@ def test_run_monitor_alert_subject_prefers_note_text():
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as mock_email,
     ):
         run_monitor(frequency="daily")
 
-    subject, _body = mock_email.call_args[0][:2]
+    subject = mock_storage.create_monitor_notification_for_trigger.call_args.args[1]
     assert subject == "[股票监控告警] 600519 贵州茅台 抄底提醒"
 
 
@@ -480,11 +453,10 @@ def test_run_monitor_alert_subject_falls_back_when_note_blank():
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as mock_email,
     ):
         run_monitor(frequency="daily")
 
-    subject, _body = mock_email.call_args[0][:2]
+    subject = mock_storage.create_monitor_notification_for_trigger.call_args.args[1]
     assert subject == "[股票监控告警] 600519 贵州茅台 价格低于1500.0"
 
 
@@ -500,13 +472,12 @@ def test_run_monitor_alert_subject_resolves_missing_stock_name():
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as mock_email,
         patch("monitor.monitor_runner.resolve_stock_name", return_value="贵州茅台") as mock_resolve,
     ):
         run_monitor(frequency="daily")
 
     mock_resolve.assert_called_once_with("600519", None)
-    subject, _body = mock_email.call_args[0][:2]
+    subject = mock_storage.create_monitor_notification_for_trigger.call_args.args[1]
     assert subject == "[股票监控告警] 600519 贵州茅台 价格低于1500.0"
 
 
@@ -521,12 +492,11 @@ def test_run_monitor_alert_subject_graceful_fallback_on_resolver_failure():
         patch("monitor.monitor_runner.get_storage", return_value=mock_storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as mock_email,
         patch("monitor.monitor_runner.resolve_stock_name", return_value=None),
     ):
         run_monitor(frequency="daily")
 
-    subject, _body = mock_email.call_args[0][:2]
+    subject = mock_storage.create_monitor_notification_for_trigger.call_args.args[1]
     # No stock name, condition fallback
     assert subject == "[股票监控告警] 600519 价格低于1500.0"
 
@@ -542,7 +512,6 @@ def test_run_monitor_filters_by_workflow():
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email"),
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
@@ -570,11 +539,9 @@ def test_banned_workflow_target_is_disabled_without_email():
         patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
-    email.assert_not_called()
     storage.disable_forecast_ssf_target_for_blackroom.assert_called_once_with(target.id, "active_blackroom")
     storage.update_monitor_target_state.assert_not_called()
     storage.record_monitor_target_evaluation.assert_not_called()
@@ -597,11 +564,9 @@ def test_workflow_blackroom_lookup_failure_counts_as_error():
         patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
-    email.assert_not_called()
     storage.update_monitor_target_state.assert_not_called()
     assert summary.errors == 1
     assert summary.error_details == ["600519: blackroom unavailable"]
@@ -621,16 +586,15 @@ def test_workflow_alert_includes_candidate_evidence():
         patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         run_monitor(workflow="forecast_ssf_ma20")
 
-    body = email.call_args.args[1]
+    body = storage.create_monitor_notification_for_trigger.call_args.args[2]
     for value in ("2025-12-31", "50.0", "2026-01-15", "全国社保基金一一八组合", "2026-01-10"):
         assert value in body
 
 
-def test_workflow_alert_checks_blackroom_after_evidence_before_email():
+def test_workflow_alert_checks_blackroom_after_evidence_before_enqueue():
     target = _make_target(last_state=False)
     target.workflow = "forecast_ssf_ma20"
     storage = MagicMock()
@@ -655,13 +619,16 @@ def test_workflow_alert_checks_blackroom_after_evidence_before_email():
         patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email", side_effect=lambda *_: events.append("email")) as email,
+        patch(
+            "monitor.monitor_runner._build_alert_message",
+            side_effect=lambda *_args, **_kwargs: events.append("enqueue") or ("subject", "body"),
+        ),
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
-    email.assert_called_once()
+    storage.create_monitor_notification_for_trigger.assert_called_once()
     assert blackroom.is_banned.call_count == 1
-    assert events == ["evidence", "blackroom", "email"]
+    assert events == ["evidence", "blackroom", "enqueue"]
     assert summary.triggered == 1
 
 
@@ -679,17 +646,15 @@ def test_workflow_blackroom_disable_failure_counts_as_error():
         patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email") as email,
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
-    email.assert_not_called()
     assert summary.skipped == 0
     assert summary.errors == 1
     assert "failed to disable forecast SSF target" in summary.error_details[0]
 
 
-def test_workflow_email_failure_does_not_update_triggered_state():
+def test_workflow_outbox_persistence_failure_does_not_update_triggered_state():
     target = _make_target(last_state=False)
     target.workflow = "forecast_ssf_ma20"
     storage = MagicMock()
@@ -703,7 +668,11 @@ def test_workflow_email_failure_does_not_update_triggered_state():
         patch("monitor.monitor_runner.BlackroomService", return_value=blackroom),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email", side_effect=RuntimeError("email unavailable")),
+        patch.object(
+            storage,
+            "create_monitor_notification_for_trigger",
+            side_effect=RuntimeError("outbox unavailable"),
+        ),
     ):
         summary = run_monitor(workflow="forecast_ssf_ma20")
 
@@ -729,7 +698,6 @@ def test_run_monitor_records_each_completed_evaluation(current_price, last_state
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=current_price),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email"),
         patch("monitor.monitor_runner._utc_now", return_value=datetime(2026, 9, 7, tzinfo=timezone.utc)),
     ):
         summary = run_monitor()
@@ -787,8 +755,12 @@ def test_final_close_insufficient_data_does_not_record_health(history):
             lambda storage: patch("monitor.monitor_runner.BlackroomService", side_effect=RuntimeError("guard failed")),
         ),
         (
-            "notification",
-            lambda storage: patch("monitor.monitor_runner.send_email", side_effect=RuntimeError("notification failed")),
+            "storage",
+            lambda storage: patch.object(
+                storage,
+                "create_monitor_notification_for_trigger",
+                side_effect=RuntimeError("notification persistence failed"),
+            ),
         ),
         (
             "storage",
@@ -809,7 +781,6 @@ def test_run_monitor_records_sanitized_error_by_stage(stage, configure):
         patch("monitor.monitor_runner.get_storage", return_value=storage),
         patch("monitor.monitor_runner.fetch_current_price", return_value=1400.0),
         patch("monitor.monitor_runner.fetch_history_df", return_value=None),
-        patch("monitor.monitor_runner.send_email"),
         configure(storage),
     ):
         summary = run_monitor()

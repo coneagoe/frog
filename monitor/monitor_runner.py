@@ -16,7 +16,6 @@ from monitor.monitor_health import sanitize_error_detail
 from monitor.monitor_target_service import format_monitor_target_label, resolve_stock_name
 from monitor.price_fetcher import fetch_current_price, fetch_final_close_history_df, fetch_history_df
 from storage import get_storage
-from utility import send_email
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +80,7 @@ def run_monitor(
 ) -> MonitorSummary:
     """
     Load all enabled monitoring targets for the given frequency,
-    evaluate their conditions, and send email alerts on edge triggers.
+    evaluate their conditions, and enqueue alerts on edge triggers.
 
     Args:
         frequency: 'daily' or 'intraday'
@@ -182,11 +181,12 @@ def run_monitor(
                         summary.skipped += 1
                         continue
                 error_kind = MonitorEvaluationErrorKind.NOTIFICATION
-                _send_alert(target, current_price, change_pct, evidence=evidence)
+                subject, body = _build_alert_message(target, current_price, change_pct, evidence=evidence)
                 error_kind = MonitorEvaluationErrorKind.STORAGE
-                storage.update_monitor_target_state(target.id, True, triggered_at=now)
-                summary.triggered += 1
-                logger.info(f"[monitor] 告警触发: {target.stock_code} note={target.note!r} price={current_price}")
+                notification_id = storage.create_monitor_notification_for_trigger(target.id, subject, body, now)
+                if notification_id is not None:
+                    summary.triggered += 1
+                    logger.info(f"[monitor] 告警触发: {target.stock_code} note={target.note!r} price={current_price}")
 
             elif not condition_met and target.last_state and target.reset_mode == "auto":
                 error_kind = MonitorEvaluationErrorKind.STORAGE
@@ -212,8 +212,10 @@ def run_monitor(
     return summary
 
 
-def _send_alert(target, current_price: Optional[float], change_pct: Optional[float], evidence=None):
-    """Compose and send an email alert for a triggered condition."""
+def _build_alert_message(
+    target, current_price: Optional[float], change_pct: Optional[float], evidence=None
+) -> tuple[str, str]:
+    """Compose an email alert for a triggered condition."""
     label = format_monitor_target_label(
         target.stock_code,
         resolve_stock_name(target.stock_code, getattr(target, "stock_name", None)),
@@ -236,4 +238,4 @@ def _send_alert(target, current_price: Optional[float], change_pct: Optional[flo
                 if value is not None:
                     lines.append(f"{section}.{key}: {value}")
 
-    send_email(subject, "\n".join(lines))
+    return subject, "\n".join(lines)
