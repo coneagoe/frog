@@ -2,6 +2,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pandas as pd
 import pytest
@@ -18,7 +19,7 @@ from common.const import (
     COL_STOCK_NAME,
 )
 from storage import storage_db as storage_db_module
-from storage.model import AStockBasic, Base, ForecastSSFCandidate, StockMonitorTarget
+from storage.model import AStockBasic, Base, ForecastSSFCandidate, MonitorNotification, StockMonitorTarget
 from storage.storage_db import StorageDb
 
 
@@ -452,6 +453,23 @@ def test_lifecycle_transition_rejects_stale_link_without_mutation(tmp_path):
         target.id,
         {"forecast": {"ann_date": "2026-01-15"}},
     )
+
+
+@pytest.mark.parametrize("delete_method", ["delete_monitor_target", "delete_manual_monitor_target"])
+def test_target_deletion_cancels_pending_and_processing_notifications(tmp_path, delete_method):
+    db = _sqlite_storage(tmp_path)
+    target = db.create_manual_monitor_target("600001", "A", _typed_condition())
+    now = datetime(2026, 9, 8, tzinfo=timezone.utc)
+    notification_id = db.create_monitor_notification_for_trigger(target.id, "subject", "body", now)
+    db.claim_due_monitor_notifications(now, 1)
+
+    assert getattr(db, delete_method)(target.id)
+    session = db.Session()
+    try:
+        notification = session.get(MonitorNotification, UUID(notification_id))
+        assert notification.state == "cancelled"
+    finally:
+        session.close()
 
 
 @pytest.mark.parametrize("operation", ["transition", "blackroom"], ids=["transition", "blackroom_adapter"])

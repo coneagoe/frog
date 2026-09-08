@@ -8,12 +8,13 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from functools import wraps
 from typing import Any, Callable, Dict, List, Literal, Optional, Set, cast
+from uuid import UUID, uuid4
 
 import pandas as pd
 import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.extras import RealDictCursor
-from sqlalchemy import MetaData, Numeric, Table, bindparam, create_engine, func, inspect, text
+from sqlalchemy import MetaData, Numeric, Table, and_, bindparam, create_engine, func, inspect, or_, text
 from sqlalchemy.dialects.postgresql import Insert as PostgreSQLInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import Insert as SQLiteInsert
@@ -110,6 +111,7 @@ from monitor.domain_enums import (
     MonitorFrequency,
     MonitorMarket,
     MonitorResetMode,
+    NotificationDeliveryState,
 )
 from monitor.monitor_health import sanitize_error_detail
 
@@ -124,6 +126,7 @@ from .model import (
     ForecastSnapshotRecord,
     ForecastSnapshotRun,
     IndexDailyTurnover,
+    MonitorNotification,
     User,
     tb_name_a_stock_basic,
     tb_name_blackroom_record,
@@ -3353,12 +3356,14 @@ class StorageDb:
         self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
+        self.ensure_monitor_notification_tables()
         assert self.Session is not None
         session = self.Session()
         try:
             target = session.query(StockMonitorTarget).filter_by(id=target_id).first()
             if target is None:
                 return False
+            self._cancel_monitor_notifications_for_target(session, target_id)
             session.delete(target)
             session.commit()
             return True
@@ -3373,6 +3378,7 @@ class StorageDb:
         self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
 
+        self.ensure_monitor_notification_tables()
         assert self.Session is not None
         session = self.Session()
         try:
@@ -3383,6 +3389,7 @@ class StorageDb:
             )
             if target is None:
                 return False
+            self._cancel_monitor_notifications_for_target(session, target_id)
             session.delete(target)
             session.commit()
             return True
@@ -3918,6 +3925,149 @@ class StorageDb:
         self._ensure_monitor_target_health_columns()
         self._migrate_sqlite_price_vs_ma_conditions()
         self._ensure_workflow_monitor_target_identity()
+
+    def ensure_monitor_notification_tables(self) -> None:
+        """Ensure the monitor target and notification outbox tables exist."""
+        self.ensure_monitor_targets_table()
+        MonitorNotification.__table__.create(self.engine, checkfirst=True)
+
+    def create_monitor_notification_for_trigger(
+        self, target_id: int, subject: str, body: str, triggered_at: datetime
+    ) -> str | None:
+        """Persist a notification only when a target crosses into the triggered state."""
+        self.ensure_monitor_notification_tables()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            query = session.query(StockMonitorTarget).filter_by(id=target_id)
+            if self.engine.dialect.name == "postgresql":
+                query = query.with_for_update()
+            target = query.first()
+            if target is None or target.last_state:
+                session.rollback()
+                return None
+
+            notification_id = uuid4()
+            target.last_state = True
+            target.triggered_at = triggered_at
+            session.add(
+                MonitorNotification(
+                    id=notification_id,
+                    target_id=target_id,
+                    subject=subject,
+                    body=body,
+                    state=NotificationDeliveryState.PENDING.value,
+                    attempt_count=0,
+                    next_attempt_at=triggered_at,
+                )
+            )
+            session.commit()
+            return str(notification_id)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def claim_due_monitor_notifications(self, now: datetime, limit: int) -> list[MonitorNotification]:
+        """Claim due or abandoned notifications for exclusive delivery processing."""
+        if limit <= 0:
+            return []
+        self.ensure_monitor_notification_tables()
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            stale_before = now - timedelta(minutes=30)
+            due = or_(
+                and_(
+                    MonitorNotification.state == NotificationDeliveryState.PENDING.value,
+                    MonitorNotification.next_attempt_at <= now,
+                ),
+                and_(
+                    MonitorNotification.state == NotificationDeliveryState.PROCESSING.value,
+                    MonitorNotification.claimed_at <= stale_before,
+                ),
+            )
+            query = session.query(MonitorNotification).filter(due).order_by(
+                MonitorNotification.next_attempt_at.asc(), MonitorNotification.created_at.asc()
+            )
+            if self.engine.dialect.name == "postgresql":
+                query = query.with_for_update(skip_locked=True)
+            notifications = query.limit(limit).all()
+            for notification in notifications:
+                notification.state = NotificationDeliveryState.PROCESSING.value
+                notification.claimed_at = now
+            session.commit()
+            for notification in notifications:
+                session.refresh(notification)
+                session.expunge(notification)
+            return notifications
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def mark_monitor_notification_delivered(self, notification_id: str, delivered_at: datetime) -> bool:
+        self.ensure_monitor_notification_tables()
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            notification = session.get(MonitorNotification, UUID(notification_id))
+            if notification is None or notification.state != NotificationDeliveryState.PROCESSING.value:
+                session.rollback()
+                return False
+            notification.state = NotificationDeliveryState.DELIVERED.value
+            notification.delivered_at = delivered_at
+            notification.last_error = None
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def record_monitor_notification_failure(
+        self, notification_id: str, error: str, occurred_at: datetime
+    ) -> NotificationDeliveryState:
+        self.ensure_monitor_notification_tables()
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            notification = session.get(MonitorNotification, UUID(notification_id))
+            if notification is None or notification.state != NotificationDeliveryState.PROCESSING.value:
+                session.rollback()
+                return NotificationDeliveryState.FAILED
+
+            notification.attempt_count += 1
+            notification.last_error = sanitize_error_detail(error)
+            if notification.attempt_count >= 5:
+                notification.state = NotificationDeliveryState.FAILED.value
+                notification.next_attempt_at = occurred_at
+            else:
+                notification.state = NotificationDeliveryState.PENDING.value
+                notification.claimed_at = None
+                notification.next_attempt_at = occurred_at + timedelta(minutes=2 ** (notification.attempt_count - 1))
+            session.commit()
+            return NotificationDeliveryState(notification.state)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    @staticmethod
+    def _cancel_monitor_notifications_for_target(session: Any, target_id: int) -> None:
+        session.query(MonitorNotification).filter(
+            MonitorNotification.target_id == target_id,
+            MonitorNotification.state.in_(
+                (NotificationDeliveryState.PENDING.value, NotificationDeliveryState.PROCESSING.value)
+            ),
+        ).update({MonitorNotification.state: NotificationDeliveryState.CANCELLED.value}, synchronize_session=False)
 
     def _ensure_monitor_target_health_columns(self) -> None:
         from .model.stock_monitor_target import StockMonitorTarget
