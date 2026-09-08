@@ -255,9 +255,8 @@ def test_coordinator_forward_preflight_is_noop_when_all_governed_tables_are_abse
     with _connection(engine, schema) as connection:
         connection.execute(text("DROP TABLE monitor_notifications, forecast_ssf_candidates, stock_monitor_targets"))
 
-        result = migrate_enums(connection, adapters=(MONITOR_ENUM_ADAPTER,))
+        MONITOR_ENUM_ADAPTER.preflight(connection, rollback=False)
 
-        assert result.converted is False
         assert _enum_types(connection) == set()
 
 

@@ -230,7 +230,9 @@ def _adapter_apply(connection: Connection) -> tuple[bool, tuple[PriceVsMaMigrati
 def _apply_monitor_enums(connection: Connection) -> tuple[bool, tuple[PriceVsMaMigrationDiagnostic, ...]]:
     _adapter_preflight(connection, rollback=False)
     missing_tables = _preflight(connection, rollback=False)
-    migrated_price_vs_ma = () if missing_tables else _migrate_price_vs_ma_conditions(connection)
+    migrated_price_vs_ma = (
+        () if "stock_monitor_targets" in missing_tables else _migrate_price_vs_ma_conditions(connection)
+    )
     changed = any(
         not _column_has_type(connection, column, group.type_name)
         for group in MONITOR_ENUM_GROUPS
@@ -241,6 +243,8 @@ def _apply_monitor_enums(connection: Connection) -> tuple[bool, tuple[PriceVsMaM
         for group in MONITOR_ENUM_GROUPS:
             _create_type(connection, group)
         _create_missing_tables(connection, missing_tables)
+        for group in MONITOR_ENUM_GROUPS:
+            _alter_group(connection, group, rollback=False)
         _preflight(connection, rollback=False)
     else:
         for group in MONITOR_ENUM_GROUPS:
