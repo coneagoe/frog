@@ -84,10 +84,10 @@ def _create_legacy_schema(connection: Connection) -> None:
     connection.execute(
         text(
             "CREATE TABLE monitor_notifications ("
-            "id uuid primary key, target_id integer NOT NULL, payload json NOT NULL, "
+            "id uuid primary key, target_id integer NOT NULL, subject text NOT NULL, body text NOT NULL, "
             "state varchar(16) NOT NULL DEFAULT 'pending', attempt_count integer NOT NULL DEFAULT 0, "
-            "next_attempt_at timestamptz NOT NULL, locked_at timestamptz, delivered_at timestamptz, "
-            "cancelled_at timestamptz, last_error text, created_at timestamptz NOT NULL DEFAULT now())"
+            "next_attempt_at timestamptz NOT NULL, claimed_at timestamptz, delivered_at timestamptz, "
+            "last_error text, created_at timestamptz NOT NULL DEFAULT now())"
         )
     )
 
@@ -394,6 +394,9 @@ def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schem
         assert _column_type(connection, "stock_monitor_targets", "market") == "monitor_market"
         assert _column_type(connection, "forecast_ssf_candidates", "state") == "forecast_ssf_candidate_state"
         assert _column_type(connection, "monitor_notifications", "state") == "monitor_notification_delivery_state"
+        assert _column_type(connection, "monitor_notifications", "subject") == "text"
+        assert _column_type(connection, "monitor_notifications", "body") == "text"
+        assert _column_type(connection, "monitor_notifications", "claimed_at") == "timestamp with time zone"
         assert _enum_types(connection) == EXPECTED_TYPE_NAMES
         assert _check_exists(connection)
         for index_name in MANAGED_INDEX_NAMES:
@@ -420,8 +423,8 @@ def test_apply_converts_columns_and_rejects_direct_invalid_values(postgres_schem
         )
         _assert_insert_rejected(
             connection,
-            "INSERT INTO monitor_notifications (id, target_id, payload, state, attempt_count, next_attempt_at) "
-            "VALUES ('00000000-0000-0000-0000-000000000001', 1, '{}'::jsonb, 'unknown', 0, now())",
+            "INSERT INTO monitor_notifications (id, target_id, subject, body, state, attempt_count, next_attempt_at) "
+            "VALUES ('00000000-0000-0000-0000-000000000001', 1, 'subject', 'body', 'unknown', 0, now())",
         )
 
 

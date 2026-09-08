@@ -1,10 +1,8 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, Enum, Index, Integer, Text, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import DateTime, Enum, Index, Integer, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.sql import func
 
@@ -33,9 +31,8 @@ class MonitorNotification(Base):
 
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True, comment="通知ID")
     target_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True, comment="监控目标ID")
-    payload: Mapped[dict[str, Any]] = mapped_column(
-        JSON().with_variant(JSONB, "postgresql"), nullable=False, comment="通知负载"
-    )
+    subject: Mapped[str] = mapped_column(Text, nullable=False, comment="通知主题")
+    body: Mapped[str] = mapped_column(Text, nullable=False, comment="通知正文")
     state: Mapped[str] = mapped_column(
         _value_enum(NotificationDeliveryState, "monitor_notification_delivery_state"),
         nullable=False,
@@ -45,8 +42,7 @@ class MonitorNotification(Base):
     )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
