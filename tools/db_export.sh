@@ -148,6 +148,9 @@ DUMP_ARGS=(
   --no-privileges
   --verbose
 )
+DEPENDENCY_DUMP_ARGS=()
+PARENT_DUMP_ARGS=()
+REMAINDER_DUMP_ARGS=()
 
 if [[ $CLEAN -eq 1 && ${#SELECTED_ENUM_TYPES[@]} -eq 0 ]]; then
   DUMP_ARGS+=(--clean --if-exists)
@@ -159,6 +162,15 @@ if [[ -n "$TABLE_NAME" ]]; then
 else
   for t in "${BUSINESS_TABLES[@]}"; do
     DUMP_ARGS+=("--table=${SCHEMA}.${t}")
+  done
+  # pg_dump may emit dependent table definitions before their parents because
+  # foreign keys are restored in the post-data section. Keep the monitor
+  # target definition first so the plain SQL dump is dependency-readable.
+  DEPENDENCY_DUMP_ARGS=("--table=${SCHEMA}.stock_monitor_targets")
+  PARENT_DUMP_ARGS=(--format=plain --no-owner --no-privileges --verbose "--table=${SCHEMA}.stock_monitor_targets")
+  REMAINDER_DUMP_ARGS=(--format=plain --no-owner --no-privileges --verbose)
+  for t in "${BUSINESS_TABLES[@]}"; do
+    [[ "$t" == "stock_monitor_targets" ]] || REMAINDER_DUMP_ARGS+=("--table=${SCHEMA}.${t}")
   done
 fi
 
@@ -226,10 +238,26 @@ run_export_docker() {
 
   if [[ $GZIP -eq 1 ]]; then
     # shellcheck disable=SC2086
-    { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; } | gzip -c >"$OUT_FILE"
+    {
+      cat "$ENUM_DDL_FILE" 2>/dev/null || true
+      if [[ ${#DEPENDENCY_DUMP_ARGS[@]} -gt 0 ]]; then
+        $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${PARENT_DUMP_ARGS[@]}"
+        $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${REMAINDER_DUMP_ARGS[@]}"
+      else
+        $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"
+      fi
+    } | gzip -c >"$OUT_FILE"
   else
     # shellcheck disable=SC2086
-    { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; } >"$OUT_FILE"
+    {
+      cat "$ENUM_DDL_FILE" 2>/dev/null || true
+      if [[ ${#DEPENDENCY_DUMP_ARGS[@]} -gt 0 ]]; then
+        $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${PARENT_DUMP_ARGS[@]}"
+        $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${REMAINDER_DUMP_ARGS[@]}"
+      else
+        $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"
+      fi
+    } >"$OUT_FILE"
   fi
 }
 

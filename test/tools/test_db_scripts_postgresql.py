@@ -212,7 +212,9 @@ def _create_legacy_monitor_notification_tables(connection: Connection) -> None:
         "id uuid primary key, target_id integer NOT NULL, subject text NOT NULL, body text NOT NULL, "
         "state varchar(16) NOT NULL DEFAULT 'pending', attempt_count integer NOT NULL DEFAULT 0, "
         "next_attempt_at timestamptz NOT NULL, claimed_at timestamptz, delivered_at timestamptz, "
-        "last_error text, created_at timestamptz NOT NULL DEFAULT now())",
+        "last_error text, created_at timestamptz NOT NULL DEFAULT now(), "
+        "CONSTRAINT monitor_notifications_target_id_fkey FOREIGN KEY (target_id) "
+        "REFERENCES stock_monitor_targets(id))",
     )
     for statement in statements:
         connection.execute(text(statement))
@@ -304,7 +306,7 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
         assert constraint_exists(connection, schema, table, check_name)
 
 
-def test_selected_monitor_notifications_export_restores_delivery_state_and_pending_row(
+def test_monitor_notifications_export_restores_dependency_order_and_pending_row(
     postgres_schema: tuple[Engine, str], tmp_path: Path
 ) -> None:
     engine, schema = postgres_schema
@@ -338,8 +340,6 @@ def test_selected_monitor_notifications_export_restores_delivery_state_and_pendi
             "--no-gzip",
             "--schema",
             schema,
-            "--table",
-            "monitor_notifications",
             "--out",
             str(dump_file),
         ],
@@ -347,8 +347,10 @@ def test_selected_monitor_notifications_export_restores_delivery_state_and_pendi
 
     assert exported.returncode == 0, exported.stderr
     dump = dump_file.read_text(encoding="utf-8")
+    parent_marker = f"-- Name: stock_monitor_targets; Type: TABLE; Schema: {schema};"
     table_marker = f"-- Name: monitor_notifications; Type: TABLE; Schema: {schema};"
     assert dump.index(f'CREATE TYPE "{schema}"."monitor_notification_delivery_state"') < dump.index(table_marker)
+    assert dump.index(parent_marker) < dump.index(table_marker)
 
     imported = _run_script(
         "db_import.sh",
@@ -358,8 +360,6 @@ def test_selected_monitor_notifications_export_restores_delivery_state_and_pendi
             "--clean",
             "--schema",
             schema,
-            "--table",
-            "monitor_notifications",
             "--in",
             str(dump_file),
         ],
@@ -380,6 +380,7 @@ def test_selected_monitor_notifications_export_restores_delivery_state_and_pendi
             connection.execute(text(f'SELECT state::text FROM "{schema}"."monitor_notifications"')).scalar_one()
             == "pending"
         )
+        assert connection.execute(text(f'SELECT target_id FROM "{schema}"."monitor_notifications"')).scalar_one() == 1
 
 
 def test_clean_selected_table_export_is_rejected_before_mutation(
