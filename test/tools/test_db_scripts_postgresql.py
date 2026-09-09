@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
+from monitor.storage.enum_migration import MONITOR_ENUM_ADAPTER, MONITOR_ENUM_GROUPS
 from storage.enum_governance import migrate_enums
 from storage.enum_migration import STORAGE_ENUM_ADAPTER, STORAGE_ENUM_GROUPS
 
@@ -22,7 +23,7 @@ STORAGE_ENUM_TYPES = {
     "forecast_snapshot_status",
     "ssf_change_signal_status",
 }
-STORAGE_ENUM_LABELS = {group.type_name: group.labels for group in STORAGE_ENUM_GROUPS}
+ENUM_LABELS = {group.type_name: group.labels for group in (*MONITOR_ENUM_GROUPS, *STORAGE_ENUM_GROUPS)}
 
 
 def _engine() -> Engine:
@@ -198,6 +199,28 @@ def _create_legacy_storage_tables(connection: Connection) -> None:
         connection.execute(text(statement))
 
 
+def _create_legacy_monitor_notification_tables(connection: Connection) -> None:
+    statements = (
+        "CREATE TABLE stock_monitor_targets ("
+        "id integer primary key, stock_code varchar(10) NOT NULL, market varchar(5) NOT NULL DEFAULT 'A', "
+        "condition jsonb NOT NULL, frequency varchar(10) NOT NULL DEFAULT 'daily', "
+        "reset_mode varchar(10) NOT NULL DEFAULT 'auto', latest_error_kind varchar(32))",
+        "CREATE TABLE forecast_ssf_candidates ("
+        "stock_code varchar(6) primary key, market varchar(5) NOT NULL DEFAULT 'A', "
+        "report_end_date date NOT NULL, state varchar(32) NOT NULL, state_reason varchar(128) NOT NULL)",
+        "CREATE TABLE monitor_notifications ("
+        "id uuid primary key, target_id integer NOT NULL, subject text NOT NULL, body text NOT NULL, "
+        "state varchar(16) NOT NULL DEFAULT 'pending', attempt_count integer NOT NULL DEFAULT 0, "
+        "next_attempt_at timestamptz NOT NULL, claimed_at timestamptz, delivered_at timestamptz, "
+        "last_error text, created_at timestamptz NOT NULL DEFAULT now(), "
+        "CONSTRAINT monitor_notifications_target_id_fkey FOREIGN KEY (target_id) "
+        "REFERENCES stock_monitor_targets(id))",
+    )
+    for statement in statements:
+        connection.execute(text(statement))
+    migrate_enums(connection, adapters=(MONITOR_ENUM_ADAPTER,))
+
+
 def _assert_foreign_keys_and_selected_table_remain(connection: Connection, schema: str) -> None:
     assert foreign_key_exists(connection, schema, "paper_trades", "paper_trades_order_id_fkey")
     assert foreign_key_exists(
@@ -272,7 +295,7 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
     with engine.connect() as connection:
         for type_name in enum_types:
             assert enum_type_exists(connection, schema, type_name)
-            assert enum_labels(connection, schema, type_name) == STORAGE_ENUM_LABELS[type_name]
+            assert enum_labels(connection, schema, type_name) == ENUM_LABELS[type_name]
         assert table_exists(connection, schema, table)
         for column, type_name in enum_columns:
             assert column_type(connection, schema, table, column) == (schema, type_name)
@@ -281,6 +304,82 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
         restored_row = restored_rows[0]
         assert tuple(restored_row[1:]) == expected_row
         assert constraint_exists(connection, schema, table, check_name)
+
+
+def test_monitor_notifications_export_restores_foreign_key_and_pending_row(
+    postgres_schema: tuple[Engine, str], tmp_path: Path
+) -> None:
+    engine, schema = postgres_schema
+    dump_file = tmp_path / "monitor_notifications.sql"
+
+    with engine.begin() as connection:
+        connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        _create_legacy_monitor_notification_tables(connection)
+        connection.execute(
+            text(
+                "INSERT INTO stock_monitor_targets "
+                "(id, stock_code, market, condition, frequency, reset_mode) VALUES "
+                '(1, \'000001\', \'A\', \'{"type": "price_threshold", "direction": "above", "value": 1}\'::jsonb, '
+                "'daily', 'auto')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO monitor_notifications "
+                "(id, target_id, subject, body, state, attempt_count, next_attempt_at) VALUES "
+                "('00000000-0000-0000-0000-000000000001', 1, 'Subject', 'Body', 'pending', 0, "
+                "TIMESTAMPTZ '2026-09-08 00:00:00+00')"
+            )
+        )
+
+    exported = _run_script(
+        "db_export.sh",
+        [
+            "--service",
+            "test_db",
+            "--no-gzip",
+            "--schema",
+            schema,
+            "--out",
+            str(dump_file),
+        ],
+    )
+
+    assert exported.returncode == 0, exported.stderr
+    dump = dump_file.read_text(encoding="utf-8")
+    table_marker = f"-- Name: monitor_notifications; Type: TABLE; Schema: {schema};"
+    assert dump.index(f'CREATE TYPE "{schema}"."monitor_notification_delivery_state"') < dump.index(table_marker)
+
+    imported = _run_script(
+        "db_import.sh",
+        [
+            "--service",
+            "test_db",
+            "--clean",
+            "--schema",
+            schema,
+            "--in",
+            str(dump_file),
+        ],
+    )
+
+    assert imported.returncode == 0, imported.stderr
+    with engine.connect() as connection:
+        assert enum_type_exists(connection, schema, "monitor_notification_delivery_state")
+        assert (
+            enum_labels(connection, schema, "monitor_notification_delivery_state")
+            == ENUM_LABELS["monitor_notification_delivery_state"]
+        )
+        assert column_type(connection, schema, "monitor_notifications", "state") == (
+            schema,
+            "monitor_notification_delivery_state",
+        )
+        assert (
+            connection.execute(text(f'SELECT state::text FROM "{schema}"."monitor_notifications"')).scalar_one()
+            == "pending"
+        )
+        assert connection.execute(text(f'SELECT target_id FROM "{schema}"."monitor_notifications"')).scalar_one() == 1
+        assert foreign_key_exists(connection, schema, "monitor_notifications", "monitor_notifications_target_id_fkey")
 
 
 def test_clean_selected_table_export_is_rejected_before_mutation(
