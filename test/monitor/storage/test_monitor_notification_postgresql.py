@@ -5,6 +5,7 @@ from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from threading import Event
+from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -39,7 +40,10 @@ def postgres_storage() -> Generator[StorageDb, None, None]:
 
 
 def _target(db: StorageDb) -> StockMonitorTarget:
-    return db.create_monitor_target("600001", "A", {"type": "price_threshold", "direction": "above", "value": 10})
+    return cast(
+        StockMonitorTarget,
+        db.create_monitor_target("600001", "A", {"type": "price_threshold", "direction": "above", "value": 10}),
+    )
 
 
 def _notification(db: StorageDb, target_id: int, when: datetime) -> str:
@@ -49,6 +53,7 @@ def _notification(db: StorageDb, target_id: int, when: datetime) -> str:
 
 
 def _load(db: StorageDb, notification_id: str) -> MonitorNotification:
+    assert db.Session is not None
     session = db.Session()
     try:
         row = session.get(MonitorNotification, UUID(notification_id))
@@ -101,6 +106,7 @@ def test_postgresql_failure_retries_then_becomes_terminal(postgres_storage: Stor
 
     for attempt in range(1, 6):
         claimed = postgres_storage.claim_due_monitor_notifications(now, 1)[0]
+        assert claimed.claimed_at is not None
         state = postgres_storage.record_monitor_notification_failure(
             notification_id, "delivery failed", now, claimed.claimed_at
         )
