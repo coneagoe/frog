@@ -4088,7 +4088,7 @@ class StorageDb:
                 notification.next_attempt_at = occurred_at
             else:
                 notification.state = NotificationDeliveryState.PENDING.value
-                notification.next_attempt_at = occurred_at + timedelta(minutes=2**notification.attempt_count)
+                notification.next_attempt_at = occurred_at + timedelta(minutes=2 ** (notification.attempt_count - 1))
             session.commit()
             return NotificationDeliveryState(notification.state)
         except Exception:

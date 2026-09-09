@@ -306,7 +306,7 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
         assert constraint_exists(connection, schema, table, check_name)
 
 
-def test_monitor_notifications_export_restores_dependency_order_and_pending_row(
+def test_monitor_notifications_export_restores_foreign_key_and_pending_row(
     postgres_schema: tuple[Engine, str], tmp_path: Path
 ) -> None:
     engine, schema = postgres_schema
@@ -347,10 +347,8 @@ def test_monitor_notifications_export_restores_dependency_order_and_pending_row(
 
     assert exported.returncode == 0, exported.stderr
     dump = dump_file.read_text(encoding="utf-8")
-    parent_marker = f"-- Name: stock_monitor_targets; Type: TABLE; Schema: {schema};"
     table_marker = f"-- Name: monitor_notifications; Type: TABLE; Schema: {schema};"
     assert dump.index(f'CREATE TYPE "{schema}"."monitor_notification_delivery_state"') < dump.index(table_marker)
-    assert dump.index(parent_marker) < dump.index(table_marker)
 
     imported = _run_script(
         "db_import.sh",
@@ -381,6 +379,7 @@ def test_monitor_notifications_export_restores_dependency_order_and_pending_row(
             == "pending"
         )
         assert connection.execute(text(f'SELECT target_id FROM "{schema}"."monitor_notifications"')).scalar_one() == 1
+        assert foreign_key_exists(connection, schema, "monitor_notifications", "monitor_notifications_target_id_fkey")
 
 
 def test_clean_selected_table_export_is_rejected_before_mutation(

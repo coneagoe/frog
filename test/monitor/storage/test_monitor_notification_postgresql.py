@@ -108,7 +108,7 @@ def test_postgresql_failure_retries_then_becomes_terminal(postgres_storage: Stor
         assert state == expected
         if attempt < 5:
             notification = _load(postgres_storage, notification_id)
-            expected_delay = timedelta(minutes=2**attempt)
+            expected_delay = timedelta(minutes=2 ** (attempt - 1))
             assert notification.next_attempt_at == now + expected_delay
             now = notification.next_attempt_at
         else:

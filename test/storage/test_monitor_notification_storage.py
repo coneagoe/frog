@@ -147,7 +147,7 @@ def test_delivery_retry_terminal_failure_and_error_sanitization(tmp_path):
     saved = _load(db, notification_id)
     assert (saved.attempt_count, saved.next_attempt_at, saved.last_error) == (
         1,
-        (now + timedelta(minutes=2)).replace(tzinfo=None),
+        (now + timedelta(minutes=1)).replace(tzinfo=None),
         "[redacted] [redacted]",
     )
     assert saved.claimed_at is None

@@ -17,9 +17,8 @@ Issue #98 remediation adds PostgreSQL monitor enum bootstrap before outbox table
 - `test_stale_claim_cannot_settle_a_newer_claim` creates stale claim A, recovers it as claim B, and verifies A cannot settle B's lease.
 - `test_runtime_outbox_bootstrap_creates_monitor_enums_before_tables` runs against the isolated PostgreSQL test service and verifies all monitor enum types and the enum-backed outbox state column exist after runtime bootstrap.
 - Delivery-task tests verify successful, retry, terminal failure, cancellation, and lost-claim accounting paths.
-- PostgreSQL database-script tests verify monitor enum creation and parent-table-before-notification-table dump ordering,
-  including restoration of the notification foreign key dependency.
-- PostgreSQL failure-retry tests assert exact backoff delays of 2, 4, 8, and 16 minutes; attempt 5 remains terminal and
+- PostgreSQL database-script tests verify monitor enum creation and restoration of the notification foreign key dependency.
+- PostgreSQL failure-retry tests assert exact backoff delays of 1, 2, 4, and 8 minutes; attempt 5 remains terminal and
   nonclaimable.
 
 ## Remaining Limits
