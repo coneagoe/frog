@@ -6,12 +6,13 @@ from fastapi.testclient import TestClient
 from monitor.monitor_health_service import MonitorTargetHealthService
 from monitor.monitor_target_service import MonitorTargetService
 from paper_trading.api.app import create_app
-from paper_trading.api.deps import get_session
+from paper_trading.api.deps import get_security_name_provider, get_session
 from paper_trading.api.monitor_target_storage import ManualMonitorTargetStorage
 from paper_trading.api.routers.monitor_targets import get_monitor_target_health_service, get_monitor_target_service
 from paper_trading.auth import AuthSettings, create_session_token, hash_password
 from storage.model.auth import User
 from storage.model.base import Base
+from test.paper_trading.fakes import _FakeSecurityNameProvider
 
 
 class FakeMonitorStorage:
@@ -58,6 +59,19 @@ class FakeMonitorStorage:
 
     def list_monitor_target_health(self):
         return self.targets
+
+    def list_monitor_target_health_page(self, *, page, page_size):
+        total_count = len(self.targets)
+        canonical_page = min(page, (total_count + page_size - 1) // page_size) if total_count else 1
+        start = (canonical_page - 1) * page_size
+        return self.targets[start : start + page_size], total_count
+
+    def list_manual_monitor_targets_page(self, *, page, page_size, **filters):
+        targets = self.list_manual_monitor_targets(**filters)
+        total_count = len(targets)
+        canonical_page = min(page, (total_count + page_size - 1) // page_size) if total_count else 1
+        start = (canonical_page - 1) * page_size
+        return targets[start : start + page_size], total_count
 
     def get_manual_monitor_target(self, target_id):
         return next((target for target in self.targets if target.id == target_id and target.workflow is None), None)
@@ -155,10 +169,10 @@ def test_monitor_target_health_is_authenticated_read_only_all_target_view(monkey
         "daily": 2,
         "intraday": 0,
     }
-    assert payload["targets"][0]["operational_state"] == "disabled"
-    assert payload["targets"][1]["workflow"] == "scheduled"
-    assert "condition" not in payload["targets"][1]
-    assert "note" not in payload["targets"][1]
+    assert payload["items"][0]["operational_state"] == "disabled"
+    assert payload["items"][1]["workflow"] == "scheduled"
+    assert "condition" not in payload["items"][1]
+    assert "note" not in payload["items"][1]
 
     before = list(storage.targets)
     for method in ("post", "patch"):
@@ -181,7 +195,7 @@ def test_monitor_target_health_api_resanitizes_seeded_sensitive_error_detail(mon
     response = client.get("/paper/monitor-targets/health")
 
     assert response.status_code == 200
-    error = response.json()["targets"][1]["latest_error"]
+    error = response.json()["items"][1]["latest_error"]
     assert error["kind"] == "storage"
     assert error["summary"] == "Monitor state persistence failed"
     for sensitive in (
@@ -201,9 +215,9 @@ def test_monitor_target_manual_crud_filters_and_safe_schema(monkeypatch, sqlite_
 
     listed = client.get("/paper/monitor-targets", params={"market": "A", "enabled": True})
     assert listed.status_code == 200
-    assert [item["id"] for item in listed.json()] == [1]
-    assert "workflow" not in listed.json()[0]
-    assert "paused" not in listed.json()[0]
+    assert [item["id"] for item in listed.json()["items"]] == [1]
+    assert "workflow" not in listed.json()["items"][0]
+    assert "paused" not in listed.json()["items"][0]
 
     created = client.post(
         "/paper/monitor-targets",
@@ -231,6 +245,113 @@ def test_monitor_target_manual_crud_filters_and_safe_schema(monkeypatch, sqlite_
     assert client.delete(f"/paper/monitor-targets/{target_id}", headers=csrf_headers).status_code == 204
 
 
+def test_monitor_target_list_and_health_return_enriched_page_envelopes(monkeypatch, sqlite_session):
+    client, _, storage = _client(monkeypatch, sqlite_session)
+    storage.targets[1].market = "HK"
+    storage.targets.extend(
+        [
+            storage._target(3, workflow=None, stock_code="510300", market="ETF"),
+            storage._target(4, workflow=None, stock_code="000002", market="A"),
+        ]
+    )
+    client.app.dependency_overrides[get_security_name_provider] = lambda: _FakeSecurityNameProvider(
+        {
+            ("a_share", "600519"): "Kweichow Moutai",
+            ("hk_connect", "600519"): "Tencent Holdings",
+            ("etf", "510300"): "CSI 300 ETF",
+        }
+    )
+
+    listed = client.get("/paper/monitor-targets?page=2&page_size=1")
+    health = client.get("/paper/monitor-targets/health?page=1&page_size=2")
+    second_health_page = client.get("/paper/monitor-targets/health?page=2&page_size=2")
+
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "items": [
+            {
+                "id": 3,
+                "stock_code": "510300",
+                "stock_name": "CSI 300 ETF",
+                "market": "ETF",
+                "condition": {"type": "price_threshold", "direction": "above", "value": 100},
+                "note": "initial",
+                "frequency": "daily",
+                "reset_mode": "auto",
+                "enabled": True,
+                "last_state": False,
+                "triggered_at": None,
+                "created_at": "2026-01-01T00:00:00Z",
+            }
+        ],
+        "page": 2,
+        "page_size": 1,
+        "total_count": 3,
+        "total_pages": 3,
+    }
+    assert health.status_code == 200
+    assert health.json()["summary"]["total"] == 4
+    assert health.json()["items"][0]["stock_name"] == "Kweichow Moutai"
+    assert health.json()["items"][1]["stock_name"] == "Tencent Holdings"
+    assert health.json()["page"] == 1
+    assert health.json()["page_size"] == 2
+    assert health.json()["total_count"] == 4
+    assert health.json()["total_pages"] == 2
+    assert second_health_page.json()["items"][0]["stock_name"] == "CSI 300 ETF"
+    assert second_health_page.json()["items"][1]["stock_name"] is None
+
+
+def test_monitor_target_list_and_health_validate_paging_queries(monkeypatch, sqlite_session):
+    client, _, _ = _client(monkeypatch, sqlite_session)
+
+    for path in (
+        "/paper/monitor-targets?page=0",
+        "/paper/monitor-targets?page_size=0",
+        "/paper/monitor-targets?page_size=101",
+        "/paper/monitor-targets/health?page=0",
+        "/paper/monitor-targets/health?page_size=0",
+        "/paper/monitor-targets/health?page_size=101",
+    ):
+        assert client.get(path).status_code == 422
+
+
+def test_monitor_target_page_envelopes_normalize_out_of_range_and_remain_valid_when_empty(monkeypatch, sqlite_session):
+    client, _, storage = _client(monkeypatch, sqlite_session)
+
+    for path, expected_page in (
+        ("/paper/monitor-targets?page=99&page_size=1", 1),
+        ("/paper/monitor-targets/health?page=99&page_size=1", 2),
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.json()["page"] == expected_page
+        assert response.json()["total_pages"] == expected_page
+
+    storage.targets.clear()
+    for path in ("/paper/monitor-targets", "/paper/monitor-targets/health"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.json()["items"] == []
+        assert response.json()["page"] == 1
+        assert response.json()["total_count"] == 0
+        assert response.json()["total_pages"] == 0
+
+
+def test_monitor_target_name_lookup_failure_returns_null(monkeypatch, sqlite_session):
+    client, _, _ = _client(monkeypatch, sqlite_session)
+
+    class FailingNameProvider:
+        def resolve_names(self, securities):
+            raise RuntimeError("metadata unavailable")
+
+    client.app.dependency_overrides[get_security_name_provider] = FailingNameProvider
+
+    response = client.get("/paper/monitor-targets")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["stock_name"] is None
+
+
 def test_monitor_target_validation_and_workflow_targets_are_not_found(monkeypatch, sqlite_session):
     client, csrf_headers, storage = _client(monkeypatch, sqlite_session)
 
@@ -251,6 +372,30 @@ def test_monitor_target_validation_and_workflow_targets_are_not_found(monkeypatc
         assert getattr(client, method)(path, **kwargs).status_code == 404
     assert storage.targets[1].note == "initial"
     assert storage.targets[1].enabled is True
+
+
+def test_monitor_target_create_and_update_reject_client_supplied_stock_name(monkeypatch, sqlite_session):
+    client, csrf_headers, storage = _client(monkeypatch, sqlite_session)
+
+    create = client.post(
+        "/paper/monitor-targets",
+        headers=csrf_headers,
+        json={
+            "stock_code": "000001",
+            "stock_name": "Client supplied name",
+            "market": "A",
+            "condition": {"type": "price_threshold", "direction": "below", "value": 10},
+        },
+    )
+    update = client.patch(
+        "/paper/monitor-targets/1",
+        headers=csrf_headers,
+        json={"stock_name": "Client supplied name"},
+    )
+
+    assert create.status_code == 422
+    assert update.status_code == 422
+    assert storage.targets[0].stock_code == "600519"
 
 
 def test_monitor_target_patch_rejects_workflow_condition(monkeypatch, sqlite_session):

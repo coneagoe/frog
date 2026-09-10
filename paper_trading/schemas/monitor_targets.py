@@ -19,6 +19,17 @@ class MonitorTargetResponse(BaseModel):
     last_state: bool
     triggered_at: datetime | None
     created_at: datetime | None
+    stock_name: str | None = None
+
+
+class MonitorTargetListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[MonitorTargetResponse]
+    page: int
+    page_size: int
+    total_count: int
+    total_pages: int
 
 
 class MonitorTargetHealthErrorResponse(BaseModel):
@@ -57,13 +68,18 @@ class MonitorTargetHealthItemResponse(BaseModel):
     last_checked_at: datetime | None
     triggered_at: datetime | None
     latest_error: MonitorTargetHealthErrorResponse | None
+    stock_name: str | None = None
 
 
 class MonitorTargetHealthResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: MonitorTargetHealthSummaryResponse
-    targets: list[MonitorTargetHealthItemResponse]
+    items: list[MonitorTargetHealthItemResponse]
+    page: int
+    page_size: int
+    total_count: int
+    total_pages: int
 
 
 class CreateMonitorTargetRequest(BaseModel):

@@ -214,6 +214,35 @@ def _render_target_line(item: dict[str, Any]) -> str:
     )
 
 
+def _list_all_targets(
+    service: MonitorTargetService,
+    *,
+    frequency: str | None,
+    enabled: bool | None,
+) -> dict[str, Any]:
+    result = service.list(frequency=frequency, enabled=enabled)
+    data = result.get("data")
+    if not result.get("success") or not isinstance(data, dict):
+        return result
+
+    items = data.get("items")
+    page_size = data.get("page_size")
+    total_pages = data.get("total_pages")
+    if not isinstance(items, list) or type(page_size) is not int or type(total_pages) is not int:
+        return result
+
+    all_items = list(items)
+    for page in range(2, total_pages + 1):
+        result = service.list(frequency=frequency, enabled=enabled, page=page, page_size=page_size)
+        page_data = result.get("data")
+        if not result.get("success") or not isinstance(page_data, dict) or not isinstance(page_data.get("items"), list):
+            return result
+        all_items.extend(page_data["items"])
+
+    result["data"] = data | {"items": all_items}
+    return result
+
+
 def _emit_target_text(result: dict[str, Any], target_command: str | None) -> bool:
     if not result.get("success"):
         return False
@@ -222,8 +251,8 @@ def _emit_target_text(result: dict[str, Any], target_command: str | None) -> boo
     if target_command == "get" and isinstance(data, dict):
         print(_render_target_line(data))
         return True
-    if target_command == "list" and isinstance(data, list):
-        for item in data:
+    if target_command == "list" and isinstance(data, dict) and isinstance(data.get("items"), list):
+        for item in data["items"]:
             if isinstance(item, dict):
                 print(_render_target_line(item))
         return True
@@ -308,7 +337,7 @@ def main(
             elif args.target_command == "remove":
                 result = _svc.remove(args.target_id)
             elif args.target_command == "list":
-                result = _svc.list(frequency=args.frequency, enabled=args.enabled)
+                result = _list_all_targets(_svc, frequency=args.frequency, enabled=args.enabled)
             elif args.target_command == "get":
                 result = _svc.get(args.target_id)
             else:

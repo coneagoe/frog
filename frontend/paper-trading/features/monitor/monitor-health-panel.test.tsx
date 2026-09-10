@@ -1,48 +1,26 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import type { MonitorTargetHealth } from "@/lib/types";
+import { describe, expect, it, vi } from "vitest";
+import type { MonitorTargetHealthPage } from "@/lib/types";
 import { MonitorHealthPanel } from "./monitor-health-panel";
 
-const health: MonitorTargetHealth = {
-  summary: { total: 2, running: 1, paused: 1, disabled: 0, triggered: 1, daily: 1, intraday: 1 },
-  targets: [
-    { id: 1, stock_code: "000001", market: "A", frequency: "daily", workflow: null, enabled: true, paused: false, operational_state: "running", last_state: true, last_checked_at: "2026-09-07T09:30:00Z", triggered_at: "2026-09-07T09:30:00Z", latest_error: null },
-    { id: 2, stock_code: "00700", market: "HK", frequency: "intraday", workflow: "morning-watch", enabled: true, paused: true, operational_state: "paused", last_state: false, last_checked_at: null, triggered_at: null, latest_error: { kind: "market_data", summary: "Quote unavailable", detail: "Provider timeout", occurred_at: "2026-09-07T09:31:00Z" } }
-  ]
-};
+const health: MonitorTargetHealthPage = { summary: { total: 75, running: 1, paused: 1, disabled: 0, triggered: 1, daily: 1, intraday: 1 }, items: [{ id: 1, stock_code: "000001", stock_name: "Ping An Bank", market: "A", frequency: "daily", workflow: null, enabled: true, paused: false, operational_state: "running", last_state: true, last_checked_at: "2026-09-07T09:30:00Z", triggered_at: "2026-09-07T09:30:00Z", latest_error: null }, { id: 2, stock_code: "00700", stock_name: null, market: "HK", frequency: "intraday", workflow: "morning-watch", enabled: true, paused: true, operational_state: "paused", last_state: false, last_checked_at: null, triggered_at: null, latest_error: null }], page: 1, page_size: 50, total_count: 75, total_pages: 2 };
 
 describe("MonitorHealthPanel", () => {
-  it("renders the operational overview and read-only target health table", () => {
-    const { container } = render(<MonitorHealthPanel error={null} health={health} loading={false} />);
+  it("renders names, fallback and only read-only health controls", () => {
+    render(<MonitorHealthPanel error={null} health={health} loading={false} onNextPage={vi.fn()} onPreviousPage={vi.fn()} />);
 
-    expect(screen.getByRole("heading", { name: "Operational health" })).toBeInTheDocument();
-    for (const counter of ["Total", "Running", "Paused", "Disabled", "Triggered", "Daily", "Intraday"]) {
-      expect(screen.getAllByText(counter).length).toBeGreaterThan(0);
-    }
-    expect(screen.getByText("Manual")).toBeInTheDocument();
-    expect(screen.getByText("morning-watch")).toBeInTheDocument();
-    expect(screen.getAllByText("Running")).toHaveLength(2);
-    expect(screen.getAllByText("Paused")).toHaveLength(2);
-    expect(screen.getAllByText("Triggered")).toHaveLength(2);
-    expect(screen.getByText("Not triggered")).toBeInTheDocument();
-    expect(screen.getByText("Quote unavailable — Provider timeout")).toBeInTheDocument();
-    expect(screen.getAllByText("—")).toHaveLength(3);
-    expect(container.querySelector('time[datetime="2026-09-07T09:30:00Z"]')).toBeInTheDocument();
-    expect(container.querySelectorAll("time")).toHaveLength(2);
-    expect(container.querySelectorAll("button, a")).toHaveLength(0);
+    expect(screen.getByText("Ping An Bank")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.getByText("Page 1 of 2 · 75 items")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Edit|Delete|Enable|Disable/ })).not.toBeInTheDocument();
   });
 
-  it("announces health errors without hiding the last successful health data", () => {
-    render(<MonitorHealthPanel error="Health service unavailable" health={health} loading={false} />);
+  it("disables its own pagination while loading and omits it for one page", () => {
+    const { rerender } = render(<MonitorHealthPanel error={null} health={health} loading onNextPage={vi.fn()} onPreviousPage={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Health service unavailable");
-    expect(screen.getByText("000001")).toBeInTheDocument();
-  });
-
-  it("does not present an initial health failure as unavailable data", () => {
-    render(<MonitorHealthPanel error="Health service unavailable" health={null} loading={false} />);
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Health service unavailable");
-    expect(screen.queryByText("Health data is not available yet.")).not.toBeInTheDocument();
+    rerender(<MonitorHealthPanel error={null} health={{ ...health, total_pages: 1 }} loading={false} onNextPage={vi.fn()} onPreviousPage={vi.fn()} />);
+    expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
   });
 });

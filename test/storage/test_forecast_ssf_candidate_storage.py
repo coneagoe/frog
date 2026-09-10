@@ -212,6 +212,24 @@ def test_monitor_health_columns_and_writes_preserve_target_lifecycle_fields(tmp_
     ) == (failed_at.replace(tzinfo=None), "storage", "before", failed_at.replace(tzinfo=None))
 
 
+def test_monitor_target_page_queries_filter_before_count_order_by_id_and_include_health_workflows(tmp_path):
+    db = _sqlite_storage(tmp_path)
+    first_manual = db.create_manual_monitor_target("600001", "A", _typed_condition(), note="first")
+    db.upsert_workflow_monitor_target(
+        "600002", "A", "daily", "forecast_ssf", _typed_condition(workflow="forecast_ssf"), "workflow", True, False
+    )
+    last_manual = db.create_manual_monitor_target("600003", "A", _typed_condition(), note="last")
+
+    manual_rows, manual_count = db.list_manual_monitor_targets_page(market="A", page=99, page_size=1)
+    health_rows, health_count = db.list_monitor_target_health_page(page=2, page_size=1)
+    empty_rows, empty_count = db.list_manual_monitor_targets_page(market="HK", page=3, page_size=1)
+
+    assert (manual_count, [target.id for target in manual_rows]) == (2, [last_manual.id])
+    assert (health_count, [target.id for target in health_rows]) == (3, [2])
+    assert (empty_rows, empty_count) == ([], 0)
+    assert first_manual.id == 1
+
+
 def _typed_condition(**extra: Any) -> dict[str, Any]:
     return {"type": "price_threshold", "direction": "above", "value": 10} | extra
 

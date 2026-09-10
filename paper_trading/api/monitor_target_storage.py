@@ -31,6 +31,28 @@ class ManualMonitorTargetStorage:
             ),
         )
 
+    def list_monitor_targets_page(
+        self,
+        *,
+        frequency: str | None = None,
+        enabled: bool | None = None,
+        market: str | None = None,
+        condition_type: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Any], int]:
+        return cast(
+            tuple[list[Any], int],
+            self._storage.list_manual_monitor_targets_page(
+                frequency=frequency,
+                enabled=enabled,
+                market=market,
+                condition_type=condition_type,
+                page=page,
+                page_size=page_size,
+            ),
+        )
+
     def get_monitor_target(self, target_id: int) -> Any | None:
         return self._storage.get_manual_monitor_target(target_id)
 

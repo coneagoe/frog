@@ -1,19 +1,22 @@
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from monitor.domain_enums import MonitorConditionType, MonitorFrequency, MonitorMarket
 from monitor.monitor_health_service import MonitorTargetHealthService
 from monitor.monitor_target_service import MonitorTargetService
-from paper_trading.api.deps import require_browser_user, require_csrf
+from paper_trading.api.deps import get_security_name_provider, require_browser_user, require_csrf
 from paper_trading.api.monitor_target_storage import ManualMonitorTargetStorage
 from paper_trading.schemas.monitor_targets import (
     CreateMonitorTargetRequest,
+    MonitorTargetHealthItemResponse,
     MonitorTargetHealthResponse,
+    MonitorTargetListResponse,
     MonitorTargetResponse,
     SetMonitorTargetEnabledRequest,
     UpdateMonitorTargetRequest,
 )
+from paper_trading.storage.security_metadata import SecurityNameProvider
 from storage import get_storage
 
 router = APIRouter(
@@ -50,22 +53,58 @@ def _raise_for_result(result: dict) -> None:
     raise HTTPException(status_code=status_code, detail=result["message"])
 
 
-@router.get("", response_model=list[MonitorTargetResponse])
+def _enrichment_market(market: MonitorMarket) -> str:
+    return {MonitorMarket.A: "a_share", MonitorMarket.HK: "hk_connect", MonitorMarket.ETF: "etf"}[market]
+
+
+def _enrich_items(items: list[dict[str, object]], response_type: Any, provider: SecurityNameProvider) -> list[Any]:
+    responses = [response_type.model_validate(item) for item in items]
+    try:
+        names = provider.resolve_names(
+            {(_enrichment_market(response.market), response.stock_code) for response in responses}
+        )
+    except Exception:
+        names = {}
+    return [
+        response.model_copy(
+            update={
+                "stock_name": name
+                if isinstance(name := names.get((_enrichment_market(response.market), response.stock_code)), str)
+                and name.strip()
+                else None
+            }
+        )
+        for response in responses
+    ]
+
+
+@router.get("", response_model=MonitorTargetListResponse)
 def list_monitor_targets(
     service: ServiceDep,
     frequency: MonitorFrequency | None = None,
     enabled: bool | None = None,
     market: MonitorMarket | None = None,
     condition_type: MonitorConditionType | None = Query(default=None),
-) -> list[MonitorTargetResponse]:
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    provider: SecurityNameProvider = Depends(get_security_name_provider),
+) -> MonitorTargetListResponse:
     result = service.list_targets(
         frequency=frequency,
         enabled=enabled,
         market=market,
         condition_type=condition_type,
+        page=page,
+        page_size=page_size,
     )
     _raise_for_result(result)
-    return [MonitorTargetResponse.model_validate(target) for target in result["data"]]
+    data = cast(dict[str, object], result["data"])
+    response = MonitorTargetListResponse.model_validate(
+        data | {"items": _enrich_items(cast(list[dict[str, object]], data["items"]), MonitorTargetResponse, provider)}
+    )
+    if not isinstance(response, MonitorTargetListResponse):
+        raise TypeError("invalid monitor target list response")
+    return response
 
 
 @router.post("", response_model=MonitorTargetResponse)
@@ -78,8 +117,21 @@ def create_monitor_target(
 
 
 @router.get("/health", response_model=MonitorTargetHealthResponse)
-def get_monitor_targets_health(service: HealthServiceDep) -> MonitorTargetHealthResponse:
-    response = MonitorTargetHealthResponse.model_validate(service.get_health())
+def get_monitor_targets_health(
+    service: HealthServiceDep,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    provider: SecurityNameProvider = Depends(get_security_name_provider),
+) -> MonitorTargetHealthResponse:
+    result = service.get_health(page=page, page_size=page_size)
+    response = MonitorTargetHealthResponse.model_validate(
+        {
+            **result,
+            "items": _enrich_items(
+                cast(list[dict[str, object]], result["items"]), MonitorTargetHealthItemResponse, provider
+            ),
+        }
+    )
     if not isinstance(response, MonitorTargetHealthResponse):
         raise TypeError("invalid monitor target health response")
     return response

@@ -450,6 +450,7 @@ export type MonitorResetMode = "auto" | "manual";
 export type MonitorTarget = {
   id: number;
   stock_code: string;
+  stock_name: string | null;
   market: MonitorMarket;
   condition: MonitorCondition;
   note: string | null;
@@ -466,6 +467,16 @@ export type ListMonitorTargetsParams = {
   enabled?: boolean;
   market?: MonitorMarket;
   condition_type?: MonitorCondition["type"];
+  page?: number;
+  page_size?: number;
+};
+
+export type MonitorTargetPage = {
+  items: MonitorTarget[];
+  page: number;
+  page_size: number;
+  total_count: number;
+  total_pages: number;
 };
 
 export type CreateMonitorTargetInput = {
@@ -484,5 +495,6 @@ export type MonitorEvaluationErrorKind = "market_data" | "condition" | "workflow
 export type MonitorOperationalState = "running" | "paused" | "disabled";
 export type MonitorTargetHealthError = { kind: MonitorEvaluationErrorKind; summary: string; detail: string | null; occurred_at: string };
 export type MonitorTargetHealthSummary = { total: number; running: number; paused: number; disabled: number; triggered: number; daily: number; intraday: number };
-export type MonitorTargetHealthItem = { id: number; stock_code: string; market: MonitorMarket; frequency: MonitorFrequency; workflow: string | null; enabled: boolean; paused: boolean; operational_state: MonitorOperationalState; last_state: boolean; last_checked_at: string | null; triggered_at: string | null; latest_error: MonitorTargetHealthError | null };
-export type MonitorTargetHealth = { summary: MonitorTargetHealthSummary; targets: MonitorTargetHealthItem[] };
+export type MonitorTargetHealthItem = { id: number; stock_code: string; stock_name: string | null; market: MonitorMarket; frequency: MonitorFrequency; workflow: string | null; enabled: boolean; paused: boolean; operational_state: MonitorOperationalState; last_state: boolean; last_checked_at: string | null; triggered_at: string | null; latest_error: MonitorTargetHealthError | null };
+export type ListMonitorTargetHealthParams = Pick<ListMonitorTargetsParams, "page" | "page_size">;
+export type MonitorTargetHealthPage = { summary: MonitorTargetHealthSummary; items: MonitorTargetHealthItem[]; page: number; page_size: number; total_count: number; total_pages: number };

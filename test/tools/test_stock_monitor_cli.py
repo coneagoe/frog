@@ -218,15 +218,21 @@ def test_target_list_text_output_uses_note_label(capsys):
         "success": True,
         "code": "OK",
         "message": "targets listed",
-        "data": [
-            {
-                "id": 1,
-                "stock_code": "600519",
-                "stock_name": "贵州茅台",
-                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
-                "note": "抄底提醒",
-            }
-        ],
+        "data": {
+            "items": [
+                {
+                    "id": 1,
+                    "stock_code": "600519",
+                    "stock_name": "贵州茅台",
+                    "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                    "note": "抄底提醒",
+                }
+            ],
+            "page": 1,
+            "page_size": 50,
+            "total_count": 1,
+            "total_pages": 1,
+        },
     }
 
     exit_code = main(["target", "list"], service=service)
@@ -265,14 +271,20 @@ def test_target_list_text_resolves_missing_stock_name(capsys):
         "success": True,
         "code": "OK",
         "message": "targets listed",
-        "data": [
-            {
-                "id": 1,
-                "stock_code": "600519",
-                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
-                "note": "抄底提醒",
-            }
-        ],
+        "data": {
+            "items": [
+                {
+                    "id": 1,
+                    "stock_code": "600519",
+                    "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                    "note": "抄底提醒",
+                }
+            ],
+            "page": 1,
+            "page_size": 50,
+            "total_count": 1,
+            "total_pages": 1,
+        },
     }
 
     with patch("tools.stock_monitor_cli.resolve_stock_name", return_value="贵州茅台") as mock_resolve:
@@ -291,14 +303,20 @@ def test_target_list_text_graceful_fallback_on_resolver_failure(capsys):
         "success": True,
         "code": "OK",
         "message": "targets listed",
-        "data": [
-            {
-                "id": 1,
-                "stock_code": "600519",
-                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
-                "note": "抄底提醒",
-            }
-        ],
+        "data": {
+            "items": [
+                {
+                    "id": 1,
+                    "stock_code": "600519",
+                    "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                    "note": "抄底提醒",
+                }
+            ],
+            "page": 1,
+            "page_size": 50,
+            "total_count": 1,
+            "total_pages": 1,
+        },
     }
 
     with patch("tools.stock_monitor_cli.resolve_stock_name", return_value=None):
@@ -315,15 +333,21 @@ def test_target_list_json_output_is_unchanged(capsys):
         "success": True,
         "code": "OK",
         "message": "targets listed",
-        "data": [
-            {
-                "id": 1,
-                "stock_code": "600519",
-                "stock_name": "贵州茅台",
-                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
-                "note": "抄底提醒",
-            }
-        ],
+        "data": {
+            "items": [
+                {
+                    "id": 1,
+                    "stock_code": "600519",
+                    "stock_name": "贵州茅台",
+                    "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                    "note": "抄底提醒",
+                }
+            ],
+            "page": 1,
+            "page_size": 50,
+            "total_count": 1,
+            "total_pages": 1,
+        },
     }
 
     exit_code = main(["--json", "target", "list"], service=service)
@@ -331,6 +355,50 @@ def test_target_list_json_output_is_unchanged(capsys):
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload == service.list.return_value
+
+
+def test_target_list_fetches_every_page_for_text_and_json_output(capsys):
+    first_page_items = [
+        {
+            "id": target_id,
+            "stock_code": f"{target_id:06d}",
+            "stock_name": f"Target {target_id}",
+            "condition": {"type": "price_threshold", "direction": "above", "value": target_id},
+            "note": None,
+        }
+        for target_id in range(1, 51)
+    ]
+    second_page_items = [
+        {
+            "id": 51,
+            "stock_code": "000051",
+            "stock_name": "Target 51",
+            "condition": {"type": "price_threshold", "direction": "above", "value": 51},
+            "note": None,
+        }
+    ]
+    service = MagicMock()
+    service.list.side_effect = [
+        {
+            "success": True,
+            "code": "OK",
+            "message": "targets listed",
+            "data": {"items": first_page_items, "page": 1, "page_size": 50, "total_count": 51, "total_pages": 2},
+        },
+        {
+            "success": True,
+            "code": "OK",
+            "message": "targets listed",
+            "data": {"items": second_page_items, "page": 2, "page_size": 50, "total_count": 51, "total_pages": 2},
+        },
+    ]
+
+    assert main(["--json", "target", "list"], service=service) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert [item["id"] for item in payload["data"]["items"]] == list(range(1, 52))
+    assert service.list.call_args_list[0].kwargs == {"frequency": None, "enabled": None}
+    assert service.list.call_args_list[1].kwargs == {"frequency": None, "enabled": None, "page": 2, "page_size": 50}
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from math import ceil
 from typing import Any, Optional
 
 from monitor.condition_validation import validate_condition
@@ -212,8 +213,11 @@ class MonitorTargetService:
         enabled: Optional[bool] = None,
         market: Optional[str] = None,
         condition_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
     ) -> dict[str, Any]:
         try:
+            self._normalize_page(page, page_size)
             if frequency is not None:
                 self._validate_frequency(frequency)
             if enabled is not None:
@@ -222,16 +226,22 @@ class MonitorTargetService:
                 self._validate_market(market)
             if condition_type is not None:
                 self._validate_condition_type(condition_type)
-            if market is None and condition_type is None:
-                targets = self.storage.list_monitor_targets(frequency=frequency, enabled=enabled)
-            else:
-                targets = self.storage.list_monitor_targets(
-                    frequency=frequency,
-                    enabled=enabled,
-                    market=market,
-                    condition_type=condition_type,
-                )
-            data = [self._serialize_target(target) for target in targets]
+            targets, total_count = self.storage.list_monitor_targets_page(
+                frequency=frequency,
+                enabled=enabled,
+                market=market,
+                condition_type=condition_type,
+                page=page,
+                page_size=page_size,
+            )
+            canonical_page, total_pages = self._normalize_page(page, page_size, total_count)
+            data = {
+                "items": [self._serialize_target(target) for target in targets],
+                "page": canonical_page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+            }
             return self._result(True, "OK", "targets listed", data)
         except TargetValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
@@ -242,12 +252,16 @@ class MonitorTargetService:
         enabled: Optional[bool] = None,
         market: Optional[str] = None,
         condition_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
     ) -> dict[str, Any]:
         return self.list_targets(
             frequency=frequency,
             enabled=enabled,
             market=market,
             condition_type=condition_type,
+            page=page,
+            page_size=page_size,
         )
 
     def update(self, target_id: int, **updates: Any) -> dict[str, Any]:
@@ -334,6 +348,17 @@ class MonitorTargetService:
     def _validate_condition_type(self, condition_type: Any) -> None:
         if not isinstance(condition_type, str) or condition_type not in MonitorConditionType:
             raise TargetValidationError(f"condition_type 必须是 {sorted(MonitorConditionType)} 之一")
+
+    @staticmethod
+    def _normalize_page(page: Any, page_size: Any, total_count: int | None = None) -> tuple[int, int]:
+        if type(page) is not int or page <= 0:
+            raise TargetValidationError("page 必须是正整数")
+        if type(page_size) is not int or page_size <= 0:
+            raise TargetValidationError("page_size 必须是正整数")
+        if total_count is None:
+            return page, 0
+        total_pages = ceil(total_count / page_size)
+        return (min(page, total_pages) if total_pages else 1), total_pages
 
     @staticmethod
     def _validate_condition_scope(condition: dict[str, Any], market: str, frequency: str) -> None:

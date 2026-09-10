@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from functools import wraps
+from math import ceil
 from typing import Any, Callable, Dict, List, Literal, Optional, Set, cast
 from uuid import UUID, uuid4
 
@@ -3101,6 +3102,21 @@ class StorageDb:
         finally:
             session.close()
 
+    def list_monitor_target_health_page(self, *, page: int = 1, page_size: int = 50) -> tuple[list[Any], int]:
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            query = session.query(StockMonitorTarget).order_by(StockMonitorTarget.id.asc())
+            total_count = query.count()
+            canonical_page = min(page, ceil(total_count / page_size)) if total_count else 1
+            rows = query.offset((canonical_page - 1) * page_size).limit(page_size).all()
+            return cast(tuple[list[Any], int], (rows, total_count))
+        finally:
+            session.close()
+
     def record_monitor_target_evaluation(self, target_id: int, checked_at: datetime) -> bool:
         self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget
@@ -3155,23 +3171,81 @@ class StorageDb:
     ) -> list[Any]:
         """查询未归属工作流的监控目标。"""
         self.ensure_monitor_targets_table()
-        from .model.stock_monitor_target import StockMonitorTarget
 
         assert self.Session is not None
         session = self.Session()
         try:
-            query = session.query(StockMonitorTarget).filter(StockMonitorTarget.workflow.is_(None))
-            if frequency is not None:
-                query = query.filter_by(frequency=frequency)
-            if enabled is not None:
-                query = query.filter_by(enabled=enabled)
-            if market is not None:
-                query = query.filter_by(market=market)
-            if condition_type is not None:
-                query = query.filter(StockMonitorTarget.condition["type"].as_string() == condition_type)
+            query = self._manual_monitor_targets_query(
+                session,
+                frequency=frequency,
+                enabled=enabled,
+                market=market,
+                condition_type=condition_type,
+            )
+            from .model.stock_monitor_target import StockMonitorTarget
+
             return cast(list[Any], query.order_by(StockMonitorTarget.id.asc()).all())
         finally:
             session.close()
+
+    def list_manual_monitor_targets_page(
+        self,
+        *,
+        frequency: str | None = None,
+        enabled: bool | None = None,
+        market: str | None = None,
+        condition_type: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Any], int]:
+        """查询未归属工作流的监控目标分页。"""
+        self.ensure_monitor_targets_table()
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            query = self._manual_monitor_targets_query(
+                session,
+                frequency=frequency,
+                enabled=enabled,
+                market=market,
+                condition_type=condition_type,
+            )
+            total_count = query.count()
+            canonical_page = min(page, ceil(total_count / page_size)) if total_count else 1
+            from .model.stock_monitor_target import StockMonitorTarget
+
+            rows = (
+                query.order_by(StockMonitorTarget.id.asc())
+                .offset((canonical_page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return cast(tuple[list[Any], int], (rows, total_count))
+        finally:
+            session.close()
+
+    def _manual_monitor_targets_query(
+        self,
+        session: Any,
+        *,
+        frequency: str | None = None,
+        enabled: bool | None = None,
+        market: str | None = None,
+        condition_type: str | None = None,
+    ) -> Any:
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        query = session.query(StockMonitorTarget).filter(StockMonitorTarget.workflow.is_(None))
+        if frequency is not None:
+            query = query.filter_by(frequency=frequency)
+        if enabled is not None:
+            query = query.filter_by(enabled=enabled)
+        if market is not None:
+            query = query.filter_by(market=market)
+        if condition_type is not None:
+            query = query.filter(StockMonitorTarget.condition["type"].as_string() == condition_type)
+        return query
 
     def get_manual_monitor_target(self, target_id: int) -> Any | None:
         """按 ID 查询未归属工作流的监控目标。"""

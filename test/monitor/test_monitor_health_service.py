@@ -33,6 +33,10 @@ class FakeStorage:
     def list_monitor_target_health(self) -> list[SimpleNamespace]:
         return self.targets
 
+    def list_monitor_target_health_page(self, *, page: int, page_size: int) -> tuple[list[SimpleNamespace], int]:
+        start = (page - 1) * page_size
+        return self.targets[start : start + page_size], len(self.targets)
+
 
 def test_get_health_derives_states_summary_and_safe_target_fields():
     service = MonitorTargetHealthService(
@@ -47,7 +51,7 @@ def test_get_health_derives_states_summary_and_safe_target_fields():
 
     health = service.get_health()
 
-    assert [target["operational_state"] for target in health["targets"]] == [
+    assert [target["operational_state"] for target in health["items"]] == [
         MonitorOperationalState.DISABLED,
         MonitorOperationalState.PAUSED,
         MonitorOperationalState.RUNNING,
@@ -61,8 +65,13 @@ def test_get_health_derives_states_summary_and_safe_target_fields():
         "daily": 2,
         "intraday": 1,
     }
-    assert health["targets"][0]["workflow"] == "scheduled"
-    assert {"condition", "note", "evidence"}.isdisjoint(health["targets"][0])
+    assert health["items"][0]["workflow"] == "scheduled"
+    assert {"condition", "note", "evidence"}.isdisjoint(health["items"][0])
+    assert health["page"] == 1
+    assert health["page_size"] == 50
+    assert health["total_count"] == 3
+    assert health["total_pages"] == 1
+    assert "targets" not in health
 
 
 def test_get_health_serializes_valid_and_corrupt_latest_errors():
@@ -87,7 +96,7 @@ def test_get_health_serializes_valid_and_corrupt_latest_errors():
         )
     )
 
-    targets = service.get_health()["targets"]
+    targets = service.get_health()["items"]
 
     assert targets[0]["latest_error"] is None
     assert targets[1]["latest_error"] == {
@@ -119,8 +128,42 @@ def test_get_health_resanitizes_legacy_sensitive_valid_error_detail():
         )
     )
 
-    error = service.get_health()["targets"][0]["latest_error"]
+    error = service.get_health()["items"][0]["latest_error"]
     assert error["kind"] == MonitorEvaluationErrorKind.STORAGE
     assert error["summary"] == MONITOR_ERROR_SUMMARIES[MonitorEvaluationErrorKind.STORAGE]
     for sensitive in ("ValueError:", "leaked", "example.com", "fragment", "/srv/frog/a.py"):
         assert sensitive not in (error["detail"] or "")
+
+
+def test_health_summary_is_not_limited_to_the_current_page():
+    service = MonitorTargetHealthService(storage=FakeStorage([_target(1), _target(2, enabled=False, last_state=True)]))
+
+    health = service.get_health(page=2, page_size=1)
+
+    assert health["summary"] == {
+        "total": 2,
+        "running": 1,
+        "paused": 0,
+        "disabled": 1,
+        "triggered": 1,
+        "daily": 2,
+        "intraday": 0,
+    }
+    assert [target["id"] for target in health["items"]] == [2]
+    assert health["page"] == 2
+    assert health["page_size"] == 1
+    assert health["total_count"] == 2
+    assert health["total_pages"] == 2
+
+
+def test_health_empty_results_return_first_page():
+    health = MonitorTargetHealthService(storage=FakeStorage([])).get_health(page=4, page_size=5)
+
+    assert health == {
+        "summary": {"total": 0, "running": 0, "paused": 0, "disabled": 0, "triggered": 0, "daily": 0, "intraday": 0},
+        "items": [],
+        "page": 1,
+        "page_size": 5,
+        "total_count": 0,
+        "total_pages": 0,
+    }

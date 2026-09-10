@@ -2,9 +2,9 @@
 
 ## 共享监控目标控制台
 
-认证用户可通过 Paper Trading 控制台的 `/monitor` 页面管理手工创建的共享监控目标（`workflow` 为 `None`）：可按市场、频率、启用状态和条件类型筛选，并可创建、编辑、启用或禁用，以及永久删除目标。
+认证用户可通过 Paper Trading 控制台的 `/monitor` 页面管理手工创建的共享监控目标（`workflow` 为 `None`）：可按市场、频率、启用状态和条件类型筛选，并可创建、编辑、启用或禁用，以及永久删除目标。页面默认只读；进入“管理模式”后才显示手工目标的操作列和新建入口，退出管理模式会隐藏这些控件。手工目标列表和健康视图均采用独立的后端分页。
 
-该控制台严格隔离工作流管理的目标，不显示或修改工作流目标。控制台不提供暂停或恢复操作；工作流专用的 pause/resume 行为和 CLI 命令保持不变。编辑目标时使用右侧滑出面板，创建和编辑均提供逐字段校验。页面持续显示告警专用提示，明确说明不会执行任何交易。
+该控制台严格隔离工作流管理的目标，不显示或修改工作流目标。健康视图始终只读，显示手工和工作流目标，并独立分页；健康汇总基于全部目标而不是当前页。控制台不提供暂停或恢复操作；工作流专用的 pause/resume 行为和 CLI 命令保持不变。编辑目标时使用右侧滑出面板，创建和编辑均提供逐字段校验。页面持续显示告警专用提示，明确说明不会执行任何交易。目标名称由现有证券元数据按市场和代码解析，缺失时显示为空值占位符。
 
 ### 运行健康视图
 
@@ -29,7 +29,7 @@
 - `stock-monitor target add --stock-code ... --market ... --condition ...`
 - `stock-monitor target update --target-id ... [--stock-code ...] [--market ...] [--condition ...] [--note ...] [--frequency ...] [--reset-mode ...] [--enabled|--disabled] [--last-state|--last-state-false]`
 - `stock-monitor target remove --target-id ...`
-- `stock-monitor target list [--frequency daily|intraday] [--enabled|--disabled]`
+- `stock-monitor target list [--frequency daily|intraday] [--enabled|--disabled]`（默认文本和 JSON 输出会遍历所有分页）
 - `stock-monitor target get --target-id ...`
 - `stock-monitor target pause --target-id ...`
 - `stock-monitor target resume --target-id ...`

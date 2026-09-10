@@ -116,31 +116,109 @@ def test_get_target_serializes_missing_paused_attribute_as_false():
     assert type(result["data"]["paused"]) is bool
 
 
-def test_list_targets_returns_serialized_targets():
+def test_list_targets_returns_serialized_page_envelope():
     storage = MagicMock()
-    storage.list_monitor_targets.return_value = [
-        _make_target(),
-        _make_target(id=2, stock_code="000001"),
-    ]
+    storage.list_monitor_targets_page.return_value = ([_make_target(), _make_target(id=2, stock_code="000001")], 2)
     service = MonitorTargetService(storage=storage)
 
     result = service.list_targets(frequency="daily", enabled=True)
 
     assert result["success"] is True
     assert result["code"] == "OK"
-    assert [item["id"] for item in result["data"]] == [1, 2]
-    storage.list_monitor_targets.assert_called_once_with(frequency="daily", enabled=True)
+    assert result["data"] == {
+        "items": [
+            {
+                "id": 1,
+                "stock_code": "600519",
+                "market": "A",
+                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                "note": "茅台提醒",
+                "frequency": "daily",
+                "reset_mode": "auto",
+                "enabled": True,
+                "paused": False,
+                "last_state": False,
+                "triggered_at": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "id": 2,
+                "stock_code": "000001",
+                "market": "A",
+                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                "note": "茅台提醒",
+                "frequency": "daily",
+                "reset_mode": "auto",
+                "enabled": True,
+                "paused": False,
+                "last_state": False,
+                "triggered_at": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+        ],
+        "page": 1,
+        "page_size": 50,
+        "total_count": 2,
+        "total_pages": 1,
+    }
+    storage.list_monitor_targets_page.assert_called_once_with(
+        frequency="daily", enabled=True, market=None, condition_type=None, page=1, page_size=50
+    )
 
 
 def test_list_targets_forwards_market_and_condition_type_filters():
     storage = MagicMock()
-    storage.list_monitor_targets.return_value = [_make_target()]
+    storage.list_monitor_targets_page.return_value = ([_make_target()], 1)
     service = MonitorTargetService(storage=storage)
 
     result = service.list_targets(market="A", condition_type="rsi")
 
     assert result["success"] is True
-    storage.list_monitor_targets.assert_called_once_with(frequency=None, enabled=None, market="A", condition_type="rsi")
+    storage.list_monitor_targets_page.assert_called_once_with(
+        frequency=None, enabled=None, market="A", condition_type="rsi", page=1, page_size=50
+    )
+
+
+def test_list_targets_clamps_an_out_of_range_page_after_filtering():
+    storage = MagicMock()
+    storage.list_monitor_targets_page.return_value = ([_make_target(id=2, stock_code="000001")], 2)
+
+    result = MonitorTargetService(storage=storage).list_targets(market="A", page=99, page_size=1)
+
+    assert result["data"] == {
+        "items": [
+            {
+                "id": 2,
+                "stock_code": "000001",
+                "market": "A",
+                "condition": {"type": "price_threshold", "direction": "below", "value": 1500},
+                "note": "茅台提醒",
+                "frequency": "daily",
+                "reset_mode": "auto",
+                "enabled": True,
+                "paused": False,
+                "last_state": False,
+                "triggered_at": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        ],
+        "page": 2,
+        "page_size": 1,
+        "total_count": 2,
+        "total_pages": 2,
+    }
+    storage.list_monitor_targets_page.assert_called_once_with(
+        frequency=None, enabled=None, market="A", condition_type=None, page=99, page_size=1
+    )
+
+
+def test_list_targets_returns_an_empty_first_page():
+    storage = MagicMock()
+    storage.list_monitor_targets_page.return_value = ([], 0)
+
+    result = MonitorTargetService(storage=storage).list_targets(page=3, page_size=2)
+
+    assert result["data"] == {"items": [], "page": 1, "page_size": 2, "total_count": 0, "total_pages": 0}
 
 
 def test_list_targets_rejects_invalid_market_or_condition_type_filters():
@@ -177,6 +255,19 @@ def test_manual_monitor_target_storage_uses_only_manual_storage_operations():
     storage.delete_monitor_target.assert_not_called()
 
 
+def test_manual_monitor_target_storage_forwards_page_queries_to_manual_storage():
+    storage = MagicMock()
+    adapter = ManualMonitorTargetStorage(storage)
+
+    adapter.list_monitor_targets_page(
+        frequency="daily", enabled=True, market="A", condition_type="rsi", page=2, page_size=5
+    )
+
+    storage.list_manual_monitor_targets_page.assert_called_once_with(
+        frequency="daily", enabled=True, market="A", condition_type="rsi", page=2, page_size=5
+    )
+
+
 def test_manual_monitor_target_storage_rejects_workflow_owned_creation():
     storage = MagicMock()
 
@@ -197,7 +288,7 @@ def test_manual_monitor_target_storage_rejects_workflow_owned_creation():
 def test_new_method_aliases_are_wired_to_existing_behaviors():
     storage = MagicMock()
     storage.get_monitor_target.return_value = _make_target(id=1)
-    storage.list_monitor_targets.return_value = [_make_target(id=1)]
+    storage.list_monitor_targets_page.return_value = ([_make_target(id=1)], 1)
     storage.update_monitor_target.return_value = _make_target(id=1, note="新备注")
     storage.delete_monitor_target.return_value = True
     service = MonitorTargetService(storage=storage)

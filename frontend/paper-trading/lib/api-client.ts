@@ -17,9 +17,11 @@ import type {
   ImportPositionsInput,
   ImportPositionsResult,
   CreateMonitorTargetInput,
+  ListMonitorTargetHealthParams,
   ListMonitorTargetsParams,
   MonitorTarget,
-  MonitorTargetHealth,
+  MonitorTargetHealthPage,
+  MonitorTargetPage,
   ListOrdersParams,
   ListCorporateActionsParams,
   ListTradesParams,
@@ -245,20 +247,30 @@ export function listCorporateActions(accountId: number, params?: ListCorporateAc
   );
 }
 
-export function listMonitorTargets(params?: ListMonitorTargetsParams): Promise<MonitorTarget[]> {
+export function listMonitorTargets(params?: ListMonitorTargetsParams): Promise<MonitorTargetPage> {
   const query = new URLSearchParams();
   if (params) {
-    for (const key of ["market", "frequency", "enabled", "condition_type"] as const) {
-      const value = params[key];
-      if (value !== undefined) query.set(key, String(value));
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        query.set(key, String(value));
+      }
     }
   }
   const queryString = query.toString();
-  return apiGet<MonitorTarget[]>(`/monitor-targets${queryString ? `?${queryString}` : ""}`);
+  return apiGet<MonitorTargetPage>(`/monitor-targets${queryString ? `?${queryString}` : ""}`);
 }
 
-export function getMonitorTargetHealth(): Promise<MonitorTargetHealth> {
-  return apiGet<MonitorTargetHealth>("/monitor-targets/health");
+export function getMonitorTargetHealth(params?: ListMonitorTargetHealthParams): Promise<MonitorTargetHealthPage> {
+  const query = new URLSearchParams();
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) {
+        query.set(key, String(value));
+      }
+    }
+  }
+  const queryString = query.toString();
+  return apiGet<MonitorTargetHealthPage>(`/monitor-targets/health${queryString ? `?${queryString}` : ""}`);
 }
 
 export function createMonitorTarget(input: CreateMonitorTargetInput): Promise<MonitorTarget> {
