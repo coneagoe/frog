@@ -11,6 +11,9 @@ describe("MonitorTargetTable", () => {
 
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByText("Actions")).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: /Stock code/ })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Stock name" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Scope" })).not.toBeInTheDocument();
     expect(screen.getByText("Ping An Bank")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     expect(screen.getByText("Page 2 of 2 · 75 items")).toBeInTheDocument();

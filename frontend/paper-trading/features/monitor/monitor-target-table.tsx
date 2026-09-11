@@ -72,10 +72,10 @@ export function MonitorTargetTable({
             <tr>
               <th aria-sort={sortLabel}>
                 <button className="table__sort-button" disabled={loading} type="button" onClick={onSort}>
-                  Target {sort === "stock_code_asc" ? "↑" : sort === "stock_code_desc" ? "↓" : ""}
+                  Stock code {sort === "stock_code_asc" ? "↑" : sort === "stock_code_desc" ? "↓" : ""}
                 </button>
               </th>
-              <th>Scope</th>
+              <th>Stock name</th>
               <th>Condition</th>
               <th>Status</th>
               <th>Owner</th>
@@ -90,9 +90,9 @@ export function MonitorTargetTable({
               return (
                 <tr key={target.id}>
                   <td>
-                    <strong>{target.stock_code}</strong> <span className="muted">{target.stock_name || "—"}</span>
+                    <strong>{target.stock_code}</strong>
                   </td>
-                  <td>{target.market} · {target.frequency}</td>
+                  <td className="muted">{target.stock_name || "—"}</td>
                   <td>
                     {target.condition
                       ? `${target.condition.type.replaceAll("_", " ")} · ${target.condition.direction}`
