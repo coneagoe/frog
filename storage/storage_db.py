@@ -3145,6 +3145,7 @@ class StorageDb:
                     StockMonitorTarget.workflow.is_(None),
                     StockMonitorTarget.condition["type"].as_string() == condition_type,
                 )
+            ordering: tuple[Any, ...]
             if sort == "stock_code_asc":
                 ordering = (
                     StockMonitorTarget.stock_code.asc(),

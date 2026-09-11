@@ -460,6 +460,13 @@ export type MonitorTarget = {
   last_state: boolean;
   triggered_at: string | null;
   created_at: string | null;
+  paused?: boolean;
+  target_type?: "manual" | "workflow";
+  can_manage?: boolean;
+  workflow?: string | null;
+  operational_state?: MonitorOperationalState;
+  last_checked_at?: string | null;
+  latest_error?: MonitorTargetHealthError | null;
 };
 
 export type ListMonitorTargetsParams = {
@@ -469,6 +476,7 @@ export type ListMonitorTargetsParams = {
   condition_type?: MonitorCondition["type"];
   page?: number;
   page_size?: number;
+  sort?: "default" | "stock_code_asc" | "stock_code_desc";
 };
 
 export type MonitorTargetPage = {
@@ -478,6 +486,10 @@ export type MonitorTargetPage = {
   total_count: number;
   total_pages: number;
 };
+
+export type MonitorTargetSummary = MonitorTargetHealthSummary;
+export type MonitorTargetPagination = Pick<MonitorTargetPage, "page" | "page_size" | "total_count" | "total_pages">;
+export type UnifiedMonitorTargetPage = { items: MonitorTarget[]; summary: MonitorTargetSummary; pagination: MonitorTargetPagination };
 
 export type CreateMonitorTargetInput = {
   stock_code: string;

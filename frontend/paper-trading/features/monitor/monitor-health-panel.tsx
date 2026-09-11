@@ -1,6 +1,6 @@
 import { DataTable, type Column } from "@/components/data-table";
 import type { MonitorOperationalState, MonitorTargetHealthItem, MonitorTargetHealthPage } from "@/lib/types";
-import { Pagination } from "./monitor-target-table";
+import { Pagination } from "./monitor-target-table-pagination";
 
 const stateBadgeClass: Record<MonitorOperationalState, string> = { running: "status-badge--active", paused: "", disabled: "status-badge--failed" };
 

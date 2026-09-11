@@ -21,7 +21,7 @@ import type {
   ListMonitorTargetsParams,
   MonitorTarget,
   MonitorTargetHealthPage,
-  MonitorTargetPage,
+  UnifiedMonitorTargetPage,
   ListOrdersParams,
   ListCorporateActionsParams,
   ListTradesParams,
@@ -247,7 +247,7 @@ export function listCorporateActions(accountId: number, params?: ListCorporateAc
   );
 }
 
-export function listMonitorTargets(params?: ListMonitorTargetsParams): Promise<MonitorTargetPage> {
+export function listMonitorTargets(params?: ListMonitorTargetsParams): Promise<UnifiedMonitorTargetPage> {
   const query = new URLSearchParams();
   if (params) {
     for (const [key, value] of Object.entries(params)) {
@@ -257,7 +257,7 @@ export function listMonitorTargets(params?: ListMonitorTargetsParams): Promise<M
     }
   }
   const queryString = query.toString();
-  return apiGet<MonitorTargetPage>(`/monitor-targets${queryString ? `?${queryString}` : ""}`);
+  return apiGet<UnifiedMonitorTargetPage>(`/monitor-targets${queryString ? `?${queryString}` : ""}`);
 }
 
 export function getMonitorTargetHealth(params?: ListMonitorTargetHealthParams): Promise<MonitorTargetHealthPage> {

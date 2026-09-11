@@ -300,12 +300,17 @@ describe("monitor target API", () => {
   };
 
   it("retains false list filters and encodes defined filters", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([target]), { status: 200 }));
+    const response = {
+      items: [{ ...target, target_type: "manual" as const, can_manage: true, paused: false, operational_state: "running" as const }],
+      summary: { total: 1, running: 1, paused: 0, disabled: 0, triggered: 0, daily: 1, intraday: 0 },
+      pagination: { page: 1, page_size: 50, total_count: 1, total_pages: 1 }
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(listMonitorTargets({ enabled: false, market: "HK" })).resolves.toEqual([target]);
+    await expect(listMonitorTargets({ enabled: false, market: "HK" })).resolves.toEqual(response);
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/paper/monitor-targets?market=HK&enabled=false", expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith("/api/paper/monitor-targets?enabled=false&market=HK", expect.anything());
   });
 
   it("gets the operational health for manual and workflow targets", async () => {

@@ -109,9 +109,7 @@ def list_monitor_targets(
     _raise_for_result(result)
     data = cast(dict[str, object], result["data"])
     enriched = _enrich_items(cast(list[dict[str, object]], data["items"]), UnifiedMonitorTargetResponse, provider)
-    response = UnifiedMonitorTargetResponseEnvelope.model_validate(
-        data | {"items": enriched}
-    )
+    response = UnifiedMonitorTargetResponseEnvelope.model_validate(data | {"items": enriched})
     if not isinstance(response, UnifiedMonitorTargetResponseEnvelope):
         raise TypeError("invalid monitor target list response")
     return response
@@ -137,7 +135,7 @@ def get_monitor_targets_health(
     response.headers["Deprecation"] = "true"
     response.headers["Link"] = '</paper/monitor-targets>; rel="successor-version"'
     result = service.get_health(page=page, page_size=page_size)
-    response = MonitorTargetHealthResponse.model_validate(
+    health_response = MonitorTargetHealthResponse.model_validate(
         {
             **result,
             "items": _enrich_items(
@@ -145,9 +143,9 @@ def get_monitor_targets_health(
             ),
         }
     )
-    if not isinstance(response, MonitorTargetHealthResponse):
+    if not isinstance(health_response, MonitorTargetHealthResponse):
         raise TypeError("invalid monitor target health response")
-    return response
+    return health_response
 
 
 @router.get("/manual", response_model=MonitorTargetListResponse, deprecated=True)
@@ -173,9 +171,12 @@ def list_manual_monitor_targets_compat(
     )
     _raise_for_result(result)
     data = cast(dict[str, object], result["data"])
-    return MonitorTargetListResponse.model_validate(
+    manual_response = MonitorTargetListResponse.model_validate(
         data | {"items": _enrich_items(cast(list[dict[str, object]], data["items"]), MonitorTargetResponse, provider)}
     )
+    if not isinstance(manual_response, MonitorTargetListResponse):
+        raise TypeError("invalid manual monitor target list response")
+    return manual_response
 
 
 @router.get("/{target_id}", response_model=MonitorTargetResponse)

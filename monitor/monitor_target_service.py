@@ -270,40 +270,27 @@ class MonitorTargetService:
                 self._validate_condition_type(condition_type)
             if sort not in {"default", "stock_code_asc", "stock_code_desc"}:
                 raise TargetValidationError("sort is invalid")
-            targets, total_count = self.storage.list_monitor_targets_unified_page(
+            targets = self.storage.list_monitor_targets_unified(
                 frequency=frequency,
                 enabled=enabled,
                 market=market,
                 condition_type=condition_type,
-                page=page,
-                page_size=page_size,
                 sort=sort,
             )
-            all_targets = getattr(self.storage, "list_monitor_targets_unified", None)
-            summary_result = (
-                all_targets(
-                    frequency=frequency,
-                    enabled=enabled,
-                    market=market,
-                    condition_type=condition_type,
-                    sort=sort,
-                )
-                if callable(all_targets)
-                else None
-            )
-            summary_targets = summary_result if isinstance(summary_result, list) else targets
+            total_count = len(targets)
             canonical_page, total_pages = self._normalize_page(page, page_size, total_count)
             health_service = MonitorTargetHealthService(storage=self.storage)
             summary = {"total": 0, "running": 0, "paused": 0, "disabled": 0, "triggered": 0, "daily": 0, "intraday": 0}
-            items = []
-            for target in summary_targets:
+            for target in targets:
                 state = health_service._serialize_target(target)
                 summary["total"] += 1
                 summary[state["operational_state"]] += 1
                 summary[target.frequency] += 1
                 if target.last_state:
                     summary["triggered"] += 1
-            for target in targets:
+            start = (canonical_page - 1) * page_size
+            items = []
+            for target in targets[start : start + page_size]:
                 item = self._serialize_target(target)
                 item.update(health_service._serialize_target(target))
                 workflow = getattr(target, "workflow", None)

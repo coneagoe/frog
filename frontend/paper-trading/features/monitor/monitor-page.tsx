@@ -208,14 +208,16 @@ export function MonitorPage() {
               <option value="close_cross_ma">Close cross MA</option>
             </select>
           </label>
-          <label>
-            Page size
-            <select aria-label="Page size" disabled={queryDisabled} value={pageSize} onChange={(event) => { setPage(1); setPageSize(Number(event.target.value)); }}>
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-          </label>
+          {response?.items.length !== 0 ? (
+            <label>
+              Page size
+              <select aria-label="Page size" disabled={queryDisabled} value={pageSize} onChange={(event) => { setPage(1); setPageSize(Number(event.target.value)); }}>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </label>
+          ) : null}
           <button className="button button--secondary" disabled={queryDisabled} type="button" onClick={clearFilters}>
             Clear filters
           </button>
