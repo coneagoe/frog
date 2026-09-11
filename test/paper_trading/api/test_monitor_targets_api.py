@@ -66,6 +66,30 @@ class FakeMonitorStorage:
         start = (canonical_page - 1) * page_size
         return self.targets[start : start + page_size], total_count
 
+    def list_monitor_targets_unified(self, **filters):
+        targets = list(self.targets)
+        for field, value in filters.items():
+            if field == "sort":
+                continue
+            if value is not None:
+                if field == "condition_type":
+                    targets = [
+                        target for target in targets if target.workflow is None and target.condition["type"] == value
+                    ]
+                else:
+                    targets = [target for target in targets if getattr(target, field) == value]
+        return targets
+
+    def list_monitor_targets_unified_page(self, *, page, page_size, **filters):
+        targets = self.list_monitor_targets_unified(**filters)
+        if filters.get("sort") == "stock_code_desc":
+            targets.sort(key=lambda target: (target.stock_code, target.market, target.id), reverse=True)
+        else:
+            targets.sort(key=lambda target: (target.market, target.id))
+        total_count = len(targets)
+        start = (min(page, (total_count + page_size - 1) // page_size) - 1) * page_size if total_count else 0
+        return targets[start : start + page_size], total_count
+
     def list_manual_monitor_targets_page(self, *, page, page_size, **filters):
         targets = self.list_manual_monitor_targets(**filters)
         total_count = len(targets)
@@ -157,7 +181,7 @@ def test_monitor_target_health_is_authenticated_read_only_all_target_view(monkey
     response = client.get("/paper/monitor-targets/health")
     bearer_response = client.get("/paper/monitor-targets/health", headers={"Authorization": "Bearer secret"})
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert bearer_response.status_code == 200
     payload = response.json()
     assert payload["summary"] == {
@@ -215,9 +239,9 @@ def test_monitor_target_manual_crud_filters_and_safe_schema(monkeypatch, sqlite_
 
     listed = client.get("/paper/monitor-targets", params={"market": "A", "enabled": True})
     assert listed.status_code == 200
-    assert [item["id"] for item in listed.json()["items"]] == [1]
-    assert "workflow" not in listed.json()["items"][0]
-    assert "paused" not in listed.json()["items"][0]
+    assert [item["id"] for item in listed.json()["items"]] == [1, 2]
+    assert listed.json()["items"][0]["target_type"] == "manual"
+    assert listed.json()["items"][1]["target_type"] == "workflow"
 
     created = client.post(
         "/paper/monitor-targets",
@@ -262,33 +286,13 @@ def test_monitor_target_list_and_health_return_enriched_page_envelopes(monkeypat
         }
     )
 
-    listed = client.get("/paper/monitor-targets?page=2&page_size=1")
+    listed = client.get("/paper/monitor-targets?page=1&page_size=25")
     health = client.get("/paper/monitor-targets/health?page=1&page_size=2")
     second_health_page = client.get("/paper/monitor-targets/health?page=2&page_size=2")
 
     assert listed.status_code == 200
-    assert listed.json() == {
-        "items": [
-            {
-                "id": 3,
-                "stock_code": "510300",
-                "stock_name": "CSI 300 ETF",
-                "market": "ETF",
-                "condition": {"type": "price_threshold", "direction": "above", "value": 100},
-                "note": "initial",
-                "frequency": "daily",
-                "reset_mode": "auto",
-                "enabled": True,
-                "last_state": False,
-                "triggered_at": None,
-                "created_at": "2026-01-01T00:00:00Z",
-            }
-        ],
-        "page": 2,
-        "page_size": 1,
-        "total_count": 3,
-        "total_pages": 3,
-    }
+    assert listed.json()["pagination"] == {"page": 1, "page_size": 25, "total_count": 4, "total_pages": 1}
+    assert listed.json()["items"][2]["stock_name"] == "CSI 300 ETF"
     assert health.status_code == 200
     assert health.json()["summary"]["total"] == 4
     assert health.json()["items"][0]["stock_name"] == "Kweichow Moutai"
@@ -299,6 +303,32 @@ def test_monitor_target_list_and_health_return_enriched_page_envelopes(monkeypat
     assert health.json()["total_pages"] == 2
     assert second_health_page.json()["items"][0]["stock_name"] == "CSI 300 ETF"
     assert second_health_page.json()["items"][1]["stock_name"] is None
+
+
+def test_unified_monitor_target_route_returns_both_target_types_and_filters_workflows(monkeypatch, sqlite_session):
+    client, _, storage = _client(monkeypatch, sqlite_session)
+    storage.targets.extend(
+        [
+            storage._target(3, workflow=None, stock_code="000002", market="A"),
+            storage._target(4, workflow="scheduled", stock_code="000003", market="A"),
+        ]
+    )
+
+    response = client.get(
+        "/paper/monitor-targets",
+        params={"sort": "stock_code_desc", "page_size": 25},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert {item["target_type"] for item in payload["items"]} == {"manual", "workflow"}
+    assert all(item["can_manage"] == (item["target_type"] == "manual") for item in payload["items"])
+    assert payload["pagination"] == {"page": 1, "page_size": 25, "total_count": 4, "total_pages": 1}
+    assert payload["summary"]["total"] == 4
+
+    manual_only = client.get("/paper/monitor-targets", params={"condition_type": "rsi"})
+    assert manual_only.status_code == 200
+    assert all(item["target_type"] == "manual" for item in manual_only.json()["items"])
 
 
 def test_monitor_target_list_and_health_validate_paging_queries(monkeypatch, sqlite_session):
@@ -319,22 +349,25 @@ def test_monitor_target_page_envelopes_normalize_out_of_range_and_remain_valid_w
     client, _, storage = _client(monkeypatch, sqlite_session)
 
     for path, expected_page in (
-        ("/paper/monitor-targets?page=99&page_size=1", 1),
+        ("/paper/monitor-targets?page=99&page_size=25", 1),
         ("/paper/monitor-targets/health?page=99&page_size=1", 2),
     ):
         response = client.get(path)
         assert response.status_code == 200
-        assert response.json()["page"] == expected_page
-        assert response.json()["total_pages"] == expected_page
+        pagination = response.json().get("pagination", response.json())
+        assert pagination["page"] == expected_page
+        assert pagination["total_pages"] == expected_page
 
     storage.targets.clear()
     for path in ("/paper/monitor-targets", "/paper/monitor-targets/health"):
         response = client.get(path)
         assert response.status_code == 200
-        assert response.json()["items"] == []
-        assert response.json()["page"] == 1
-        assert response.json()["total_count"] == 0
-        assert response.json()["total_pages"] == 0
+        payload = response.json()
+        pagination = payload.get("pagination", payload)
+        assert payload["items"] == []
+        assert pagination["page"] == 1
+        assert pagination["total_count"] == 0
+        assert pagination["total_pages"] == 0
 
 
 def test_monitor_target_name_lookup_failure_returns_null(monkeypatch, sqlite_session):

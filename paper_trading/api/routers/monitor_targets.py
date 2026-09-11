@@ -1,4 +1,4 @@
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
@@ -14,6 +14,8 @@ from paper_trading.schemas.monitor_targets import (
     MonitorTargetListResponse,
     MonitorTargetResponse,
     SetMonitorTargetEnabledRequest,
+    UnifiedMonitorTargetResponse,
+    UnifiedMonitorTargetResponseEnvelope,
     UpdateMonitorTargetRequest,
 )
 from paper_trading.storage.security_metadata import SecurityNameProvider
@@ -78,7 +80,7 @@ def _enrich_items(items: list[dict[str, object]], response_type: Any, provider: 
     ]
 
 
-@router.get("", response_model=MonitorTargetListResponse)
+@router.get("", response_model=UnifiedMonitorTargetResponseEnvelope)
 def list_monitor_targets(
     service: ServiceDep,
     frequency: MonitorFrequency | None = None,
@@ -87,22 +89,30 @@ def list_monitor_targets(
     condition_type: MonitorConditionType | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
+    sort: Literal["default", "stock_code_asc", "stock_code_desc"] = Query(default="default"),
     provider: SecurityNameProvider = Depends(get_security_name_provider),
-) -> MonitorTargetListResponse:
-    result = service.list_targets(
+) -> UnifiedMonitorTargetResponseEnvelope:
+    if page_size not in {25, 50, 100}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="page_size must be 25, 50, or 100",
+        )
+    result = service.list_unified_targets(
         frequency=frequency,
         enabled=enabled,
         market=market,
         condition_type=condition_type,
         page=page,
         page_size=page_size,
+        sort=sort,
     )
     _raise_for_result(result)
     data = cast(dict[str, object], result["data"])
-    response = MonitorTargetListResponse.model_validate(
-        data | {"items": _enrich_items(cast(list[dict[str, object]], data["items"]), MonitorTargetResponse, provider)}
+    enriched = _enrich_items(cast(list[dict[str, object]], data["items"]), UnifiedMonitorTargetResponse, provider)
+    response = UnifiedMonitorTargetResponseEnvelope.model_validate(
+        data | {"items": enriched}
     )
-    if not isinstance(response, MonitorTargetListResponse):
+    if not isinstance(response, UnifiedMonitorTargetResponseEnvelope):
         raise TypeError("invalid monitor target list response")
     return response
 
@@ -119,10 +129,13 @@ def create_monitor_target(
 @router.get("/health", response_model=MonitorTargetHealthResponse)
 def get_monitor_targets_health(
     service: HealthServiceDep,
+    response: Response,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
     provider: SecurityNameProvider = Depends(get_security_name_provider),
 ) -> MonitorTargetHealthResponse:
+    response.headers["Deprecation"] = "true"
+    response.headers["Link"] = '</paper/monitor-targets>; rel="successor-version"'
     result = service.get_health(page=page, page_size=page_size)
     response = MonitorTargetHealthResponse.model_validate(
         {
@@ -135,6 +148,34 @@ def get_monitor_targets_health(
     if not isinstance(response, MonitorTargetHealthResponse):
         raise TypeError("invalid monitor target health response")
     return response
+
+
+@router.get("/manual", response_model=MonitorTargetListResponse, deprecated=True)
+def list_manual_monitor_targets_compat(
+    service: ServiceDep,
+    response: Response,
+    frequency: MonitorFrequency | None = None,
+    enabled: bool | None = None,
+    market: MonitorMarket | None = None,
+    condition_type: MonitorConditionType | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=100),
+    provider: SecurityNameProvider = Depends(get_security_name_provider),
+) -> MonitorTargetListResponse:
+    response.headers["Deprecation"] = "true"
+    result = service.list_targets(
+        frequency=frequency,
+        enabled=enabled,
+        market=market,
+        condition_type=condition_type,
+        page=page,
+        page_size=page_size,
+    )
+    _raise_for_result(result)
+    data = cast(dict[str, object], result["data"])
+    return MonitorTargetListResponse.model_validate(
+        data | {"items": _enrich_items(cast(list[dict[str, object]], data["items"]), MonitorTargetResponse, provider)}
+    )
 
 
 @router.get("/{target_id}", response_model=MonitorTargetResponse)

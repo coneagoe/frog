@@ -27,22 +27,26 @@ class MonitorTargetHealthService:
 
     @staticmethod
     def _latest_error(target: Any) -> dict[str, Any] | None:
-        if target.latest_error_kind is None or target.latest_error_at is None:
+        error_kind = getattr(target, "latest_error_kind", None)
+        error_at = getattr(target, "latest_error_at", None)
+        if error_kind is None or error_at is None:
             return None
         try:
-            kind = MonitorEvaluationErrorKind(target.latest_error_kind)
+            kind = MonitorEvaluationErrorKind(error_kind)
         except ValueError:
             kind = MonitorEvaluationErrorKind.UNKNOWN
             detail = None
         else:
             detail = (
-                sanitize_error_detail(target.latest_error_detail) if target.latest_error_detail is not None else None
+                sanitize_error_detail(getattr(target, "latest_error_detail", None))
+                if getattr(target, "latest_error_detail", None) is not None
+                else None
             )
         return {
             "kind": kind,
             "summary": MONITOR_ERROR_SUMMARIES[kind],
             "detail": detail,
-            "occurred_at": target.latest_error_at,
+            "occurred_at": error_at,
         }
 
     def _serialize_target(self, target: Any) -> dict[str, Any]:
@@ -51,13 +55,13 @@ class MonitorTargetHealthService:
             "stock_code": target.stock_code,
             "market": target.market,
             "frequency": target.frequency,
-            "workflow": target.workflow,
+            "workflow": getattr(target, "workflow", None),
             "enabled": target.enabled,
-            "paused": target.paused,
+            "paused": getattr(target, "paused", False),
             "operational_state": self._operational_state(target),
             "last_state": target.last_state,
-            "last_checked_at": target.last_checked_at,
-            "triggered_at": target.triggered_at,
+            "last_checked_at": getattr(target, "last_checked_at", None),
+            "triggered_at": getattr(target, "triggered_at", None),
             "latest_error": self._latest_error(target),
         }
 

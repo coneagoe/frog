@@ -3117,6 +3117,61 @@ class StorageDb:
         finally:
             session.close()
 
+    def list_monitor_targets_unified(
+        self,
+        *,
+        frequency: str | None = None,
+        enabled: bool | None = None,
+        market: str | None = None,
+        condition_type: str | None = None,
+        sort: str = "default",
+    ) -> list[Any]:
+        """Return the filtered manual/workflow target set for the unified console."""
+        self.ensure_monitor_targets_table()
+        from .model.stock_monitor_target import StockMonitorTarget
+
+        assert self.Session is not None
+        session = self.Session()
+        try:
+            query = session.query(StockMonitorTarget)
+            if frequency is not None:
+                query = query.filter_by(frequency=frequency)
+            if enabled is not None:
+                query = query.filter_by(enabled=enabled)
+            if market is not None:
+                query = query.filter_by(market=market)
+            if condition_type is not None:
+                query = query.filter(
+                    StockMonitorTarget.workflow.is_(None),
+                    StockMonitorTarget.condition["type"].as_string() == condition_type,
+                )
+            if sort == "stock_code_asc":
+                ordering = (
+                    StockMonitorTarget.stock_code.asc(),
+                    StockMonitorTarget.market.asc(),
+                    StockMonitorTarget.id.asc(),
+                )
+            elif sort == "stock_code_desc":
+                ordering = (
+                    StockMonitorTarget.stock_code.desc(),
+                    StockMonitorTarget.market.asc(),
+                    StockMonitorTarget.id.asc(),
+                )
+            else:
+                ordering = (StockMonitorTarget.market.asc(), StockMonitorTarget.id.asc())
+            return cast(list[Any], query.order_by(*ordering).all())
+        finally:
+            session.close()
+
+    def list_monitor_targets_unified_page(
+        self, *, page: int = 1, page_size: int = 50, **filters: Any
+    ) -> tuple[list[Any], int]:
+        rows = self.list_monitor_targets_unified(**filters)
+        total_count = len(rows)
+        canonical_page = min(page, ceil(total_count / page_size)) if total_count else 1
+        start = (canonical_page - 1) * page_size
+        return rows[start : start + page_size], total_count
+
     def record_monitor_target_evaluation(self, target_id: int, checked_at: datetime) -> bool:
         self.ensure_monitor_targets_table()
         from .model.stock_monitor_target import StockMonitorTarget

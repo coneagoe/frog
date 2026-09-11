@@ -179,6 +179,34 @@ def test_list_targets_forwards_market_and_condition_type_filters():
     )
 
 
+def test_list_unified_targets_includes_manual_and_workflow_rows_with_summary_and_sorting():
+    storage = MagicMock()
+    storage.list_monitor_targets_unified_page.return_value = (
+        [
+            _make_target(id=2, stock_code="000001", workflow="scheduled", paused=True),
+            _make_target(id=1, stock_code="000001", workflow=None),
+        ],
+        2,
+    )
+
+    result = MonitorTargetService(storage=storage).list_unified_targets(sort="stock_code_asc")
+
+    assert result["success"] is True
+    assert [item["target_type"] for item in result["data"]["items"]] == ["workflow", "manual"]
+    assert result["data"]["items"][0]["can_manage"] is False
+    assert result["data"]["items"][1]["can_manage"] is True
+    assert result["data"]["summary"]["total"] == 2
+    storage.list_monitor_targets_unified_page.assert_called_once_with(
+        frequency=None,
+        enabled=None,
+        market=None,
+        condition_type=None,
+        page=1,
+        page_size=50,
+        sort="stock_code_asc",
+    )
+
+
 def test_list_targets_clamps_an_out_of_range_page_after_filtering():
     storage = MagicMock()
     storage.list_monitor_targets_page.return_value = ([_make_target(id=2, stock_code="000001")], 2)

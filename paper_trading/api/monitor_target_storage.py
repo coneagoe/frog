@@ -88,3 +88,9 @@ class ManualMonitorTargetStorage:
 
     def delete_monitor_target(self, target_id: int) -> bool:
         return cast(bool, self._storage.delete_manual_monitor_target(target_id))
+
+    def list_monitor_targets_unified_page(self, **kwargs: Any) -> tuple[list[Any], int]:
+        return cast(tuple[list[Any], int], self._storage.list_monitor_targets_unified_page(**kwargs))
+
+    def list_monitor_targets_unified(self, **kwargs: Any) -> list[Any]:
+        return cast(list[Any], self._storage.list_monitor_targets_unified(**kwargs))

@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from monitor.condition_validation import validate_condition
 from monitor.domain_enums import MonitorConditionType, MonitorFrequency, MonitorMarket, MonitorResetMode
+from monitor.monitor_health_service import MonitorTargetHealthService
 from storage import get_storage
 
 
@@ -243,6 +244,87 @@ class MonitorTargetService:
                 "total_pages": total_pages,
             }
             return self._result(True, "OK", "targets listed", data)
+        except TargetValidationError as exc:
+            return self._result(False, "VALIDATION_ERROR", str(exc), None)
+
+    def list_unified_targets(
+        self,
+        *,
+        frequency: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        market: Optional[str] = None,
+        condition_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
+        sort: str = "default",
+    ) -> dict[str, Any]:
+        try:
+            self._normalize_page(page, page_size)
+            if frequency is not None:
+                self._validate_frequency(frequency)
+            if enabled is not None:
+                self._validate_bool(enabled, "enabled")
+            if market is not None:
+                self._validate_market(market)
+            if condition_type is not None:
+                self._validate_condition_type(condition_type)
+            if sort not in {"default", "stock_code_asc", "stock_code_desc"}:
+                raise TargetValidationError("sort is invalid")
+            targets, total_count = self.storage.list_monitor_targets_unified_page(
+                frequency=frequency,
+                enabled=enabled,
+                market=market,
+                condition_type=condition_type,
+                page=page,
+                page_size=page_size,
+                sort=sort,
+            )
+            all_targets = getattr(self.storage, "list_monitor_targets_unified", None)
+            summary_result = (
+                all_targets(
+                    frequency=frequency,
+                    enabled=enabled,
+                    market=market,
+                    condition_type=condition_type,
+                    sort=sort,
+                )
+                if callable(all_targets)
+                else None
+            )
+            summary_targets = summary_result if isinstance(summary_result, list) else targets
+            canonical_page, total_pages = self._normalize_page(page, page_size, total_count)
+            health_service = MonitorTargetHealthService(storage=self.storage)
+            summary = {"total": 0, "running": 0, "paused": 0, "disabled": 0, "triggered": 0, "daily": 0, "intraday": 0}
+            items = []
+            for target in summary_targets:
+                state = health_service._serialize_target(target)
+                summary["total"] += 1
+                summary[state["operational_state"]] += 1
+                summary[target.frequency] += 1
+                if target.last_state:
+                    summary["triggered"] += 1
+            for target in targets:
+                item = self._serialize_target(target)
+                item.update(health_service._serialize_target(target))
+                workflow = getattr(target, "workflow", None)
+                item["target_type"] = "workflow" if workflow is not None else "manual"
+                item["can_manage"] = workflow is None
+                items.append(item)
+            return self._result(
+                True,
+                "OK",
+                "targets listed",
+                {
+                    "items": items,
+                    "summary": summary,
+                    "pagination": {
+                        "page": canonical_page,
+                        "page_size": page_size,
+                        "total_count": total_count,
+                        "total_pages": total_pages,
+                    },
+                },
+            )
         except TargetValidationError as exc:
             return self._result(False, "VALIDATION_ERROR", str(exc), None)
 

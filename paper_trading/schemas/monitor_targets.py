@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -80,6 +80,47 @@ class MonitorTargetHealthResponse(BaseModel):
     page_size: int
     total_count: int
     total_pages: int
+
+
+class MonitorTargetPagination(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page: int
+    page_size: int
+    total_count: int
+    total_pages: int
+
+
+class UnifiedMonitorTargetResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    stock_code: str
+    stock_name: str | None = None
+    market: MonitorMarket
+    frequency: MonitorFrequency
+    enabled: bool
+    paused: bool
+    last_state: bool
+    triggered_at: datetime | None
+    target_type: Literal["manual", "workflow"]
+    can_manage: bool
+    condition: dict[str, Any] | None = None
+    note: str | None = None
+    reset_mode: MonitorResetMode | None = None
+    created_at: datetime | None = None
+    workflow: str | None = None
+    operational_state: MonitorOperationalState
+    last_checked_at: datetime | None = None
+    latest_error: MonitorTargetHealthErrorResponse | None = None
+
+
+class UnifiedMonitorTargetResponseEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[UnifiedMonitorTargetResponse]
+    summary: MonitorTargetHealthSummaryResponse
+    pagination: MonitorTargetPagination
 
 
 class CreateMonitorTargetRequest(BaseModel):
