@@ -4108,6 +4108,11 @@ def test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adap
                 for column in group.columns
                 if column.table_name not in operational_tables | optional_tables
             }
+            required_table_names = {
+                table_name
+                for table_name in required_table_names
+                if not table_name.startswith("paper_data_gap_recovery_")
+            }
             Base.metadata.create_all(
                 conn,
                 tables=[table for table in Base.metadata.sorted_tables if table.name in required_table_names],

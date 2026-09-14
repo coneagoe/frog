@@ -165,6 +165,13 @@ from .model import (
     tb_name_paper_accounts,
     tb_name_paper_cash_ledger,
     tb_name_paper_corporate_actions,
+    tb_name_paper_data_gap_recovery_accounts,
+    tb_name_paper_data_gap_recovery_alerts,
+    tb_name_paper_data_gap_recovery_approvals,
+    tb_name_paper_data_gap_recovery_attempts,
+    tb_name_paper_data_gap_recovery_batches,
+    tb_name_paper_data_gap_recovery_candidates,
+    tb_name_paper_data_gap_recovery_gaps,
     tb_name_paper_etf_eligibility,
     tb_name_paper_ledger_rebuilds,
     tb_name_paper_matching_runs,
@@ -402,12 +409,24 @@ _ENUM_GOVERNED_PAPER_TRADING_TABLES = {
     tb_name_ssf_change_signal,
     tb_name_stock_monitor_target,
     tb_name_forecast_ssf_candidate,
+    tb_name_paper_data_gap_recovery_gaps,
+    tb_name_paper_data_gap_recovery_candidates,
+    tb_name_paper_data_gap_recovery_attempts,
+    tb_name_paper_data_gap_recovery_approvals,
+    tb_name_paper_data_gap_recovery_accounts,
+    tb_name_paper_data_gap_recovery_batches,
+    tb_name_paper_data_gap_recovery_alerts,
 }
 
 _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS = {
     tb_name_paper_account_snapshots,
     tb_name_paper_valuation_gaps,
     tb_name_paper_order_events,
+    tb_name_paper_data_gap_recovery_candidates,
+    tb_name_paper_data_gap_recovery_attempts,
+    tb_name_paper_data_gap_recovery_approvals,
+    tb_name_paper_data_gap_recovery_accounts,
+    tb_name_paper_data_gap_recovery_alerts,
 }
 _PAPER_SNAPSHOT_SERIES_LOCK_KEY = "paper_account_snapshots.nav_series"
 _PAPER_SNAPSHOT_NAV_COLUMNS = {

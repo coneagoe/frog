@@ -221,7 +221,11 @@ def _prepare_reduced_legacy_enum_columns(engine: Engine) -> None:
         operational_tables = {"paper_account_snapshots", "paper_valuation_gaps", "paper_etf_eligibility"}
         optional_tables = {"daily_bar_diagnostics", "paper_corporate_actions"}
         missing_tables = governed_tables - tables - operational_tables - optional_tables
-        missing_metadata_tables = [table for table in Base.metadata.sorted_tables if table.name in missing_tables]
+        missing_metadata_tables = [
+            table
+            for table in Base.metadata.sorted_tables
+            if table.name in missing_tables and not table.name.startswith("paper_data_gap_recovery_")
+        ]
         required_enum_types = {
             group.type_name
             for group in PAPER_TRADING_ENUM_GROUPS

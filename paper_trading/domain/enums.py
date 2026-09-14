@@ -145,6 +145,44 @@ class NavBaselineEligibility(StrEnum):
     INELIGIBLE = "ineligible"
 
 
+class DataGapRecoveryStatus(StrEnum):
+    OPEN = "open"
+    RECOVERED = "recovered"
+    ESCALATED = "escalated"
+    PERMANENTLY_UNRESOLVED = "permanently_unresolved"
+
+
+class DataGapRecoveryBatchStatus(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DataGapRecoveryApprovalDecision(StrEnum):
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    REOPENED = "reopened"
+
+
+class DataGapRecoveryAttemptOutcome(StrEnum):
+    RECOVERED = "recovered"
+    NOT_FOUND = "not_found"
+    FAILED = "failed"
+
+
+class DataGapRecoveryAccountStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    RECOVERED = "recovered"
+    FAILED = "failed"
+
+
+class DataGapRecoveryAlertDeliveryState(StrEnum):
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    FAILED = "failed"
+
+
 # Marker prefix for rejection reasons set by OrderDeleteService replay.
 # reset_orders_for_replay uses this to distinguish replay-induced rejections
 # (which may become resolvable after a later delete) from original/business

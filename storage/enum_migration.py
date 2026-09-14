@@ -624,6 +624,12 @@ def _create_type(connection: Connection, group: StorageEnumGroup) -> None:
         )
 
 
+def ensure_daily_bar_diagnostic_adjust_type(connection: Connection) -> None:
+    """Bootstrap the shared diagnostic enum without applying storage migrations."""
+    group = next(group for group in STORAGE_ENUM_GROUPS if group.type_name == "daily_bar_diagnostic_adjust")
+    _create_type(connection, group)
+
+
 def _upgrade_daily_bar_diagnostic_adjust_labels(connection: Connection) -> bool:
     labels = _enum_labels(connection, "daily_bar_diagnostic_adjust")
     expected = _labels(DailyBarDiagnosticAdjust)
@@ -918,7 +924,7 @@ def _type_dependencies(connection: Connection, group: StorageEnumGroup) -> tuple
             text(
                 "WITH managed(table_name, column_name) AS (VALUES "
                 + managed
-                + ") SELECT DISTINCT COALESCE('view ' || v.relname, pg_describe_object(d.classid, d.objid, d.objsubid)) FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid LEFT JOIN pg_class vc ON vc.oid = d.objid AND vc.relkind = 'v' LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid LEFT JOIN pg_class v ON v.oid = COALESCE(vc.oid, r.ev_class) WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') AND NOT (t.typname = 'forecast_snapshot_status' AND d.classid = 'pg_class'::regclass AND d.objid = to_regclass('uq_forecast_snapshot_running_range')) AND NOT EXISTS (SELECT 1 FROM managed m JOIN pg_class c ON c.relname = m.table_name JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = m.column_name LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum WHERE n.nspname = current_schema() AND ((d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.objsubid = a.attnum) OR (d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid))) ORDER BY 1"
+                + ") SELECT DISTINCT COALESCE('view ' || v.relname, pg_describe_object(d.classid, d.objid, d.objsubid)) FROM pg_depend d JOIN pg_type t ON t.oid = d.refobjid LEFT JOIN pg_class vc ON vc.oid = d.objid AND vc.relkind = 'v' LEFT JOIN pg_rewrite r ON d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid LEFT JOIN pg_class v ON v.oid = COALESCE(vc.oid, r.ev_class) WHERE d.refclassid = 'pg_type'::regclass AND t.typnamespace = current_schema()::regnamespace AND t.typname = :type_name AND d.deptype NOT IN ('i', 'a') AND NOT (t.typname = 'forecast_snapshot_status' AND d.classid = 'pg_class'::regclass AND d.objid = to_regclass('uq_forecast_snapshot_running_range')) AND NOT EXISTS (SELECT 1 FROM managed m JOIN pg_class c ON c.relname = m.table_name JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = m.column_name LEFT JOIN pg_attrdef ad ON ad.adrelid = c.oid AND ad.adnum = a.attnum WHERE n.nspname = current_schema() AND ((d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.objsubid = a.attnum) OR (d.classid = 'pg_attrdef'::regclass AND d.objid = ad.oid))) AND NOT (d.classid = 'pg_class'::regclass AND EXISTS (SELECT 1 FROM pg_class recovery_table JOIN pg_namespace recovery_schema ON recovery_schema.oid = recovery_table.relnamespace WHERE recovery_schema.nspname = current_schema() AND recovery_table.relname LIKE 'paper_data_gap_recovery_%' AND d.objid = recovery_table.oid)) AND NOT (d.classid = 'pg_constraint'::regclass AND EXISTS (SELECT 1 FROM pg_constraint recovery_constraint JOIN pg_class recovery_table ON recovery_table.oid = recovery_constraint.conrelid JOIN pg_namespace recovery_schema ON recovery_schema.oid = recovery_table.relnamespace WHERE recovery_schema.nspname = current_schema() AND recovery_table.relname LIKE 'paper_data_gap_recovery_%' AND d.objid = recovery_constraint.oid)) ORDER BY 1"
             ),
             parameters,
         ).scalars()

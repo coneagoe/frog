@@ -163,9 +163,11 @@ else
 fi
 
 ENUM_DDL_FILE=""
-if [[ ${#SELECTED_ENUM_TYPES[@]} -gt 0 ]]; then
+RECOVERY_TRIGGER_DDL_FILE=""
+if [[ ${#SELECTED_ENUM_TYPES[@]} -gt 0 || -z "$TABLE_NAME" || "$TABLE_NAME" == paper_data_gap_recovery_* ]]; then
   ENUM_DDL_FILE="$(mktemp)"
-  trap 'rm -f "$ENUM_DDL_FILE"' EXIT
+  RECOVERY_TRIGGER_DDL_FILE="$(mktemp)"
+  trap 'rm -f "$ENUM_DDL_FILE" "$RECOVERY_TRIGGER_DDL_FILE"' EXIT
 fi
 
 psql_args_common=(
@@ -223,13 +225,17 @@ run_export_docker() {
       rm -f "$enum_labels_file"
     done
   fi
+  if [[ -n "$ENUM_DDL_FILE" && ( -z "$TABLE_NAME" || "$TABLE_NAME" == paper_data_gap_recovery_* ) ]]; then
+    write_recovery_append_only_functions "$SCHEMA" "$TABLE_NAME" run_catalog_query_docker >>"$ENUM_DDL_FILE"
+    write_recovery_append_only_triggers "$SCHEMA" "$TABLE_NAME" run_catalog_query_docker >>"$RECOVERY_TRIGGER_DDL_FILE"
+  fi
 
   if [[ $GZIP -eq 1 ]]; then
     # shellcheck disable=SC2086
-    { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; } | gzip -c >"$OUT_FILE"
+    { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; cat "$RECOVERY_TRIGGER_DDL_FILE" 2>/dev/null || true; } | gzip -c >"$OUT_FILE"
   else
     # shellcheck disable=SC2086
-    { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; } >"$OUT_FILE"
+    { cat "$ENUM_DDL_FILE" 2>/dev/null || true; $dc "${exec_args[@]}" "$SERVICE" env PGPASSWORD="${PGPASSWORD:-}" pg_dump -U "$DB_USER" -d "$DB_NAME" "${DUMP_ARGS[@]}"; cat "$RECOVERY_TRIGGER_DDL_FILE" 2>/dev/null || true; } >"$OUT_FILE"
   fi
 }
 

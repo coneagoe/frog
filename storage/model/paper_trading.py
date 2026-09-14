@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -26,6 +27,12 @@ from paper_trading.domain.enums import (
     CashEventType,
     CorporateActionProcessingStatus,
     CorporateActionType,
+    DataGapRecoveryAccountStatus,
+    DataGapRecoveryAlertDeliveryState,
+    DataGapRecoveryApprovalDecision,
+    DataGapRecoveryAttemptOutcome,
+    DataGapRecoveryBatchStatus,
+    DataGapRecoveryStatus,
     ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
@@ -67,6 +74,13 @@ tb_name_daily_bar_diagnostics = "daily_bar_diagnostics"
 tb_name_paper_valuation_gaps = "paper_valuation_gaps"
 tb_name_paper_ledger_rebuilds = "paper_ledger_rebuilds"
 tb_name_paper_etf_eligibility = "paper_etf_eligibility"
+tb_name_paper_data_gap_recovery_gaps = "paper_data_gap_recovery_gaps"
+tb_name_paper_data_gap_recovery_candidates = "paper_data_gap_recovery_candidates"
+tb_name_paper_data_gap_recovery_attempts = "paper_data_gap_recovery_attempts"
+tb_name_paper_data_gap_recovery_approvals = "paper_data_gap_recovery_approvals"
+tb_name_paper_data_gap_recovery_accounts = "paper_data_gap_recovery_accounts"
+tb_name_paper_data_gap_recovery_batches = "paper_data_gap_recovery_batches"
+tb_name_paper_data_gap_recovery_alerts = "paper_data_gap_recovery_alerts"
 ETF_ELIGIBILITY_SYMBOL_CHECK_NAME = "ck_paper_etf_eligibility_symbol_six_ascii_digits"
 ETF_ELIGIBILITY_SYMBOL_CHECK_SQL = (
     "length(symbol) = 6 AND length("
@@ -74,6 +88,7 @@ ETF_ELIGIBILITY_SYMBOL_CHECK_SQL = (
     "symbol, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), "
     "'5', ''), '6', ''), '7', ''), '8', ''), '9', '')) = 0"
 )
+DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL = ETF_ELIGIBILITY_SYMBOL_CHECK_SQL.replace("symbol", "stock_id")
 
 
 def _value_enum(enum_type: type[StrEnum], name: str) -> Enum:
@@ -585,6 +600,146 @@ class ETFEligibility(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaperDataGapRecoveryGap(Base):
+    __tablename__ = tb_name_paper_data_gap_recovery_gaps
+    __table_args__ = (
+        UniqueConstraint(
+            "business_date", "market", "stock_id", "adjust", name="uq_paper_data_gap_recovery_gap_identity"
+        ),
+        CheckConstraint("market = 'a_share'", name="ck_paper_data_gap_recovery_a_share"),
+        CheckConstraint("adjust = 'bfq'", name="ck_paper_data_gap_recovery_bfq"),
+        CheckConstraint(
+            DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL, name="ck_paper_data_gap_recovery_stock_id_six_ascii_digits"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    business_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    market: Mapped[str] = mapped_column(_value_enum(Market, "paper_market"), nullable=False, server_default="a_share")
+    stock_id: Mapped[str] = mapped_column(String(6), nullable=False, index=True)
+    adjust: Mapped[str] = mapped_column(
+        _value_enum(DailyBarDiagnosticAdjust, "daily_bar_diagnostic_adjust"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        _value_enum(DataGapRecoveryStatus, "paper_data_gap_recovery_status"),
+        nullable=False,
+        server_default="open",
+        index=True,
+    )
+    first_observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    latest_candidate_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, server_default=text("'{}'"))
+
+
+class PaperDataGapRecoveryCandidate(Base):
+    __tablename__ = tb_name_paper_data_gap_recovery_candidates
+    gap_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_data_gap_recovery_gaps}.id"), primary_key=True
+    )
+    candidate_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    validation: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    source: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaperDataGapRecoveryAttempt(Base):
+    __tablename__ = tb_name_paper_data_gap_recovery_attempts
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gap_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_data_gap_recovery_gaps}.id"), nullable=False, index=True
+    )
+    batch_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_data_gap_recovery_batches}.id"), nullable=True, index=True
+    )
+    outcome: Mapped[str] = mapped_column(
+        _value_enum(DataGapRecoveryAttemptOutcome, "paper_data_gap_recovery_attempt_outcome"), nullable=False
+    )
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaperDataGapRecoveryApproval(Base):
+    __tablename__ = tb_name_paper_data_gap_recovery_approvals
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["gap_id", "candidate_hash"],
+            [
+                f"{tb_name_paper_data_gap_recovery_candidates}.gap_id",
+                f"{tb_name_paper_data_gap_recovery_candidates}.candidate_hash",
+            ],
+            name="fk_paper_data_gap_recovery_approval_candidate",
+        ),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gap_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_data_gap_recovery_gaps}.id"), nullable=False, index=True
+    )
+    decision: Mapped[str] = mapped_column(
+        _value_enum(DataGapRecoveryApprovalDecision, "paper_data_gap_recovery_approval_decision"), nullable=False
+    )
+    candidate_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    approver_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    approver_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaperDataGapRecoveryAccount(Base):
+    __tablename__ = tb_name_paper_data_gap_recovery_accounts
+    __table_args__ = (UniqueConstraint("gap_id", "account_id", name="uq_paper_data_gap_recovery_account"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gap_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_data_gap_recovery_gaps}.id"), nullable=False
+    )
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey(f"{tb_name_paper_accounts}.id"), nullable=False)
+    status: Mapped[str] = mapped_column(
+        _value_enum(DataGapRecoveryAccountStatus, "paper_data_gap_recovery_account_status"),
+        nullable=False,
+        server_default="pending",
+    )
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, server_default=text("'{}'"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaperDataGapRecoveryBatch(Base):
+    __tablename__ = tb_name_paper_data_gap_recovery_batches
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    status: Mapped[str] = mapped_column(
+        _value_enum(DataGapRecoveryBatchStatus, "paper_data_gap_recovery_batch_status"), nullable=False
+    )
+    download_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cutoff: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    gap_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    recovered_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PaperDataGapRecoveryAlert(Base):
+    __tablename__ = tb_name_paper_data_gap_recovery_alerts
+    __table_args__ = (UniqueConstraint("gap_id", "cycle_key", name="uq_paper_data_gap_recovery_alert_cycle"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    gap_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{tb_name_paper_data_gap_recovery_gaps}.id"), nullable=False, index=True
+    )
+    cycle_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    delivery_state: Mapped[str] = mapped_column(
+        _value_enum(DataGapRecoveryAlertDeliveryState, "paper_data_gap_recovery_alert_delivery_state"),
+        nullable=False,
+        server_default="pending",
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class DailyBarDiagnostic(Base):

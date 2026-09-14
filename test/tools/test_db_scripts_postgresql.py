@@ -7,12 +7,15 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from sqlalchemy import Enum as SqlAlchemyEnum
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
 from monitor.storage.enum_migration import MONITOR_ENUM_ADAPTER, MONITOR_ENUM_GROUPS
+from paper_trading.storage.enum_migration import _ensure_recovery_append_only, migrate_paper_trading_enums
 from storage.enum_governance import migrate_enums
 from storage.enum_migration import STORAGE_ENUM_ADAPTER, STORAGE_ENUM_GROUPS
+from storage.model import Base, User
 
 ROOT = Path(__file__).resolve().parents[2]
 STORAGE_ENUM_TYPES = {
@@ -304,6 +307,149 @@ def test_selected_storage_table_export_restores_enums_data_and_json_check(
         restored_row = restored_rows[0]
         assert tuple(restored_row[1:]) == expected_row
         assert constraint_exists(connection, schema, table, check_name)
+
+
+def test_full_export_import_preserves_data_gap_recovery_enum_registrations(
+    postgres_schema: tuple[Engine, str], tmp_path: Path
+) -> None:
+    engine, schema = postgres_schema
+    dump_file = tmp_path / "full.sql"
+
+    with engine.begin() as connection:
+        connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        connection.execute(
+            text(
+                "ALTER TABLE paper_orders ADD COLUMN side varchar(10) NOT NULL DEFAULT 'buy', "
+                "ADD COLUMN status varchar(30) NOT NULL, "
+                "ADD COLUMN validity_status varchar(20), "
+                "ADD COLUMN market varchar(20) NOT NULL DEFAULT 'a_share'"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE paper_trades ADD COLUMN side varchar(10) NOT NULL DEFAULT 'buy', "
+                "ADD COLUMN market varchar(20) NOT NULL DEFAULT 'a_share'"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE paper_trade_validity_checks ADD COLUMN side varchar(10) NOT NULL DEFAULT 'buy', "
+                "ADD COLUMN status varchar(20) NOT NULL DEFAULT 'valid', "
+                "ADD COLUMN data_granularity varchar(20) NOT NULL DEFAULT 'daily', "
+                "ADD COLUMN market varchar(20) NOT NULL DEFAULT 'a_share'"
+            )
+        )
+        connection.execute(text("ALTER TABLE paper_orders ALTER COLUMN side DROP DEFAULT"))
+        connection.execute(text("ALTER TABLE paper_orders ALTER COLUMN status DROP DEFAULT"))
+        connection.execute(text("ALTER TABLE paper_trades ALTER COLUMN side DROP DEFAULT"))
+        connection.execute(text("ALTER TABLE paper_trade_validity_checks ALTER COLUMN side DROP DEFAULT"))
+        connection.execute(text("ALTER TABLE paper_trade_validity_checks ALTER COLUMN status DROP DEFAULT"))
+        for statement in (
+            "CREATE INDEX ix_paper_orders_status ON paper_orders (status)",
+            "CREATE INDEX ix_paper_orders_validity_status ON paper_orders (validity_status)",
+            "CREATE INDEX ix_paper_orders_market ON paper_orders (market)",
+            "CREATE INDEX ix_paper_trades_market ON paper_trades (market)",
+            "CREATE INDEX ix_paper_trade_validity_checks_status ON paper_trade_validity_checks (status)",
+            "CREATE INDEX ix_paper_trade_validity_checks_market ON paper_trade_validity_checks (market)",
+        ):
+            connection.execute(text(statement))
+        enum_types = {
+            column.type
+            for table in Base.metadata.sorted_tables
+            for column in table.columns
+            if isinstance(column.type, SqlAlchemyEnum)
+        }
+        for enum_type in enum_types:
+            enum_type.create(connection, checkfirst=True)
+        Base.metadata.create_all(connection, checkfirst=True)
+        _ensure_recovery_append_only(connection)
+        migrate_paper_trading_enums(connection)
+
+    exported = _run_script(
+        "db_export.sh",
+        ["--service", "test_db", "--no-gzip", "--schema", schema, "--out", str(dump_file)],
+    )
+    assert exported.returncode == 0, exported.stderr
+    dump = dump_file.read_text(encoding="utf-8")
+    assert 'CREATE TYPE "' + schema + '"."paper_data_gap_recovery_status"' in dump
+    assert f"-- Name: paper_data_gap_recovery_gaps; Type: TABLE; Schema: {schema};" in dump
+
+    imported = _run_script(
+        "db_import.sh",
+        ["--service", "test_db", "--clean", "--schema", schema, "--in", str(dump_file)],
+    )
+    assert imported.returncode == 0, imported.stderr
+    with engine.connect() as connection:
+        assert enum_type_exists(connection, schema, "paper_data_gap_recovery_status")
+        assert enum_labels(connection, schema, "paper_data_gap_recovery_status") == (
+            "open",
+            "recovered",
+            "escalated",
+            "permanently_unresolved",
+        )
+        assert table_exists(connection, schema, "paper_data_gap_recovery_gaps")
+
+
+def test_full_export_import_preserves_recovery_append_only_triggers(
+    postgres_schema: tuple[Engine, str], tmp_path: Path
+) -> None:
+    engine, schema = postgres_schema
+    dump_file = tmp_path / "recovery.sql"
+    with engine.begin() as connection:
+        connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        connection.execute(text("CREATE TABLE paper_data_gap_recovery_candidates (id integer primary key)"))
+        connection.execute(
+            text(
+                "CREATE OR REPLACE FUNCTION paper_data_gap_recovery_candidates_append_only() "
+                "RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'append-only'; END; $$"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TRIGGER paper_data_gap_recovery_candidates_append_only "
+                "BEFORE UPDATE OR DELETE ON paper_data_gap_recovery_candidates "
+                "FOR EACH ROW EXECUTE FUNCTION paper_data_gap_recovery_candidates_append_only()"
+            )
+        )
+    exported = _run_script(
+        "db_export.sh", ["--service", "test_db", "--no-gzip", "--schema", schema, "--out", str(dump_file)]
+    )
+    assert exported.returncode == 0, exported.stderr
+    dump = dump_file.read_text(encoding="utf-8")
+    assert "CREATE OR REPLACE FUNCTION" in dump
+    imported = _run_script(
+        "db_import.sh", ["--service", "test_db", "--clean", "--schema", schema, "--in", str(dump_file)]
+    )
+    assert imported.returncode == 0, imported.stderr
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_trigger "
+                "WHERE tgname = 'paper_data_gap_recovery_candidates_append_only')"
+            )
+        ).scalar_one()
+
+
+def test_plain_metadata_subset_create_does_not_install_recovery_triggers(
+    postgres_schema: tuple[Engine, str],
+) -> None:
+    engine, schema = postgres_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        Base.metadata.create_all(connection, tables=[User.__table__])
+        trigger_names = (
+            connection.execute(
+                text(
+                    "SELECT tgname FROM pg_trigger AS trigger "
+                    "JOIN pg_class AS table_ ON table_.oid = trigger.tgrelid "
+                    "WHERE NOT trigger.tgisinternal AND table_.relname LIKE 'paper_data_gap_recovery_%'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert trigger_names == []
 
 
 def test_monitor_notifications_export_restores_foreign_key_and_pending_row(

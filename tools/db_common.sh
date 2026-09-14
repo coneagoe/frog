@@ -60,6 +60,13 @@ BUSINESS_TABLES=(
   daily_bar_diagnostics
   paper_valuation_gaps
   paper_etf_eligibility
+  paper_data_gap_recovery_gaps
+  paper_data_gap_recovery_candidates
+  paper_data_gap_recovery_attempts
+  paper_data_gap_recovery_approvals
+  paper_data_gap_recovery_accounts
+  paper_data_gap_recovery_batches
+  paper_data_gap_recovery_alerts
 )
 
 BUSINESS_ENUM_TYPES=(
@@ -97,7 +104,71 @@ BUSINESS_ENUM_TYPES=(
   daily_bar_diagnostic_classification
   ssf_change_signal_status
   forecast_snapshot_status
+  paper_data_gap_recovery_status
+  paper_data_gap_recovery_attempt_outcome
+  paper_data_gap_recovery_approval_decision
+  paper_data_gap_recovery_account_status
+  paper_data_gap_recovery_batch_status
+  paper_data_gap_recovery_alert_delivery_state
 )
+
+RECOVERY_APPEND_ONLY_TABLES=(
+  paper_data_gap_recovery_candidates
+  paper_data_gap_recovery_attempts
+  paper_data_gap_recovery_approvals
+  paper_data_gap_recovery_batches
+  paper_data_gap_recovery_alerts
+)
+# Recovery append-only functions are emitted as executable DDL by db_export.sh.
+# Names include paper_data_gap_recovery_candidates_append_only and its peers.
+
+recovery_append_only_tables() {
+  local schema="$1"
+  local table_name="$2"
+  local query_executor="$3"
+  local schema_literal="${schema//\'/\'\'}"
+  local table_filter=""
+  local recovery_table_literals=()
+  local recovery_table_list
+  local recovery_table
+
+  for recovery_table in "${RECOVERY_APPEND_ONLY_TABLES[@]}"; do
+    recovery_table_literals+=("'${recovery_table//\'/\'\'}'")
+  done
+  recovery_table_list=$(IFS=,; printf '%s' "${recovery_table_literals[*]}")
+
+  if [[ -n "$table_name" ]]; then
+    local table_literal="${table_name//\'/\'\'}"
+    table_filter=" AND class.relname = '${table_literal}'"
+  fi
+
+  "$query_executor" "SELECT class.relname FROM pg_class AS class JOIN pg_namespace AS namespace ON namespace.oid = class.relnamespace WHERE namespace.nspname = '${schema_literal}' AND class.relkind IN ('r', 'p') AND class.relname IN (${recovery_table_list})${table_filter} ORDER BY class.relname;"
+}
+
+write_recovery_append_only_functions() {
+  local schema="$1"
+  local table_name="$2"
+  local query_executor="$3"
+  local table
+
+  while IFS= read -r table; do
+    [[ -z "$table" ]] && continue
+    printf 'CREATE OR REPLACE FUNCTION "%s"."%s_append_only"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION '\''append-only evidence cannot be changed'\''; END; $$;\n' "$schema" "$table"
+  done < <(recovery_append_only_tables "$schema" "$table_name" "$query_executor")
+}
+
+write_recovery_append_only_triggers() {
+  local schema="$1"
+  local table_name="$2"
+  local query_executor="$3"
+  local table
+
+  while IFS= read -r table; do
+    [[ -z "$table" ]] && continue
+    printf 'DROP TRIGGER IF EXISTS "%s_append_only" ON "%s"."%s";\n' "$table" "$schema" "$table"
+    printf 'CREATE TRIGGER "%s_append_only" BEFORE UPDATE OR DELETE ON "%s"."%s" FOR EACH ROW EXECUTE FUNCTION "%s"."%s_append_only"();\n' "$table" "$schema" "$table" "$schema" "$table"
+  done < <(recovery_append_only_tables "$schema" "$table_name" "$query_executor")
+}
 
 business_enum_is_needed() {
   local type_name="$1"
@@ -107,6 +178,9 @@ business_enum_is_needed() {
 
   case "$type_name:$table_name" in
     monitor_notification_delivery_state:monitor_notifications)
+      return 0
+      ;;
+    paper_data_gap_recovery_status:paper_data_gap_recovery_gaps|paper_data_gap_recovery_attempt_outcome:paper_data_gap_recovery_attempts|paper_data_gap_recovery_approval_decision:paper_data_gap_recovery_approvals|paper_data_gap_recovery_account_status:paper_data_gap_recovery_accounts|paper_data_gap_recovery_batch_status:paper_data_gap_recovery_batches|paper_data_gap_recovery_alert_delivery_state:paper_data_gap_recovery_alerts|paper_market:paper_data_gap_recovery_gaps|daily_bar_diagnostic_adjust:paper_data_gap_recovery_gaps)
       return 0
       ;;
     paper_account_status:paper_accounts|paper_fee_preset:paper_accounts|paper_cash_event_type:paper_cash_ledger|paper_replay_time_provenance:paper_cash_ledger|paper_corporate_action_type:paper_corporate_actions|paper_corporate_action_processing_status:paper_corporate_actions|paper_replay_time_provenance:paper_corporate_actions|paper_order_side:paper_orders|paper_order_side:paper_trades|paper_order_side:paper_trade_validity_checks|paper_order_status:paper_orders|paper_order_event_type:paper_order_events|paper_replay_time_provenance:paper_order_events|paper_trade_validity_status:paper_orders|paper_trade_validity_status:paper_trade_validity_checks|paper_market:paper_orders|paper_market:paper_positions|paper_market:paper_position_lots|paper_market:paper_trades|paper_market:paper_trade_validity_checks|paper_market:paper_corporate_actions|paper_replay_time_provenance:paper_trades|paper_position_source:paper_positions|paper_position_source:paper_position_lots|paper_round_trip_status:paper_position_round_trips|paper_trade_validity_granularity:paper_trade_validity_checks|paper_pending_settlement_source:paper_pending_settlement|paper_ledger_rebuild_status:paper_ledger_rebuilds|paper_matching_run_status:paper_matching_runs|paper_etf_eligibility_status:paper_etf_eligibility|paper_snapshot_point_type:paper_account_snapshots|paper_snapshot_quality_status:paper_account_snapshots|paper_snapshot_valuation_quality:paper_account_snapshots|paper_replay_time_provenance:paper_account_snapshots|paper_account_migration_repair_reason:paper_accounts|monitor_market:stock_monitor_targets|monitor_market:forecast_ssf_candidates|monitor_frequency:stock_monitor_targets|monitor_reset_mode:stock_monitor_targets|monitor_evaluation_error_kind:stock_monitor_targets|forecast_ssf_candidate_state:forecast_ssf_candidates|blackroom_market:blackroom_records|blackroom_source:blackroom_records|daily_bar_diagnostic_adjust:daily_bar_diagnostics|daily_bar_diagnostic_classification:daily_bar_diagnostics|ssf_change_signal_status:ssf_change_signals|forecast_snapshot_status:forecast_snapshot_runs)

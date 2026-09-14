@@ -6,12 +6,19 @@ from enum import StrEnum
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Connection
+from sqlalchemy.schema import CreateTable
 
 from paper_trading.domain.enums import (
     AccountStatus,
     CashEventType,
     CorporateActionProcessingStatus,
     CorporateActionType,
+    DataGapRecoveryAccountStatus,
+    DataGapRecoveryAlertDeliveryState,
+    DataGapRecoveryApprovalDecision,
+    DataGapRecoveryAttemptOutcome,
+    DataGapRecoveryBatchStatus,
+    DataGapRecoveryStatus,
     ETFEligibilityStatus,
     FeePreset,
     LedgerRebuildStatus,
@@ -32,6 +39,7 @@ from paper_trading.domain.enums import (
     TradeValidityStatus,
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
+from storage.enum_migration import ensure_daily_bar_diagnostic_adjust_type
 from storage.model import (
     AuthToken,
     Base,
@@ -41,6 +49,13 @@ from storage.model import (
     PaperAccountSnapshot,
     PaperCashLedger,
     PaperCorporateAction,
+    PaperDataGapRecoveryAccount,
+    PaperDataGapRecoveryAlert,
+    PaperDataGapRecoveryApproval,
+    PaperDataGapRecoveryAttempt,
+    PaperDataGapRecoveryBatch,
+    PaperDataGapRecoveryCandidate,
+    PaperDataGapRecoveryGap,
     PaperLedgerRebuild,
     PaperMatchingRun,
     PaperOrder,
@@ -54,6 +69,7 @@ from storage.model import (
     User,
 )
 from storage.model.paper_trading import (
+    DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL,
     ETF_ELIGIBILITY_SYMBOL_CHECK_NAME,
     ETF_ELIGIBILITY_SYMBOL_CHECK_SQL,
     PaperPendingSettlement,
@@ -402,6 +418,44 @@ PAPER_TRADING_ENUM_GROUPS = (
         _labels(MigrationRepairReason),
         (_column("paper_accounts", "migration_repair_reason", "VARCHAR(40)", nullable=True),),
     ),
+    PaperTradingEnumGroup(
+        "paper_data_gap_recovery_status",
+        _labels(DataGapRecoveryStatus),
+        (
+            _column(
+                "paper_data_gap_recovery_gaps",
+                "status",
+                "VARCHAR(40)",
+                "'open'",
+                indexes=(_index("ix_paper_data_gap_recovery_gaps_status", "paper_data_gap_recovery_gaps", "status"),),
+            ),
+        ),
+    ),
+    PaperTradingEnumGroup(
+        "paper_data_gap_recovery_attempt_outcome",
+        _labels(DataGapRecoveryAttemptOutcome),
+        (_column("paper_data_gap_recovery_attempts", "outcome", "VARCHAR(40)"),),
+    ),
+    PaperTradingEnumGroup(
+        "paper_data_gap_recovery_approval_decision",
+        _labels(DataGapRecoveryApprovalDecision),
+        (_column("paper_data_gap_recovery_approvals", "decision", "VARCHAR(40)"),),
+    ),
+    PaperTradingEnumGroup(
+        "paper_data_gap_recovery_account_status",
+        _labels(DataGapRecoveryAccountStatus),
+        (_column("paper_data_gap_recovery_accounts", "status", "VARCHAR(40)", "'pending'"),),
+    ),
+    PaperTradingEnumGroup(
+        "paper_data_gap_recovery_batch_status",
+        _labels(DataGapRecoveryBatchStatus),
+        (_column("paper_data_gap_recovery_batches", "status", "VARCHAR(40)"),),
+    ),
+    PaperTradingEnumGroup(
+        "paper_data_gap_recovery_alert_delivery_state",
+        _labels(DataGapRecoveryAlertDeliveryState),
+        (_column("paper_data_gap_recovery_alerts", "delivery_state", "VARCHAR(40)", "'pending'"),),
+    ),
 )
 
 _GOVERNED_TABLES = (
@@ -421,6 +475,13 @@ _GOVERNED_TABLES = (
     PaperAccountSnapshot.__table__,
     PaperValuationGap.__table__,
     ETFEligibility.__table__,
+    PaperDataGapRecoveryGap.__table__,
+    PaperDataGapRecoveryCandidate.__table__,
+    PaperDataGapRecoveryAttempt.__table__,
+    PaperDataGapRecoveryApproval.__table__,
+    PaperDataGapRecoveryAccount.__table__,
+    PaperDataGapRecoveryBatch.__table__,
+    PaperDataGapRecoveryAlert.__table__,
 )
 _OPTIONAL_GOVERNED_TABLES = (DailyBarDiagnostic.__table__,)
 _MARKET_COLUMNS_REMOVED_ON_ROLLBACK = {"paper_position_round_trips", "daily_bar_diagnostics"}
@@ -432,7 +493,30 @@ _OPERATIONAL_TABLES = (
     PaperValuationGap.__table__,
     ETFEligibility.__table__,
 )
-_ADDITIVE_GOVERNED_TABLES = frozenset({tb_name_paper_corporate_actions, tb_name_paper_order_events})
+_ADDITIVE_GOVERNED_TABLES = frozenset(
+    {
+        tb_name_paper_corporate_actions,
+        tb_name_paper_order_events,
+        "paper_data_gap_recovery_gaps",
+        "paper_data_gap_recovery_candidates",
+        "paper_data_gap_recovery_attempts",
+        "paper_data_gap_recovery_approvals",
+        "paper_data_gap_recovery_accounts",
+        "paper_data_gap_recovery_batches",
+        "paper_data_gap_recovery_alerts",
+    }
+)
+_RECOVERY_GOVERNED_TABLES = frozenset(
+    {
+        "paper_data_gap_recovery_gaps",
+        "paper_data_gap_recovery_candidates",
+        "paper_data_gap_recovery_attempts",
+        "paper_data_gap_recovery_approvals",
+        "paper_data_gap_recovery_accounts",
+        "paper_data_gap_recovery_batches",
+        "paper_data_gap_recovery_alerts",
+    }
+)
 _ENUM_PREDICATE = re.compile(r"status\s*=\s*'running'\s*::\s*paper_matching_run_status", re.IGNORECASE)
 _LEGACY_PREDICATE = re.compile(r"status.*=.*'running'", re.IGNORECASE)
 _SNAPSHOT_ENUM_TYPES = frozenset({"paper_snapshot_point_type", "paper_snapshot_quality_status"})
@@ -530,6 +614,7 @@ def _result(
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     groups = PAPER_TRADING_ENUM_GROUPS
+    _preflight_recovery_schema(connection, rollback=rollback)
     missing_tables = _preflight(connection, groups, rollback=rollback)
     if not rollback and _table_exists(connection, tb_name_paper_etf_eligibility):
         _validate_etf_eligibility_symbols(connection)
@@ -552,19 +637,226 @@ def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
         _preflight_etf_commission_rate_rollback(connection)
 
 
+def _preflight_recovery_schema(connection: Connection, *, rollback: bool) -> None:
+    """Do not turn a partial recovery schema into a falsely complete one."""
+    if rollback or connection.dialect.name != "postgresql":
+        return
+    required = {
+        "paper_data_gap_recovery_gaps": {
+            "id",
+            "business_date",
+            "market",
+            "stock_id",
+            "adjust",
+            "status",
+            "first_observed_at",
+            "last_observed_at",
+            "resolved_at",
+            "latest_candidate_hash",
+            "summary",
+        },
+        "paper_data_gap_recovery_candidates": {
+            "gap_id",
+            "candidate_hash",
+            "payload",
+            "validation",
+            "source",
+            "created_at",
+        },
+        "paper_data_gap_recovery_attempts": {"id", "gap_id", "batch_id", "outcome", "evidence", "created_at"},
+        "paper_data_gap_recovery_approvals": {
+            "id",
+            "gap_id",
+            "decision",
+            "candidate_hash",
+            "approver_user_id",
+            "approver_snapshot",
+            "created_at",
+        },
+        "paper_data_gap_recovery_accounts": {"id", "gap_id", "account_id", "status", "summary", "updated_at"},
+        "paper_data_gap_recovery_batches": {
+            "id",
+            "status",
+            "download_id",
+            "cutoff",
+            "finished_at",
+            "gap_count",
+            "recovered_count",
+            "failed_count",
+            "summary",
+            "created_at",
+        },
+        "paper_data_gap_recovery_alerts": {"id", "gap_id", "cycle_key", "evidence", "delivery_state", "created_at"},
+    }
+    present = {name for name in required if _table_exists(connection, name)}
+    if not present:
+        return
+    missing: dict[str, set[str]] = {}
+    for table_name in present:
+        rows = connection.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = :table"
+            ),
+            {"table": table_name},
+        ).scalars()
+        absent = required[table_name] - set(rows)
+        if absent:
+            missing[table_name] = absent
+    if missing:
+        raise PaperTradingEnumMigrationError(f"incomplete recovery schema; migration refused: {missing}")
+    _validate_recovery_constraints(connection)
+    _validate_recovery_append_only(connection)
+
+
+def _validate_recovery_constraints(connection: Connection) -> None:
+    expected = {
+        "paper_data_gap_recovery_gaps": (("id",), ("business_date", "market", "stock_id", "adjust")),
+        "paper_data_gap_recovery_candidates": (("gap_id", "candidate_hash"),),
+        "paper_data_gap_recovery_attempts": (("id",),),
+        "paper_data_gap_recovery_approvals": (("id",),),
+        "paper_data_gap_recovery_accounts": (("id",), ("gap_id", "account_id")),
+        "paper_data_gap_recovery_batches": (("id",),),
+        "paper_data_gap_recovery_alerts": (("id",), ("gap_id", "cycle_key")),
+    }
+    for table_name, keys in expected.items():
+        observed = set(
+            tuple(columns)
+            for columns in connection.execute(
+                text(
+                    "SELECT array_agg(attribute.attname ORDER BY key.ordinality) "
+                    "FROM pg_constraint con "
+                    "JOIN unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true "
+                    "JOIN pg_attribute attribute ON attribute.attrelid = con.conrelid "
+                    "AND attribute.attnum = key.attnum "
+                    "WHERE con.conrelid = CAST(:table_name AS regclass) "
+                    "AND con.contype IN ('p', 'u') GROUP BY con.oid"
+                ),
+                {"table_name": table_name},
+            ).scalars()
+        )
+        if not set(keys) <= observed:
+            raise PaperTradingEnumMigrationError(
+                f"incomplete recovery schema; migration refused: invalid keys on {table_name}"
+            )
+    expected_checks = {
+        "paper_data_gap_recovery_gaps": {
+            "ck_paper_data_gap_recovery_a_share",
+            "ck_paper_data_gap_recovery_bfq",
+            "ck_paper_data_gap_recovery_stock_id_six_ascii_digits",
+        }
+    }
+    expected_check_definitions = {
+        "ck_paper_data_gap_recovery_a_share": "market = 'a_share'",
+        "ck_paper_data_gap_recovery_bfq": "adjust = 'bfq'",
+        "ck_paper_data_gap_recovery_stock_id_six_ascii_digits": DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL,
+    }
+    for table_name, constraint_names in expected_checks.items():
+        observed_checks = {
+            str(name): str(definition)
+            for name, definition in connection.execute(
+                text(
+                    "SELECT conname, pg_get_constraintdef(con.oid) FROM pg_constraint con "
+                    "WHERE conrelid = CAST(:table_name AS regclass) AND con.contype = 'c'"
+                ),
+                {"table_name": table_name},
+            )
+        }
+        if not constraint_names <= observed_checks.keys() or any(
+            not _recovery_check_definition_matches(observed_checks[name], expected_check_definitions[name])
+            for name in constraint_names
+        ):
+            raise PaperTradingEnumMigrationError(
+                f"incomplete recovery schema; migration refused: invalid checks on {table_name}"
+            )
+    foreign_keys = {
+        ("paper_data_gap_recovery_candidates", ("gap_id",), "paper_data_gap_recovery_gaps"),
+        ("paper_data_gap_recovery_attempts", ("gap_id",), "paper_data_gap_recovery_gaps"),
+        ("paper_data_gap_recovery_attempts", ("batch_id",), "paper_data_gap_recovery_batches"),
+        ("paper_data_gap_recovery_approvals", ("gap_id",), "paper_data_gap_recovery_gaps"),
+        ("paper_data_gap_recovery_approvals", ("gap_id", "candidate_hash"), "paper_data_gap_recovery_candidates"),
+        ("paper_data_gap_recovery_approvals", ("approver_user_id",), "users"),
+        ("paper_data_gap_recovery_accounts", ("gap_id",), "paper_data_gap_recovery_gaps"),
+        ("paper_data_gap_recovery_accounts", ("account_id",), "paper_accounts"),
+        ("paper_data_gap_recovery_alerts", ("gap_id",), "paper_data_gap_recovery_gaps"),
+    }
+    for table_name, columns, target_table in foreign_keys:
+        actual = connection.execute(
+            text(
+                "SELECT array_agg(source.attname ORDER BY key.ordinality), target_table.relname "
+                "FROM pg_constraint con "
+                "JOIN unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true "
+                "JOIN pg_attribute source ON source.attrelid = con.conrelid AND source.attnum = key.attnum "
+                "JOIN pg_class target_table ON target_table.oid = con.confrelid "
+                "WHERE con.conrelid = CAST(:table_name AS regclass) AND con.contype = 'f' "
+                "GROUP BY con.oid, target_table.relname"
+            ),
+            {"table_name": table_name},
+        ).all()
+        if (list(columns), target_table) not in actual:
+            raise PaperTradingEnumMigrationError(
+                f"incomplete recovery schema; migration refused: invalid foreign keys on {table_name}"
+            )
+
+
+def _normalize_recovery_check_definition(definition: str) -> str:
+    normalized = _normalize_expression(definition).removeprefix("check")
+    normalized = re.sub(r"::[a-z_]+", "", normalized)
+    return normalized.replace("(", "").replace(")", "")
+
+
+def _recovery_check_definition_matches(observed: str, expected: str) -> bool:
+    observed_normalized = _normalize_recovery_check_definition(observed)
+    expected_normalized = _normalize_recovery_check_definition(expected)
+    if observed_normalized == expected_normalized:
+        return True
+    return expected_normalized.startswith("lengthstock_id=6andlength") and bool(
+        re.search(r"stock_id.*~.*'\^\[0-9\]\{6\}\$'", observed_normalized)
+    )
+
+
+def _validate_recovery_append_only(connection: Connection) -> None:
+    for table_name in (
+        "paper_data_gap_recovery_candidates",
+        "paper_data_gap_recovery_attempts",
+        "paper_data_gap_recovery_approvals",
+        "paper_data_gap_recovery_batches",
+        "paper_data_gap_recovery_alerts",
+    ):
+        trigger_name = f"{table_name}_append_only"
+        found = connection.execute(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_trigger trigger "
+                "JOIN pg_class table_class ON table_class.oid = trigger.tgrelid "
+                "JOIN pg_proc function ON function.oid = trigger.tgfoid "
+                "WHERE table_class.relnamespace = current_schema()::regnamespace "
+                "AND table_class.relname = :table_name AND trigger.tgname = :trigger_name "
+                "AND function.proname = :trigger_name AND NOT trigger.tgisinternal)"
+            ),
+            {"table_name": table_name, "trigger_name": trigger_name},
+        ).scalar_one()
+        if not found:
+            raise PaperTradingEnumMigrationError(
+                f"incomplete recovery schema; migration refused: missing append-only trigger {trigger_name}"
+            )
+
+
 def _adapter_apply(connection: Connection) -> bool:
     groups = PAPER_TRADING_ENUM_GROUPS
     _adapter_preflight(connection, rollback=False)
     missing_tables = _preflight(connection, groups, rollback=False)
-    changed = bool(missing_tables) or _has_pending_enum_column_changes(connection, groups)
+    # Daily-bar diagnostics is governed by the shared storage migration and is
+    # intentionally excluded from this adapter's table creation.
+    creatable_missing_tables = missing_tables - {DailyBarDiagnostic.__table__.name}
+    changed = bool(creatable_missing_tables) or _has_pending_enum_column_changes(connection, groups)
     changed = _ensure_etf_eligibility_symbol_check(connection) or changed
-    if missing_tables:
+    if creatable_missing_tables:
         _ensure_auth_tables(connection)
         for group in groups:
             _create_type(connection, group)
         _create_missing_tables(
             connection,
-            missing_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES},
+            creatable_missing_tables - {table.name for table in _OPTIONAL_GOVERNED_TABLES},
             create_operational_tables=groups is PAPER_TRADING_ENUM_GROUPS,
         )
         _add_market_columns(connection)
@@ -576,6 +868,7 @@ def _adapter_apply(connection: Connection) -> bool:
         ensure_snapshot_valuation_metadata(connection)
         _upgrade_market_qualified_keys(connection)
         _preflight(connection, groups, rollback=False)
+        _ensure_recovery_append_only(connection)
         return True
 
     if changed:
@@ -591,7 +884,35 @@ def _adapter_apply(connection: Connection) -> bool:
     _upgrade_market_qualified_keys(connection)
     if groups is PAPER_TRADING_ENUM_GROUPS:
         _create_missing_tables(connection, set(), create_operational_tables=True)
+        _ensure_recovery_append_only(connection)
     return changed
+
+
+def _ensure_recovery_append_only(connection: Connection) -> None:
+    if connection.dialect.name != "postgresql":
+        return
+    for table_name in (
+        "paper_data_gap_recovery_candidates",
+        "paper_data_gap_recovery_attempts",
+        "paper_data_gap_recovery_approvals",
+        "paper_data_gap_recovery_batches",
+        "paper_data_gap_recovery_alerts",
+    ):
+        if not _table_exists(connection, table_name):
+            continue
+        connection.execute(
+            text(
+                f"CREATE OR REPLACE FUNCTION {table_name}_append_only() RETURNS trigger LANGUAGE plpgsql AS "
+                "$$ BEGIN RAISE EXCEPTION 'append-only evidence cannot be changed'; END; $$"
+            )
+        )
+        connection.execute(text(f"DROP TRIGGER IF EXISTS {table_name}_append_only ON {table_name}"))
+        connection.execute(
+            text(
+                f"CREATE TRIGGER {table_name}_append_only BEFORE UPDATE OR DELETE ON {table_name} "
+                f"FOR EACH ROW EXECUTE FUNCTION {table_name}_append_only()"
+            )
+        )
 
 
 def _adapter_verify(connection: Connection, *, rollback: bool) -> None:
@@ -671,7 +992,15 @@ def _adapter_audit(connection: Connection, *, rollback: bool):
                     None if ready else "incompatible column catalog facts",
                 )
             )
-        dependencies = _type_dependencies(connection, group) if rollback and observed_labels else ()
+        dependencies = (
+            tuple(
+                dependency
+                for dependency in _type_dependencies(connection, group)
+                if not any(f"table {table_name}" in dependency for table_name in _ADDITIVE_GOVERNED_TABLES)
+            )
+            if rollback and observed_labels
+            else ()
+        )
         ready = observed_labels in ((), group.labels) and all(column.ready for column in columns) and not dependencies
         groups.append(
             EnumGovernanceGroupAudit(
@@ -792,13 +1121,21 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
                 continue
             facts = _column_facts(connection, column)
             if facts is None:
-                if not rollback and _is_addable_missing_column(group, column):
+                if (not rollback and _is_addable_missing_column(group, column)) or (
+                    rollback
+                    and group.type_name == "paper_market"
+                    and column.table_name in _MARKET_COLUMNS_REMOVED_ON_ROLLBACK
+                ):
                     continue
                 raise PaperTradingEnumMigrationError(
                     f"{group.type_name}: missing {column.table_name}.{column.column_name}"
                 )
             type_name, nullable = facts
-            expected = group.type_name if rollback else _normalized_type(column.legacy_type_sql)
+            expected = (
+                group.type_name
+                if rollback and _enum_labels(connection, group.type_name)
+                else _normalized_type(column.legacy_type_sql)
+            )
             if rollback:
                 valid = type_name == expected
             else:
@@ -812,7 +1149,7 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
             if rollback and group.type_name == "paper_market":
                 _validate_values(connection, _legacy_market_group(group), column)
             enum_typed = type_name == group.type_name
-            _validate_indexes(connection, column, enum_typed=rollback or enum_typed)
+            _validate_indexes(connection, column, enum_typed=enum_typed)
             _validate_default(connection, group, column, rollback=not enum_typed)
         if rollback and labels:
             dependencies = tuple(
@@ -828,20 +1165,62 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
 def _create_missing_tables(
     connection: Connection, missing_tables: set[str], *, create_operational_tables: bool = False
 ) -> None:
+    recovery_order = (
+        "paper_data_gap_recovery_gaps",
+        "paper_data_gap_recovery_candidates",
+        "paper_data_gap_recovery_batches",
+        "paper_data_gap_recovery_attempts",
+        "paper_data_gap_recovery_approvals",
+        "paper_data_gap_recovery_accounts",
+        "paper_data_gap_recovery_alerts",
+    )
     tables = [
         table
         for table in _GOVERNED_TABLES
         if table is not DailyBarDiagnostic.__table__
         and (
-            table.name in missing_tables
+            (
+                table.name in missing_tables
+                and (
+                    table.name not in _RECOVERY_GOVERNED_TABLES
+                    or bool(_enum_labels(connection, "daily_bar_diagnostic_adjust"))
+                )
+            )
             or (
-                create_operational_tables and table in _OPERATIONAL_TABLES and not _table_exists(connection, table.name)
+                create_operational_tables
+                and (table in _OPERATIONAL_TABLES or table.name in _ADDITIVE_GOVERNED_TABLES)
+                and (
+                    table.name not in _RECOVERY_GOVERNED_TABLES
+                    or bool(_enum_labels(connection, "daily_bar_diagnostic_adjust"))
+                )
+                and not _table_exists(connection, table.name)
             )
         )
     ]
+    if create_operational_tables:
+        recovery_table_names = set(recovery_order)
+        tables.extend(
+            table
+            for table in _GOVERNED_TABLES
+            if table.name in recovery_table_names
+            and table.name not in {candidate.name for candidate in tables}
+            and not _table_exists(connection, table.name)
+        )
     if tables:
-        # Metadata creates the mapped native types and respects foreign-key order.
-        tables[0].metadata.create_all(connection, tables=tables, checkfirst=True)
+        # Create ordinary tables first because recovery accounts reference
+        # paper_accounts, then create recovery tables in FK dependency order.
+        recovery_tables = {table.name: table for table in tables if table.name in recovery_order}
+        remaining = [table for table in tables if table.name not in recovery_tables]
+        if recovery_tables:
+            ensure_daily_bar_diagnostic_adjust_type(connection)
+        if remaining:
+            remaining[0].metadata.create_all(connection, tables=remaining, checkfirst=True)
+        for table_name in recovery_order:
+            table = recovery_tables.get(table_name)
+            if table is not None:
+                connection.execute(CreateTable(table, if_not_exists=True))
+                for index in table.indexes:
+                    index.create(connection, checkfirst=True)
 
 
 def _ensure_auth_tables(connection: Connection) -> None:
@@ -1285,7 +1664,7 @@ def _restore_legacy_market_qualified_keys(connection: Connection) -> None:
     ):
         connection.execute(text("ALTER TABLE daily_bar_diagnostics DROP COLUMN market"))
     if _table_exists(connection, "paper_position_round_trips"):
-        connection.execute(text("ALTER TABLE paper_position_round_trips DROP COLUMN market"))
+        connection.execute(text("ALTER TABLE paper_position_round_trips DROP COLUMN IF EXISTS market"))
 
 
 def _constraint_exists(connection: Connection, table_name: str, constraint_name: str) -> bool:

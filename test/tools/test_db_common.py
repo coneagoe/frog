@@ -80,6 +80,51 @@ def test_business_enum_types_include_paper_order_event_type_and_replay_provenanc
     } <= _parse_business_enum_types()
 
 
+def test_business_tables_and_enum_types_register_data_gap_recovery():
+    assert {
+        "paper_data_gap_recovery_gaps",
+        "paper_data_gap_recovery_candidates",
+        "paper_data_gap_recovery_attempts",
+        "paper_data_gap_recovery_approvals",
+        "paper_data_gap_recovery_accounts",
+        "paper_data_gap_recovery_batches",
+        "paper_data_gap_recovery_alerts",
+    } <= _parse_business_tables()
+    assert {
+        "paper_data_gap_recovery_status",
+        "paper_data_gap_recovery_attempt_outcome",
+        "paper_data_gap_recovery_approval_decision",
+        "paper_data_gap_recovery_account_status",
+        "paper_data_gap_recovery_batch_status",
+        "paper_data_gap_recovery_alert_delivery_state",
+    } <= _parse_business_enum_types()
+
+
+def test_business_enum_is_needed_maps_data_gap_recovery_types():
+    expected = (
+        ("paper_data_gap_recovery_status", "paper_data_gap_recovery_gaps"),
+        ("paper_data_gap_recovery_attempt_outcome", "paper_data_gap_recovery_attempts"),
+        ("paper_data_gap_recovery_approval_decision", "paper_data_gap_recovery_approvals"),
+        ("paper_data_gap_recovery_account_status", "paper_data_gap_recovery_accounts"),
+        ("paper_data_gap_recovery_batch_status", "paper_data_gap_recovery_batches"),
+        ("paper_data_gap_recovery_alert_delivery_state", "paper_data_gap_recovery_alerts"),
+    )
+    for type_name, table_name in expected:
+        assert _business_enum_is_needed(type_name, table_name)
+
+
+def test_selected_gap_export_includes_shared_market_and_adjust_enums():
+    assert _business_enum_is_needed("paper_market", "paper_data_gap_recovery_gaps")
+    assert _business_enum_is_needed("daily_bar_diagnostic_adjust", "paper_data_gap_recovery_gaps")
+
+
+def test_db_common_declares_recovery_append_only_ddl_contract():
+    content = DB_COMMON_PATH.read_text(encoding="utf-8")
+    assert "paper_data_gap_recovery_candidates_append_only" in content
+    assert "CREATE OR REPLACE FUNCTION" in content
+    assert "CREATE TRIGGER" in content
+
+
 def test_business_enum_is_needed_maps_order_event_and_replay_provenance_types():
     assert _business_enum_is_needed("paper_order_event_type", "paper_order_events")
     for table_name in (

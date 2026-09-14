@@ -32,7 +32,7 @@ def _create_paper_trading_tables(connection: Connection) -> None:
             "VALUES ('migration-owner@example.com', 'test-hash', NOW())"
         )
     )
-    tables = list(_GOVERNED_TABLES)
+    tables = [table for table in _GOVERNED_TABLES if not table.name.startswith("paper_data_gap_recovery_")]
     enum_types = {
         column.type for table in tables for column in table.columns if isinstance(column.type, SqlAlchemyEnum)
     }

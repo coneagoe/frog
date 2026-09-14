@@ -484,10 +484,12 @@ def test_global_migration_bootstraps_empty_schema_without_partial_storage_domain
         connection.execute(text(f'SET search_path TO "{schema}"'))
 
         result = migrate_enums(connection)
+        second_result = migrate_enums(connection)
 
         expected_types = {group.type_name for group in _all_enum_groups()}
         expected_tables = {column.table_name for group in _all_enum_groups() for column in group.columns}
         assert result.converted is True
+        assert second_result.converted is False
         assert connection.execute(text("SELECT to_regclass('users')")).scalar_one() == "users"
         assert connection.execute(text("SELECT to_regclass('auth_tokens')")).scalar_one() == "auth_tokens"
         assert _all_managed_enum_types(connection) == expected_types

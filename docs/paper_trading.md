@@ -612,6 +612,23 @@ Analytics reports valuation gaps separately in date order through `valuation_gap
 
 日线历史 DAG 对缺失或失败的 BFQ/HFQ 下载记录 provider 结果；汇总警告仍允许模拟交易匹配继续执行，只有致命的汇总失败会阻止匹配。
 
+### A 股 BFQ 精确日期缺口运维查询（Issue #112）
+
+数据缺口恢复记录目前只覆盖 A 股 BFQ 的**精确业务日期**缺口（`market=a_share`、`adjust=bfq`）。缺口主记录及账户汇总是可变状态，用于表示当前状态、最近观察时间和最新汇总；candidate、attempt、approval、batch、alert 是追加写入的证据，保留每次候选、尝试、审批、批次和告警的历史，不应将它们当作可变的当前状态表。
+
+运维和审计只使用以下只读 GET API：
+
+```text
+GET /paper/data-gap-recovery/gaps
+GET /paper/data-gap-recovery/gaps/{id}
+GET /paper/data-gap-recovery/batches
+GET /paper/data-gap-recovery/batches/{id}
+```
+
+列表接口使用 `offset`（默认 `0`）和 `page_size`（默认 `50`，最大 `200`）分页。`/gaps` 还支持 `status`、`business_date`、六位 `stock_id` 过滤；`/batches` 支持 `status` 过滤。详情响应包含关联的 evidence 集合，适合核对缺口当前汇总与追加证据链。请求必须使用已登录的浏览器 session cookie，或受信任自动化使用 `Authorization: Bearer $PAPER_TRADING_API_TOKEN`；不要把 Bearer token 放入浏览器代码或日志。
+
+该查询面不提供 approval mutation，也不执行 recovery；审批变更和恢复执行不属于这些 GET API 的能力。Issue #110 的 provider contract 仍是独立边界：本功能记录和查询缺口恢复证据，不替代或修改 provider contract。
+
 ## Query Account State
 
 ```bash
