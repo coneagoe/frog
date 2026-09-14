@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -68,6 +68,14 @@ class DataGapRecoveryRepository:
         if gap is None:
             raise KeyError(gap_id)
         gap.summary = summary
+        self.session.flush()
+
+    def resolve_gap(self, gap_id: int) -> None:
+        gap = self.session.get(PaperDataGapRecoveryGap, gap_id)
+        if gap is None:
+            raise KeyError(gap_id)
+        gap.status = DataGapRecoveryStatus.RECOVERED
+        gap.resolved_at = datetime.now(timezone.utc)
         self.session.flush()
 
     def record_candidate(
