@@ -2,6 +2,7 @@
 """DAG for downloading stock history (HFQ) on weekdays."""
 
 import json
+import logging
 import os
 import sys
 from dataclasses import asdict
@@ -45,6 +46,7 @@ from paper_trading.domain.enums import (  # noqa: E402
     DataGapRecoveryRouting,
 )
 from paper_trading.services.data_gap_recovery_service import DataGapRecoveryService  # noqa: E402
+from paper_trading.services.data_gap_alert_service import DataGapAlertService  # noqa: E402
 from paper_trading.services.ledger_rebuild_service import LedgerRebuildService  # noqa: E402
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService  # noqa: E402
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository  # noqa: E402
@@ -56,6 +58,8 @@ from stock.market import is_a_share_trade_date  # noqa: E402
 from storage import get_storage  # noqa: E402
 from tools.paper_trading_cli import run_paper_trading_ledger_rebuild  # noqa: E402
 from tools.paper_trading_cli import run_paper_trading_matching  # noqa: E402, I001
+
+logger = logging.getLogger(__name__)
 
 
 def _persist_diagnostic(storage, business_date, stock_id, adjust, outcome):
@@ -291,6 +295,7 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
     session = storage.Session()
     try:
         repository = DataGapRecoveryRepository(session)
+        approved_candidates = repository.list_pending_approved_candidates()
         diagnostics = get_unresolved_ordinary_gaps(repository=repository, business_date=business_date)
         gaps = [
             _detach_gap(
@@ -316,11 +321,16 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
         session.close()
 
     recovery_repository = _FreshSessionRecoveryRepository(storage)
+    for approved_gap, approved_hash, _payload in approved_candidates:
+        DataGapRecoveryService(repository=recovery_repository).execute_approved_gap(
+            _detach_gap(approved_gap), approved_hash
+        )
+    alert_service = DataGapAlertService(repository=recovery_repository)
     results: list[Any] = []
     try:
-        results = DataGapRecoveryService(repository=recovery_repository).recover_unresolved_ordinary_gaps(
-            gaps, batch_id=batch_id
-        )
+        results = DataGapRecoveryService(
+            repository=recovery_repository, alert_service=alert_service
+        ).recover_unresolved_ordinary_gaps(gaps, batch_id=batch_id)
         batch_status = (
             DataGapRecoveryBatchStatus.FAILED
             if any(item.status == "failed" for item in results)
@@ -367,6 +377,7 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
             end_date=business_date,
             recovery_work=recovery_work,
             storage=storage,
+            alert_service=alert_service,
         )
     )
     return recovery
@@ -381,6 +392,7 @@ def run_paper_trading_account_recovery(
     recalculate_snapshots: Any | None = None,
     recovery_work: list[dict[str, Any]] | None = None,
     storage: Any | None = None,
+    alert_service: Any | None = None,
 ) -> dict[str, Any]:
     """Recover affected accounts independently, preserving completed steps on retry.
 
@@ -499,6 +511,18 @@ def run_paper_trading_account_recovery(
                     )
                 except Exception as persist_exc:  # noqa: BLE001
                     errors[account_id] = f"{exc}; progress persistence failed: {persist_exc}"
+            if alert_service is not None:
+                for item in account_work or []:
+                    try:
+                        gap = alert_service.repository.get_gap(item["gap_id"])
+                        if gap is not None:
+                            alert_service.send_account_recovery_failure(
+                                gap, account_id=account_id, failure_class=type(exc).__name__.lower()
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "Data-gap account alert failed: gap_id=%s account_id=%s", item["gap_id"], account_id
+                        )
             continue
         recovered.append(account_id)
     result: dict[str, Any] = {"recovered_account_ids": recovered, "failed_account_ids": failed}
@@ -534,6 +558,8 @@ def _detach_gap(gap: Any) -> Any:
         market=gap.market,
         adjust=gap.adjust,
         summary=dict(getattr(gap, "summary", {}) or {}),
+        status=getattr(gap, "status", None),
+        latest_candidate_hash=getattr(gap, "latest_candidate_hash", None),
     )
 
 
@@ -559,8 +585,36 @@ class _FreshSessionRecoveryRepository:
     def record_attempt(self, *args: Any) -> Any:
         return self._call(lambda repository: repository.record_attempt(*args))
 
+    def record_candidate(self, *args: Any) -> Any:
+        return self._call(lambda repository: repository.record_candidate(*args))
+
+    def get_gap(self, gap_id: int, owner_user_id: int | None = None) -> Any:
+        return self._call(lambda repository: repository.get_gap(gap_id, owner_user_id))
+
+    def gap_evidence(self, gap_id: int, owner_user_id: int | None = None) -> dict[str, Any]:
+        result = self._call(lambda repository: repository.gap_evidence(gap_id, owner_user_id))
+        return cast(dict[str, Any], result)
+
+    def escalate_gap(
+        self,
+        gap_id: int,
+        user_id: int,
+        user_snapshot: dict[str, Any],
+        reason: str | None = None,
+    ) -> Any:
+        return self._call(lambda repository: repository.escalate_gap(gap_id, user_id, user_snapshot, reason=reason))
+
+    def claim_alert(self, gap_id: int, cycle_key: str, evidence: dict[str, Any]) -> Any:
+        return self._call(lambda repository: repository.claim_alert(gap_id, cycle_key, evidence))
+
+    def update_alert_delivery(self, alert_id: int, state: Any, metadata: dict[str, Any]) -> Any:
+        return self._call(lambda repository: repository.update_alert_delivery(alert_id, state, metadata))
+
     def resolve_gap(self, gap_id: int) -> None:
         self._call(lambda repository: repository.resolve_gap(gap_id))
+
+    def execute_approved_candidate(self, gap_id: int, candidate_hash: str, callback: Callable[..., Any]) -> Any:
+        return self._call(lambda repository: repository.execute_approved_candidate(gap_id, candidate_hash, callback))
 
     def finalize_batch(self, *args: Any, **kwargs: Any) -> Any:
         return self._call(lambda repository: repository.finalize_batch(*args, **kwargs))

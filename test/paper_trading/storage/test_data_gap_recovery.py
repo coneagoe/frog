@@ -1,10 +1,14 @@
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import numpy as np
+import pandas as pd
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from common.const import COL_AMOUNT, COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN, COL_STOCK_ID, COL_VOLUME
 from paper_trading.domain.enums import (
     DataGapRecoveryAccountStatus,
     DataGapRecoveryAlertDeliveryState,
@@ -13,7 +17,9 @@ from paper_trading.domain.enums import (
     DataGapRecoveryBatchStatus,
     DataGapRecoveryClassification,
     DataGapRecoveryRouting,
+    DataGapRecoveryStatus,
 )
+from paper_trading.services.data_gap_recovery_service import canonical_candidate_hash, canonical_candidate_payload
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
@@ -100,6 +106,140 @@ def test_candidate_hash_and_approval_binding_are_enforced(tmp_path):
             gap.id, DataGapRecoveryApprovalDecision.APPROVED, candidate.candidate_hash, None, {}
         )
         assert approval.candidate_hash == candidate.candidate_hash
+
+
+def test_record_candidate_persists_json_safe_numpy_provider_payload(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    candidate = pd.DataFrame(
+        {
+            COL_DATE: [np.datetime64("2026-01-02")],
+            COL_STOCK_ID: [np.str_("000001")],
+            COL_OPEN: [np.float64(10.0)],
+            COL_HIGH: [np.float32(11.0)],
+            COL_LOW: [np.float64(np.nan)],
+            COL_CLOSE: [np.float64(10.5)],
+            COL_VOLUME: [np.int64(100)],
+            COL_AMOUNT: [pd.NaT],
+            "decimal_value": [Decimal("1.2300")],
+        }
+    )
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        payload = canonical_candidate_payload(
+            candidate, market="a_share", stock_id="000001", business_date=date(2026, 1, 2), adjust="bfq"
+        )
+        candidate_hash = canonical_candidate_hash(payload)
+        stored = repository.record_candidate(gap.id, candidate_hash, payload, {"valid": True}, "provider")
+        assert json.loads(json.dumps(stored.payload, sort_keys=True)) == payload
+
+
+def test_locked_escalation_approval_rejection_and_reopen_preserve_evidence(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {"impact": "none"})
+        candidate = repository.record_candidate(gap.id, "a" * 64, {"order": 1}, {"ok": True}, "caller")
+        user = {"id": 7, "email": "reviewer@example.com", "role": "reviewer"}
+
+        repository.escalate_gap(gap.id, 7, user, reason="needs review")
+        repository.reject_gap(gap.id, candidate.candidate_hash, 7, user, reason="not trustworthy")
+        assert gap.status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED
+        assert gap.summary == {"impact": "none"}
+        repository.reopen_gap(gap.id, 7, user, reason="new source available")
+
+        assert gap.status == DataGapRecoveryStatus.OPEN
+        evidence = repository.gap_evidence(gap.id)
+        assert len(evidence["candidates"]) == 1
+        assert [row.decision for row in evidence["approvals"]] == [
+            DataGapRecoveryApprovalDecision.REJECTED,
+            DataGapRecoveryApprovalDecision.REOPENED,
+        ]
+        assert evidence["approvals"][0].approver_snapshot["reason"] == "not trustworthy"
+        assert evidence["approvals"][0].approver_snapshot["user_id"] == 7
+        assert evidence["approvals"][1].approver_snapshot["email"] == "reviewer@example.com"
+        assert evidence["attempts"][0].evidence == {
+            "event": "escalated",
+            "id": 7,
+            "email": "reviewer@example.com",
+            "role": "reviewer",
+            "user_id": 7,
+            "reason": "needs review",
+        }
+
+
+def test_stale_candidate_hash_invalidates_to_pending_approval_without_losing_candidate(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {"keep": True})
+        repository.record_candidate(gap.id, "a" * 64, {}, {}, "caller")
+        repository.record_candidate(gap.id, "b" * 64, {}, {}, "caller")
+        repository.escalate_gap(gap.id, 7, {"email": "reviewer@example.com"})
+
+        result = repository.approve_gap(gap.id, "a" * 64, 7, {"email": "reviewer@example.com"})
+
+        assert result is gap
+        assert gap.status == DataGapRecoveryStatus.PENDING_APPROVAL
+        assert gap.latest_candidate_hash == "b" * 64
+        assert gap.summary == {"keep": True}
+        assert len(repository.gap_evidence(gap.id)["candidates"]) == 2
+
+
+def test_transitions_reject_invalid_source_states_and_preserve_attempts(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        candidate = repository.record_candidate(gap.id, "a" * 64, {}, {}, "caller")
+        repository.escalate_gap(gap.id, 7, {"email": "r@example.com"})
+        with pytest.raises(ValueError, match="only open"):
+            repository.escalate_gap(gap.id, 7, {"email": "r@example.com"})
+        repository.reject_gap(gap.id, candidate.candidate_hash, 7, {"email": "r@example.com"})
+        with pytest.raises(ValueError, match="escalated or pending"):
+            repository.reject_gap(gap.id, candidate.candidate_hash, 7, {"email": "r@example.com"})
+        assert len(repository.gap_evidence(gap.id)["attempts"]) == 1
+
+
+def test_record_candidate_locks_gap_before_updating_latest_candidate_hash(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        locked_gap_ids = []
+        original_locked_gap = repository._locked_gap
+
+        def locked_gap(gap_id):
+            locked_gap_ids.append(gap_id)
+            return original_locked_gap(gap_id)
+
+        monkeypatch.setattr(repository, "_locked_gap", locked_gap)
+
+        repository.record_candidate(gap.id, "a" * 64, {}, {}, "caller")
+        assert gap.latest_candidate_hash == "a" * 64
+
+        repository.record_candidate(gap.id, "b" * 64, {}, {}, "caller")
+        assert gap.latest_candidate_hash == "b" * 64
+        assert locked_gap_ids == [gap.id, gap.id]
+
+
+def test_record_candidate_retry_returns_immutable_candidate(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        first = repository.record_candidate(gap.id, "a" * 64, {"row": 1}, {"ok": True}, "provider")
+        retry = repository.record_candidate(gap.id, "a" * 64, {"row": 1}, {"ok": True}, "provider")
+        assert retry is first
+        assert gap.latest_candidate_hash == "a" * 64
+        with pytest.raises(ValueError, match="immutable candidate"):
+            repository.record_candidate(gap.id, "a" * 64, {"row": 2}, {"ok": True}, "provider")
 
 
 def test_recording_existing_gap_updates_last_observed_at(tmp_path):
@@ -203,6 +343,42 @@ def test_batch_account_recovery_excludes_unrelated_prior_batch_gap(tmp_path, mon
         result = repository.list_batch_account_recovery(batch.id)
 
         assert [(item["gap_id"], item["account_id"]) for item in result] == [(current_gap.id, account.id)]
+
+
+def test_batch_account_recovery_excludes_no_impact_gap(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        account = PaperTradingRepository(session).create_account("no-impact", Decimal("100"))
+        session.add(
+            PaperOrder(
+                account_id=account.id,
+                symbol="000001",
+                side="buy",
+                quantity=1,
+                limit_price=Decimal("10"),
+                trade_date=date(2026, 1, 2),
+                status="accepted",
+            )
+        )
+        session.flush()
+        gap = repository.record_gap(
+            date(2026, 1, 2),
+            "a_share",
+            "000001",
+            "bfq",
+            {"classification": "no_impact", "routing": "ordinary"},
+        )
+        batch = repository.record_batch(DataGapRecoveryBatchStatus.COMPLETED, {})
+        repository.record_attempt(gap.id, batch.id, DataGapRecoveryAttemptOutcome.NOT_FOUND, {})
+        monkeypatch.setattr(
+            repository,
+            "_account_replay_events",
+            lambda account_id: [type("Event", (), {"payload": {"symbol": "000001"}, "trade_date": date(2026, 1, 2)})()],
+        )
+
+        assert repository.list_batch_account_recovery(batch.id) == []
 
 
 def test_owner_scoped_gap_and_batch_queries_are_distinct_and_do_not_leak_evidence(tmp_path):

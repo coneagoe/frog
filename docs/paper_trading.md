@@ -612,7 +612,24 @@ Analytics reports valuation gaps separately in date order through `valuation_gap
 
 日线历史 DAG 对缺失或失败的 BFQ/HFQ 下载记录 provider 结果；汇总警告仍允许模拟交易匹配继续执行，只有致命的汇总失败会阻止匹配。
 
-Issue #113 的统一恢复在全部 HFQ/BFQ 分片完成并且模拟交易匹配成功或带 warning 完成后运行，仅处理普通 A 股 BFQ 精确业务日期缺口。分片或匹配失败时跳过恢复；匹配中的逐证券 warning 只记录并继续处理其他证券。恢复是幂等的：已存在精确行情的缺口会被跳过并解决，未解决缺口可脱离原批次独立重试。批次、尝试和缺口摘要记录 routing/classification 及相关 provider/结果证据。账户修复、审批和升级处置不由该流程执行，保留为未来独立边界。
+Issue #113 的统一恢复在全部 HFQ/BFQ 分片完成并且模拟交易匹配成功或带 warning 完成后运行，仅处理普通 A 股 BFQ 精确业务日期缺口。分片或匹配失败时跳过恢复；匹配中的逐证券 warning 只记录并继续处理其他证券。恢复是幂等的：已存在精确行情的缺口会被跳过并解决，未解决缺口可脱离原批次独立重试。批次、尝试和缺口摘要记录 routing/classification 及相关 provider/结果证据；达到阈值的 unresolved 缺口由该流程自动升级并发送告警，账户恢复失败也发送独立告警。
+升级后的缺口即使 provider 找到并验证了候选，也只记录不可变 candidate 并转为 `pending_approval`；在浏览器审批前不会自动写入行情。
+
+### 缺口升级审批（Issue #115）
+
+达到升级阈值（三个不可用批次或五个工作日）后，系统按 failure class 去重记录一次告警周期。告警投递失败只标记 alert 为 `failed`，不会改变缺口、审批或恢复状态；SMTP 故障保持隔离。账户账本或快照恢复失败也按账户和 failure class 单独告警，其他账户继续处理。
+
+审批仅允许已登录浏览器 session，并要求 CSRF：浏览器可执行 **approve**、**reject** 或 **reopen**。approve 必须提交详情中最新 candidate 的 SHA-256 `candidate_hash`；候选 hash 变化时操作被拒绝。CLI 不提供这些 mutation 命令。
+
+`no_impact` 缺口是终态，不写入行情、账本或快照；terminal unresolved 缺口也不会产生 trading impact。审计使用浏览器页面或受信任自动化的只读 CLI 查询：
+
+```bash
+export PAPER_TRADING_API_TOKEN="change-me"
+export PAPER_TRADING_API_BASE_URL="http://localhost:8000"
+uv run tools/paper_trading_cli.py data_gap_recovery list
+uv run tools/paper_trading_cli.py data_gap_recovery get --gap-id 123
+uv run tools/paper_trading_cli.py data_gap_recovery batches
+```
 
 ### A 股 BFQ 精确日期缺口运维查询（Issue #112）
 

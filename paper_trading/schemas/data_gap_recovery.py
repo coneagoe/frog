@@ -53,3 +53,12 @@ class DataGapRecoveryBatchPage(BaseModel):
     offset: int
     page_size: int
     total_count: int
+
+
+class DataGapRecoveryApprovalRequest(BaseModel):
+    candidate_hash: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class DataGapRecoveryReopenRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)

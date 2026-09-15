@@ -1,7 +1,10 @@
+import json
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -17,8 +20,12 @@ from common.const import (
     AdjustType,
     PeriodType,
 )
-from paper_trading.domain.enums import DataGapRecoveryClassification, DataGapRecoveryRouting
-from paper_trading.services.data_gap_recovery_service import DataGapRecoveryService
+from paper_trading.domain.enums import DataGapRecoveryClassification, DataGapRecoveryRouting, DataGapRecoveryStatus
+from paper_trading.services.data_gap_recovery_service import (
+    DataGapRecoveryService,
+    canonical_candidate_hash,
+    canonical_candidate_payload,
+)
 
 
 def _row(stock_id: str, business_date: str) -> pd.DataFrame:
@@ -38,6 +45,278 @@ def _row(stock_id: str, business_date: str) -> pd.DataFrame:
 
 def _service(storage: Mock, downloader: Mock, repository: Mock) -> DataGapRecoveryService:
     return DataGapRecoveryService(storage=storage, downloader=downloader, repository=repository)
+
+
+def test_escalation_waits_for_three_unavailable_batch_windows():
+    repository = Mock()
+    repository.gap_evidence.return_value = {
+        "attempts": [
+            SimpleNamespace(batch_id=1, outcome="not_found"),
+            SimpleNamespace(batch_id=2, outcome="not_found"),
+        ]
+    }
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 1), summary={})
+    service = _service(Mock(), Mock(), repository)
+
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 2)) is False
+    repository.escalate_gap.assert_not_called()
+
+    repository.gap_evidence.return_value["attempts"].append(SimpleNamespace(batch_id=3, outcome="not_found"))
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 2)) is True
+    repository.escalate_gap.assert_called_once()
+
+
+def test_escalation_occurs_after_five_business_days():
+    repository = Mock()
+    repository.gap_evidence.return_value = {"attempts": []}
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 7), summary={})
+    service = _service(Mock(), Mock(), repository)
+
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 11)) is True
+    repository.escalate_gap.assert_called_once()
+
+
+def test_escalation_counts_only_distinct_not_found_batches():
+    repository = Mock()
+    repository.gap_evidence.return_value = {
+        "attempts": [
+            SimpleNamespace(batch_id=1, outcome="failed"),
+            SimpleNamespace(batch_id=1, outcome="not_found"),
+            SimpleNamespace(batch_id=1, outcome="not_found"),
+            SimpleNamespace(batch_id=2, outcome="recovered"),
+            SimpleNamespace(batch_id=2, outcome="not_found"),
+        ]
+    }
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 7), summary={})
+
+    assert (
+        _service(Mock(), Mock(), repository).maybe_escalate_gap(
+            gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 8)
+        )
+        is False
+    )
+    repository.escalate_gap.assert_not_called()
+
+
+def test_threshold_escalation_sends_one_alert():
+    repository = Mock()
+    repository.gap_evidence.return_value = {
+        "attempts": [SimpleNamespace(batch_id=i, outcome="not_found") for i in (1, 2, 3)]
+    }
+    alerts = Mock()
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 1), summary={})
+
+    service = DataGapRecoveryService(storage=Mock(), downloader=Mock(), repository=repository, alert_service=alerts)
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 2)) is True
+    alerts.send_escalation.assert_called_once_with(gap, failure_class="threshold")
+
+
+def test_escalation_alert_delivery_failure_does_not_mutate_recovery_state():
+    repository = Mock()
+    repository.gap_evidence.return_value = {"attempts": []}
+    alerts = Mock()
+    alerts.send_escalation.side_effect = RuntimeError("smtp unavailable")
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 7), summary={}, status="open")
+    service = DataGapRecoveryService(storage=Mock(), downloader=Mock(), repository=repository, alert_service=alerts)
+
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 11)) is True
+    assert gap.status == "open"
+    repository.escalate_gap.assert_called_once()
+
+
+def test_threshold_path_calls_adapter_escalation_and_alert_without_airflow():
+    class FreshSessionAdapter:
+        def __init__(self):
+            self.escalations = []
+
+        def gap_evidence(self, _gap_id):
+            return {"attempts": [SimpleNamespace(batch_id=i, outcome="not_found") for i in (1, 2, 3)]}
+
+        def escalate_gap(self, gap_id, user_id, user_snapshot, *, reason=None):
+            self.escalations.append((gap_id, user_id, user_snapshot, reason))
+
+    repository = FreshSessionAdapter()
+    alerts = Mock()
+    gap = SimpleNamespace(id=7, business_date=date(2026, 9, 1), summary={}, status="open")
+    service = DataGapRecoveryService(storage=Mock(), downloader=Mock(), repository=repository, alert_service=alerts)
+
+    assert service.maybe_escalate_gap(gap, user_id=0, user_snapshot={"actor": "system"}, as_of=date(2026, 9, 2))
+    assert repository.escalations == [(7, 0, {"actor": "system"}, None)]
+    alerts.send_escalation.assert_called_once_with(gap, failure_class="threshold")
+
+
+def test_four_business_days_does_not_count_weekend():
+    repository = Mock()
+    repository.gap_evidence.return_value = {"attempts": []}
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 10), summary={})
+
+    assert (
+        _service(Mock(), Mock(), repository).maybe_escalate_gap(
+            gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 15)
+        )
+        is False
+    )
+
+
+def test_approved_write_requires_authoritative_repository_and_approval():
+    storage = Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+
+    result = DataGapRecoveryService(storage=storage, downloader=Mock()).execute_approved_gap(
+        gap, "a" * 64, _row("000001", "2026-08-07")
+    )
+    assert result.status == "failed"
+    storage.save_history_data_stock.assert_not_called()
+
+    repository = Mock()
+    repository.execute_approved_candidate.side_effect = ValueError("approved candidate is required")
+    result = _service(storage, Mock(), repository).execute_approved_gap(gap, "a" * 64, _row("000001", "2026-08-07"))
+    assert result.status == "failed"
+    storage.save_history_data_stock.assert_not_called()
+
+
+def test_approved_write_rechecks_hash_and_returns_pending_without_writing():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        latest_candidate_hash="b" * 64,
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    repository.execute_approved_candidate.side_effect = ValueError("approved candidate hash is stale")
+    result = _service(storage, downloader, repository).execute_approved_gap(gap, "a" * 64, _row("000001", "2026-08-07"))
+
+    assert result.status == "pending_approval"
+    repository.execute_approved_candidate.assert_called_once()
+    storage.save_history_data_stock.assert_not_called()
+
+
+def test_approved_no_impact_gap_is_terminal_and_does_not_write():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        latest_candidate_hash="a" * 64,
+        summary={"classification": "no_impact", "routing": "approval_escalation"},
+    )
+    repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(gap)
+    result = _service(storage, downloader, repository).execute_approved_gap(gap, "a" * 64, _row("000001", "2026-08-07"))
+
+    assert result.status == "skipped"
+    storage.save_history_data_stock.assert_not_called()
+    downloader.dl_history_data_stock_by_provider.assert_not_called()
+
+
+def test_approved_write_uses_repository_locked_gap_for_readback_and_resolution():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    detached_gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    locked_gap = SimpleNamespace(
+        id=99,
+        business_date=date(2026, 8, 8),
+        stock_id="000002",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "valuation_only", "routing": "approval_escalation"},
+    )
+    repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(locked_gap)
+    storage.load_history_data_stock.return_value = _row("000002", "2026-08-08")
+    storage.save_history_data_stock.return_value = True
+    candidate = _row("000002", "2026-08-08")
+    approved_payload = canonical_candidate_payload(
+        candidate,
+        market=locked_gap.market,
+        stock_id=locked_gap.stock_id,
+        business_date=locked_gap.business_date,
+        adjust=locked_gap.adjust,
+    )
+    approved_hash = canonical_candidate_hash(approved_payload)
+
+    result = _service(storage, downloader, repository).execute_approved_gap(detached_gap, approved_hash, candidate)
+
+    assert result.gap_id == locked_gap.id
+    assert result.classification == "valuation_only"
+    repository.resolve_gap.assert_called_once_with(locked_gap.id)
+    assert storage.load_history_data_stock.call_args.args[0] == locked_gap.stock_id
+    assert storage.load_history_data_stock.call_args.kwargs["start_date"] == "2026-08-08"
+
+
+def test_approved_write_skips_append_for_matching_preexisting_exact_row():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    candidate = _row("000001", "2026-08-07")
+    storage.load_history_data_stock.return_value = candidate.copy()
+    repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(gap)
+    approved_hash = canonical_candidate_hash(
+        canonical_candidate_payload(
+            candidate, market=gap.market, stock_id=gap.stock_id, business_date=gap.business_date, adjust=gap.adjust
+        )
+    )
+
+    result = _service(storage, downloader, repository).execute_approved_gap(gap, approved_hash, candidate)
+
+    assert result.status == "recovered"
+    storage.save_history_data_stock.assert_not_called()
+    repository.resolve_gap.assert_called_once_with(gap.id)
+
+
+def test_approved_write_retry_after_resolution_failure_does_not_append_twice():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    candidate = _row("000001", "2026-08-07")
+    storage.load_history_data_stock.side_effect = [pd.DataFrame(), candidate.copy(), candidate.copy()]
+    storage.save_history_data_stock.return_value = True
+    repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(
+        gap, repository.resolve_gap
+    )
+    repository.resolve_gap.side_effect = [RuntimeError("commit failed"), None]
+    approved_hash = canonical_candidate_hash(
+        canonical_candidate_payload(
+            candidate, market=gap.market, stock_id=gap.stock_id, business_date=gap.business_date, adjust=gap.adjust
+        )
+    )
+    service = _service(storage, downloader, repository)
+
+    first = service.execute_approved_gap(gap, approved_hash, candidate)
+    second = service.execute_approved_gap(gap, approved_hash, candidate)
+
+    assert first.status == "failed"
+    assert second.status == "recovered"
+    storage.save_history_data_stock.assert_called_once_with(candidate, PeriodType.DAILY, AdjustType.BFQ)
+    assert repository.resolve_gap.call_count == 2
 
 
 def test_unified_recovery_records_classification_and_ordinary_routing():
@@ -63,6 +342,54 @@ def test_unified_recovery_records_classification_and_ordinary_routing():
     evidence = repository.record_attempt.call_args.args[3]
     assert evidence["classification"] == DataGapRecoveryClassification.ORDER_DEPENDENT.value
     assert evidence["routing"] == DataGapRecoveryRouting.ORDINARY.value
+
+
+def test_escalated_candidate_is_pending_approval_without_history_write():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        status=DataGapRecoveryStatus.ESCALATED,
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    storage.load_history_data_stock.return_value = pd.DataFrame()
+    downloader.dl_history_data_stock_by_provider.return_value = _row("000001", "2026-08-07")
+
+    result = _service(storage, downloader, repository).recover_gap(gap)
+
+    assert result.status == "pending_approval"
+    repository.record_candidate.assert_called_once()
+    storage.save_history_data_stock.assert_not_called()
+
+
+def test_canonical_candidate_payload_normalizes_provider_scalars_for_persistence():
+    candidate = pd.DataFrame(
+        {
+            COL_DATE: [np.datetime64("2026-08-07")],
+            COL_STOCK_ID: [np.str_("000001")],
+            COL_OPEN: [np.float64(10.0)],
+            COL_HIGH: [np.float32(11.0)],
+            COL_LOW: [np.float64(np.nan)],
+            COL_CLOSE: [np.float64(10.5)],
+            COL_VOLUME: [np.int64(100)],
+            COL_AMOUNT: [pd.NaT],
+            "decimal_value": [Decimal("1.2300")],
+        }
+    )
+
+    payload = canonical_candidate_payload(
+        candidate, market="a_share", stock_id="000001", business_date=date(2026, 8, 7), adjust="bfq"
+    )
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    candidate_hash = canonical_candidate_hash(payload)
+
+    assert json.loads(serialized) == payload
+    assert candidate_hash == canonical_candidate_hash(json.loads(serialized))
+    assert payload["row"][COL_LOW] is None
+    assert payload["row"][COL_AMOUNT] is None
 
 
 def test_unexpected_diagnostic_failure_carries_processed_results():

@@ -147,6 +147,7 @@ class NavBaselineEligibility(StrEnum):
 
 class DataGapRecoveryStatus(StrEnum):
     OPEN = "open"
+    PENDING_APPROVAL = "pending_approval"
     RECOVERED = "recovered"
     ESCALATED = "escalated"
     PERMANENTLY_UNRESOLVED = "permanently_unresolved"

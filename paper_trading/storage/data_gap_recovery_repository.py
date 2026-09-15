@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timezone
-from typing import Any
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Callable
 
-from sqlalchemy import func, select
+from sqlalchemy import func, not_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from paper_trading.domain.enums import (
     DataGapRecoveryAccountStatus,
+    DataGapRecoveryAlertDeliveryState,
     DataGapRecoveryApprovalDecision,
     DataGapRecoveryAttemptOutcome,
     DataGapRecoveryBatchStatus,
@@ -84,6 +86,17 @@ class DataGapRecoveryRepository:
                     DailyBarDiagnostic.adjust == "bfq",
                     DailyBarDiagnostic.classification.in_(("missing_market_data", "missing_exact_date")),
                     DailyBarDiagnostic.resolved.is_(False),
+                    not_(
+                        select(PaperDataGapRecoveryGap.id)
+                        .where(
+                            PaperDataGapRecoveryGap.business_date == DailyBarDiagnostic.business_date,
+                            PaperDataGapRecoveryGap.market == DailyBarDiagnostic.market,
+                            PaperDataGapRecoveryGap.stock_id == DailyBarDiagnostic.stock_id,
+                            PaperDataGapRecoveryGap.adjust == DailyBarDiagnostic.adjust,
+                            PaperDataGapRecoveryGap.status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED,
+                        )
+                        .exists()
+                    ),
                 )
                 .order_by(DailyBarDiagnostic.business_date, DailyBarDiagnostic.stock_id, DailyBarDiagnostic.id)
             )
@@ -125,9 +138,7 @@ class DataGapRecoveryRepository:
         routing: DataGapRecoveryRouting,
         evidence: dict[str, Any],
     ) -> None:
-        gap = self.session.get(PaperDataGapRecoveryGap, gap_id)
-        if gap is None:
-            raise KeyError(gap_id)
+        gap = self._locked_gap(gap_id)
         summary = dict(gap.summary)
         summary.update(classification=classification.value, routing=routing.value, evidence=evidence)
         self.update_gap_summary(gap_id, summary)
@@ -145,10 +156,26 @@ class DataGapRecoveryRepository:
     ) -> PaperDataGapRecoveryCandidate:
         if not re.fullmatch(r"[0-9a-fA-F]{64}", candidate_hash):
             raise ValueError("candidate_hash must be a 64-character SHA-256 hex digest")
+        gap = self._locked_gap(gap_id)
+        existing = self.session.scalar(
+            select(PaperDataGapRecoveryCandidate).where(
+                PaperDataGapRecoveryCandidate.gap_id == gap_id,
+                PaperDataGapRecoveryCandidate.candidate_hash == candidate_hash,
+            )
+        )
+        if existing is not None:
+            if existing.payload != payload or existing.validation != validation or existing.source != source:
+                raise ValueError("candidate retry payload or evidence does not match immutable candidate")
+            gap.latest_candidate_hash = candidate_hash
+            self.session.flush()
+            return existing
         candidate = PaperDataGapRecoveryCandidate(
             gap_id=gap_id, candidate_hash=candidate_hash, payload=payload, validation=validation, source=source
         )
         self.session.add(candidate)
+        gap.latest_candidate_hash = candidate_hash
+        if gap.status == DataGapRecoveryStatus.ESCALATED:
+            gap.status = DataGapRecoveryStatus.PENDING_APPROVAL
         self.session.flush()
         return candidate
 
@@ -224,9 +251,254 @@ class DataGapRecoveryRepository:
         self.session.flush()
         return approval
 
+    def _locked_gap(self, gap_id: int) -> PaperDataGapRecoveryGap:
+        gap = self.session.scalar(
+            select(PaperDataGapRecoveryGap).where(PaperDataGapRecoveryGap.id == gap_id).with_for_update()
+        )
+        if gap is None:
+            raise KeyError(gap_id)
+        return gap
+
+    @staticmethod
+    def _authenticated_snapshot(user_id: int | None, snapshot: dict[str, Any], reason: str | None) -> dict[str, Any]:
+        if user_id is None:
+            raise ValueError("authenticated user is required")
+        result = dict(snapshot)
+        result["user_id"] = user_id
+        if reason is not None:
+            result["reason"] = reason
+        return result
+
+    def escalate_gap(
+        self, gap_id: int, user_id: int, user_snapshot: dict[str, Any], *, reason: str | None = None
+    ) -> PaperDataGapRecoveryGap:
+        """Move an open gap to escalation and append its authenticated audit event."""
+        gap = self._locked_gap(gap_id)
+        if gap.status != DataGapRecoveryStatus.OPEN:
+            raise ValueError("only open gaps can be escalated")
+        snapshot = self._authenticated_snapshot(user_id, user_snapshot, reason)
+        self.record_attempt(gap_id, None, DataGapRecoveryAttemptOutcome.FAILED, {"event": "escalated", **snapshot})
+        gap.status = DataGapRecoveryStatus.ESCALATED
+        self.session.flush()
+        return gap
+
+    def invalidate_stale_candidate(self, gap_id: int, candidate_hash: str) -> PaperDataGapRecoveryGap:
+        """Invalidate a decision based on anything other than the current candidate."""
+        gap = self._locked_gap(gap_id)
+        if gap.latest_candidate_hash == candidate_hash:
+            return gap
+        gap.status = DataGapRecoveryStatus.PENDING_APPROVAL
+        self.session.flush()
+        return gap
+
+    def _decide_gap(
+        self,
+        gap_id: int,
+        decision: DataGapRecoveryApprovalDecision,
+        candidate_hash: str,
+        user_id: int | None,
+        user_snapshot: dict[str, Any],
+        reason: str | None,
+        status: DataGapRecoveryStatus,
+    ) -> PaperDataGapRecoveryGap:
+        gap = self._locked_gap(gap_id)
+        if gap.status not in {DataGapRecoveryStatus.ESCALATED, DataGapRecoveryStatus.PENDING_APPROVAL}:
+            raise ValueError("approval decisions require an escalated or pending-approval gap")
+        if gap.latest_candidate_hash != candidate_hash:
+            gap.status = DataGapRecoveryStatus.PENDING_APPROVAL
+            self.session.flush()
+            return gap
+        snapshot = self._authenticated_snapshot(user_id, user_snapshot, reason)
+        self.record_approval(gap_id, decision, candidate_hash, user_id, snapshot)
+        gap.status = status
+        if status == DataGapRecoveryStatus.RECOVERED:
+            gap.resolved_at = datetime.now(timezone.utc)
+        else:
+            gap.resolved_at = None
+        self.session.flush()
+        return gap
+
+    def approve_gap(
+        self,
+        gap_id: int,
+        candidate_hash: str,
+        user_id: int,
+        user_snapshot: dict[str, Any],
+        *,
+        reason: str | None = None,
+    ) -> PaperDataGapRecoveryGap:
+        return self._decide_gap(
+            gap_id,
+            DataGapRecoveryApprovalDecision.APPROVED,
+            candidate_hash,
+            user_id,
+            user_snapshot,
+            reason,
+            DataGapRecoveryStatus.PENDING_APPROVAL,
+        )
+
+    def execute_approved_candidate(self, gap_id: int, candidate_hash: str, write_callback: Callable[..., Any]) -> Any:
+        """Lock and authorize a candidate while its write callback runs in this transaction."""
+        gap = self._locked_gap(gap_id)
+        if gap.status != DataGapRecoveryStatus.PENDING_APPROVAL:
+            raise ValueError("approved writes require a pending-approval gap")
+        if gap.latest_candidate_hash != candidate_hash:
+            gap.status = DataGapRecoveryStatus.PENDING_APPROVAL
+            self.session.flush()
+            raise ValueError("approved candidate hash is stale")
+        approval = self.session.scalar(
+            select(PaperDataGapRecoveryApproval).where(
+                PaperDataGapRecoveryApproval.gap_id == gap_id,
+                PaperDataGapRecoveryApproval.candidate_hash == candidate_hash,
+                PaperDataGapRecoveryApproval.decision == DataGapRecoveryApprovalDecision.APPROVED,
+            )
+        )
+        if approval is None:
+            raise ValueError("approved candidate decision is required")
+        candidate = self.session.scalar(
+            select(PaperDataGapRecoveryCandidate).where(
+                PaperDataGapRecoveryCandidate.gap_id == gap_id,
+                PaperDataGapRecoveryCandidate.candidate_hash == candidate_hash,
+            )
+        )
+        if candidate is None:
+            raise ValueError("approved candidate payload is required")
+        return write_callback(gap, dict(candidate.payload), self.resolve_gap)
+
+    def approved_candidate_payload(self, gap_id: int, candidate_hash: str) -> dict[str, Any]:
+        candidate = self.session.scalar(
+            select(PaperDataGapRecoveryCandidate).where(
+                PaperDataGapRecoveryCandidate.gap_id == gap_id,
+                PaperDataGapRecoveryCandidate.candidate_hash == candidate_hash,
+            )
+        )
+        if candidate is None:
+            raise ValueError("approved candidate payload is required")
+        return dict(candidate.payload)
+
+    def list_pending_approved_candidates(self) -> list[tuple[PaperDataGapRecoveryGap, str, dict[str, Any]]]:
+        rows = self.session.execute(
+            select(PaperDataGapRecoveryGap, PaperDataGapRecoveryApproval, PaperDataGapRecoveryCandidate)
+            .join(PaperDataGapRecoveryApproval, PaperDataGapRecoveryApproval.gap_id == PaperDataGapRecoveryGap.id)
+            .join(
+                PaperDataGapRecoveryCandidate,
+                (
+                    (PaperDataGapRecoveryCandidate.gap_id == PaperDataGapRecoveryGap.id)
+                    & (PaperDataGapRecoveryCandidate.candidate_hash == PaperDataGapRecoveryApproval.candidate_hash)
+                ),
+            )
+            .where(
+                PaperDataGapRecoveryGap.status == DataGapRecoveryStatus.PENDING_APPROVAL,
+                PaperDataGapRecoveryApproval.decision == DataGapRecoveryApprovalDecision.APPROVED,
+            )
+        ).all()
+        return [(gap, approval.candidate_hash, dict(candidate.payload)) for gap, approval, candidate in rows]
+
+    def reject_gap(
+        self,
+        gap_id: int,
+        candidate_hash: str,
+        user_id: int,
+        user_snapshot: dict[str, Any],
+        *,
+        reason: str | None = None,
+    ) -> PaperDataGapRecoveryGap:
+        return self._decide_gap(
+            gap_id,
+            DataGapRecoveryApprovalDecision.REJECTED,
+            candidate_hash,
+            user_id,
+            user_snapshot,
+            reason,
+            DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED,
+        )
+
+    def reopen_gap(
+        self, gap_id: int, user_id: int, user_snapshot: dict[str, Any], *, reason: str | None = None
+    ) -> PaperDataGapRecoveryGap:
+        gap = self._locked_gap(gap_id)
+        if gap.status != DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED:
+            raise ValueError("only permanently unresolved gaps can be reopened")
+        snapshot = self._authenticated_snapshot(user_id, user_snapshot, reason)
+        if gap.latest_candidate_hash is None:
+            raise ValueError("cannot reopen a gap without a candidate")
+        self.record_approval(
+            gap_id,
+            DataGapRecoveryApprovalDecision.REOPENED,
+            gap.latest_candidate_hash,
+            user_id,
+            snapshot,
+        )
+        gap.status = DataGapRecoveryStatus.OPEN
+        gap.resolved_at = None
+        self.session.flush()
+        return gap
+
     def record_alert(self, gap_id: int, cycle_key: str, evidence: dict[str, Any]) -> PaperDataGapRecoveryAlert:
         alert = PaperDataGapRecoveryAlert(gap_id=gap_id, cycle_key=cycle_key, evidence=evidence)
         self.session.add(alert)
+        self.session.flush()
+        return alert
+
+    def claim_alert(
+        self, gap_id: int, cycle_key: str, evidence: dict[str, Any]
+    ) -> tuple[PaperDataGapRecoveryAlert, bool]:
+        """Atomically claim an alert cycle; failed cycles get a retry cycle."""
+        retry = 0
+        collision_reads = 0
+        while retry < 100:
+            key = cycle_key if retry == 0 else f"{cycle_key}:retry:{retry}"
+            try:
+                with self.session.begin_nested():
+                    alert = self.get_alert(gap_id, key)
+                    if alert is not None:
+                        if alert.delivery_state == DataGapRecoveryAlertDeliveryState.PENDING and (
+                            alert.created_at is None
+                            or alert.created_at < datetime.now(timezone.utc) - timedelta(minutes=15)
+                        ):
+                            alert.delivery_state = DataGapRecoveryAlertDeliveryState.FAILED
+                            self.session.flush()
+                        if alert.delivery_state != DataGapRecoveryAlertDeliveryState.FAILED:
+                            return alert, False
+                        retry += 1
+                        continue
+                    return self.record_alert(gap_id, key, evidence), True
+            except IntegrityError:
+                # Re-read the contested key before allocating a retry. Otherwise a
+                # concurrent pending/delivered insert could cause duplicate delivery.
+                collision_reads += 1
+                alert = self._read_alert_after_collision(gap_id, key)
+                if alert is None:
+                    if collision_reads >= 100:
+                        break
+                    continue
+                collision_reads = 0
+                if alert.delivery_state != DataGapRecoveryAlertDeliveryState.FAILED:
+                    return alert, False
+                retry += 1
+        raise RuntimeError("unable to claim data-gap alert cycle")
+
+    def _read_alert_after_collision(self, gap_id: int, cycle_key: str) -> PaperDataGapRecoveryAlert | None:
+        """Read a winner after a savepoint collision without affecting the outer transaction."""
+        with self.session.begin_nested():
+            return self.get_alert(gap_id, cycle_key)
+
+    def get_alert(self, gap_id: int, cycle_key: str) -> PaperDataGapRecoveryAlert | None:
+        return self.session.scalar(
+            select(PaperDataGapRecoveryAlert).where(
+                PaperDataGapRecoveryAlert.gap_id == gap_id,
+                PaperDataGapRecoveryAlert.cycle_key == cycle_key,
+            )
+        )
+
+    def update_alert_delivery(
+        self, alert_id: int, state: DataGapRecoveryAlertDeliveryState, metadata: dict[str, Any]
+    ) -> PaperDataGapRecoveryAlert:
+        alert = self.session.get(PaperDataGapRecoveryAlert, alert_id)
+        if alert is None:
+            raise KeyError(alert_id)
+        alert.delivery_metadata = dict(metadata)
+        alert.delivery_state = state
         self.session.flush()
         return alert
 
@@ -344,10 +616,17 @@ class DataGapRecoveryRepository:
             )
         )
         gap_rows = self.session.scalars(select(PaperDataGapRecoveryGap)).all()
+        no_impact_gap_ids = {
+            gap.id
+            for gap in gap_rows
+            if gap.id in batch_gap_ids and (gap.summary or {}).get("classification") == "no_impact"
+        }
+        result = [item for item in result if item["gap_id"] not in no_impact_gap_ids]
         account_ids = self.session.scalars(select(PaperAccount.id)).all()
         for gap in gap_rows:
             if (
                 gap.id not in batch_gap_ids
+                or gap.id in no_impact_gap_ids
                 or gap.status == DataGapRecoveryStatus.RECOVERED
                 or gap.business_date > (cutoff or gap.business_date)
             ):
@@ -394,7 +673,11 @@ class DataGapRecoveryRepository:
             ):
                 continue
             gap = self.session.get(PaperDataGapRecoveryGap, progress.gap_id)
-            if gap is None or (end_date is not None and gap.business_date > end_date):
+            if (
+                gap is None
+                or (gap.summary or {}).get("classification") == "no_impact"
+                or (end_date is not None and gap.business_date > end_date)
+            ):
                 continue
             result.append(
                 {

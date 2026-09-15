@@ -24,12 +24,40 @@ from tools.paper_trading_cli import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("arguments", "method"),
+    [
+        (["--json", "data_gap_recovery", "list"], "list_data_gap_recovery"),
+        (["--json", "data_gap_recovery", "get", "--gap-id", "1"], "get_data_gap_recovery"),
+        (["--json", "data_gap_recovery", "batches"], "list_data_gap_batches"),
+    ],
+)
+def test_data_gap_recovery_read_only_json_routes(arguments, method, capsys):
+    client = _mock_client()
+    assert main(arguments, client=client) == EXIT_CODES["OK"]
+    getattr(client, method).assert_called_once()
+    assert json.loads(capsys.readouterr().out)
+
+
+def test_data_gap_recovery_cli_has_no_mutations():
+    from tools.paper_trading_cli import build_parser
+
+    parser_commands = vars(build_parser()).get("_actions")
+    assert parser_commands is not None
+    assert "approve" not in str(parser_commands)
+    assert "reject" not in str(parser_commands)
+    assert "reopen" not in str(parser_commands)
+
+
 def _mock_client(**kwargs) -> MagicMock:
     """Build a minimal PaperTradingApiClient mock with success returns."""
     client = MagicMock(**kwargs)
     client.base_url = "http://localhost:8000"
     client.token = "test-token"
     if not kwargs:
+        client.list_data_gap_recovery.return_value = {"items": [{"id": 1}]}
+        client.get_data_gap_recovery.return_value = {"id": 1}
+        client.list_data_gap_batches.return_value = {"items": [{"id": 2}]}
         # Default success payloads
         client.create_account.return_value = {
             "id": 1,

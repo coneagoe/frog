@@ -734,6 +734,7 @@ class PaperDataGapRecoveryAlert(Base):
     )
     cycle_key: Mapped[str] = mapped_column(String(100), nullable=False)
     evidence: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    delivery_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, server_default=text("'{}'"))
     delivery_state: Mapped[str] = mapped_column(
         _value_enum(DataGapRecoveryAlertDeliveryState, "paper_data_gap_recovery_alert_delivery_state"),
         nullable=False,

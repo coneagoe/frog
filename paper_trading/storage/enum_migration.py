@@ -566,6 +566,50 @@ def _is_addable_missing_column(group: PaperTradingEnumGroup, column: PaperTradin
     )
 
 
+def _add_alert_delivery_metadata_column(connection: Connection) -> bool:
+    if not _table_exists(connection, "paper_data_gap_recovery_alerts"):
+        return False
+    if connection.dialect.name != "postgresql":
+        return False
+    exists = connection.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+            "AND table_name = 'paper_data_gap_recovery_alerts' AND column_name = 'delivery_metadata'"
+        )
+    ).scalar()
+    if exists:
+        return False
+    connection.execute(
+        text("ALTER TABLE paper_data_gap_recovery_alerts ADD COLUMN delivery_metadata JSON NOT NULL DEFAULT '{}'")
+    )
+    return True
+
+
+def _ensure_alert_delivery_trigger(connection: Connection) -> None:
+    """Keep alert evidence immutable while allowing delivery settlement updates."""
+    if connection.dialect.name != "postgresql" or not _table_exists(connection, "paper_data_gap_recovery_alerts"):
+        return
+    connection.execute(
+        text(
+            "CREATE OR REPLACE FUNCTION paper_data_gap_recovery_alerts_append_only() "
+            "RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+            "IF TG_OP = 'DELETE' OR OLD.evidence IS DISTINCT FROM NEW.evidence THEN "
+            "RAISE EXCEPTION 'append-only evidence cannot be changed'; END IF; "
+            "RETURN NEW; END; $$"
+        )
+    )
+    connection.execute(
+        text("DROP TRIGGER IF EXISTS paper_data_gap_recovery_alerts_append_only ON paper_data_gap_recovery_alerts")
+    )
+    connection.execute(
+        text(
+            "CREATE TRIGGER paper_data_gap_recovery_alerts_append_only "
+            "BEFORE UPDATE OR DELETE ON paper_data_gap_recovery_alerts FOR EACH ROW "
+            "EXECUTE FUNCTION paper_data_gap_recovery_alerts_append_only()"
+        )
+    )
+
+
 def ensure_snapshot_series_enum_types(connection: Connection) -> None:
     """Create snapshot series enum types when they are missing."""
     for group in PAPER_TRADING_ENUM_GROUPS:
@@ -581,10 +625,13 @@ def ensure_snapshot_valuation_metadata(connection: Connection) -> bool:
     _reject_duplicate_trading_snapshots(connection)
     changed = _add_valuation_quality_column(connection)
     changed = _add_valuation_details_column(connection) or changed
+    changed = _add_alert_delivery_metadata_column(connection) or changed
     return _ensure_snapshot_trading_index(connection) or changed
 
 
 def _has_pending_enum_column_changes(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]) -> bool:
+    if any(_can_extend_enum_labels(connection, group, _enum_labels(connection, group.type_name)) for group in groups):
+        return True
     for group in groups:
         for column in group.columns:
             if not _table_exists(connection, column.table_name):
@@ -614,6 +661,8 @@ def _result(
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     groups = PAPER_TRADING_ENUM_GROUPS
+    if not rollback:
+        _add_alert_delivery_metadata_column(connection)
     _preflight_recovery_schema(connection, rollback=rollback)
     missing_tables = _preflight(connection, groups, rollback=rollback)
     if not rollback and _table_exists(connection, tb_name_paper_etf_eligibility):
@@ -639,7 +688,7 @@ def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
 
 def _preflight_recovery_schema(connection: Connection, *, rollback: bool) -> None:
     """Do not turn a partial recovery schema into a falsely complete one."""
-    if rollback or connection.dialect.name != "postgresql":
+    if connection.dialect.name != "postgresql":
         return
     required = {
         "paper_data_gap_recovery_gaps": {
@@ -686,7 +735,15 @@ def _preflight_recovery_schema(connection: Connection, *, rollback: bool) -> Non
             "summary",
             "created_at",
         },
-        "paper_data_gap_recovery_alerts": {"id", "gap_id", "cycle_key", "evidence", "delivery_state", "created_at"},
+        "paper_data_gap_recovery_alerts": {
+            "id",
+            "gap_id",
+            "cycle_key",
+            "evidence",
+            "delivery_metadata",
+            "delivery_state",
+            "created_at",
+        },
     }
     present = {name for name in required if _table_exists(connection, name)}
     if not present:
@@ -900,6 +957,9 @@ def _ensure_recovery_append_only(connection: Connection) -> None:
     ):
         if not _table_exists(connection, table_name):
             continue
+        if table_name == "paper_data_gap_recovery_alerts":
+            _ensure_alert_delivery_trigger(connection)
+            continue
         connection.execute(
             text(
                 f"CREATE OR REPLACE FUNCTION {table_name}_append_only() RETURNS trigger LANGUAGE plpgsql AS "
@@ -1083,7 +1143,7 @@ def _migrate(
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
     changed = any(
         not _column_has_type(connection, column, group.type_name) for group in groups for column in group.columns
-    )
+    ) or any(_can_extend_enum_labels(connection, group, _enum_labels(connection, group.type_name)) for group in groups)
     if dry_run:
         return _result(
             groups, dry_run=True, rollback=rollback, converted=changed if dry_run_reports_conversion else False
@@ -1114,7 +1174,7 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
     missing_tables = {name for name in governed_names if not _table_exists(connection, name)}
     for group in groups:
         labels = _enum_labels(connection, group.type_name)
-        if labels and labels != group.labels and not _can_extend_replay_time_provenance(group, labels):
+        if labels and labels != group.labels and (rollback or not _can_extend_enum_labels(connection, group, labels)):
             raise PaperTradingEnumMigrationError(f"{group.type_name}: unexpected enum labels {labels}")
         for column in group.columns:
             if column.table_name in missing_tables:
@@ -1231,9 +1291,15 @@ def _ensure_auth_tables(connection: Connection) -> None:
 def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
     labels = _enum_labels(connection, group.type_name)
     if labels:
-        if _can_extend_replay_time_provenance(group, labels):
-            for label in group.labels[len(labels) :]:
-                connection.execute(text(f"ALTER TYPE {group.type_name} ADD VALUE '{label}'"))
+        if _can_extend_enum_labels(connection, group, labels):
+            existing = set(labels)
+            for index, label in enumerate(group.labels):
+                if label in existing:
+                    continue
+                following = next((candidate for candidate in group.labels[index + 1 :] if candidate in existing), None)
+                placement = f" BEFORE '{following}'" if following is not None else ""
+                connection.execute(text(f"ALTER TYPE {group.type_name} ADD VALUE '{label}'{placement}"))
+                existing.add(label)
         return
     labels_sql = ", ".join(f"'{label}'" for label in group.labels)
     connection.execute(text(f"CREATE TYPE {group.type_name} AS ENUM ({labels_sql})"))
@@ -1241,6 +1307,19 @@ def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
 
 def _can_extend_replay_time_provenance(group: PaperTradingEnumGroup, labels: tuple[str, ...]) -> bool:
     return group.type_name == "paper_replay_time_provenance" and group.labels[: len(labels)] == labels
+
+
+def _can_extend_enum_labels(connection: Connection, group: PaperTradingEnumGroup, labels: tuple[str, ...]) -> bool:
+    """Allow only known, ordered additions to an existing PostgreSQL enum."""
+    if not labels or labels == group.labels:
+        return False
+    if _can_extend_replay_time_provenance(group, labels):
+        return True
+    if group.type_name != "paper_data_gap_recovery_status":
+        return False
+    return all(label in group.labels for label in labels) and [
+        label for label in group.labels if label in labels
+    ] == list(labels)
 
 
 def ensure_paper_market_type(connection: Connection) -> None:

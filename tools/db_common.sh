@@ -153,7 +153,11 @@ write_recovery_append_only_functions() {
 
   while IFS= read -r table; do
     [[ -z "$table" ]] && continue
-    printf 'CREATE OR REPLACE FUNCTION "%s"."%s_append_only"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION '\''append-only evidence cannot be changed'\''; END; $$;\n' "$schema" "$table"
+    if [[ "$table" == "paper_data_gap_recovery_alerts" ]]; then
+      printf 'CREATE OR REPLACE FUNCTION "%s"."%s_append_only"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_OP = '\''DELETE'\'' OR OLD.evidence IS DISTINCT FROM NEW.evidence THEN RAISE EXCEPTION '\''append-only evidence cannot be changed'\''; END IF; RETURN NEW; END; $$;\n' "$schema" "$table"
+    else
+      printf 'CREATE OR REPLACE FUNCTION "%s"."%s_append_only"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION '\''append-only evidence cannot be changed'\''; END; $$;\n' "$schema" "$table"
+    fi
   done < <(recovery_append_only_tables "$schema" "$table_name" "$query_executor")
 }
 

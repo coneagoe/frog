@@ -184,6 +184,7 @@ def test_recovery_groups_declare_expected_labels_and_table_columns():
         group = groups[type_name]
         assert group.labels == tuple(member.value for member in enum_class)
         assert [(column.table_name, column.column_name) for column in group.columns] == [(table_name, column_name)]
+    assert DataGapRecoveryStatus.PENDING_APPROVAL.value in RECOVERY_GROUPS["paper_data_gap_recovery_status"][0]
 
 
 def test_fresh_recovery_migration_registers_all_types_tables_and_reruns(migration_schema):
@@ -225,6 +226,40 @@ def test_legacy_recovery_values_are_converted_and_unknown_labels_abort(migration
         assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
         assert not _type_exists(connection, "paper_data_gap_recovery_status")
         assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is False
+
+
+def test_existing_recovery_status_enum_gets_pending_approval_additively(migration_schema):
+    engine, schema = migration_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        _create_legacy_schema(connection)
+        _create_legacy_recovery_tables(connection)
+        connection.execute(
+            text(
+                "CREATE TYPE paper_data_gap_recovery_status AS ENUM "
+                "('open', 'recovered', 'escalated', 'permanently_unresolved')"
+            )
+        )
+        connection.execute(text("ALTER TABLE paper_data_gap_recovery_gaps ALTER COLUMN status DROP DEFAULT"))
+        connection.execute(
+            text(
+                "ALTER TABLE paper_data_gap_recovery_gaps ALTER COLUMN status TYPE paper_data_gap_recovery_status "
+                "USING status::paper_data_gap_recovery_status"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE paper_data_gap_recovery_gaps ALTER COLUMN status "
+                "SET DEFAULT 'open'::paper_data_gap_recovery_status"
+            )
+        )
+
+        assert migrate_paper_trading_enums(connection).converted is True
+        assert _enum_labels(connection, "paper_data_gap_recovery_status") == tuple(
+            member.value for member in DataGapRecoveryStatus
+        )
+        assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
+        assert not _type_exists(connection, "paper_data_gap_recovery_status")
 
 
 def test_partial_recovery_schema_without_alert_created_at_fails_closed(migration_schema):

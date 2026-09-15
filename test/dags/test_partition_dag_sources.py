@@ -325,6 +325,8 @@ def test_unified_recovery_callable_does_not_invoke_account_side_effect_apis(monk
     repository.get_or_create_gap_from_diagnostic.return_value = gap
     repository.record_batch.return_value = SimpleNamespace(id=3)
     persistence = Mock()
+    persistence.list_batch_account_recovery.return_value = []
+    persistence.list_retryable_recovery_work.return_value = []
     service = Mock()
     service.recover_unresolved_ordinary_gaps.return_value = []
     session = MagicMock()
@@ -334,6 +336,8 @@ def test_unified_recovery_callable_does_not_invoke_account_side_effect_apis(monk
     monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
     monkeypatch.setattr(dag_module, "_FreshSessionRecoveryRepository", lambda storage: persistence)
     monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: service)
+    account_recovery = Mock(return_value={})
+    monkeypatch.setattr(dag_module, "run_paper_trading_account_recovery", account_recovery)
 
     dag_module.run_unified_bfq_data_gap_recovery(
         ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
@@ -356,6 +360,9 @@ def test_unified_recovery_callable_does_not_invoke_account_side_effect_apis(monk
         getattr(repository, api).assert_not_called()
         getattr(persistence, api).assert_not_called()
         getattr(service, api).assert_not_called()
+    account_recovery.assert_called_once()
+    assert account_recovery.call_args.kwargs["affected_account_ids"] == []
+    assert account_recovery.call_args.kwargs["recovery_work"] == []
 
 
 def test_unexpected_recovery_failure_preserves_processed_batch_counts(monkeypatch):
@@ -461,6 +468,31 @@ def test_real_service_partial_results_drive_dag_finalization(monkeypatch):
     assert kwargs["gap_count"] == 1
     assert kwargs["recovered_count"] == 1
     assert kwargs["failed_count"] == 0
+
+
+def test_fresh_recovery_repository_supports_threshold_escalation(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+    from paper_trading.services.data_gap_recovery_service import DataGapRecoveryService
+
+    gap = SimpleNamespace(id=7, business_date=date(2026, 9, 1), stock_id="000001", status="open")
+    repository = Mock()
+    repository.gap_evidence.return_value = {
+        "attempts": [SimpleNamespace(batch_id=i, outcome="not_found") for i in (1, 2, 3)]
+    }
+    repository.get_gap.return_value = gap
+    repository.escalate_gap.return_value = gap
+    session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=session))
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
+
+    adapter = dag_module._FreshSessionRecoveryRepository(storage)
+    alerts = Mock()
+    service = DataGapRecoveryService(storage=Mock(), downloader=Mock(), repository=adapter, alert_service=alerts)
+
+    assert service.maybe_escalate_gap(gap, user_id=0, user_snapshot={"actor": "system"}, as_of=date(2026, 9, 2))
+    repository.gap_evidence.assert_called_once_with(7, None)
+    alerts.send_escalation.assert_called_once_with(gap, failure_class="threshold")
 
 
 def test_fatal_aggregate_skips_unified_recovery(monkeypatch):

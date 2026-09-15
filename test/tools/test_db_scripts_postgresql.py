@@ -12,6 +12,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
 
 from monitor.storage.enum_migration import MONITOR_ENUM_ADAPTER, MONITOR_ENUM_GROUPS
+from paper_trading.domain.enums import DataGapRecoveryStatus
 from paper_trading.storage.enum_migration import _ensure_recovery_append_only, migrate_paper_trading_enums
 from storage.enum_governance import migrate_enums
 from storage.enum_migration import STORAGE_ENUM_ADAPTER, STORAGE_ENUM_GROUPS
@@ -381,11 +382,8 @@ def test_full_export_import_preserves_data_gap_recovery_enum_registrations(
     assert imported.returncode == 0, imported.stderr
     with engine.connect() as connection:
         assert enum_type_exists(connection, schema, "paper_data_gap_recovery_status")
-        assert enum_labels(connection, schema, "paper_data_gap_recovery_status") == (
-            "open",
-            "recovered",
-            "escalated",
-            "permanently_unresolved",
+        assert enum_labels(connection, schema, "paper_data_gap_recovery_status") == tuple(
+            status.value for status in DataGapRecoveryStatus
         )
         assert table_exists(connection, schema, "paper_data_gap_recovery_gaps")
 
