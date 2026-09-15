@@ -345,6 +345,44 @@ def test_batch_account_recovery_excludes_unrelated_prior_batch_gap(tmp_path, mon
         assert [(item["gap_id"], item["account_id"]) for item in result] == [(current_gap.id, account.id)]
 
 
+def test_batch_account_recovery_excludes_no_impact_gap(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        account = PaperTradingRepository(session).create_account("no-impact", Decimal("100"))
+        session.add(
+            PaperOrder(
+                account_id=account.id,
+                symbol="000001",
+                side="buy",
+                quantity=1,
+                limit_price=Decimal("10"),
+                trade_date=date(2026, 1, 2),
+                status="accepted",
+            )
+        )
+        session.flush()
+        gap = repository.record_gap(
+            date(2026, 1, 2),
+            "a_share",
+            "000001",
+            "bfq",
+            {"classification": "no_impact", "routing": "ordinary"},
+        )
+        batch = repository.record_batch(DataGapRecoveryBatchStatus.COMPLETED, {})
+        repository.record_attempt(gap.id, batch.id, DataGapRecoveryAttemptOutcome.NOT_FOUND, {})
+        monkeypatch.setattr(
+            repository,
+            "_account_replay_events",
+            lambda account_id: [
+                type("Event", (), {"payload": {"symbol": "000001"}, "trade_date": date(2026, 1, 2)})()
+            ],
+        )
+
+        assert repository.list_batch_account_recovery(batch.id) == []
+
+
 def test_owner_scoped_gap_and_batch_queries_are_distinct_and_do_not_leak_evidence(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
     Base.metadata.create_all(engine)

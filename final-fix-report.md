@@ -49,3 +49,14 @@ The external history write precedes database resolution. If the database transac
 ## Documentation rationale
 
 - Corrected `docs/airflow.md` to describe threshold escalation, immutable candidate recording, pending browser approval, alerts, and account recovery as part of the post-matching recovery workflow, and to state that escalated candidates do not auto-write before approval.
+
+## No-impact account recovery fix
+
+- Account ledger/snapshot recovery projections now exclude gaps classified as `no_impact`, including retryable work, while preserving order-dependent and valuation-only routing and unresolved terminal behavior.
+- Added repository and DAG regression coverage proving a no-impact skipped result produces no account recovery work.
+
+## Final-fix verification
+
+- `uv run pytest test/paper_trading/services/test_data_gap_recovery_service.py test/paper_trading/storage/test_data_gap_recovery.py test/paper_trading/api/test_data_gap_recovery_api.py test/dags/test_partition_dag_sources.py -q`: 118 passed, 20 skipped.
+- `uv run ruff check paper_trading/storage/data_gap_recovery_repository.py test/paper_trading/storage/test_data_gap_recovery.py test/dags/test_partition_dag_sources.py dags/download_stock_history_daily.py`: passed.
+- Simplify review: no safe simplification identified.

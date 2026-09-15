@@ -616,10 +616,17 @@ class DataGapRecoveryRepository:
             )
         )
         gap_rows = self.session.scalars(select(PaperDataGapRecoveryGap)).all()
+        no_impact_gap_ids = {
+            gap.id
+            for gap in gap_rows
+            if gap.id in batch_gap_ids and (gap.summary or {}).get("classification") == "no_impact"
+        }
+        result = [item for item in result if item["gap_id"] not in no_impact_gap_ids]
         account_ids = self.session.scalars(select(PaperAccount.id)).all()
         for gap in gap_rows:
             if (
                 gap.id not in batch_gap_ids
+                or gap.id in no_impact_gap_ids
                 or gap.status == DataGapRecoveryStatus.RECOVERED
                 or gap.business_date > (cutoff or gap.business_date)
             ):
@@ -666,7 +673,11 @@ class DataGapRecoveryRepository:
             ):
                 continue
             gap = self.session.get(PaperDataGapRecoveryGap, progress.gap_id)
-            if gap is None or (end_date is not None and gap.business_date > end_date):
+            if (
+                gap is None
+                or (gap.summary or {}).get("classification") == "no_impact"
+                or (end_date is not None and gap.business_date > end_date)
+            ):
                 continue
             result.append(
                 {
