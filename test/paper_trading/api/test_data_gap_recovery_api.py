@@ -154,3 +154,83 @@ def test_browser_user_only_sees_recovery_records_linked_to_owned_accounts(monkey
     assert [attempt["gap_id"] for attempt in batch_response.json()["attempts"]] == [visible.id]
     assert client.get("/paper/data-gap-recovery/batches").json()["total_count"] == 1
     assert client.get(f"/paper/data-gap-recovery/gaps/{hidden.id}", headers=AUTH_HEADERS).status_code == 200
+
+
+def test_data_gap_recovery_mutations_require_browser_session_and_csrf(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    Base.metadata.create_all(sqlite_session.get_bind())
+    user = User(email="approver@example.com", password_hash=hash_password("StrongPassword1"))
+    sqlite_session.add(user)
+    sqlite_session.flush()
+    account = PaperTradingRepository(sqlite_session).create_account("owned", Decimal("100"), owner_user_id=user.id)
+    recovery = DataGapRecoveryRepository(sqlite_session)
+    gap = recovery.record_gap(date(2026, 8, 2), "a_share", "000002", "bfq", {})
+    recovery.upsert_account_progress(gap.id, account.id, DataGapRecoveryAccountStatus.PENDING, {})
+    gap.status = "escalated"
+    recovery.record_candidate(gap.id, "a" * 64, {"row": 1}, {}, "test")
+    sqlite_session.commit()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: sqlite_session
+    client = TestClient(app)
+
+    assert client.post(
+        f"/paper/data-gap-recovery/gaps/{gap.id}/approve", json={"candidate_hash": "a" * 64}, headers=AUTH_HEADERS
+    ).status_code == 401
+    client.cookies.set("paper_trading_session", create_session_token(user.id, user.session_version, AuthSettings.from_environment()))
+    payload = {"candidate_hash": "a" * 64}
+    assert client.post(f"/paper/data-gap-recovery/gaps/{gap.id}/approve", json=payload).status_code == 403
+
+
+def test_data_gap_recovery_approval_records_snapshot_and_commits(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    Base.metadata.create_all(sqlite_session.get_bind())
+    user = User(email="approver@example.com", password_hash=hash_password("StrongPassword1"))
+    sqlite_session.add(user)
+    sqlite_session.flush()
+    account = PaperTradingRepository(sqlite_session).create_account("owned", Decimal("100"), owner_user_id=user.id)
+    recovery = DataGapRecoveryRepository(sqlite_session)
+    gap = recovery.record_gap(date(2026, 8, 3), "a_share", "000003", "bfq", {})
+    recovery.upsert_account_progress(gap.id, account.id, DataGapRecoveryAccountStatus.PENDING, {})
+    gap.status = "escalated"
+    recovery.record_candidate(gap.id, "b" * 64, {"row": 1}, {}, "test")
+    sqlite_session.commit()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: sqlite_session
+    client = TestClient(app)
+    client.cookies.set("paper_trading_session", create_session_token(user.id, user.session_version, AuthSettings.from_environment()))
+    client.cookies.set("paper_trading_csrf", "csrf")
+    response = client.post(
+        f"/paper/data-gap-recovery/gaps/{gap.id}/approve",
+        json={"candidate_hash": "b" * 64, "reason": "reviewed"},
+        headers={"x-csrf-token": "csrf"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending_approval"
+    approval = recovery.gap_evidence(gap.id)["approvals"][0]
+    assert approval.approver_user_id == user.id
+    assert approval.approver_snapshot["email"] == user.email
+
+
+@pytest.mark.parametrize("action", ["approve", "reject"])
+def test_data_gap_recovery_mutations_map_missing_and_stale_to_expected_errors(monkeypatch, sqlite_session, action):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    Base.metadata.create_all(sqlite_session.get_bind())
+    user = User(email="approver@example.com", password_hash=hash_password("StrongPassword1"))
+    sqlite_session.add(user)
+    sqlite_session.flush()
+    account = PaperTradingRepository(sqlite_session).create_account("owned", Decimal("100"), owner_user_id=user.id)
+    recovery = DataGapRecoveryRepository(sqlite_session)
+    gap = recovery.record_gap(date(2026, 8, 4), "a_share", "000004", "bfq", {})
+    recovery.upsert_account_progress(gap.id, account.id, DataGapRecoveryAccountStatus.PENDING, {})
+    gap.status = "escalated"
+    recovery.record_candidate(gap.id, "c" * 64, {"row": 1}, {}, "test")
+    sqlite_session.commit()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: sqlite_session
+    client = TestClient(app)
+    client.cookies.set("paper_trading_session", create_session_token(user.id, user.session_version, AuthSettings.from_environment()))
+    client.cookies.set("paper_trading_csrf", "csrf")
+    headers = {"x-csrf-token": "csrf"}
+    path = f"/paper/data-gap-recovery/gaps/{gap.id}/" + action
+    assert client.post(path, json={"candidate_hash": "d" * 64}, headers=headers).status_code == 409
+    assert client.post(path.replace(str(gap.id), "999"), json={"candidate_hash": "c" * 64}, headers=headers).status_code == 404

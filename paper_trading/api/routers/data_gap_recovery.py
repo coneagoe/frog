@@ -1,15 +1,17 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from paper_trading.api.deps import get_session, require_browser_user
+from paper_trading.api.deps import get_session, require_browser_user, require_csrf
 from paper_trading.domain.enums import DataGapRecoveryBatchStatus, DataGapRecoveryStatus
 from paper_trading.schemas.data_gap_recovery import (
+    DataGapRecoveryApprovalRequest,
     DataGapRecoveryBatchPage,
     DataGapRecoveryBatchResponse,
     DataGapRecoveryGapResponse,
     DataGapRecoveryPage,
+    DataGapRecoveryReopenRequest,
 )
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
 
@@ -90,3 +92,93 @@ def get_batch(batch_id: int, session: Session = Depends(get_session), user=Depen
     if batch is None:
         raise HTTPException(status_code=404, detail="batch not found")
     return {**batch.__dict__, **_serialize_evidence(repository.batch_evidence(batch_id, owner))}
+
+
+def _require_mutation_user(user):
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="browser session required")
+    return user
+
+
+def _user_snapshot(user) -> dict[str, object]:
+    return {
+        "user_id": user.id,
+        "email": user.email,
+        "email_verified_at": user.email_verified_at.isoformat() if user.email_verified_at else None,
+    }
+
+
+def _mutate_gap(gap_id: int, operation, session: Session, user, candidate_hash: str | None = None):
+    repository = DataGapRecoveryRepository(session)
+    gap = repository.get_gap(gap_id, user.id)
+    if gap is None:
+        raise HTTPException(status_code=404, detail="gap not found")
+    if candidate_hash is not None and gap.latest_candidate_hash != candidate_hash:
+        raise HTTPException(status_code=409, detail="candidate hash is stale")
+    try:
+        operation(repository, user)
+        response = {**gap.__dict__, **_serialize_evidence(repository.gap_evidence(gap_id, user.id))}
+        session.commit()
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return response
+
+
+@router.post("/gaps/{gap_id}/approve", response_model=DataGapRecoveryGapResponse)
+def approve_gap(
+    gap_id: int,
+    request: DataGapRecoveryApprovalRequest,
+    session: Session = Depends(get_session),
+    user=Depends(require_browser_user),
+    _: None = Depends(require_csrf),
+):
+    user = _require_mutation_user(user)
+    return _mutate_gap(
+        gap_id,
+        lambda repository, authenticated: repository.approve_gap(
+            gap_id, request.candidate_hash, authenticated.id, _user_snapshot(authenticated), reason=request.reason
+        ),
+        session,
+        user,
+        request.candidate_hash,
+    )
+
+
+@router.post("/gaps/{gap_id}/reject", response_model=DataGapRecoveryGapResponse)
+def reject_gap(
+    gap_id: int,
+    request: DataGapRecoveryApprovalRequest,
+    session: Session = Depends(get_session),
+    user=Depends(require_browser_user),
+    _: None = Depends(require_csrf),
+):
+    user = _require_mutation_user(user)
+    return _mutate_gap(
+        gap_id,
+        lambda repository, authenticated: repository.reject_gap(
+            gap_id, request.candidate_hash, authenticated.id, _user_snapshot(authenticated), reason=request.reason
+        ),
+        session,
+        user,
+        request.candidate_hash,
+    )
+
+
+@router.post("/gaps/{gap_id}/reopen", response_model=DataGapRecoveryGapResponse)
+def reopen_gap(
+    gap_id: int,
+    request: DataGapRecoveryReopenRequest,
+    session: Session = Depends(get_session),
+    user=Depends(require_browser_user),
+    _: None = Depends(require_csrf),
+):
+    user = _require_mutation_user(user)
+    return _mutate_gap(
+        gap_id,
+        lambda repository, authenticated: repository.reopen_gap(
+            gap_id, authenticated.id, _user_snapshot(authenticated), reason=request.reason
+        ),
+        session,
+        user,
+    )
