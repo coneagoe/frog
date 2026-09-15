@@ -327,6 +327,20 @@ class DataGapRecoveryService:
             )
             if canonical_candidate_hash(payload) != candidate_hash:
                 raise ValueError("approved candidate payload does not match approved hash")
+            existing = self._read_exact(locked_gap.stock_id, locked_gap.business_date)
+            if not existing.empty:
+                if not self._exact_rows_match_candidate(existing, candidate, locked_gap):
+                    raise _RecoveryWriteError("existing exact row differs from approved candidate")
+                if resolve_gap is None:
+                    self._resolve(locked_gap)
+                else:
+                    try:
+                        resolve_gap(locked_gap.id)
+                    except Exception as exc:
+                        raise _RecoveryPersistenceError(str(exc)) from exc
+                return self._result(
+                    locked_gap, "recovered", classification=locked_classification, routing=locked_routing
+                )
             if not self.storage.save_history_data_stock(candidate, PeriodType.DAILY, AdjustType.BFQ):
                 raise _RecoveryWriteError("save returned False")
             if self._read_exact(locked_gap.stock_id, locked_gap.business_date).empty:
@@ -401,6 +415,27 @@ class DataGapRecoveryService:
             (rows[COL_STOCK_ID].astype(str) == stock_id)
             & (pd.to_datetime(rows[COL_DATE], errors="coerce").dt.date == business_date)
         ]
+
+    @staticmethod
+    def _exact_rows_match_candidate(existing: pd.DataFrame, candidate: pd.DataFrame, gap: Any) -> bool:
+        candidate_payload = canonical_candidate_payload(
+            candidate,
+            market=gap.market,
+            stock_id=gap.stock_id,
+            business_date=gap.business_date,
+            adjust=gap.adjust,
+        )
+        return all(
+            canonical_candidate_payload(
+                row.to_frame().T,
+                market=gap.market,
+                stock_id=gap.stock_id,
+                business_date=gap.business_date,
+                adjust=gap.adjust,
+            )
+            == candidate_payload
+            for _, row in existing.iterrows()
+        )
 
     def _record_attempt(
         self,

@@ -251,6 +251,65 @@ def test_approved_write_uses_repository_locked_gap_for_readback_and_resolution()
     assert storage.load_history_data_stock.call_args.kwargs["start_date"] == "2026-08-08"
 
 
+def test_approved_write_skips_append_for_matching_preexisting_exact_row():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    candidate = _row("000001", "2026-08-07")
+    storage.load_history_data_stock.return_value = candidate.copy()
+    repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(gap)
+    approved_hash = canonical_candidate_hash(
+        canonical_candidate_payload(
+            candidate, market=gap.market, stock_id=gap.stock_id, business_date=gap.business_date, adjust=gap.adjust
+        )
+    )
+
+    result = _service(storage, downloader, repository).execute_approved_gap(gap, approved_hash, candidate)
+
+    assert result.status == "recovered"
+    storage.save_history_data_stock.assert_not_called()
+    repository.resolve_gap.assert_called_once_with(gap.id)
+
+
+def test_approved_write_retry_after_resolution_failure_does_not_append_twice():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    candidate = _row("000001", "2026-08-07")
+    storage.load_history_data_stock.side_effect = [pd.DataFrame(), candidate.copy(), candidate.copy()]
+    storage.save_history_data_stock.return_value = True
+    repository.execute_approved_candidate.side_effect = (
+        lambda _id, _hash, callback: callback(gap, repository.resolve_gap)
+    )
+    repository.resolve_gap.side_effect = [RuntimeError("commit failed"), None]
+    approved_hash = canonical_candidate_hash(
+        canonical_candidate_payload(
+            candidate, market=gap.market, stock_id=gap.stock_id, business_date=gap.business_date, adjust=gap.adjust
+        )
+    )
+    service = _service(storage, downloader, repository)
+
+    first = service.execute_approved_gap(gap, approved_hash, candidate)
+    second = service.execute_approved_gap(gap, approved_hash, candidate)
+
+    assert first.status == "failed"
+    assert second.status == "recovered"
+    storage.save_history_data_stock.assert_called_once_with(candidate, PeriodType.DAILY, AdjustType.BFQ)
+    assert repository.resolve_gap.call_count == 2
+
+
 def test_unified_recovery_records_classification_and_ordinary_routing():
     storage = Mock()
     storage.load_history_data_stock.side_effect = [pd.DataFrame(), _row("000001", "2026-08-07")]
