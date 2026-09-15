@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable
 
 import pandas as pd
@@ -188,6 +188,60 @@ class DataGapRecoveryService:
                 classification=classification,
                 routing=routing,
             )
+            return self._result(gap, "failed", error=str(exc), classification=classification, routing=routing)
+
+    def maybe_escalate_gap(
+        self,
+        gap: Any,
+        *,
+        user_id: int,
+        user_snapshot: dict[str, Any],
+        as_of: date | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        """Escalate an unresolved gap once either service threshold is reached."""
+        if self.repository is None or not hasattr(self.repository, "escalate_gap"):
+            return False
+        evidence = self.repository.gap_evidence(gap.id)
+        attempts = evidence.get("attempts", [])
+        unavailable_batches = {
+            attempt.batch_id
+            for attempt in attempts
+            if getattr(attempt, "outcome", None) == DataGapRecoveryAttemptOutcome.NOT_FOUND
+            and getattr(attempt, "batch_id", None) is not None
+        }
+        today = as_of or date.today()
+        business_days = sum(
+            (gap.business_date + timedelta(days=offset)).weekday() < 5
+            for offset in range(max(0, (today - gap.business_date).days + 1))
+        )
+        if len(unavailable_batches) < 3 and business_days < 5:
+            return False
+        self.repository.escalate_gap(gap.id, user_id, user_snapshot, reason=reason)
+        return True
+
+    def execute_approved_gap(self, gap: Any, candidate_hash: str, candidate: pd.DataFrame) -> GapRecoveryResult:
+        """Write an approved candidate only if it is still the current candidate."""
+        classification, routing = self._diagnostic(gap)
+        if self.repository is not None and gap.latest_candidate_hash != candidate_hash:
+            self.repository.invalidate_stale_candidate(gap.id, candidate_hash)
+            return self._result(
+                gap,
+                "pending_approval",
+                error="candidate hash is stale",
+                classification=classification,
+                routing=routing,
+            )
+        if classification == DataGapRecoveryClassification.NO_IMPACT.value:
+            return self._result(gap, "skipped", classification=classification, routing=routing)
+        try:
+            if not self.storage.save_history_data_stock(candidate, PeriodType.DAILY, AdjustType.BFQ):
+                raise _RecoveryWriteError("save returned False")
+            if self._read_exact(gap.stock_id, gap.business_date).empty:
+                raise _RecoveryWriteError("exact-key readback did not find recovered row")
+            self._resolve(gap)
+            return self._result(gap, "recovered", classification=classification, routing=routing)
+        except Exception as exc:  # noqa: BLE001
             return self._result(gap, "failed", error=str(exc), classification=classification, routing=routing)
 
     @staticmethod
