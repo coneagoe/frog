@@ -509,9 +509,7 @@ def run_paper_trading_account_recovery(
             if alert_service is not None:
                 for item in account_work or []:
                     try:
-                        gap = alert_service.repository._call(
-                            lambda repository: repository.get_gap(item["gap_id"], None)
-                        )
+                        gap = alert_service.repository.get_gap(item["gap_id"])
                         if gap is not None:
                             alert_service.send_account_recovery_failure(
                                 gap, account_id=account_id, failure_class=type(exc).__name__.lower()
@@ -579,6 +577,19 @@ class _FreshSessionRecoveryRepository:
 
     def record_attempt(self, *args: Any) -> Any:
         return self._call(lambda repository: repository.record_attempt(*args))
+
+    def get_gap(self, gap_id: int, owner_user_id: int | None = None) -> Any:
+        return self._call(lambda repository: repository.get_gap(gap_id, owner_user_id))
+
+    def gap_evidence(self, gap_id: int, owner_user_id: int | None = None) -> dict[str, Any]:
+        result = self._call(lambda repository: repository.gap_evidence(gap_id, owner_user_id))
+        return cast(dict[str, Any], result)
+
+    def claim_alert(self, gap_id: int, cycle_key: str, evidence: dict[str, Any]) -> Any:
+        return self._call(lambda repository: repository.claim_alert(gap_id, cycle_key, evidence))
+
+    def update_alert_delivery(self, alert_id: int, state: Any, metadata: dict[str, Any]) -> Any:
+        return self._call(lambda repository: repository.update_alert_delivery(alert_id, state, metadata))
 
     def resolve_gap(self, gap_id: int) -> None:
         self._call(lambda repository: repository.resolve_gap(gap_id))
