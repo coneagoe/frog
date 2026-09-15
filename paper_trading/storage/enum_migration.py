@@ -571,16 +571,43 @@ def _add_alert_delivery_metadata_column(connection: Connection) -> bool:
         return False
     if connection.dialect.name != "postgresql":
         return False
-    exists = connection.execute(text(
-        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
-        "AND table_name = 'paper_data_gap_recovery_alerts' AND column_name = 'delivery_metadata'"
-    )).scalar()
+    exists = connection.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+            "AND table_name = 'paper_data_gap_recovery_alerts' AND column_name = 'delivery_metadata'"
+        )
+    ).scalar()
     if exists:
         return False
-    connection.execute(text(
-        "ALTER TABLE paper_data_gap_recovery_alerts ADD COLUMN delivery_metadata JSON NOT NULL DEFAULT '{}'"
-    ))
+    connection.execute(
+        text("ALTER TABLE paper_data_gap_recovery_alerts ADD COLUMN delivery_metadata JSON NOT NULL DEFAULT '{}'")
+    )
     return True
+
+
+def _ensure_alert_delivery_trigger(connection: Connection) -> None:
+    """Keep alert evidence immutable while allowing delivery settlement updates."""
+    if connection.dialect.name != "postgresql" or not _table_exists(connection, "paper_data_gap_recovery_alerts"):
+        return
+    connection.execute(
+        text(
+            "CREATE OR REPLACE FUNCTION paper_data_gap_recovery_alerts_append_only() "
+            "RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+            "IF TG_OP = 'DELETE' OR OLD.evidence IS DISTINCT FROM NEW.evidence THEN "
+            "RAISE EXCEPTION 'append-only evidence cannot be changed'; END IF; "
+            "RETURN NEW; END; $$"
+        )
+    )
+    connection.execute(
+        text("DROP TRIGGER IF EXISTS paper_data_gap_recovery_alerts_append_only ON paper_data_gap_recovery_alerts")
+    )
+    connection.execute(
+        text(
+            "CREATE TRIGGER paper_data_gap_recovery_alerts_append_only "
+            "BEFORE UPDATE OR DELETE ON paper_data_gap_recovery_alerts FOR EACH ROW "
+            "EXECUTE FUNCTION paper_data_gap_recovery_alerts_append_only()"
+        )
+    )
 
 
 def ensure_snapshot_series_enum_types(connection: Connection) -> None:
@@ -634,6 +661,8 @@ def _result(
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     groups = PAPER_TRADING_ENUM_GROUPS
+    if not rollback:
+        _add_alert_delivery_metadata_column(connection)
     _preflight_recovery_schema(connection, rollback=rollback)
     missing_tables = _preflight(connection, groups, rollback=rollback)
     if not rollback and _table_exists(connection, tb_name_paper_etf_eligibility):
@@ -707,7 +736,13 @@ def _preflight_recovery_schema(connection: Connection, *, rollback: bool) -> Non
             "created_at",
         },
         "paper_data_gap_recovery_alerts": {
-            "id", "gap_id", "cycle_key", "evidence", "delivery_metadata", "delivery_state", "created_at"
+            "id",
+            "gap_id",
+            "cycle_key",
+            "evidence",
+            "delivery_metadata",
+            "delivery_state",
+            "created_at",
         },
     }
     present = {name for name in required if _table_exists(connection, name)}
@@ -921,6 +956,9 @@ def _ensure_recovery_append_only(connection: Connection) -> None:
         "paper_data_gap_recovery_alerts",
     ):
         if not _table_exists(connection, table_name):
+            continue
+        if table_name == "paper_data_gap_recovery_alerts":
+            _ensure_alert_delivery_trigger(connection)
             continue
         connection.execute(
             text(
@@ -1136,11 +1174,7 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
     missing_tables = {name for name in governed_names if not _table_exists(connection, name)}
     for group in groups:
         labels = _enum_labels(connection, group.type_name)
-        if (
-            labels
-            and labels != group.labels
-            and (rollback or not _can_extend_enum_labels(connection, group, labels))
-        ):
+        if labels and labels != group.labels and (rollback or not _can_extend_enum_labels(connection, group, labels)):
             raise PaperTradingEnumMigrationError(f"{group.type_name}: unexpected enum labels {labels}")
         for column in group.columns:
             if column.table_name in missing_tables:
@@ -1275,9 +1309,7 @@ def _can_extend_replay_time_provenance(group: PaperTradingEnumGroup, labels: tup
     return group.type_name == "paper_replay_time_provenance" and group.labels[: len(labels)] == labels
 
 
-def _can_extend_enum_labels(
-    connection: Connection, group: PaperTradingEnumGroup, labels: tuple[str, ...]
-) -> bool:
+def _can_extend_enum_labels(connection: Connection, group: PaperTradingEnumGroup, labels: tuple[str, ...]) -> bool:
     """Allow only known, ordered additions to an existing PostgreSQL enum."""
     if not labels or labels == group.labels:
         return False

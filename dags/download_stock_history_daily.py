@@ -602,11 +602,7 @@ class _FreshSessionRecoveryRepository:
         user_snapshot: dict[str, Any],
         reason: str | None = None,
     ) -> Any:
-        return self._call(
-            lambda repository: repository.escalate_gap(
-                gap_id, user_id, user_snapshot, reason=reason
-            )
-        )
+        return self._call(lambda repository: repository.escalate_gap(gap_id, user_id, user_snapshot, reason=reason))
 
     def claim_alert(self, gap_id: int, cycle_key: str, evidence: dict[str, Any]) -> Any:
         return self._call(lambda repository: repository.claim_alert(gap_id, cycle_key, evidence))
@@ -617,7 +613,7 @@ class _FreshSessionRecoveryRepository:
     def resolve_gap(self, gap_id: int) -> None:
         self._call(lambda repository: repository.resolve_gap(gap_id))
 
-    def execute_approved_candidate(self, gap_id: int, candidate_hash: str, callback: Callable[[Any], Any]) -> Any:
+    def execute_approved_candidate(self, gap_id: int, candidate_hash: str, callback: Callable[..., Any]) -> Any:
         return self._call(lambda repository: repository.execute_approved_candidate(gap_id, candidate_hash, callback))
 
     def finalize_batch(self, *args: Any, **kwargs: Any) -> Any:

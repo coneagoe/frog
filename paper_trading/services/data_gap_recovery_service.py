@@ -221,9 +221,7 @@ class DataGapRecoveryService:
             )
             error = RuntimeError("all providers failed")
             self._send_recovery_system_failure(gap, error)
-            return self._result(
-                gap, "failed", error=str(error), classification=classification, routing=routing
-            )
+            return self._result(gap, "failed", error=str(error), classification=classification, routing=routing)
         except _RecoveryPersistenceError as exc:
             self._send_recovery_system_failure(gap, exc)
             return self._result(gap, "failed", error=str(exc), classification=classification, routing=routing)
@@ -300,9 +298,7 @@ class DataGapRecoveryService:
         if self.alert_service is None:
             return
         try:
-            self.alert_service.send_recovery_system_failure(
-                gap, failure_class=self._failure_class(error)
-            )
+            self.alert_service.send_recovery_system_failure(gap, failure_class=self._failure_class(error))
         except Exception:  # noqa: BLE001
             logger.exception("Data-gap recovery system alert failed: gap_id=%s", getattr(gap, "id", None))
 
@@ -318,15 +314,16 @@ class DataGapRecoveryService:
                 routing=routing,
             )
 
-        def write(locked_gap: Any) -> GapRecoveryResult:
+        def write(locked_gap: Any, resolve_gap: Any = None) -> GapRecoveryResult:
             locked_classification, locked_routing = self._diagnostic(locked_gap)
             if locked_classification == DataGapRecoveryClassification.NO_IMPACT.value:
-                return self._result(
-                    locked_gap, "skipped", classification=locked_classification, routing=locked_routing
-                )
+                return self._result(locked_gap, "skipped", classification=locked_classification, routing=locked_routing)
             payload = canonical_candidate_payload(
-                candidate, market=locked_gap.market, stock_id=locked_gap.stock_id,
-                business_date=locked_gap.business_date, adjust=locked_gap.adjust,
+                candidate,
+                market=locked_gap.market,
+                stock_id=locked_gap.stock_id,
+                business_date=locked_gap.business_date,
+                adjust=locked_gap.adjust,
             )
             if canonical_candidate_hash(payload) != candidate_hash:
                 raise ValueError("approved candidate payload does not match approved hash")
@@ -334,10 +331,14 @@ class DataGapRecoveryService:
                 raise _RecoveryWriteError("save returned False")
             if self._read_exact(locked_gap.stock_id, locked_gap.business_date).empty:
                 raise _RecoveryWriteError("exact-key readback did not find recovered row")
-            self._resolve(locked_gap)
-            return self._result(
-                locked_gap, "recovered", classification=locked_classification, routing=locked_routing
-            )
+            if resolve_gap is None:
+                self._resolve(locked_gap)
+            else:
+                try:
+                    resolve_gap(locked_gap.id)
+                except Exception as exc:  # noqa: BLE001
+                    raise _RecoveryPersistenceError(str(exc)) from exc
+            return self._result(locked_gap, "recovered", classification=locked_classification, routing=locked_routing)
 
         try:
             result = self.repository.execute_approved_candidate(gap.id, candidate_hash, write)
@@ -353,8 +354,7 @@ class DataGapRecoveryService:
         status = getattr(getattr(gap, "status", None), "value", getattr(gap, "status", None))
         summary = getattr(gap, "summary", None)
         explicit_no_impact = (
-            isinstance(summary, dict)
-            and summary.get("classification") == DataGapRecoveryClassification.NO_IMPACT.value
+            isinstance(summary, dict) and summary.get("classification") == DataGapRecoveryClassification.NO_IMPACT.value
         )
         return status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED.value or explicit_no_impact
 

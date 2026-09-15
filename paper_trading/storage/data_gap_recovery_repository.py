@@ -86,13 +86,17 @@ class DataGapRecoveryRepository:
                     DailyBarDiagnostic.adjust == "bfq",
                     DailyBarDiagnostic.classification.in_(("missing_market_data", "missing_exact_date")),
                     DailyBarDiagnostic.resolved.is_(False),
-                    not_(select(PaperDataGapRecoveryGap.id).where(
-                        PaperDataGapRecoveryGap.business_date == DailyBarDiagnostic.business_date,
-                        PaperDataGapRecoveryGap.market == DailyBarDiagnostic.market,
-                        PaperDataGapRecoveryGap.stock_id == DailyBarDiagnostic.stock_id,
-                        PaperDataGapRecoveryGap.adjust == DailyBarDiagnostic.adjust,
-                        PaperDataGapRecoveryGap.status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED,
-                    ).exists()),
+                    not_(
+                        select(PaperDataGapRecoveryGap.id)
+                        .where(
+                            PaperDataGapRecoveryGap.business_date == DailyBarDiagnostic.business_date,
+                            PaperDataGapRecoveryGap.market == DailyBarDiagnostic.market,
+                            PaperDataGapRecoveryGap.stock_id == DailyBarDiagnostic.stock_id,
+                            PaperDataGapRecoveryGap.adjust == DailyBarDiagnostic.adjust,
+                            PaperDataGapRecoveryGap.status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED,
+                        )
+                        .exists()
+                    ),
                 )
                 .order_by(DailyBarDiagnostic.business_date, DailyBarDiagnostic.stock_id, DailyBarDiagnostic.id)
             )
@@ -319,9 +323,7 @@ class DataGapRecoveryRepository:
             DataGapRecoveryStatus.PENDING_APPROVAL,
         )
 
-    def execute_approved_candidate(
-        self, gap_id: int, candidate_hash: str, write_callback: Callable[[PaperDataGapRecoveryGap], Any]
-    ) -> Any:
+    def execute_approved_candidate(self, gap_id: int, candidate_hash: str, write_callback: Callable[..., Any]) -> Any:
         """Lock and authorize a candidate while its write callback runs in this transaction."""
         gap = self._locked_gap(gap_id)
         if gap.status != DataGapRecoveryStatus.PENDING_APPROVAL:
@@ -347,13 +349,15 @@ class DataGapRecoveryRepository:
         )
         if candidate is None:
             raise ValueError("approved candidate payload is required")
-        return write_callback(gap)
+        return write_callback(gap, self.resolve_gap)
 
     def approved_candidate_payload(self, gap_id: int, candidate_hash: str) -> dict[str, Any]:
-        candidate = self.session.scalar(select(PaperDataGapRecoveryCandidate).where(
-            PaperDataGapRecoveryCandidate.gap_id == gap_id,
-            PaperDataGapRecoveryCandidate.candidate_hash == candidate_hash,
-        ))
+        candidate = self.session.scalar(
+            select(PaperDataGapRecoveryCandidate).where(
+                PaperDataGapRecoveryCandidate.gap_id == gap_id,
+                PaperDataGapRecoveryCandidate.candidate_hash == candidate_hash,
+            )
+        )
         if candidate is None:
             raise ValueError("approved candidate payload is required")
         return dict(candidate.payload)
@@ -362,10 +366,13 @@ class DataGapRecoveryRepository:
         rows = self.session.execute(
             select(PaperDataGapRecoveryGap, PaperDataGapRecoveryApproval, PaperDataGapRecoveryCandidate)
             .join(PaperDataGapRecoveryApproval, PaperDataGapRecoveryApproval.gap_id == PaperDataGapRecoveryGap.id)
-            .join(PaperDataGapRecoveryCandidate, (
-                (PaperDataGapRecoveryCandidate.gap_id == PaperDataGapRecoveryGap.id)
-                & (PaperDataGapRecoveryCandidate.candidate_hash == PaperDataGapRecoveryApproval.candidate_hash)
-            ))
+            .join(
+                PaperDataGapRecoveryCandidate,
+                (
+                    (PaperDataGapRecoveryCandidate.gap_id == PaperDataGapRecoveryGap.id)
+                    & (PaperDataGapRecoveryCandidate.candidate_hash == PaperDataGapRecoveryApproval.candidate_hash)
+                ),
+            )
             .where(
                 PaperDataGapRecoveryGap.status == DataGapRecoveryStatus.PENDING_APPROVAL,
                 PaperDataGapRecoveryApproval.decision == DataGapRecoveryApprovalDecision.APPROVED,
