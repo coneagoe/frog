@@ -585,6 +585,8 @@ def ensure_snapshot_valuation_metadata(connection: Connection) -> bool:
 
 
 def _has_pending_enum_column_changes(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]) -> bool:
+    if any(_can_extend_enum_labels(connection, group, _enum_labels(connection, group.type_name)) for group in groups):
+        return True
     for group in groups:
         for column in group.columns:
             if not _table_exists(connection, column.table_name):
@@ -1083,7 +1085,7 @@ def _migrate(
         raise PaperTradingEnumMigrationError(f"partially missing governed tables: {sorted(missing_tables)}")
     changed = any(
         not _column_has_type(connection, column, group.type_name) for group in groups for column in group.columns
-    )
+    ) or any(_can_extend_enum_labels(connection, group, _enum_labels(connection, group.type_name)) for group in groups)
     if dry_run:
         return _result(
             groups, dry_run=True, rollback=rollback, converted=changed if dry_run_reports_conversion else False
@@ -1114,7 +1116,12 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
     missing_tables = {name for name in governed_names if not _table_exists(connection, name)}
     for group in groups:
         labels = _enum_labels(connection, group.type_name)
-        if labels and labels != group.labels and not _can_extend_replay_time_provenance(group, labels):
+        if (
+            labels
+            and labels != group.labels
+            and not rollback
+            and not _can_extend_enum_labels(connection, group, labels)
+        ):
             raise PaperTradingEnumMigrationError(f"{group.type_name}: unexpected enum labels {labels}")
         for column in group.columns:
             if column.table_name in missing_tables:
@@ -1231,9 +1238,15 @@ def _ensure_auth_tables(connection: Connection) -> None:
 def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
     labels = _enum_labels(connection, group.type_name)
     if labels:
-        if _can_extend_replay_time_provenance(group, labels):
-            for label in group.labels[len(labels) :]:
-                connection.execute(text(f"ALTER TYPE {group.type_name} ADD VALUE '{label}'"))
+        if _can_extend_enum_labels(connection, group, labels):
+            existing = set(labels)
+            for index, label in enumerate(group.labels):
+                if label in existing:
+                    continue
+                following = next((candidate for candidate in group.labels[index + 1 :] if candidate in existing), None)
+                placement = f" BEFORE '{following}'" if following is not None else ""
+                connection.execute(text(f"ALTER TYPE {group.type_name} ADD VALUE '{label}'{placement}"))
+                existing.add(label)
         return
     labels_sql = ", ".join(f"'{label}'" for label in group.labels)
     connection.execute(text(f"CREATE TYPE {group.type_name} AS ENUM ({labels_sql})"))
@@ -1241,6 +1254,21 @@ def _create_type(connection: Connection, group: PaperTradingEnumGroup) -> None:
 
 def _can_extend_replay_time_provenance(group: PaperTradingEnumGroup, labels: tuple[str, ...]) -> bool:
     return group.type_name == "paper_replay_time_provenance" and group.labels[: len(labels)] == labels
+
+
+def _can_extend_enum_labels(
+    connection: Connection, group: PaperTradingEnumGroup, labels: tuple[str, ...]
+) -> bool:
+    """Allow only known, ordered additions to an existing PostgreSQL enum."""
+    if not labels or labels == group.labels:
+        return False
+    if _can_extend_replay_time_provenance(group, labels):
+        return True
+    if group.type_name != "paper_data_gap_recovery_status":
+        return False
+    return all(label in group.labels for label in labels) and [
+        label for label in group.labels if label in labels
+    ] == list(labels)
 
 
 def ensure_paper_market_type(connection: Connection) -> None:
