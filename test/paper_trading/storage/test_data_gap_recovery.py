@@ -173,18 +173,27 @@ def test_transitions_reject_invalid_source_states_and_preserve_attempts(tmp_path
         assert len(repository.gap_evidence(gap.id)["attempts"]) == 1
 
 
-def test_record_candidate_updates_gap_latest_candidate_hash(tmp_path):
+def test_record_candidate_locks_gap_before_updating_latest_candidate_hash(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
     Base.metadata.create_all(engine)
     with Session(engine) as session:
         repository = DataGapRecoveryRepository(session)
         gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        locked_gap_ids = []
+        original_locked_gap = repository._locked_gap
+
+        def locked_gap(gap_id):
+            locked_gap_ids.append(gap_id)
+            return original_locked_gap(gap_id)
+
+        monkeypatch.setattr(repository, "_locked_gap", locked_gap)
 
         repository.record_candidate(gap.id, "a" * 64, {}, {}, "caller")
         assert gap.latest_candidate_hash == "a" * 64
 
         repository.record_candidate(gap.id, "b" * 64, {}, {}, "caller")
         assert gap.latest_candidate_hash == "b" * 64
+        assert locked_gap_ids == [gap.id, gap.id]
 
 
 def test_recording_existing_gap_updates_last_observed_at(tmp_path):

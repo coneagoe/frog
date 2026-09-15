@@ -127,9 +127,7 @@ class DataGapRecoveryRepository:
         routing: DataGapRecoveryRouting,
         evidence: dict[str, Any],
     ) -> None:
-        gap = self.session.get(PaperDataGapRecoveryGap, gap_id)
-        if gap is None:
-            raise KeyError(gap_id)
+        gap = self._locked_gap(gap_id)
         summary = dict(gap.summary)
         summary.update(classification=classification.value, routing=routing.value, evidence=evidence)
         self.update_gap_summary(gap_id, summary)
@@ -147,9 +145,7 @@ class DataGapRecoveryRepository:
     ) -> PaperDataGapRecoveryCandidate:
         if not re.fullmatch(r"[0-9a-fA-F]{64}", candidate_hash):
             raise ValueError("candidate_hash must be a 64-character SHA-256 hex digest")
-        gap = self.session.get(PaperDataGapRecoveryGap, gap_id)
-        if gap is None:
-            raise KeyError(gap_id)
+        gap = self._locked_gap(gap_id)
         candidate = PaperDataGapRecoveryCandidate(
             gap_id=gap_id, candidate_hash=candidate_hash, payload=payload, validation=validation, source=source
         )
