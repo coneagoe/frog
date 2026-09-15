@@ -45,3 +45,7 @@ The external history write precedes database resolution. If the database transac
 ## Full export/import enum expectation
 
 - Confirmed the full export/import failure was a stale four-label test expectation; governed `DataGapRecoveryStatus` now includes `pending_approval`. Updated the test to derive expected labels from the enum. `delivery_metadata` was not added because it is outside this test's enum-registration purpose.
+
+## Documentation rationale
+
+- Corrected `docs/airflow.md` to describe threshold escalation, immutable candidate recording, pending browser approval, alerts, and account recovery as part of the post-matching recovery workflow, and to state that escalated candidates do not auto-write before approval.
