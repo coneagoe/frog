@@ -41,3 +41,7 @@ The external history write precedes database resolution. If the database transac
 - `tools/run_tests.sh test/paper_trading/storage/test_data_gap_recovery_enum_migration.py -v`: 7 passed.
 - `uv run ruff check` on changed Python files: passed.
 - Simplify review: no safe simplification identified.
+
+## Full export/import enum expectation
+
+- Confirmed the full export/import failure was a stale four-label test expectation; governed `DataGapRecoveryStatus` now includes `pending_approval`. Updated the test to derive expected labels from the enum. `delivery_metadata` was not added because it is outside this test's enum-registration purpose.
