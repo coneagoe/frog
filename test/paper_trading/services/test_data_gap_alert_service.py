@@ -169,3 +169,25 @@ def test_claim_collision_rereads_contested_key_before_allocating_retry():
         ((4, "recovery_system:provider_timeout"), {}),
         ((4, "recovery_system:provider_timeout"), {}),
     ]
+
+
+def test_existing_failed_base_cycle_allocates_retry_one():
+    session = Mock()
+    savepoint = Mock()
+    savepoint.__enter__ = Mock(return_value=savepoint)
+    savepoint.__exit__ = Mock(return_value=None)
+    session.begin_nested.return_value = savepoint
+    repository = DataGapRecoveryRepository(session)
+    failed = SimpleNamespace(delivery_state=DataGapRecoveryAlertDeliveryState.FAILED)
+    retry = SimpleNamespace(
+        cycle_key="recovery_system:provider_timeout:retry:1",
+        delivery_state=DataGapRecoveryAlertDeliveryState.PENDING,
+    )
+    repository.get_alert = Mock(side_effect=[failed, None])
+    repository.record_alert = Mock(return_value=retry)
+
+    alert, claimed = repository.claim_alert(4, "recovery_system:provider_timeout", {})
+
+    assert alert is retry
+    assert claimed is True
+    assert repository.record_alert.call_args.args[1] == "recovery_system:provider_timeout:retry:1"

@@ -398,6 +398,7 @@ class DataGapRecoveryRepository:
                     if alert is not None:
                         if alert.delivery_state != DataGapRecoveryAlertDeliveryState.FAILED:
                             return alert, False
+                        retry += 1
                         continue
                     return self.record_alert(gap_id, key, evidence), True
             except IntegrityError:
