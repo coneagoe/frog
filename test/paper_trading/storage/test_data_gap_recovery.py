@@ -102,6 +102,20 @@ def test_candidate_hash_and_approval_binding_are_enforced(tmp_path):
         assert approval.candidate_hash == candidate.candidate_hash
 
 
+def test_record_candidate_updates_gap_latest_candidate_hash(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+
+        repository.record_candidate(gap.id, "a" * 64, {}, {}, "caller")
+        assert gap.latest_candidate_hash == "a" * 64
+
+        repository.record_candidate(gap.id, "b" * 64, {}, {}, "caller")
+        assert gap.latest_candidate_hash == "b" * 64
+
+
 def test_recording_existing_gap_updates_last_observed_at(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
     Base.metadata.create_all(engine)

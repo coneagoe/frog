@@ -184,6 +184,7 @@ def test_recovery_groups_declare_expected_labels_and_table_columns():
         group = groups[type_name]
         assert group.labels == tuple(member.value for member in enum_class)
         assert [(column.table_name, column.column_name) for column in group.columns] == [(table_name, column_name)]
+    assert DataGapRecoveryStatus.PENDING_APPROVAL.value in RECOVERY_GROUPS["paper_data_gap_recovery_status"][0]
 
 
 def test_fresh_recovery_migration_registers_all_types_tables_and_reruns(migration_schema):
