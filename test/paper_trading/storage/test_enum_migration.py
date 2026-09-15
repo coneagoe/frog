@@ -948,6 +948,15 @@ def test_rollback_rejects_rows_colliding_on_legacy_marketless_keys(postgres_sche
             migrate_paper_trading_enums(connection, rollback=True)
 
 
+def test_rollback_rejects_unexpected_labels_on_unrelated_enum(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        migrate_paper_trading_enums(connection)
+        connection.execute(text("ALTER TYPE paper_account_status ADD VALUE 'unexpected'"))
+        with pytest.raises(PaperTradingEnumMigrationError, match="paper_account_status: unexpected enum labels"):
+            migrate_paper_trading_enums(connection, rollback=True)
+
+
 def test_rollback_rejects_diagnostic_rows_colliding_on_legacy_marketless_key(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:

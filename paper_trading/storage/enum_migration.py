@@ -1119,8 +1119,7 @@ def _preflight(connection: Connection, groups: tuple[PaperTradingEnumGroup, ...]
         if (
             labels
             and labels != group.labels
-            and not rollback
-            and not _can_extend_enum_labels(connection, group, labels)
+            and (rollback or not _can_extend_enum_labels(connection, group, labels))
         ):
             raise PaperTradingEnumMigrationError(f"{group.type_name}: unexpected enum labels {labels}")
         for column in group.columns:
