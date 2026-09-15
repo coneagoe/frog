@@ -114,9 +114,13 @@ def _mutate_gap(gap_id: int, operation, session: Session, user, candidate_hash: 
     if gap is None:
         raise HTTPException(status_code=404, detail="gap not found")
     if candidate_hash is not None and gap.latest_candidate_hash != candidate_hash:
+        session.rollback()
         raise HTTPException(status_code=409, detail="candidate hash is stale")
     try:
         operation(repository, user)
+        if candidate_hash is not None and gap.latest_candidate_hash != candidate_hash:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="candidate hash is stale")
         response = {**gap.__dict__, **_serialize_evidence(repository.gap_evidence(gap_id, user.id))}
         session.commit()
     except ValueError as exc:
