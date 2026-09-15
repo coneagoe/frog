@@ -9,6 +9,8 @@ from typing import Any, Callable, cast
 from paper_trading.domain.enums import DataGapRecoveryAlertDeliveryState
 
 _SENSITIVE_ERROR = re.compile(r"(?i)(password|passwd|secret|token|api[_ -]?key)\s*[=:]\s*[^\s,;]+")
+_SAFE_TOKEN = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,47}$")
+_SAFE_STOCK = re.compile(r"^[0-9]{6}$")
 
 
 class DataGapAlertService:
@@ -42,9 +44,11 @@ class DataGapAlertService:
         *,
         account_id: int | None = None,
     ) -> Any:
-        existing = self.repository.get_alert(gap.id, cycle_key)
-        if existing is not None:
-            return existing
+        failure_class = self._safe_token(failure_class, "failure_class")
+        if not isinstance(gap.id, int) or gap.id <= 0 or not _SAFE_STOCK.fullmatch(str(gap.stock_id)):
+            raise ValueError("invalid gap identifier")
+        if account_id is not None and (not isinstance(account_id, int) or account_id <= 0):
+            raise ValueError("invalid account identifier")
         evidence: dict[str, Any] = {
             "event": subject.lower().replace(" ", "_"),
             "failure_class": failure_class,
@@ -53,7 +57,9 @@ class DataGapAlertService:
         }
         if account_id is not None:
             evidence["account_id"] = account_id
-        alert = self.repository.record_alert(gap.id, cycle_key, evidence)
+        alert, claimed = self.repository.claim_alert(gap.id, cycle_key, evidence)
+        if not claimed:
+            return alert
         try:
             self.sender(subject, self._body(gap, failure_class, account_id))
         except Exception as exc:  # noqa: BLE001
@@ -77,7 +83,17 @@ class DataGapAlertService:
 
     @staticmethod
     def _safe_error(error: Exception) -> str:
-        return _SENSITIVE_ERROR.sub(r"\1=[redacted]", str(error))[:500]
+        safe = _SENSITIVE_ERROR.sub(r"\1=[redacted]", str(error))
+        return "".join(char if char.isprintable() else " " for char in safe)[:500]
+
+    @staticmethod
+    def _safe_token(value: str, name: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError(f"{name} must be a string")
+        value = value.strip().lower()
+        if not _SAFE_TOKEN.fullmatch(value):
+            raise ValueError(f"invalid {name}")
+        return value
 
     @staticmethod
     def _send_smtp(subject: str, body: str) -> None:

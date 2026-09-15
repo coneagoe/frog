@@ -25,6 +25,16 @@ class RecordingRepository:
         self.alerts[(gap_id, cycle_key)] = alert
         return alert
 
+    def claim_alert(self, gap_id, cycle_key, evidence):
+        for retry in range(100):
+            key = cycle_key if retry == 0 else f"{cycle_key}:retry:{retry}"
+            existing = self.alerts.get((gap_id, key))
+            if existing is None:
+                return self.record_alert(gap_id, key, evidence), True
+            if existing.delivery_state != DataGapRecoveryAlertDeliveryState.FAILED:
+                return existing, False
+        raise RuntimeError("unable to claim test alert cycle")
+
     def update_alert_delivery(self, alert_id, state, metadata):
         alert = next(alert for alert in self.alerts.values() if alert.id == alert_id)
         alert.delivery_state = state
@@ -75,3 +85,61 @@ def test_delivery_failure_is_persisted_without_secret_metadata():
     delivery = alert.evidence["delivery"]
     assert delivery["state"] == "failed"
     assert "super-secret" not in str(delivery)
+
+
+def test_failed_cycle_is_retryable_but_delivered_cycle_is_not():
+    repository = RecordingRepository()
+    calls = iter([RuntimeError("temporary"), None])
+    service = DataGapAlertService(repository=repository, sender=lambda *_: None)
+
+    def sender(*_):
+        result = next(calls)
+        if isinstance(result, Exception):
+            raise result
+
+    service.sender = sender
+    failed = service.send_recovery_system_failure(gap(), failure_class="provider_timeout")
+    retried = service.send_recovery_system_failure(gap(), failure_class="provider_timeout")
+    delivered_again = service.send_recovery_system_failure(gap(), failure_class="provider_timeout")
+
+    assert failed.delivery_state == DataGapRecoveryAlertDeliveryState.FAILED
+    assert retried.delivery_state == DataGapRecoveryAlertDeliveryState.DELIVERED
+    assert retried.cycle_key.endswith(":retry:1")
+    assert delivered_again is retried
+
+
+def test_recovery_system_failure_uses_safe_config_and_rejects_control_tokens(monkeypatch):
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_PORT", "465")
+    monkeypatch.setenv("SMTP_MAIL_FROM", "alerts@example.test")
+    monkeypatch.setenv("SMTP_PASSWORD", "not-in-output")
+    monkeypatch.setenv("ALERT_EMAILS", "ops@example.test")
+    sent = []
+
+    class SMTP:
+        def __init__(self, host, port):
+            assert (host, port) == ("smtp.example.test", 465)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def login(self, user, password):
+            assert (user, password) == ("alerts@example.test", "not-in-output")
+
+        def send_message(self, message):
+            sent.append(message)
+
+    monkeypatch.setattr("paper_trading.services.data_gap_alert_service.smtplib.SMTP_SSL", SMTP)
+    DataGapAlertService._send_smtp("Data gap recovery system failure", "provider_timeout")
+    assert sent[0]["To"] == "ops@example.test"
+    assert sent[0]["Subject"] == "Data gap recovery system failure"
+    assert DataGapAlertService._safe_token("Provider_Timeout", "failure_class") == "provider_timeout"
+    try:
+        DataGapAlertService._safe_token("provider\nBcc: attacker", "failure_class")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("control characters must be rejected")
