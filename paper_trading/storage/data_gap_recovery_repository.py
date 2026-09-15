@@ -27,6 +27,7 @@ from paper_trading.storage.models import (
     PaperDataGapRecoveryBatch,
     PaperDataGapRecoveryCandidate,
     PaperDataGapRecoveryGap,
+    PaperOrder,
 )
 
 _STOCK_ID = re.compile(r"^[0-9]{6}$", re.ASCII)
@@ -159,8 +160,15 @@ class DataGapRecoveryRepository:
         self.session.flush()
         return attempt
 
-    def record_batch(self, status: DataGapRecoveryBatchStatus, summary: dict[str, Any]) -> PaperDataGapRecoveryBatch:
-        batch = PaperDataGapRecoveryBatch(status=status, summary=summary)
+    def record_batch(
+        self,
+        status: DataGapRecoveryBatchStatus,
+        summary: dict[str, Any],
+        *,
+        download_id: str | None = None,
+        cutoff: datetime | None = None,
+    ) -> PaperDataGapRecoveryBatch:
+        batch = PaperDataGapRecoveryBatch(status=status, summary=summary, download_id=download_id, cutoff=cutoff)
         self.session.add(batch)
         self.session.flush()
         return batch
@@ -238,6 +246,173 @@ class DataGapRecoveryRepository:
             progress.summary = summary
         self.session.flush()
         return progress
+
+    def record_account_recovery_step(
+        self,
+        gap_id: int,
+        account_id: int,
+        step: str,
+        status: str,
+        evidence: dict[str, Any],
+    ) -> PaperDataGapRecoveryAccount:
+        """Persist one recovery step without replacing the other step's evidence."""
+        if step not in {"ledger", "snapshot"}:
+            raise ValueError("recovery step must be ledger or snapshot")
+        progress = self.session.scalar(
+            select(PaperDataGapRecoveryAccount).where(
+                PaperDataGapRecoveryAccount.gap_id == gap_id,
+                PaperDataGapRecoveryAccount.account_id == account_id,
+            )
+        )
+        if progress is None:
+            progress = PaperDataGapRecoveryAccount(
+                gap_id=gap_id,
+                account_id=account_id,
+                status=DataGapRecoveryAccountStatus.IN_PROGRESS,
+                summary={},
+            )
+            self.session.add(progress)
+        summary = dict(progress.summary or {})
+        summary[step] = {"status": status, "evidence": evidence}
+        progress.summary = summary
+        progress.status = (
+            DataGapRecoveryAccountStatus.RECOVERED
+            if all(summary.get(name, {}).get("status") in {"completed", "recovered"} for name in ("ledger", "snapshot"))
+            else DataGapRecoveryAccountStatus.FAILED
+            if status == "failed"
+            else DataGapRecoveryAccountStatus.IN_PROGRESS
+        )
+        progress.updated_at = datetime.now(timezone.utc)
+        self.session.flush()
+        return progress
+
+    def list_retryable_account_progress(self) -> list[PaperDataGapRecoveryAccount]:
+        """Return account work whose ledger or snapshot step is not complete."""
+        rows = self.session.scalars(
+            select(PaperDataGapRecoveryAccount).order_by(
+                PaperDataGapRecoveryAccount.gap_id, PaperDataGapRecoveryAccount.account_id
+            )
+        )
+        return [
+            row
+            for row in rows
+            if any(
+                row.summary.get(step, {}).get("status") not in {"completed", "recovered"}
+                for step in ("ledger", "snapshot")
+            )
+        ]
+
+    def list_batch_account_recovery(self, batch_id: int) -> list[dict[str, Any]]:
+        """Return affected accounts and their earliest gap date for a batch."""
+        batch = self.session.get(PaperDataGapRecoveryBatch, batch_id)
+        if batch is None:
+            raise KeyError(batch_id)
+        cutoff = batch.cutoff.date() if batch.cutoff is not None else None
+        rows = self.session.execute(
+            select(
+                PaperDataGapRecoveryGap.id,
+                PaperOrder.account_id,
+                func.min(PaperDataGapRecoveryGap.business_date),
+            )
+            .join(
+                PaperDataGapRecoveryGap,
+                (PaperDataGapRecoveryGap.stock_id == PaperOrder.symbol)
+                & (PaperOrder.trade_date >= PaperDataGapRecoveryGap.business_date)
+                & (cutoff is None or PaperOrder.trade_date <= cutoff),
+            )
+            .join(
+                PaperDataGapRecoveryAttempt,
+                PaperDataGapRecoveryAttempt.gap_id == PaperDataGapRecoveryGap.id,
+            )
+            .where(PaperDataGapRecoveryAttempt.batch_id == batch_id)
+            .group_by(PaperDataGapRecoveryGap.id, PaperOrder.account_id)
+            .order_by(PaperOrder.account_id, PaperDataGapRecoveryGap.id)
+        ).all()
+        result = [
+            {
+                "gap_id": int(gap_id),
+                "account_id": int(account_id),
+                "start_date": start_date,
+                "end_date": cutoff or start_date,
+            }
+            for gap_id, account_id, start_date in rows
+        ]
+        known = {(item["gap_id"], item["account_id"]) for item in result}
+        batch_gap_ids = set(
+            self.session.scalars(
+                select(PaperDataGapRecoveryAttempt.gap_id).where(PaperDataGapRecoveryAttempt.batch_id == batch_id)
+            )
+        )
+        gap_rows = self.session.scalars(select(PaperDataGapRecoveryGap)).all()
+        account_ids = self.session.scalars(select(PaperAccount.id)).all()
+        for gap in gap_rows:
+            if (
+                gap.id not in batch_gap_ids
+                or gap.status == DataGapRecoveryStatus.RECOVERED
+                or gap.business_date > (cutoff or gap.business_date)
+            ):
+                continue
+            for account_id in account_ids:
+                for event in DataGapRecoveryRepository._account_replay_events(self, int(account_id)):
+                    symbol = event.payload.get("symbol")
+                    if (
+                        symbol == gap.stock_id
+                        and gap.business_date <= event.trade_date <= (cutoff or event.trade_date)
+                        and (gap.id, int(account_id)) not in known
+                    ):
+                        result.append(
+                            {
+                                "gap_id": gap.id,
+                                "account_id": int(account_id),
+                                "start_date": gap.business_date,
+                                "end_date": cutoff or gap.business_date,
+                            }
+                        )
+                        known.add((gap.id, int(account_id)))
+                        break
+        return result
+
+    def _account_replay_events(self, account_id: int) -> list[Any]:
+        """Use the repository's canonical replay projection for recovery impact."""
+        from paper_trading.storage.repository import PaperTradingRepository
+
+        return PaperTradingRepository(self.session).list_replay_events(account_id)
+
+    def list_retryable_recovery_work(self, cutoff: datetime | None = None) -> list[dict[str, Any]]:
+        """Return incomplete account steps from current and prior batches."""
+        end_date = cutoff.date() if cutoff is not None else None
+        rows = self.session.scalars(
+            select(PaperDataGapRecoveryAccount)
+            .join(PaperDataGapRecoveryGap)
+            .order_by(PaperDataGapRecoveryGap.business_date, PaperDataGapRecoveryAccount.account_id)
+        )
+        result: list[dict[str, Any]] = []
+        for progress in rows:
+            summary = progress.summary or {}
+            if all(
+                summary.get(step, {}).get("status") in {"completed", "recovered"} for step in ("ledger", "snapshot")
+            ):
+                continue
+            gap = self.session.get(PaperDataGapRecoveryGap, progress.gap_id)
+            if gap is None or (end_date is not None and gap.business_date > end_date):
+                continue
+            result.append(
+                {
+                    "gap_id": progress.gap_id,
+                    "account_id": progress.account_id,
+                    "start_date": gap.business_date,
+                    "end_date": end_date or gap.business_date,
+                }
+            )
+        return result
+
+    def get_account_progress(self, gap_id: int, account_id: int) -> PaperDataGapRecoveryAccount | None:
+        return self.session.scalar(
+            select(PaperDataGapRecoveryAccount).where(
+                PaperDataGapRecoveryAccount.gap_id == gap_id,
+                PaperDataGapRecoveryAccount.account_id == account_id,
+            )
+        )
 
     def list_gaps(
         self,

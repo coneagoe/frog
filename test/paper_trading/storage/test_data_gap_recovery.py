@@ -27,6 +27,7 @@ from paper_trading.storage.models import (
     PaperDataGapRecoveryBatch,
     PaperDataGapRecoveryGap,
     PaperLedgerRebuild,
+    PaperOrder,
 )
 from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.auth import User
@@ -164,6 +165,44 @@ def test_repository_finalizes_batch_with_counts_and_finished_at(tmp_path):
         assert stored.status == DataGapRecoveryBatchStatus.FAILED
         assert (stored.gap_count, stored.recovered_count, stored.failed_count) == (2, 1, 1)
         assert stored.finished_at is not None
+
+
+def test_batch_account_recovery_excludes_unrelated_prior_batch_gap(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        account = PaperTradingRepository(session).create_account("batch-scoped", Decimal("100"))
+        session.add(
+            PaperOrder(
+                account_id=account.id,
+                symbol="000001",
+                side="buy",
+                quantity=1,
+                limit_price=Decimal("10"),
+                trade_date=date(2026, 1, 2),
+                status="accepted",
+            )
+        )
+        session.flush()
+        current_gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        prior_gap = repository.record_gap(date(2026, 1, 3), "a_share", "000002", "bfq", {})
+        batch = repository.record_batch(DataGapRecoveryBatchStatus.COMPLETED, {})
+        repository.record_attempt(current_gap.id, batch.id, DataGapRecoveryAttemptOutcome.NOT_FOUND, {})
+        repository.record_attempt(prior_gap.id, None, DataGapRecoveryAttemptOutcome.NOT_FOUND, {})
+
+        monkeypatch.setattr(
+            repository,
+            "_account_replay_events",
+            lambda account_id: [
+                type("Event", (), {"payload": {"symbol": "000001"}, "trade_date": date(2026, 1, 2)})(),
+                type("Event", (), {"payload": {"symbol": "000002"}, "trade_date": date(2026, 1, 3)})(),
+            ],
+        )
+
+        result = repository.list_batch_account_recovery(batch.id)
+
+        assert [(item["gap_id"], item["account_id"]) for item in result] == [(current_gap.id, account.id)]
 
 
 def test_owner_scoped_gap_and_batch_queries_are_distinct_and_do_not_leak_evidence(tmp_path):
@@ -308,3 +347,39 @@ def test_unified_recovery_does_not_create_account_approval_or_alert_rows(tmp_pat
         assert session.query(PaperAccountSnapshot).count() == 0
         assert session.query(PaperLedgerRebuild).count() == 0
         assert session.query(PaperAccount).count() == 0
+
+
+def test_repository_records_ledger_and_snapshot_recovery_steps_independently(tmp_path):
+    """Catches persistence that overwrites one account step with the other."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        account = PaperTradingRepository(session).create_account("step-statuses", Decimal("100"))
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+
+        repository.record_account_recovery_step(gap.id, account.id, "ledger", "completed", {"rows": 3})
+        progress = repository.record_account_recovery_step(
+            gap.id, account.id, "snapshot", "failed", {"error": "missing close"}
+        )
+
+        assert progress.summary["ledger"] == {"status": "completed", "evidence": {"rows": 3}}
+        assert progress.summary["snapshot"] == {"status": "failed", "evidence": {"error": "missing close"}}
+
+
+def test_repository_retry_selection_keeps_completed_ledger_when_snapshot_failed(tmp_path):
+    """Catches retry selection that re-runs completed ledger work."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        account = PaperTradingRepository(session).create_account("retry-selection", Decimal("100"))
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        repository.record_account_recovery_step(gap.id, account.id, "ledger", "completed", {})
+        repository.record_account_recovery_step(gap.id, account.id, "snapshot", "failed", {"attempt": 1})
+
+        retryable = repository.list_retryable_account_progress()
+
+        assert [(row.gap_id, row.account_id) for row in retryable] == [(gap.id, account.id)]
+        assert retryable[0].summary["ledger"]["status"] == "completed"
+        assert retryable[0].summary["snapshot"]["status"] == "failed"

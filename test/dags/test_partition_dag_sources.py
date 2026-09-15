@@ -1,10 +1,11 @@
 import json
 import re
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TypedDict
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, call
 
 import pandas as pd
 import pytest
@@ -546,6 +547,137 @@ def test_persist_diagnostic_commits_and_closes_its_session(monkeypatch):
 
     assert events == ["upsert", "commit", "close"]
     assert received_args[1] == Market.A_SHARE
+
+
+def test_account_recovery_rebuilds_ledger_and_recalculates_snapshots_per_account(monkeypatch):
+    """RED: recovery must not use one global rebuild or one shared snapshot range."""
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    rebuild = Mock(side_effect=lambda account_id, start_date: {"account_id": account_id})
+    recalculate = Mock(side_effect=lambda account_id, start_date, end_date: {"account_id": account_id})
+
+    result = dag_module.run_paper_trading_account_recovery(
+        affected_account_ids=[11, 22],
+        start_date=date(2026, 7, 28),
+        end_date=date(2026, 7, 28),
+        rebuild_account=rebuild,
+        recalculate_snapshots=recalculate,
+    )
+
+    assert result == {"recovered_account_ids": [11, 22], "failed_account_ids": []}
+    assert rebuild.call_args_list == [call(11, date(2026, 7, 28)), call(22, date(2026, 7, 28))]
+    assert recalculate.call_args_list == [
+        call(11, date(2026, 7, 28), date(2026, 7, 28)),
+        call(22, date(2026, 7, 28), date(2026, 7, 28)),
+    ]
+
+
+def test_account_recovery_isolates_one_account_failure_and_continues(monkeypatch):
+    """RED: one account's ledger failure must not suppress another account's recovery."""
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    rebuild = Mock(side_effect=[RuntimeError("account 11 is corrupt"), {"account_id": 22}])
+    recalculate = Mock()
+
+    result = dag_module.run_paper_trading_account_recovery(
+        affected_account_ids=[11, 22],
+        start_date=date(2026, 7, 28),
+        end_date=date(2026, 7, 28),
+        rebuild_account=rebuild,
+        recalculate_snapshots=recalculate,
+    )
+
+    assert result == {
+        "recovered_account_ids": [22],
+        "failed_account_ids": [11],
+        "errors": {11: "account 11 is corrupt"},
+    }
+    recalculate.assert_called_once_with(22, date(2026, 7, 28), date(2026, 7, 28))
+
+
+def test_unified_recovery_wires_default_account_recovery_and_exposes_persisted_state(monkeypatch):
+    """The unified task must not silently skip account ledger/snapshot recovery."""
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    business_date = date(2026, 7, 28)
+    diagnostic = SimpleNamespace(classification="missing_market_data")
+    gap = SimpleNamespace(
+        id=7,
+        business_date=business_date,
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    class DatabaseLayer:
+        def __init__(self):
+            self.persisted: dict[str, list[dict[str, object]]] = {"ledger": [], "snapshots": []}
+
+        def list_unresolved_ordinary_diagnostics(self, **kwargs):
+            return [diagnostic]
+
+        def get_or_create_gap_from_diagnostic(self, *args, **kwargs):
+            return gap
+
+        def record_batch(self, *args, **kwargs):
+            return SimpleNamespace(id=3)
+
+        def finalize_batch(self, *args, **kwargs):
+            return {"status": "completed"}
+
+        def rebuild_account(self, account_id, start_date):
+            self.persisted["ledger"].append({"account_id": account_id, "status": "completed"})
+
+        def recalculate_snapshots(self, account_id, start_date, end_date):
+            self.persisted["snapshots"].append({"account_id": account_id, "status": "completed"})
+
+    database = DatabaseLayer()
+
+    class RecoveryService:
+        def __init__(self, **kwargs):
+            pass
+
+        def recover_unresolved_ordinary_gaps(self, gaps, *, batch_id):
+            @dataclass
+            class RecoveryResult:
+                gap_id: int
+                status: str
+                affected_account_ids: list[int]
+
+            return [RecoveryResult(7, "recovered", [11])]
+
+    session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=session))
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: business_date)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: database)
+    monkeypatch.setattr(dag_module, "_FreshSessionRecoveryRepository", lambda storage: database)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", RecoveryService)
+
+    result = dag_module.run_unified_bfq_data_gap_recovery(
+        ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
+    )
+
+    assert result["recovered_account_ids"] == [11]
+    assert result["failed_account_ids"] == []
+    assert database.persisted == {
+        "ledger": [{"account_id": 11, "status": "completed"}],
+        "snapshots": [{"account_id": 11, "status": "completed"}],
+    }
+
+
+def test_daily_dag_exposes_independent_account_recovery_hook():
+    """RED: the DAG currently has no account-scoped recovery orchestration hook."""
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+
+    assert "def run_paper_trading_account_recovery(" in source
+    assert "rebuild_account(" in source
+    assert "recalculate_snapshots(" in source
+    assert "except Exception" in source
 
 
 def test_daily_dag_closes_diagnostic_session_with_each_write():

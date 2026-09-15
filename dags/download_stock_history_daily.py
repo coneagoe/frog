@@ -5,9 +5,9 @@ import json
 import os
 import sys
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import redis
 from airflow.sdk.exceptions import AirflowSkipException
@@ -45,7 +45,12 @@ from paper_trading.domain.enums import (  # noqa: E402
     DataGapRecoveryRouting,
 )
 from paper_trading.services.data_gap_recovery_service import DataGapRecoveryService  # noqa: E402
+from paper_trading.services.ledger_rebuild_service import LedgerRebuildService  # noqa: E402
+from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService  # noqa: E402
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository  # noqa: E402
+from paper_trading.storage.hk_metadata import HkConnectMetadataProvider  # noqa: E402
+from paper_trading.storage.market_data import StorageMarketDataProvider  # noqa: E402
+from paper_trading.api.deps import _DataAvailableCalendar  # noqa: E402
 from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
 from stock.market import is_a_share_trade_date  # noqa: E402
 from storage import get_storage  # noqa: E402
@@ -300,6 +305,7 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
         batch = repository.record_batch(
             DataGapRecoveryBatchStatus.RUNNING,
             {"business_date": business_date.isoformat()},
+            cutoff=datetime.combine(business_date, time.max, tzinfo=timezone.utc),
         )
         session.commit()
         batch_id = batch.id
@@ -339,11 +345,184 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
             summary={"business_date": business_date.isoformat(), "error": "recovery batch failed"},
         )
         raise
-    return {
+    recovery = {
         "date": business_date.isoformat(),
         "gap_count": len(results),
         "results": [asdict(item) for item in results],
     }
+    successful_gap_ids = {item.gap_id for item in results if item.status in {"recovered", "skipped"}}
+    recovery_work = [
+        item
+        for item in recovery_repository.list_batch_account_recovery(batch_id)
+        if item["gap_id"] in successful_gap_ids
+    ]
+    retry_work = recovery_repository.list_retryable_recovery_work(
+        datetime.combine(business_date, time.max, tzinfo=timezone.utc)
+    )
+    recovery_work.extend(item for item in retry_work if item not in recovery_work)
+    recovery.update(
+        run_paper_trading_account_recovery(
+            affected_account_ids=sorted({item["account_id"] for item in recovery_work}),
+            start_date=business_date,
+            end_date=business_date,
+            recovery_work=recovery_work,
+            storage=storage,
+        )
+    )
+    return recovery
+
+
+def run_paper_trading_account_recovery(
+    *,
+    affected_account_ids: list[int],
+    start_date: date,
+    end_date: date,
+    rebuild_account: Any | None = None,
+    recalculate_snapshots: Any | None = None,
+    recovery_work: list[dict[str, Any]] | None = None,
+    storage: Any | None = None,
+) -> dict[str, Any]:
+    """Recover affected accounts independently, preserving completed steps on retry.
+
+    The injectable ``rebuild_account(...)`` and ``recalculate_snapshots(...)``
+    callbacks are retained for unit-level orchestration tests; production uses
+    the concrete services wired below.
+    """
+    if start_date > end_date:
+        raise ValueError("start_date must be on or before end_date")
+    if not affected_account_ids:
+        return {"recovered_account_ids": [], "failed_account_ids": []}
+    ledger_runner: Callable[[int, date], Any]
+    snapshot_runner: Callable[[int, date, date], Any]
+    if rebuild_account is None or recalculate_snapshots is None:
+        if storage is None:
+            storage = get_storage()
+        assert storage.Session is not None
+        session_factory = storage.Session
+
+        def runtime_rebuild(account_id: int, account_start: date) -> Any:
+            session = session_factory()
+            try:
+                repo = PaperTradingRepository(session)
+                result = LedgerRebuildService(
+                    repo,
+                    StorageMarketDataProvider(storage, _DataAvailableCalendar()),
+                    HkConnectMetadataProvider(session),
+                ).rebuild_account_from(account_id, account_start, trigger_evidence={"source": "data_gap_recovery"})
+                session.commit()
+                return result
+            except Exception:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+
+        def runtime_recalculate(account_id: int, account_start: date, account_end: date) -> Any:
+            return SnapshotRecalculationService(
+                session_factory,
+                StorageMarketDataProvider(storage, _DataAvailableCalendar()),
+            ).recalculate(account_id, account_start, account_end)
+
+        ledger_runner = runtime_rebuild
+        snapshot_runner = runtime_recalculate
+    else:
+        ledger_runner = rebuild_account
+        snapshot_runner = recalculate_snapshots
+
+    recovered: list[int] = []
+    failed: list[int] = []
+    errors: dict[int, str] = {}
+    work_by_account: dict[int, list[dict[str, Any]]] = {}
+    for item in recovery_work or []:
+        work_by_account.setdefault(item["account_id"], []).append(item)
+    for account_id in affected_account_ids:
+        account_work = work_by_account.get(account_id)
+        account_start = min((item["start_date"] for item in account_work or []), default=start_date)
+        account_end = max((item["end_date"] for item in account_work or []), default=end_date)
+        pending_ledger = list(account_work or [])
+        pending_snapshot = list(account_work or [])
+        ledger_committed = False
+        ledger_persisted = False
+        try:
+            pending_ledger = [item for item in pending_ledger if item.get("gap_id") is not None]
+            pending_snapshot = list(pending_ledger)
+            if storage is not None and pending_ledger:
+                progress_session = storage.Session()
+                try:
+                    progress_repo = DataGapRecoveryRepository(progress_session)
+
+                    def needs_step(item: dict[str, Any], step: str) -> bool:
+                        progress = progress_repo.get_account_progress(item["gap_id"], account_id)
+                        return progress is None or progress.summary.get(step, {}).get("status") not in {
+                            "completed",
+                            "recovered",
+                        }
+
+                    pending_ledger = [item for item in pending_ledger if needs_step(item, "ledger")]
+                    pending_snapshot = [item for item in pending_snapshot if needs_step(item, "snapshot")]
+                finally:
+                    progress_session.close()
+            if pending_ledger:
+                ledger_runner(account_id, account_start)
+                ledger_committed = True
+                _persist_account_steps(
+                    storage,
+                    pending_ledger,
+                    account_id,
+                    "ledger",
+                    "completed",
+                    {"start_date": account_start.isoformat()},
+                )
+                ledger_persisted = True
+            if pending_snapshot:
+                snapshot_runner(account_id, account_start, account_end)
+                _persist_account_steps(
+                    storage,
+                    pending_snapshot,
+                    account_id,
+                    "snapshot",
+                    "completed",
+                    {"end_date": account_end.isoformat()},
+                )
+        except Exception as exc:  # noqa: BLE001
+            failed.append(account_id)
+            errors[account_id] = str(exc)
+            if storage is not None and not (ledger_committed and not ledger_persisted):
+                try:
+                    _persist_account_steps(
+                        storage,
+                        account_work or [],
+                        account_id,
+                        "snapshot" if ledger_committed else "ledger",
+                        "failed",
+                        {"error": str(exc), "ledger_committed": ledger_committed},
+                    )
+                except Exception as persist_exc:  # noqa: BLE001
+                    errors[account_id] = f"{exc}; progress persistence failed: {persist_exc}"
+            continue
+        recovered.append(account_id)
+    result: dict[str, Any] = {"recovered_account_ids": recovered, "failed_account_ids": failed}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
+def _persist_account_steps(
+    storage: Any, work: list[dict[str, Any]], account_id: int, step: str, status: str, evidence: dict[str, Any]
+) -> None:
+    if storage is None:
+        return
+    session = storage.Session()
+    try:
+        repository = DataGapRecoveryRepository(session)
+        for item in work:
+            repository.record_account_recovery_step(item["gap_id"], account_id, step, status, evidence)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def _detach_gap(gap: Any) -> Any:
@@ -385,6 +564,14 @@ class _FreshSessionRecoveryRepository:
 
     def finalize_batch(self, *args: Any, **kwargs: Any) -> Any:
         return self._call(lambda repository: repository.finalize_batch(*args, **kwargs))
+
+    def list_batch_account_recovery(self, batch_id: int) -> list[dict[str, Any]]:
+        result = self._call(lambda repository: repository.list_batch_account_recovery(batch_id))
+        return cast(list[dict[str, Any]], result)
+
+    def list_retryable_recovery_work(self, cutoff: datetime | None = None) -> list[dict[str, Any]]:
+        result = self._call(lambda repository: repository.list_retryable_recovery_work(cutoff))
+        return cast(list[dict[str, Any]], result)
 
 
 def classify_diagnostic(diagnostic: Any) -> DataGapRecoveryClassification:
