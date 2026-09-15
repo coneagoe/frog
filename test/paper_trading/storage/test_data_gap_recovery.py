@@ -1,10 +1,14 @@
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import numpy as np
+import pandas as pd
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from common.const import COL_AMOUNT, COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN, COL_STOCK_ID, COL_VOLUME
 from paper_trading.domain.enums import (
     DataGapRecoveryAccountStatus,
     DataGapRecoveryAlertDeliveryState,
@@ -15,6 +19,7 @@ from paper_trading.domain.enums import (
     DataGapRecoveryRouting,
     DataGapRecoveryStatus,
 )
+from paper_trading.services.data_gap_recovery_service import canonical_candidate_hash, canonical_candidate_payload
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
@@ -101,6 +106,33 @@ def test_candidate_hash_and_approval_binding_are_enforced(tmp_path):
             gap.id, DataGapRecoveryApprovalDecision.APPROVED, candidate.candidate_hash, None, {}
         )
         assert approval.candidate_hash == candidate.candidate_hash
+
+
+def test_record_candidate_persists_json_safe_numpy_provider_payload(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    candidate = pd.DataFrame(
+        {
+            COL_DATE: [np.datetime64("2026-01-02")],
+            COL_STOCK_ID: [np.str_("000001")],
+            COL_OPEN: [np.float64(10.0)],
+            COL_HIGH: [np.float32(11.0)],
+            COL_LOW: [np.float64(np.nan)],
+            COL_CLOSE: [np.float64(10.5)],
+            COL_VOLUME: [np.int64(100)],
+            COL_AMOUNT: [pd.NaT],
+            "decimal_value": [Decimal("1.2300")],
+        }
+    )
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        payload = canonical_candidate_payload(
+            candidate, market="a_share", stock_id="000001", business_date=date(2026, 1, 2), adjust="bfq"
+        )
+        candidate_hash = canonical_candidate_hash(payload)
+        stored = repository.record_candidate(gap.id, candidate_hash, payload, {"valid": True}, "provider")
+        assert json.loads(json.dumps(stored.payload, sort_keys=True)) == payload
 
 
 def test_locked_escalation_approval_rejection_and_reopen_preserve_evidence(tmp_path):

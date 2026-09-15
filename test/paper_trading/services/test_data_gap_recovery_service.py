@@ -1,7 +1,10 @@
+import json
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -350,6 +353,31 @@ def test_escalated_candidate_is_pending_approval_without_history_write():
     assert result.status == "pending_approval"
     repository.record_candidate.assert_called_once()
     storage.save_history_data_stock.assert_not_called()
+
+
+def test_canonical_candidate_payload_normalizes_provider_scalars_for_persistence():
+    candidate = pd.DataFrame(
+        {
+            COL_DATE: [np.datetime64("2026-08-07")],
+            COL_STOCK_ID: [np.str_("000001")],
+            COL_OPEN: [np.float64(10.0)],
+            COL_HIGH: [np.float32(11.0)],
+            COL_LOW: [np.float64(np.nan)],
+            COL_CLOSE: [np.float64(10.5)],
+            COL_VOLUME: [np.int64(100)],
+            COL_AMOUNT: [pd.NaT],
+            "decimal_value": [Decimal("1.2300")],
+        }
+    )
+
+    payload = canonical_candidate_payload(
+        candidate, market="a_share", stock_id="000001", business_date=date(2026, 8, 7), adjust="bfq"
+    )
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    candidate_hash = canonical_candidate_hash(payload)
+
+    assert json.loads(serialized) == payload
+    assert candidate_hash == canonical_candidate_hash(json.loads(serialized))
 
 
 def test_unexpected_diagnostic_failure_carries_processed_results():

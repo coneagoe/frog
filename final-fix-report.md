@@ -29,3 +29,15 @@ The external history write precedes database resolution. If the database transac
 - Escalated provider candidates are immutable evidence only and transition to pending approval without an automatic history write; pending approvals are guarded from recovery writes.
 - Candidate retries are idempotent after payload, validation, and source compatibility checks.
 - Approved execution receives the immutable payload from the locked repository boundary; the DAG no longer reconstructs a caller payload.
+
+## Final blocker fix
+
+- `canonical_candidate_payload()` now recursively normalizes NumPy scalars, pandas/NumPy dates, decimals, missing values, mappings, and simple sequences into deterministic JSON-safe values. Canonical hashing now serializes strictly without an arbitrary string fallback.
+- Added production-shaped NumPy provider-row coverage proving JSON serialization, hash stability after round-trip, and `record_candidate()` persistence.
+
+## Final verification
+
+- `uv run pytest test/paper_trading/services/test_data_gap_recovery_service.py test/paper_trading/storage/test_data_gap_recovery.py test/paper_trading/api/test_data_gap_recovery_api.py test/paper_trading/services/test_data_gap_alert_service.py test/dags/test_partition_dag_sources.py test/tools/test_paper_trading_cli.py -q`: 285 passed, 20 skipped.
+- `tools/run_tests.sh test/paper_trading/storage/test_data_gap_recovery_enum_migration.py -v`: 7 passed.
+- `uv run ruff check` on changed Python files: passed.
+- Simplify review: no safe simplification identified.

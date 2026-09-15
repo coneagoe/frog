@@ -4,10 +4,13 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Iterable
 
+import numpy as np
 import pandas as pd
 
 from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType
@@ -25,6 +28,29 @@ logger = logging.getLogger(__name__)
 _STOCK_ID = re.compile(r"^[0-9]{6}$", re.ASCII)
 
 
+def _json_safe_candidate_value(value: Any) -> Any:
+    """Normalize provider row values without relying on JSON's string fallback."""
+    if value is None or isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        return None if not np.isfinite(value) else value
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (pd.Timestamp, datetime, date)):
+        return value.isoformat()
+    if isinstance(value, np.datetime64):
+        return None if np.isnat(value) else pd.Timestamp(value).isoformat()
+    if isinstance(value, np.generic):
+        return _json_safe_candidate_value(value.item())
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe_candidate_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [_json_safe_candidate_value(item) for item in value]
+    if pd.isna(value):
+        return None
+    raise TypeError(f"candidate row value is not JSON serializable: {type(value).__name__}")
+
+
 def canonical_candidate_payload(
     candidate: pd.DataFrame, *, market: str, stock_id: str, business_date: date, adjust: str
 ) -> dict[str, Any]:
@@ -38,12 +64,12 @@ def canonical_candidate_payload(
         "stock_id": stock_id,
         "business_date": business_date.isoformat(),
         "adjust": adjust,
-        "row": {str(key): (value.isoformat() if hasattr(value, "isoformat") else value) for key, value in row.items()},
+        "row": {str(key): _json_safe_candidate_value(value) for key, value in row.items()},
     }
 
 
 def canonical_candidate_hash(payload: dict[str, Any]) -> str:
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 @dataclass(frozen=True)
