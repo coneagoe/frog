@@ -90,6 +90,32 @@ def test_escalation_counts_only_distinct_not_found_batches():
     repository.escalate_gap.assert_not_called()
 
 
+def test_threshold_escalation_sends_one_alert():
+    repository = Mock()
+    repository.gap_evidence.return_value = {
+        "attempts": [SimpleNamespace(batch_id=i, outcome="not_found") for i in (1, 2, 3)]
+    }
+    alerts = Mock()
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 1), summary={})
+
+    service = DataGapRecoveryService(storage=Mock(), downloader=Mock(), repository=repository, alert_service=alerts)
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 2)) is True
+    alerts.send_escalation.assert_called_once_with(gap, failure_class="threshold")
+
+
+def test_escalation_alert_delivery_failure_does_not_mutate_recovery_state():
+    repository = Mock()
+    repository.gap_evidence.return_value = {"attempts": []}
+    alerts = Mock()
+    alerts.send_escalation.side_effect = RuntimeError("smtp unavailable")
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 7), summary={}, status="escalated")
+    service = DataGapRecoveryService(storage=Mock(), downloader=Mock(), repository=repository, alert_service=alerts)
+
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 11)) is True
+    assert gap.status == "escalated"
+    repository.escalate_gap.assert_called_once()
+
+
 def test_four_business_days_does_not_count_weekend():
     repository = Mock()
     repository.gap_evidence.return_value = {"attempts": []}

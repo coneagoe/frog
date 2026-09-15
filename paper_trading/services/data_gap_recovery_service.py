@@ -44,7 +44,14 @@ class _RecoveryPersistenceError(RuntimeError):
 class DataGapRecoveryService:
     """Recover only the exact A-share daily BFQ row represented by a gap."""
 
-    def __init__(self, *, storage: Any | None = None, downloader: Any | None = None, repository: Any | None = None):
+    def __init__(
+        self,
+        *,
+        storage: Any | None = None,
+        downloader: Any | None = None,
+        repository: Any | None = None,
+        alert_service: Any | None = None,
+    ):
         if storage is None:
             storage = get_storage()
         if downloader is None:
@@ -55,6 +62,7 @@ class DataGapRecoveryService:
         self.downloader = downloader
         # Keep the in-memory fallback for existing callers that do not inject a repository.
         self.repository = repository
+        self.alert_service = alert_service
 
     def recover_gaps(self, gaps: Iterable[Any], *, batch_id: int | None = None) -> list[GapRecoveryResult]:
         results = []
@@ -63,6 +71,7 @@ class DataGapRecoveryService:
                 results.append(self.recover_gap(gap, batch_id=batch_id))
             except Exception as exc:  # noqa: BLE001
                 logger.exception("BFQ gap recovery failed at batch boundary: gap_id=%s", getattr(gap, "id", None))
+                self._send_recovery_system_failure(gap, exc)
                 results.append(self._result(gap, "failed", error=str(exc)))
         return results
 
@@ -75,6 +84,7 @@ class DataGapRecoveryService:
                 classification, routing = self._diagnostic(gap)
             except Exception as exc:
                 setattr(exc, "partial_results", list(results))
+                self._send_recovery_system_failure(gap, exc)
                 raise
             if routing != DataGapRecoveryRouting.ORDINARY.value:
                 results.append(
@@ -218,7 +228,41 @@ class DataGapRecoveryService:
         if len(unavailable_batches) < 3 and business_days < 5:
             return False
         self.repository.escalate_gap(gap.id, user_id, user_snapshot, reason=reason)
+        self._send_escalation(gap)
         return True
+
+    def send_account_recovery_failure(self, gap: Any, *, account_id: int, error: Exception) -> None:
+        """Record an account alert without allowing mail failures to affect recovery."""
+        if self.alert_service is None:
+            return
+        try:
+            self.alert_service.send_account_recovery_failure(
+                gap, account_id=account_id, failure_class=self._failure_class(error)
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Data-gap account alert failed: gap_id=%s account_id=%s", gap.id, account_id)
+
+    @staticmethod
+    def _failure_class(error: Exception) -> str:
+        return type(error).__name__.lower().replace("error", "") or "failure"
+
+    def _send_escalation(self, gap: Any) -> None:
+        if self.alert_service is None:
+            return
+        try:
+            self.alert_service.send_escalation(gap, failure_class="threshold")
+        except Exception:  # noqa: BLE001
+            logger.exception("Data-gap escalation alert failed: gap_id=%s", gap.id)
+
+    def _send_recovery_system_failure(self, gap: Any, error: Exception) -> None:
+        if self.alert_service is None:
+            return
+        try:
+            self.alert_service.send_recovery_system_failure(
+                gap, failure_class=self._failure_class(error)
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Data-gap recovery system alert failed: gap_id=%s", getattr(gap, "id", None))
 
     def execute_approved_gap(self, gap: Any, candidate_hash: str, candidate: pd.DataFrame) -> GapRecoveryResult:
         """Write an approved candidate only if it is still the current candidate."""

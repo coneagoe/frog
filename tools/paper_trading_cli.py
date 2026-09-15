@@ -248,6 +248,15 @@ class PaperTradingApiClient:
     def list_snapshots(self, account_id: int) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/snapshots"))
 
+    def list_data_gap_recovery(self) -> object:
+        return self._request("GET", "/paper/data-gap-recovery/gaps")
+
+    def get_data_gap_recovery(self, gap_id: int) -> object:
+        return self._request("GET", f"/paper/data-gap-recovery/gaps/{gap_id}")
+
+    def list_data_gap_batches(self) -> object:
+        return self._request("GET", "/paper/data-gap-recovery/batches")
+
     def deposit_cash(
         self, account_id: int, amount: Decimal, trade_date: str, note: str | None = None
     ) -> dict[str, Any]:
@@ -494,6 +503,12 @@ def build_parser() -> _SafeParser:
     _add_snapshot_subparsers(subparsers)
     _add_etf_eligibility_subparsers(subparsers)
     _add_repair_subparsers(subparsers)
+    gap = subparsers.add_parser("data_gap_recovery", help="Read data-gap recovery state")
+    gap_sub = gap.add_subparsers(dest="data_gap_recovery_command", required=True, parser_class=_SafeParser)
+    gap_sub.add_parser("list")
+    get_gap = gap_sub.add_parser("get")
+    get_gap.add_argument("--gap-id", type=int, required=True)
+    gap_sub.add_parser("batches")
     return parser
 
 
@@ -784,6 +799,14 @@ def _handle_repair(client: PaperTradingApiClient, args: argparse.Namespace) -> A
     raise _ParserError(f"unknown repair command: {args.repair_command}")
 
 
+def _handle_data_gap_recovery(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:
+    if args.data_gap_recovery_command == "list":
+        return client.list_data_gap_recovery()
+    if args.data_gap_recovery_command == "get":
+        return client.get_data_gap_recovery(args.gap_id)
+    return client.list_data_gap_batches()
+
+
 _HANDLERS: dict[str, Any] = {
     "account": _handle_account,
     "order": _handle_order,
@@ -792,6 +815,7 @@ _HANDLERS: dict[str, Any] = {
     "snapshot": _handle_snapshot,
     "etf_eligibility": _handle_etf_eligibility,
     "repair": _handle_repair,
+    "data_gap_recovery": _handle_data_gap_recovery,
 }
 
 
@@ -850,6 +874,7 @@ def _get_subcommand(args: argparse.Namespace) -> str | None:
         "snapshot_command",
         "etf_eligibility_command",
         "repair_command",
+        "data_gap_recovery_command",
     ):
         val = getattr(args, attr, None)
         if val is not None:

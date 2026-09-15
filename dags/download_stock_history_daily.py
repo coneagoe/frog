@@ -2,6 +2,7 @@
 """DAG for downloading stock history (HFQ) on weekdays."""
 
 import json
+import logging
 import os
 import sys
 from dataclasses import asdict
@@ -45,6 +46,7 @@ from paper_trading.domain.enums import (  # noqa: E402
     DataGapRecoveryRouting,
 )
 from paper_trading.services.data_gap_recovery_service import DataGapRecoveryService  # noqa: E402
+from paper_trading.services.data_gap_alert_service import DataGapAlertService  # noqa: E402
 from paper_trading.services.ledger_rebuild_service import LedgerRebuildService  # noqa: E402
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService  # noqa: E402
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository  # noqa: E402
@@ -56,6 +58,8 @@ from stock.market import is_a_share_trade_date  # noqa: E402
 from storage import get_storage  # noqa: E402
 from tools.paper_trading_cli import run_paper_trading_ledger_rebuild  # noqa: E402
 from tools.paper_trading_cli import run_paper_trading_matching  # noqa: E402, I001
+
+logger = logging.getLogger(__name__)
 
 
 def _persist_diagnostic(storage, business_date, stock_id, adjust, outcome):
@@ -316,11 +320,12 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
         session.close()
 
     recovery_repository = _FreshSessionRecoveryRepository(storage)
+    alert_service = DataGapAlertService(repository=recovery_repository)
     results: list[Any] = []
     try:
-        results = DataGapRecoveryService(repository=recovery_repository).recover_unresolved_ordinary_gaps(
-            gaps, batch_id=batch_id
-        )
+        results = DataGapRecoveryService(
+            repository=recovery_repository, alert_service=alert_service
+        ).recover_unresolved_ordinary_gaps(gaps, batch_id=batch_id)
         batch_status = (
             DataGapRecoveryBatchStatus.FAILED
             if any(item.status == "failed" for item in results)
@@ -367,6 +372,7 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
             end_date=business_date,
             recovery_work=recovery_work,
             storage=storage,
+            alert_service=alert_service,
         )
     )
     return recovery
@@ -381,6 +387,7 @@ def run_paper_trading_account_recovery(
     recalculate_snapshots: Any | None = None,
     recovery_work: list[dict[str, Any]] | None = None,
     storage: Any | None = None,
+    alert_service: Any | None = None,
 ) -> dict[str, Any]:
     """Recover affected accounts independently, preserving completed steps on retry.
 
@@ -499,6 +506,20 @@ def run_paper_trading_account_recovery(
                     )
                 except Exception as persist_exc:  # noqa: BLE001
                     errors[account_id] = f"{exc}; progress persistence failed: {persist_exc}"
+            if alert_service is not None:
+                for item in account_work or []:
+                    try:
+                        gap = alert_service.repository._call(
+                            lambda repository: repository.get_gap(item["gap_id"], None)
+                        )
+                        if gap is not None:
+                            alert_service.send_account_recovery_failure(
+                                gap, account_id=account_id, failure_class=type(exc).__name__.lower()
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "Data-gap account alert failed: gap_id=%s account_id=%s", item["gap_id"], account_id
+                        )
             continue
         recovered.append(account_id)
     result: dict[str, Any] = {"recovered_account_ids": recovered, "failed_account_ids": failed}
