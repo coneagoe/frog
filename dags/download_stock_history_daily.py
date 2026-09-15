@@ -6,6 +6,7 @@ import os
 import sys
 from dataclasses import asdict
 from datetime import date
+from types import SimpleNamespace
 from typing import Any, cast
 
 import redis
@@ -38,8 +39,16 @@ from common.const import (  # noqa: E402
 )
 from paper_trading.domain.enums import Market  # noqa: E402
 from paper_trading.domain.market_data_diagnostics import canonical_adjust_label  # noqa: E402
+from paper_trading.domain.enums import (  # noqa: E402
+    DataGapRecoveryBatchStatus,
+    DataGapRecoveryClassification,
+    DataGapRecoveryRouting,
+)
+from paper_trading.services.data_gap_recovery_service import DataGapRecoveryService  # noqa: E402
+from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository  # noqa: E402
 from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
 from stock.market import is_a_share_trade_date  # noqa: E402
+from storage import get_storage  # noqa: E402
 from tools.paper_trading_cli import run_paper_trading_ledger_rebuild  # noqa: E402
 from tools.paper_trading_cli import run_paper_trading_matching  # noqa: E402, I001
 
@@ -260,6 +269,136 @@ def run_paper_trading_matching_for_active_accounts(**context):
     )
 
 
+def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
+    """Run the independent post-matching ordinary BFQ recovery batch."""
+    ti: Any = context.get("ti")
+    aggregate_summary = ti.xcom_pull(task_ids="save_download_result_to_redis") if ti is not None else None
+    aggregate_is_fatal = isinstance(aggregate_summary, dict) and aggregate_summary.get("result") != "success"
+    aggregate_is_fatal = aggregate_is_fatal or (
+        isinstance(aggregate_summary, str) and "result=fail" in aggregate_summary
+    )
+    if aggregate_is_fatal:
+        raise AirflowSkipException("daily-history aggregate was fatal; skip unified BFQ recovery")
+
+    business_date = ensure_a_share_trade_date(context)
+    storage = get_storage()
+    assert storage.Session is not None
+    session = storage.Session()
+    try:
+        repository = DataGapRecoveryRepository(session)
+        diagnostics = get_unresolved_ordinary_gaps(repository=repository, business_date=business_date)
+        gaps = [
+            _detach_gap(
+                repository.get_or_create_gap_from_diagnostic(
+                    diagnostic,
+                    routing=DataGapRecoveryRouting.ORDINARY,
+                    classification=classify_diagnostic(diagnostic),
+                )
+            )
+            for diagnostic in diagnostics
+        ]
+        batch = repository.record_batch(
+            DataGapRecoveryBatchStatus.RUNNING,
+            {"business_date": business_date.isoformat()},
+        )
+        session.commit()
+        batch_id = batch.id
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+    recovery_repository = _FreshSessionRecoveryRepository(storage)
+    results: list[Any] = []
+    try:
+        results = DataGapRecoveryService(repository=recovery_repository).recover_unresolved_ordinary_gaps(
+            gaps, batch_id=batch_id
+        )
+        batch_status = (
+            DataGapRecoveryBatchStatus.FAILED
+            if any(item.status == "failed" for item in results)
+            else DataGapRecoveryBatchStatus.COMPLETED
+        )
+        recovery_repository.finalize_batch(
+            batch_id,
+            batch_status,
+            gap_count=len(results),
+            recovered_count=sum(item.status in {"recovered", "skipped"} for item in results),
+            failed_count=sum(item.status == "failed" for item in results),
+            summary={"business_date": business_date.isoformat(), "results": [asdict(item) for item in results]},
+        )
+    except Exception:
+        processed_results = getattr(sys.exc_info()[1], "partial_results", results)
+        recovery_repository.finalize_batch(
+            batch_id,
+            DataGapRecoveryBatchStatus.FAILED,
+            gap_count=len(processed_results),
+            recovered_count=sum(item.status in {"recovered", "skipped"} for item in processed_results),
+            failed_count=sum(item.status == "failed" for item in processed_results),
+            summary={"business_date": business_date.isoformat(), "error": "recovery batch failed"},
+        )
+        raise
+    return {
+        "date": business_date.isoformat(),
+        "gap_count": len(results),
+        "results": [asdict(item) for item in results],
+    }
+
+
+def _detach_gap(gap: Any) -> Any:
+    """Detach recovery fields needed after the metadata session is closed."""
+    return SimpleNamespace(
+        id=gap.id,
+        business_date=gap.business_date,
+        stock_id=gap.stock_id,
+        market=gap.market,
+        adjust=gap.adjust,
+        summary=dict(getattr(gap, "summary", {}) or {}),
+    )
+
+
+class _FreshSessionRecoveryRepository:
+    """Persist recovery events with short-lived sessions, never across providers."""
+
+    def __init__(self, storage: Any):
+        self.storage = storage
+
+    def _call(self, callback):
+        assert self.storage.Session is not None
+        session = self.storage.Session()
+        try:
+            result = callback(DataGapRecoveryRepository(session))
+            session.commit()
+            return result
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def record_attempt(self, *args: Any) -> Any:
+        return self._call(lambda repository: repository.record_attempt(*args))
+
+    def resolve_gap(self, gap_id: int) -> None:
+        self._call(lambda repository: repository.resolve_gap(gap_id))
+
+    def finalize_batch(self, *args: Any, **kwargs: Any) -> Any:
+        return self._call(lambda repository: repository.finalize_batch(*args, **kwargs))
+
+
+def classify_diagnostic(diagnostic: Any) -> DataGapRecoveryClassification:
+    """Map a persisted daily-bar diagnostic to ordinary recovery policy."""
+    if getattr(diagnostic, "classification", None) == "missing_exact_date":
+        return DataGapRecoveryClassification.VALUATION_ONLY
+    return DataGapRecoveryClassification.ORDER_DEPENDENT
+
+
+def get_unresolved_ordinary_gaps(repository: DataGapRecoveryRepository, *, business_date: date) -> list[Any]:
+    """Load ordinary unresolved BFQ diagnostics for the recovery date."""
+    return repository.list_unresolved_ordinary_diagnostics(business_date=business_date)
+
+
 # Create DAG
 dag = DAG(
     "download_stock_history_weekdays",
@@ -308,8 +447,16 @@ paper_trading_matching_task = PythonOperator(
     dag=dag,
 )
 
+data_gap_recovery_task = PythonOperator(
+    task_id="data_gap_recovery",
+    python_callable=run_unified_bfq_data_gap_recovery,
+    trigger_rule=TriggerRule.ALL_SUCCESS,
+    dag=dag,
+)
+
 all_partition_tasks = hfq_partition_tasks + bfq_partition_tasks
 for _task in all_partition_tasks:
     _task >> aggregate_task
 
 aggregate_task >> paper_trading_matching_task
+paper_trading_matching_task >> data_gap_recovery_task

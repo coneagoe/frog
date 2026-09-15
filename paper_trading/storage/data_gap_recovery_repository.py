@@ -12,10 +12,13 @@ from paper_trading.domain.enums import (
     DataGapRecoveryApprovalDecision,
     DataGapRecoveryAttemptOutcome,
     DataGapRecoveryBatchStatus,
+    DataGapRecoveryClassification,
+    DataGapRecoveryRouting,
     DataGapRecoveryStatus,
     Market,
 )
 from paper_trading.storage.models import (
+    DailyBarDiagnostic,
     PaperAccount,
     PaperDataGapRecoveryAccount,
     PaperDataGapRecoveryAlert,
@@ -70,6 +73,64 @@ class DataGapRecoveryRepository:
         gap.summary = summary
         self.session.flush()
 
+    def list_unresolved_ordinary_diagnostics(self, *, business_date: date) -> list[DailyBarDiagnostic]:
+        return list(
+            self.session.scalars(
+                select(DailyBarDiagnostic)
+                .where(
+                    DailyBarDiagnostic.business_date == business_date,
+                    DailyBarDiagnostic.market == Market.A_SHARE.value,
+                    DailyBarDiagnostic.adjust == "bfq",
+                    DailyBarDiagnostic.classification.in_(("missing_market_data", "missing_exact_date")),
+                    DailyBarDiagnostic.resolved.is_(False),
+                )
+                .order_by(DailyBarDiagnostic.business_date, DailyBarDiagnostic.stock_id, DailyBarDiagnostic.id)
+            )
+        )
+
+    def get_or_create_gap_from_diagnostic(
+        self,
+        diagnostic: DailyBarDiagnostic,
+        *,
+        routing: DataGapRecoveryRouting,
+        classification: DataGapRecoveryClassification,
+    ) -> PaperDataGapRecoveryGap:
+        existing = self.session.scalar(
+            select(PaperDataGapRecoveryGap).where(
+                PaperDataGapRecoveryGap.business_date == diagnostic.business_date,
+                PaperDataGapRecoveryGap.market == diagnostic.market,
+                PaperDataGapRecoveryGap.stock_id == diagnostic.stock_id,
+                PaperDataGapRecoveryGap.adjust == diagnostic.adjust,
+            )
+        )
+        summary = dict(existing.summary) if existing is not None else {}
+        summary.update(
+            classification=classification.value,
+            routing=routing.value,
+            source="daily_bar_diagnostic",
+        )
+        return self.record_gap(
+            diagnostic.business_date,
+            diagnostic.market,
+            diagnostic.stock_id,
+            diagnostic.adjust,
+            summary,
+        )
+
+    def record_recovery_classification(
+        self,
+        gap_id: int,
+        classification: DataGapRecoveryClassification,
+        routing: DataGapRecoveryRouting,
+        evidence: dict[str, Any],
+    ) -> None:
+        gap = self.session.get(PaperDataGapRecoveryGap, gap_id)
+        if gap is None:
+            raise KeyError(gap_id)
+        summary = dict(gap.summary)
+        summary.update(classification=classification.value, routing=routing.value, evidence=evidence)
+        self.update_gap_summary(gap_id, summary)
+
     def resolve_gap(self, gap_id: int) -> None:
         gap = self.session.get(PaperDataGapRecoveryGap, gap_id)
         if gap is None:
@@ -101,6 +162,28 @@ class DataGapRecoveryRepository:
     def record_batch(self, status: DataGapRecoveryBatchStatus, summary: dict[str, Any]) -> PaperDataGapRecoveryBatch:
         batch = PaperDataGapRecoveryBatch(status=status, summary=summary)
         self.session.add(batch)
+        self.session.flush()
+        return batch
+
+    def finalize_batch(
+        self,
+        batch_id: int,
+        status: DataGapRecoveryBatchStatus,
+        *,
+        gap_count: int,
+        recovered_count: int,
+        failed_count: int,
+        summary: dict[str, Any],
+    ) -> PaperDataGapRecoveryBatch:
+        batch = self.session.get(PaperDataGapRecoveryBatch, batch_id)
+        if batch is None:
+            raise KeyError(batch_id)
+        batch.status = status
+        batch.gap_count = gap_count
+        batch.recovered_count = recovered_count
+        batch.failed_count = failed_count
+        batch.summary = summary
+        batch.finished_at = datetime.now(timezone.utc)
         self.session.flush()
         return batch
 

@@ -152,6 +152,18 @@ class DataGapRecoveryStatus(StrEnum):
     PERMANENTLY_UNRESOLVED = "permanently_unresolved"
 
 
+class DataGapRecoveryClassification(StrEnum):
+    ORDER_DEPENDENT = "order_dependent"
+    VALUATION_ONLY = "valuation_only"
+    NO_IMPACT = "no_impact"
+
+
+class DataGapRecoveryRouting(StrEnum):
+    ORDINARY = "ordinary"
+    ACCOUNT_REPAIR = "account_repair"
+    APPROVAL_ESCALATION = "approval_escalation"
+
+
 class DataGapRecoveryBatchStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"

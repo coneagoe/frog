@@ -2,6 +2,7 @@ import json
 import re
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TypedDict
 from unittest.mock import MagicMock, Mock
 
@@ -241,6 +242,246 @@ def test_fatal_aggregate_does_not_run_matching(monkeypatch):
     run_matching.assert_not_called()
 
 
+def test_warning_summary_and_matching_warning_run_unified_recovery(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    service = Mock()
+    service.recover_unresolved_ordinary_gaps.return_value = []
+    repository = Mock()
+    repository.list_unresolved_ordinary_diagnostics.return_value = []
+    batch = Mock(id=1)
+    repository.record_batch.return_value = batch
+    session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=session))
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: service)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: date(2026, 7, 28))
+    result = dag_module.run_unified_bfq_data_gap_recovery(
+        ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
+    )
+    assert result["gap_count"] == 0
+    service.recover_unresolved_ordinary_gaps.assert_called_once_with([], batch_id=1)
+    session.close.assert_called_once()
+
+
+def test_unified_recovery_uses_detached_gaps_and_persistence_repository(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    diagnostic = SimpleNamespace(classification="missing_market_data")
+    gap = SimpleNamespace(
+        id=7,
+        business_date=date(2026, 7, 28),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+    repository = Mock()
+    repository.list_unresolved_ordinary_diagnostics.return_value = [diagnostic]
+    repository.get_or_create_gap_from_diagnostic.return_value = gap
+    repository.record_batch.return_value = SimpleNamespace(id=3)
+    session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=session))
+    persistence = Mock()
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: gap.business_date)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
+    monkeypatch.setattr(dag_module, "_FreshSessionRecoveryRepository", lambda storage: persistence)
+    service = Mock()
+    service.recover_unresolved_ordinary_gaps.return_value = [SimpleNamespace(status="recovered")]
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: service)
+
+    result = dag_module.run_unified_bfq_data_gap_recovery(
+        ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
+    )
+
+    recovered_gap = service.recover_unresolved_ordinary_gaps.call_args.args[0][0]
+    assert recovered_gap is not gap
+    assert recovered_gap.id == gap.id
+    service.assert_not_called()
+    persistence.finalize_batch.assert_called_once()
+    assert result["gap_count"] == 1
+
+
+def test_unified_recovery_callable_does_not_invoke_account_side_effect_apis(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    diagnostic = SimpleNamespace(classification="missing_market_data")
+    gap = SimpleNamespace(
+        id=7,
+        business_date=date(2026, 7, 28),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "no_impact", "routing": "ordinary"},
+    )
+    repository = Mock()
+    repository.list_unresolved_ordinary_diagnostics.return_value = [diagnostic]
+    repository.get_or_create_gap_from_diagnostic.return_value = gap
+    repository.record_batch.return_value = SimpleNamespace(id=3)
+    persistence = Mock()
+    service = Mock()
+    service.recover_unresolved_ordinary_gaps.return_value = []
+    session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=session))
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: gap.business_date)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
+    monkeypatch.setattr(dag_module, "_FreshSessionRecoveryRepository", lambda storage: persistence)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: service)
+
+    dag_module.run_unified_bfq_data_gap_recovery(
+        ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
+    )
+
+    for api in (
+        "upsert_account_progress",
+        "record_approval",
+        "record_alert",
+        "rebuild_account_ledger",
+        "run_paper_trading_ledger_rebuild",
+        "save_snapshot",
+        "create_initial_snapshot",
+        "create_account",
+        "repair_account",
+        "repair_order",
+        "escalate_gap",
+        "escalate_account",
+    ):
+        getattr(repository, api).assert_not_called()
+        getattr(persistence, api).assert_not_called()
+        getattr(service, api).assert_not_called()
+
+
+def test_unexpected_recovery_failure_preserves_processed_batch_counts(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    gap = SimpleNamespace(
+        id=7,
+        business_date=date(2026, 7, 28),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+    repository = Mock()
+    repository.list_unresolved_ordinary_diagnostics.return_value = [
+        SimpleNamespace(classification="missing_market_data")
+    ]
+    repository.get_or_create_gap_from_diagnostic.return_value = gap
+    repository.record_batch.return_value = SimpleNamespace(id=3)
+    persistence = Mock()
+    partial = [SimpleNamespace(status="recovered"), SimpleNamespace(status="failed")]
+    error = RuntimeError("unexpected recovery failure")
+    error.__dict__["partial_results"] = partial
+    service = Mock()
+    service.recover_unresolved_ordinary_gaps.side_effect = error
+    session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=session))
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: gap.business_date)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
+    monkeypatch.setattr(dag_module, "_FreshSessionRecoveryRepository", lambda storage: persistence)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: service)
+
+    with pytest.raises(RuntimeError, match="unexpected recovery failure"):
+        dag_module.run_unified_bfq_data_gap_recovery(
+            ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
+        )
+
+    kwargs = persistence.finalize_batch.call_args.kwargs
+    assert kwargs["status"] == "failed"
+    assert kwargs["gap_count"] == 2
+    assert kwargs["recovered_count"] == 1
+    assert kwargs["failed_count"] == 1
+
+
+def test_real_service_partial_results_drive_dag_finalization(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+    import paper_trading.services.data_gap_recovery_service as service_module
+
+    first = SimpleNamespace(
+        id=7,
+        business_date=date(2026, 7, 28),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    class BrokenGap:
+        id = 8
+        business_date = date(2026, 7, 28)
+        stock_id = "000002"
+        market = "a_share"
+        adjust = "bfq"
+
+        @property
+        def summary(self):
+            raise ValueError("diagnostic unavailable")
+
+    repository = Mock()
+    repository.list_unresolved_ordinary_diagnostics.return_value = [Mock(), Mock()]
+    repository.get_or_create_gap_from_diagnostic.side_effect = [first, BrokenGap()]
+    repository.record_batch.return_value = SimpleNamespace(id=3)
+    persistence = Mock()
+    session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=session))
+    storage.load_history_data_stock.return_value = pd.DataFrame(
+        {
+            "日期": ["2026-07-28"],
+            "股票代码": ["000001"],
+            "开盘": [10.0],
+            "最高": [11.0],
+            "最低": [9.0],
+            "收盘": [10.5],
+            "成交量": [100.0],
+            "成交额": [1000.0],
+        }
+    )
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: first.business_date)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
+    monkeypatch.setattr(dag_module, "_FreshSessionRecoveryRepository", lambda storage: persistence)
+    monkeypatch.setattr(service_module, "get_storage", lambda: storage)
+
+    with pytest.raises(ValueError, match="diagnostic unavailable"):
+        dag_module.run_unified_bfq_data_gap_recovery(
+            ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
+        )
+
+    kwargs = persistence.finalize_batch.call_args.kwargs
+    assert kwargs["gap_count"] == 1
+    assert kwargs["recovered_count"] == 1
+    assert kwargs["failed_count"] == 0
+
+
+def test_fatal_aggregate_skips_unified_recovery(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    recovery = Mock()
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: recovery)
+    with pytest.raises(dag_module.AirflowSkipException):
+        dag_module.run_unified_bfq_data_gap_recovery(
+            ti=MagicMock(xcom_pull=Mock(return_value={"result": "fail", "status": "fatal"}))
+        )
+    recovery.assert_not_called()
+
+
+def test_matching_failure_skips_unified_recovery():
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+    recovery_source = source[source.index("data_gap_recovery_task") :]
+    assert "trigger_rule=TriggerRule.ALL_SUCCESS" in recovery_source
+    assert "paper_trading_matching_task >> data_gap_recovery_task" in source
+
+
 def test_partition_diagnostic_failure_rolls_back_and_fails(monkeypatch):
     pendulum = pytest.importorskip("pendulum")
     pytest.importorskip("airflow")
@@ -458,7 +699,9 @@ def test_daily_dag_paper_trading_matching_uses_local_trade_date_and_commits_once
 
     assert "trade_date = ensure_a_share_trade_date(context)" in source
     assert "trade_date=trade_date.isoformat()" in source
-    matching_source = source[source.index("def run_paper_trading_matching_for_active_accounts") :]
+    matching_start = source.index("def run_paper_trading_matching_for_active_accounts")
+    matching_end = source.index("def run_unified_bfq_data_gap_recovery", matching_start)
+    matching_source = source[matching_start:matching_end]
     assert "session.commit()" not in matching_source
     assert "session.close()" not in matching_source
 

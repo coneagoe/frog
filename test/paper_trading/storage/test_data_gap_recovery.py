@@ -8,18 +8,27 @@ from sqlalchemy.orm import Session
 from paper_trading.domain.enums import (
     DataGapRecoveryAccountStatus,
     DataGapRecoveryAlertDeliveryState,
+    DataGapRecoveryApprovalDecision,
     DataGapRecoveryAttemptOutcome,
     DataGapRecoveryBatchStatus,
+    DataGapRecoveryClassification,
+    DataGapRecoveryRouting,
 )
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
 from paper_trading.storage.models import (
+    DailyBarDiagnostic,
     PaperAccount,
+    PaperAccountSnapshot,
+    PaperCashLedger,
     PaperDataGapRecoveryAccount,
     PaperDataGapRecoveryAlert,
+    PaperDataGapRecoveryApproval,
     PaperDataGapRecoveryAttempt,
     PaperDataGapRecoveryBatch,
     PaperDataGapRecoveryGap,
+    PaperLedgerRebuild,
 )
+from paper_trading.storage.repository import PaperTradingRepository
 from storage.model.auth import User
 from storage.model.base import Base
 from storage.storage_db import (
@@ -27,6 +36,17 @@ from storage.storage_db import (
     _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS,
     _non_enum_governed_paper_trading_tables,
 )
+
+
+def test_recovery_classification_and_routing_are_closed_values():
+    from paper_trading.domain.enums import DataGapRecoveryClassification, DataGapRecoveryRouting
+
+    assert {item.value for item in DataGapRecoveryClassification} == {
+        "order_dependent",
+        "valuation_only",
+        "no_impact",
+    }
+    assert DataGapRecoveryRouting.ORDINARY.value == "ordinary"
 
 
 def test_gap_model_has_a_share_bfq_identity_and_governed_outcomes(tmp_path):
@@ -59,9 +79,9 @@ def test_repository_validates_identity_and_preserves_append_only_evidence(tmp_pa
         assert candidate.payload == {"caller": "payload"}
         assert attempt.outcome == DataGapRecoveryAttemptOutcome.NOT_FOUND
         with pytest.raises(AttributeError):
-            repository.update_gap(gap.id, {})
+            getattr(repository, "update_gap")(gap.id, {})
         with pytest.raises(AttributeError):
-            repository.delete_gap(gap.id)
+            getattr(repository, "delete_gap")(gap.id)
 
 
 def test_candidate_hash_and_approval_binding_are_enforced(tmp_path):
@@ -73,9 +93,11 @@ def test_candidate_hash_and_approval_binding_are_enforced(tmp_path):
         with pytest.raises(ValueError):
             repository.record_candidate(gap.id, "not-a-sha256", {}, {}, "caller")
         with pytest.raises(ValueError):
-            repository.record_approval(gap.id, "approved", "b" * 64, None, {})
+            repository.record_approval(gap.id, DataGapRecoveryApprovalDecision.APPROVED, "b" * 64, None, {})
         candidate = repository.record_candidate(gap.id, "b" * 64, {}, {}, "caller")
-        approval = repository.record_approval(gap.id, "approved", candidate.candidate_hash, None, {})
+        approval = repository.record_approval(
+            gap.id, DataGapRecoveryApprovalDecision.APPROVED, candidate.candidate_hash, None, {}
+        )
         assert approval.candidate_hash == candidate.candidate_hash
 
 
@@ -99,8 +121,11 @@ def test_repository_lists_stably_and_updates_only_summary(tmp_path):
         repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
         rows = repository.list_gaps(0, 1)
         assert [row.stock_id for row in rows] == ["000001"]
-        repository.update_gap_summary(rows[0].id, {"resolved": True})
-        assert session.get(PaperDataGapRecoveryGap, rows[0].id).summary == {"resolved": True}
+        row = rows[0]
+        repository.update_gap_summary(row.id, {"resolved": True})
+        updated = session.get(PaperDataGapRecoveryGap, row.id)
+        assert updated is not None
+        assert updated.summary == {"resolved": True}
 
 
 def test_recovery_batch_has_explicit_run_metadata_and_attempt_fk(tmp_path):
@@ -117,6 +142,28 @@ def test_recovery_batch_has_explicit_run_metadata_and_attempt_fk(tmp_path):
         constraint.name == "uq_paper_data_gap_recovery_alert_cycle"
         for constraint in PaperDataGapRecoveryAlert.__table__.constraints
     )
+
+
+def test_repository_finalizes_batch_with_counts_and_finished_at(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        batch = repository.record_batch(DataGapRecoveryBatchStatus.RUNNING, {"business_date": "2026-08-07"})
+        repository.finalize_batch(
+            batch.id,
+            DataGapRecoveryBatchStatus.FAILED,
+            gap_count=2,
+            recovered_count=1,
+            failed_count=1,
+            summary={"retryable": True},
+        )
+        session.commit()
+        stored = repository.get_batch(batch.id)
+        assert stored is not None
+        assert stored.status == DataGapRecoveryBatchStatus.FAILED
+        assert (stored.gap_count, stored.recovered_count, stored.failed_count) == (2, 1, 1)
+        assert stored.finished_at is not None
 
 
 def test_owner_scoped_gap_and_batch_queries_are_distinct_and_do_not_leak_evidence(tmp_path):
@@ -167,3 +214,97 @@ def test_recovery_tables_are_excluded_from_plain_metadata_bootstrap_on_postgresq
     assert not recovery_tables & {
         table.name for table in _non_enum_governed_paper_trading_tables(type("D", (), {"name": "postgresql"})())
     }
+
+
+def test_repository_selects_only_unresolved_ordinary_bfq_diagnostics(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        diagnostics = PaperTradingRepository(session)
+        for business_date, stock_id, classification, adjust, resolved in (
+            (date(2026, 1, 2), "000001", "missing_exact_date", "bfq", False),
+            (date(2026, 1, 2), "000002", "missing_market_data", "bfq", True),
+            (date(2026, 1, 3), "000003", "missing_exact_date", "bfq", False),
+            (date(2026, 1, 2), "000004", "provider_error", "bfq", False),
+            (date(2026, 1, 2), "000005", "missing_exact_date", "qfq", False),
+        ):
+            diagnostics.upsert_daily_bar_diagnostic(
+                business_date, "a_share", stock_id, adjust, classification, [], resolved
+            )
+        repository = DataGapRecoveryRepository(session)
+
+        target = repository.list_unresolved_ordinary_diagnostics(business_date=date(2026, 1, 2))
+
+        assert [(row.business_date, row.stock_id) for row in target] == [(date(2026, 1, 2), "000001")]
+
+
+def test_repository_reuses_gap_identity_and_updates_classification_without_duplicates(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        diagnostic = DailyBarDiagnostic(
+            business_date=date(2026, 1, 2), market="a_share", stock_id="000001", adjust="bfq"
+        )
+        first = repository.get_or_create_gap_from_diagnostic(
+            diagnostic,
+            routing=DataGapRecoveryRouting.ORDINARY,
+            classification=DataGapRecoveryClassification.ORDER_DEPENDENT,
+        )
+        first.summary["unrelated"] = "preserved"
+        second = repository.get_or_create_gap_from_diagnostic(
+            diagnostic,
+            routing=DataGapRecoveryRouting.ORDINARY,
+            classification=DataGapRecoveryClassification.VALUATION_ONLY,
+        )
+
+        assert first.id == second.id
+        assert session.query(PaperDataGapRecoveryGap).count() == 1
+        assert second.summary["classification"] == DataGapRecoveryClassification.VALUATION_ONLY.value
+        assert second.summary["routing"] == DataGapRecoveryRouting.ORDINARY.value
+        assert second.summary["source"] == "daily_bar_diagnostic"
+        assert second.summary["unrelated"] == "preserved"
+
+
+def test_repository_records_recovery_classification_as_summary_evidence(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {"existing": True})
+
+        repository.record_recovery_classification(
+            gap.id,
+            DataGapRecoveryClassification.NO_IMPACT,
+            DataGapRecoveryRouting.ORDINARY,
+            {"reason": "no downstream use"},
+        )
+
+        assert gap.summary == {
+            "existing": True,
+            "classification": DataGapRecoveryClassification.NO_IMPACT.value,
+            "routing": DataGapRecoveryRouting.ORDINARY.value,
+            "evidence": {"reason": "no downstream use"},
+        }
+
+
+def test_unified_recovery_does_not_create_account_approval_or_alert_rows(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {"routing": "ordinary"})
+        repository.record_recovery_classification(
+            gap.id,
+            classification=DataGapRecoveryClassification.NO_IMPACT,
+            routing=DataGapRecoveryRouting.ORDINARY,
+            evidence={"source": "issue_113"},
+        )
+
+        assert session.query(PaperDataGapRecoveryAccount).count() == 0
+        assert session.query(PaperDataGapRecoveryApproval).count() == 0
+        assert session.query(PaperDataGapRecoveryAlert).count() == 0
+        assert session.query(PaperCashLedger).count() == 0
+        assert session.query(PaperAccountSnapshot).count() == 0
+        assert session.query(PaperLedgerRebuild).count() == 0
+        assert session.query(PaperAccount).count() == 0
