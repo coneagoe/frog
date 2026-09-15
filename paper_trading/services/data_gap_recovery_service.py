@@ -30,6 +30,9 @@ _STOCK_ID = re.compile(r"^[0-9]{6}$", re.ASCII)
 
 def _json_safe_candidate_value(value: Any) -> Any:
     """Normalize provider row values without relying on JSON's string fallback."""
+    missing = pd.isna(value)
+    if isinstance(missing, (bool, np.bool_)) and missing:
+        return None
     if value is None or isinstance(value, (str, int, bool)):
         return value
     if isinstance(value, float):

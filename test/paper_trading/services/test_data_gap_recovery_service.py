@@ -378,6 +378,8 @@ def test_canonical_candidate_payload_normalizes_provider_scalars_for_persistence
 
     assert json.loads(serialized) == payload
     assert candidate_hash == canonical_candidate_hash(json.loads(serialized))
+    assert payload["row"][COL_LOW] is None
+    assert payload["row"][COL_AMOUNT] is None
 
 
 def test_unexpected_diagnostic_failure_carries_processed_results():
