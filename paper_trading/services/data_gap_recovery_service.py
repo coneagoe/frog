@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass, replace
@@ -21,6 +23,27 @@ from storage import get_storage
 
 logger = logging.getLogger(__name__)
 _STOCK_ID = re.compile(r"^[0-9]{6}$", re.ASCII)
+
+
+def canonical_candidate_payload(
+    candidate: pd.DataFrame, *, market: str, stock_id: str, business_date: date, adjust: str
+) -> dict[str, Any]:
+    if market != "a_share" or adjust != "bfq" or _STOCK_ID.fullmatch(stock_id) is None or len(candidate) != 1:
+        raise ValueError("approved candidate must be one a_share/bfq row with a six-digit symbol")
+    row = candidate.iloc[0]
+    if str(row[COL_STOCK_ID]) != stock_id or pd.to_datetime(row[COL_DATE]).date() != business_date:
+        raise ValueError("approved candidate identity or date does not match the gap")
+    return {
+        "market": market,
+        "stock_id": stock_id,
+        "business_date": business_date.isoformat(),
+        "adjust": adjust,
+        "row": {str(key): (value.isoformat() if hasattr(value, "isoformat") else value) for key, value in row.items()},
+    }
+
+
+def canonical_candidate_hash(payload: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -97,8 +120,17 @@ class DataGapRecoveryService:
                     )
                 )
                 continue
+            if self._is_terminal(gap):
+                results.append(self._result(gap, "skipped", classification=classification, routing=routing))
+                continue
             try:
                 result = self.recover_gap(gap, batch_id=batch_id)
+                if result.status == "failed":
+                    self.maybe_escalate_gap(
+                        gap,
+                        user_id=0,
+                        user_snapshot={"actor": "system", "source": "data_gap_recovery"},
+                    )
                 results.append(replace(result, classification=classification, routing=routing))
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Unified ordinary gap recovery failed: gap_id=%s", getattr(gap, "id", None))
@@ -109,6 +141,8 @@ class DataGapRecoveryService:
 
     def recover_gap(self, gap: Any, *, batch_id: int | None = None) -> GapRecoveryResult:
         classification, routing = self._diagnostic(gap)
+        if self._is_terminal(gap):
+            return self._result(gap, "skipped", classification=classification, routing=routing)
         if routing != DataGapRecoveryRouting.ORDINARY.value:
             return self._result(
                 gap,
@@ -161,6 +195,7 @@ class DataGapRecoveryService:
                         classification=classification,
                         routing=routing,
                     )
+                    self._send_recovery_system_failure(gap, exc)
                     return self._result(gap, "failed", provider, str(exc), classification, routing)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("BFQ gap provider failed: stock_id=%s provider=%s error=%s", stock_id, provider, exc)
@@ -184,10 +219,13 @@ class DataGapRecoveryService:
                 classification=classification,
                 routing=routing,
             )
+            error = RuntimeError("all providers failed")
+            self._send_recovery_system_failure(gap, error)
             return self._result(
-                gap, "failed", error="all providers failed", classification=classification, routing=routing
+                gap, "failed", error=str(error), classification=classification, routing=routing
             )
         except _RecoveryPersistenceError as exc:
+            self._send_recovery_system_failure(gap, exc)
             return self._result(gap, "failed", error=str(exc), classification=classification, routing=routing)
         except Exception as exc:  # noqa: BLE001
             self._record_attempt(
@@ -198,6 +236,7 @@ class DataGapRecoveryService:
                 classification=classification,
                 routing=routing,
             )
+            self._send_recovery_system_failure(gap, exc)
             return self._result(gap, "failed", error=str(exc), classification=classification, routing=routing)
 
     def maybe_escalate_gap(
@@ -211,6 +250,9 @@ class DataGapRecoveryService:
     ) -> bool:
         """Escalate an unresolved gap once either service threshold is reached."""
         if self.repository is None or not hasattr(self.repository, "escalate_gap"):
+            return False
+        current_status = getattr(gap, "status", DataGapRecoveryStatus.OPEN)
+        if getattr(current_status, "value", current_status) != DataGapRecoveryStatus.OPEN.value:
             return False
         evidence = self.repository.gap_evidence(gap.id)
         attempts = evidence.get("attempts", [])
@@ -282,6 +324,12 @@ class DataGapRecoveryService:
                 return self._result(
                     locked_gap, "skipped", classification=locked_classification, routing=locked_routing
                 )
+            payload = canonical_candidate_payload(
+                candidate, market=locked_gap.market, stock_id=locked_gap.stock_id,
+                business_date=locked_gap.business_date, adjust=locked_gap.adjust,
+            )
+            if canonical_candidate_hash(payload) != candidate_hash:
+                raise ValueError("approved candidate payload does not match approved hash")
             if not self.storage.save_history_data_stock(candidate, PeriodType.DAILY, AdjustType.BFQ):
                 raise _RecoveryWriteError("save returned False")
             if self._read_exact(locked_gap.stock_id, locked_gap.business_date).empty:
@@ -299,6 +347,16 @@ class DataGapRecoveryService:
         except Exception as exc:  # noqa: BLE001
             status = "pending_approval" if "stale" in str(exc) else "failed"
             return self._result(gap, status, error=str(exc), classification=classification, routing=routing)
+
+    @staticmethod
+    def _is_terminal(gap: Any) -> bool:
+        status = getattr(getattr(gap, "status", None), "value", getattr(gap, "status", None))
+        summary = getattr(gap, "summary", None)
+        explicit_no_impact = (
+            isinstance(summary, dict)
+            and summary.get("classification") == DataGapRecoveryClassification.NO_IMPACT.value
+        )
+        return status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED.value or explicit_no_impact
 
     @staticmethod
     def _diagnostic(gap: Any) -> tuple[str, str]:

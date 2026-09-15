@@ -566,6 +566,23 @@ def _is_addable_missing_column(group: PaperTradingEnumGroup, column: PaperTradin
     )
 
 
+def _add_alert_delivery_metadata_column(connection: Connection) -> bool:
+    if not _table_exists(connection, "paper_data_gap_recovery_alerts"):
+        return False
+    if connection.dialect.name != "postgresql":
+        return False
+    exists = connection.execute(text(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+        "AND table_name = 'paper_data_gap_recovery_alerts' AND column_name = 'delivery_metadata'"
+    )).scalar()
+    if exists:
+        return False
+    connection.execute(text(
+        "ALTER TABLE paper_data_gap_recovery_alerts ADD COLUMN delivery_metadata JSON NOT NULL DEFAULT '{}'"
+    ))
+    return True
+
+
 def ensure_snapshot_series_enum_types(connection: Connection) -> None:
     """Create snapshot series enum types when they are missing."""
     for group in PAPER_TRADING_ENUM_GROUPS:
@@ -581,6 +598,7 @@ def ensure_snapshot_valuation_metadata(connection: Connection) -> bool:
     _reject_duplicate_trading_snapshots(connection)
     changed = _add_valuation_quality_column(connection)
     changed = _add_valuation_details_column(connection) or changed
+    changed = _add_alert_delivery_metadata_column(connection) or changed
     return _ensure_snapshot_trading_index(connection) or changed
 
 
@@ -688,7 +706,9 @@ def _preflight_recovery_schema(connection: Connection, *, rollback: bool) -> Non
             "summary",
             "created_at",
         },
-        "paper_data_gap_recovery_alerts": {"id", "gap_id", "cycle_key", "evidence", "delivery_state", "created_at"},
+        "paper_data_gap_recovery_alerts": {
+            "id", "gap_id", "cycle_key", "evidence", "delivery_metadata", "delivery_state", "created_at"
+        },
     }
     present = {name for name in required if _table_exists(connection, name)}
     if not present:

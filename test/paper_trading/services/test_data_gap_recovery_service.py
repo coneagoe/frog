@@ -18,7 +18,11 @@ from common.const import (
     PeriodType,
 )
 from paper_trading.domain.enums import DataGapRecoveryClassification, DataGapRecoveryRouting
-from paper_trading.services.data_gap_recovery_service import DataGapRecoveryService
+from paper_trading.services.data_gap_recovery_service import (
+    DataGapRecoveryService,
+    canonical_candidate_hash,
+    canonical_candidate_payload,
+)
 
 
 def _row(stock_id: str, business_date: str) -> pd.DataFrame:
@@ -108,12 +112,35 @@ def test_escalation_alert_delivery_failure_does_not_mutate_recovery_state():
     repository.gap_evidence.return_value = {"attempts": []}
     alerts = Mock()
     alerts.send_escalation.side_effect = RuntimeError("smtp unavailable")
-    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 7), summary={}, status="escalated")
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 7), summary={}, status="open")
     service = DataGapRecoveryService(storage=Mock(), downloader=Mock(), repository=repository, alert_service=alerts)
 
     assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 11)) is True
-    assert gap.status == "escalated"
+    assert gap.status == "open"
     repository.escalate_gap.assert_called_once()
+
+
+def test_threshold_path_calls_adapter_escalation_and_alert_without_airflow():
+    class FreshSessionAdapter:
+        def __init__(self):
+            self.escalations = []
+
+        def gap_evidence(self, _gap_id):
+            return {"attempts": [SimpleNamespace(batch_id=i, outcome="not_found") for i in (1, 2, 3)]}
+
+        def escalate_gap(self, gap_id, user_id, user_snapshot, *, reason=None):
+            self.escalations.append((gap_id, user_id, user_snapshot, reason))
+
+    repository = FreshSessionAdapter()
+    alerts = Mock()
+    gap = SimpleNamespace(id=7, business_date=date(2026, 9, 1), summary={}, status="open")
+    service = DataGapRecoveryService(storage=Mock(), downloader=Mock(), repository=repository, alert_service=alerts)
+
+    assert service.maybe_escalate_gap(
+        gap, user_id=0, user_snapshot={"actor": "system"}, as_of=date(2026, 9, 2)
+    )
+    assert repository.escalations == [(7, 0, {"actor": "system"}, None)]
+    alerts.send_escalation.assert_called_once_with(gap, failure_class="threshold")
 
 
 def test_four_business_days_does_not_count_weekend():
@@ -203,9 +230,18 @@ def test_approved_write_uses_repository_locked_gap_for_readback_and_resolution()
     repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(locked_gap)
     storage.load_history_data_stock.return_value = _row("000002", "2026-08-08")
     storage.save_history_data_stock.return_value = True
+    candidate = _row("000002", "2026-08-08")
+    approved_payload = canonical_candidate_payload(
+        candidate,
+        market=locked_gap.market,
+        stock_id=locked_gap.stock_id,
+        business_date=locked_gap.business_date,
+        adjust=locked_gap.adjust,
+    )
+    approved_hash = canonical_candidate_hash(approved_payload)
 
     result = _service(storage, downloader, repository).execute_approved_gap(
-        detached_gap, "a" * 64, _row("000002", "2026-08-08")
+        detached_gap, approved_hash, candidate
     )
 
     assert result.gap_id == locked_gap.id

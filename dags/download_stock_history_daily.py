@@ -2,6 +2,7 @@
 """DAG for downloading stock history (HFQ) on weekdays."""
 
 import json
+import pandas as pd
 import logging
 import os
 import sys
@@ -295,6 +296,7 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
     session = storage.Session()
     try:
         repository = DataGapRecoveryRepository(session)
+        approved_candidates = repository.list_pending_approved_candidates()
         diagnostics = get_unresolved_ordinary_gaps(repository=repository, business_date=business_date)
         gaps = [
             _detach_gap(
@@ -320,6 +322,12 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
         session.close()
 
     recovery_repository = _FreshSessionRecoveryRepository(storage)
+    for approved_gap, approved_hash, payload in approved_candidates:
+        row = payload.get("row")
+        if isinstance(row, dict):
+            DataGapRecoveryService(repository=recovery_repository).execute_approved_gap(
+                _detach_gap(approved_gap), approved_hash, pd.DataFrame([row])
+            )
     alert_service = DataGapAlertService(repository=recovery_repository)
     results: list[Any] = []
     try:
@@ -553,6 +561,8 @@ def _detach_gap(gap: Any) -> Any:
         market=gap.market,
         adjust=gap.adjust,
         summary=dict(getattr(gap, "summary", {}) or {}),
+        status=getattr(gap, "status", None),
+        latest_candidate_hash=getattr(gap, "latest_candidate_hash", None),
     )
 
 
@@ -606,6 +616,9 @@ class _FreshSessionRecoveryRepository:
 
     def resolve_gap(self, gap_id: int) -> None:
         self._call(lambda repository: repository.resolve_gap(gap_id))
+
+    def execute_approved_candidate(self, gap_id: int, candidate_hash: str, callback: Callable[[Any], Any]) -> Any:
+        return self._call(lambda repository: repository.execute_approved_candidate(gap_id, candidate_hash, callback))
 
     def finalize_batch(self, *args: Any, **kwargs: Any) -> Any:
         return self._call(lambda repository: repository.finalize_batch(*args, **kwargs))
