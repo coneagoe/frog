@@ -585,6 +585,19 @@ class _FreshSessionRecoveryRepository:
         result = self._call(lambda repository: repository.gap_evidence(gap_id, owner_user_id))
         return cast(dict[str, Any], result)
 
+    def escalate_gap(
+        self,
+        gap_id: int,
+        user_id: int,
+        user_snapshot: dict[str, Any],
+        reason: str | None = None,
+    ) -> Any:
+        return self._call(
+            lambda repository: repository.escalate_gap(
+                gap_id, user_id, user_snapshot, reason=reason
+            )
+        )
+
     def claim_alert(self, gap_id: int, cycle_key: str, evidence: dict[str, Any]) -> Any:
         return self._call(lambda repository: repository.claim_alert(gap_id, cycle_key, evidence))
 
