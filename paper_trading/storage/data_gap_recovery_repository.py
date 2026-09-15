@@ -251,9 +251,12 @@ class DataGapRecoveryRepository:
     def escalate_gap(
         self, gap_id: int, user_id: int, user_snapshot: dict[str, Any], *, reason: str | None = None
     ) -> PaperDataGapRecoveryGap:
-        """Move a gap to escalation without changing any recovery evidence."""
+        """Move an open gap to escalation and append its authenticated audit event."""
         gap = self._locked_gap(gap_id)
-        self._authenticated_snapshot(user_id, user_snapshot, reason)
+        if gap.status != DataGapRecoveryStatus.OPEN:
+            raise ValueError("only open gaps can be escalated")
+        snapshot = self._authenticated_snapshot(user_id, user_snapshot, reason)
+        self.record_attempt(gap_id, None, DataGapRecoveryAttemptOutcome.FAILED, {"event": "escalated", **snapshot})
         gap.status = DataGapRecoveryStatus.ESCALATED
         self.session.flush()
         return gap
@@ -265,10 +268,7 @@ class DataGapRecoveryRepository:
             return gap
         gap.status = DataGapRecoveryStatus.PENDING_APPROVAL
         self.session.flush()
-        raise ValueError("stale candidate hash; approval is pending for the current candidate")
-
-    def invalidate_stale_candidate_hash(self, gap_id: int, candidate_hash: str) -> PaperDataGapRecoveryGap:
-        return self.invalidate_stale_candidate(gap_id, candidate_hash)
+        return gap
 
     def _decide_gap(
         self,
@@ -281,15 +281,19 @@ class DataGapRecoveryRepository:
         status: DataGapRecoveryStatus,
     ) -> PaperDataGapRecoveryGap:
         gap = self._locked_gap(gap_id)
+        if gap.status not in {DataGapRecoveryStatus.ESCALATED, DataGapRecoveryStatus.PENDING_APPROVAL}:
+            raise ValueError("approval decisions require an escalated or pending-approval gap")
         if gap.latest_candidate_hash != candidate_hash:
             gap.status = DataGapRecoveryStatus.PENDING_APPROVAL
             self.session.flush()
-            raise ValueError("stale candidate hash; approval is pending for the current candidate")
+            return gap
         snapshot = self._authenticated_snapshot(user_id, user_snapshot, reason)
         self.record_approval(gap_id, decision, candidate_hash, user_id, snapshot)
         gap.status = status
         if status == DataGapRecoveryStatus.RECOVERED:
             gap.resolved_at = datetime.now(timezone.utc)
+        else:
+            gap.resolved_at = None
         self.session.flush()
         return gap
 
@@ -335,6 +339,8 @@ class DataGapRecoveryRepository:
         self, gap_id: int, user_id: int, user_snapshot: dict[str, Any], *, reason: str | None = None
     ) -> PaperDataGapRecoveryGap:
         gap = self._locked_gap(gap_id)
+        if gap.status != DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED:
+            raise ValueError("only permanently unresolved gaps can be reopened")
         snapshot = self._authenticated_snapshot(user_id, user_snapshot, reason)
         if gap.latest_candidate_hash is None:
             raise ValueError("cannot reopen a gap without a candidate")

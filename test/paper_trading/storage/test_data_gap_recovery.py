@@ -126,7 +126,16 @@ def test_locked_escalation_approval_rejection_and_reopen_preserve_evidence(tmp_p
             DataGapRecoveryApprovalDecision.REOPENED,
         ]
         assert evidence["approvals"][0].approver_snapshot["reason"] == "not trustworthy"
+        assert evidence["approvals"][0].approver_snapshot["user_id"] == 7
         assert evidence["approvals"][1].approver_snapshot["email"] == "reviewer@example.com"
+        assert evidence["attempts"][0].evidence == {
+            "event": "escalated",
+            "id": 7,
+            "email": "reviewer@example.com",
+            "role": "reviewer",
+            "user_id": 7,
+            "reason": "needs review",
+        }
 
 
 def test_stale_candidate_hash_invalidates_to_pending_approval_without_losing_candidate(tmp_path):
@@ -137,14 +146,31 @@ def test_stale_candidate_hash_invalidates_to_pending_approval_without_losing_can
         gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {"keep": True})
         repository.record_candidate(gap.id, "a" * 64, {}, {}, "caller")
         repository.record_candidate(gap.id, "b" * 64, {}, {}, "caller")
+        repository.escalate_gap(gap.id, 7, {"email": "reviewer@example.com"})
 
-        with pytest.raises(ValueError, match="stale"):
-            repository.approve_gap(gap.id, "a" * 64, 7, {"email": "reviewer@example.com"})
+        result = repository.approve_gap(gap.id, "a" * 64, 7, {"email": "reviewer@example.com"})
 
+        assert result is gap
         assert gap.status == DataGapRecoveryStatus.PENDING_APPROVAL
         assert gap.latest_candidate_hash == "b" * 64
         assert gap.summary == {"keep": True}
         assert len(repository.gap_evidence(gap.id)["candidates"]) == 2
+
+
+def test_transitions_reject_invalid_source_states_and_preserve_attempts(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        candidate = repository.record_candidate(gap.id, "a" * 64, {}, {}, "caller")
+        repository.escalate_gap(gap.id, 7, {"email": "r@example.com"})
+        with pytest.raises(ValueError, match="only open"):
+            repository.escalate_gap(gap.id, 7, {"email": "r@example.com"})
+        repository.reject_gap(gap.id, candidate.candidate_hash, 7, {"email": "r@example.com"})
+        with pytest.raises(ValueError, match="escalated or pending"):
+            repository.reject_gap(gap.id, candidate.candidate_hash, 7, {"email": "r@example.com"})
+        assert len(repository.gap_evidence(gap.id)["attempts"]) == 1
 
 
 def test_record_candidate_updates_gap_latest_candidate_hash(tmp_path):
