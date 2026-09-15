@@ -141,9 +141,10 @@ class DataGapRecoveryService:
 
     def recover_gap(self, gap: Any, *, batch_id: int | None = None) -> GapRecoveryResult:
         classification, routing = self._diagnostic(gap)
-        if self._is_terminal(gap):
+        status = self._status(gap)
+        if self._is_terminal(gap) and status != DataGapRecoveryStatus.ESCALATED.value:
             return self._result(gap, "skipped", classification=classification, routing=routing)
-        if routing != DataGapRecoveryRouting.ORDINARY.value:
+        if routing != DataGapRecoveryRouting.ORDINARY.value and status != DataGapRecoveryStatus.ESCALATED.value:
             return self._result(
                 gap,
                 "failed",
@@ -182,6 +183,34 @@ class DataGapRecoveryService:
                     if len(exact) != 1:
                         raise ValueError("provider result did not contain exactly one requested row")
                     exact = exact.iloc[[0]].copy()
+                    # Persist the exact validated provider row before any later
+                    # escalation decision.  This is the same canonical boundary
+                    # used by approved execution; it is evidence, not a second
+                    # provider validation path.
+                    escalated = self._status(gap) == DataGapRecoveryStatus.ESCALATED.value
+                    if self.repository is not None and hasattr(self.repository, "record_candidate"):
+                        payload = canonical_candidate_payload(
+                            exact,
+                            market=gap.market,
+                            stock_id=stock_id,
+                            business_date=business_date,
+                            adjust=gap.adjust,
+                        )
+                        self.repository.record_candidate(
+                            gap.id,
+                            canonical_candidate_hash(payload),
+                            payload,
+                            {"validated": True, "provider": provider},
+                            provider,
+                        )
+                    if escalated:
+                        self._record_attempt(
+                            gap, batch_id, DataGapRecoveryAttemptOutcome.RECOVERED, provider,
+                            classification=classification, routing=routing,
+                        )
+                        return self._result(
+                            gap, "pending_approval", provider, classification=classification, routing=routing
+                        )
                     if not self.storage.save_history_data_stock(exact, PeriodType.DAILY, AdjustType.BFQ):
                         raise _RecoveryWriteError("save returned False")
                     if self._read_exact(stock_id, business_date).empty:
@@ -302,7 +331,9 @@ class DataGapRecoveryService:
         except Exception:  # noqa: BLE001
             logger.exception("Data-gap recovery system alert failed: gap_id=%s", getattr(gap, "id", None))
 
-    def execute_approved_gap(self, gap: Any, candidate_hash: str, candidate: pd.DataFrame) -> GapRecoveryResult:
+    def execute_approved_gap(
+        self, gap: Any, candidate_hash: str, candidate: pd.DataFrame | None = None
+    ) -> GapRecoveryResult:
         """Write an approved candidate only if it is still the current candidate."""
         classification, routing = self._diagnostic(gap)
         if self.repository is None or not hasattr(self.repository, "execute_approved_candidate"):
@@ -314,22 +345,32 @@ class DataGapRecoveryService:
                 routing=routing,
             )
 
-        def write(locked_gap: Any, resolve_gap: Any = None) -> GapRecoveryResult:
+        def write(locked_gap: Any, payload: dict[str, Any] | Any = None, resolve_gap: Any = None) -> GapRecoveryResult:
             locked_classification, locked_routing = self._diagnostic(locked_gap)
             if locked_classification == DataGapRecoveryClassification.NO_IMPACT.value:
                 return self._result(locked_gap, "skipped", classification=locked_classification, routing=locked_routing)
-            payload = canonical_candidate_payload(
-                candidate,
-                market=locked_gap.market,
-                stock_id=locked_gap.stock_id,
-                business_date=locked_gap.business_date,
-                adjust=locked_gap.adjust,
-            )
-            if canonical_candidate_hash(payload) != candidate_hash:
+            if callable(payload) and resolve_gap is None:
+                resolve_gap = payload
+                payload = None
+            if isinstance(payload, dict):
+                stored_payload = payload
+                stored_candidate = pd.DataFrame([stored_payload["row"]])
+            elif candidate is not None:
+                stored_payload = canonical_candidate_payload(
+                    candidate,
+                    market=locked_gap.market,
+                    stock_id=locked_gap.stock_id,
+                    business_date=locked_gap.business_date,
+                    adjust=locked_gap.adjust,
+                )
+                stored_candidate = candidate
+            else:
+                raise ValueError("approved candidate payload is required")
+            if canonical_candidate_hash(stored_payload) != candidate_hash:
                 raise ValueError("approved candidate payload does not match approved hash")
             existing = self._read_exact(locked_gap.stock_id, locked_gap.business_date)
             if not existing.empty:
-                if not self._exact_rows_match_candidate(existing, candidate, locked_gap):
+                if not self._exact_rows_match_candidate(existing, stored_candidate, locked_gap):
                     raise _RecoveryWriteError("existing exact row differs from approved candidate")
                 if resolve_gap is None:
                     self._resolve(locked_gap)
@@ -341,7 +382,7 @@ class DataGapRecoveryService:
                 return self._result(
                     locked_gap, "recovered", classification=locked_classification, routing=locked_routing
                 )
-            if not self.storage.save_history_data_stock(candidate, PeriodType.DAILY, AdjustType.BFQ):
+            if not self.storage.save_history_data_stock(stored_candidate, PeriodType.DAILY, AdjustType.BFQ):
                 raise _RecoveryWriteError("save returned False")
             if self._read_exact(locked_gap.stock_id, locked_gap.business_date).empty:
                 raise _RecoveryWriteError("exact-key readback did not find recovered row")
@@ -365,12 +406,20 @@ class DataGapRecoveryService:
 
     @staticmethod
     def _is_terminal(gap: Any) -> bool:
-        status = getattr(getattr(gap, "status", None), "value", getattr(gap, "status", None))
+        status = DataGapRecoveryService._status(gap)
         summary = getattr(gap, "summary", None)
         explicit_no_impact = (
             isinstance(summary, dict) and summary.get("classification") == DataGapRecoveryClassification.NO_IMPACT.value
         )
-        return status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED.value or explicit_no_impact
+        return status in {
+            DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED.value,
+            DataGapRecoveryStatus.PENDING_APPROVAL.value,
+        } or explicit_no_impact
+
+    @staticmethod
+    def _status(gap: Any) -> str | None:
+        status = getattr(gap, "status", None)
+        return getattr(status, "value", status)
 
     @staticmethod
     def _diagnostic(gap: Any) -> tuple[str, str]:

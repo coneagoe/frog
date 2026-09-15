@@ -17,7 +17,7 @@ from common.const import (
     AdjustType,
     PeriodType,
 )
-from paper_trading.domain.enums import DataGapRecoveryClassification, DataGapRecoveryRouting
+from paper_trading.domain.enums import DataGapRecoveryClassification, DataGapRecoveryRouting, DataGapRecoveryStatus
 from paper_trading.services.data_gap_recovery_service import (
     DataGapRecoveryService,
     canonical_candidate_hash,
@@ -333,6 +333,23 @@ def test_unified_recovery_records_classification_and_ordinary_routing():
     evidence = repository.record_attempt.call_args.args[3]
     assert evidence["classification"] == DataGapRecoveryClassification.ORDER_DEPENDENT.value
     assert evidence["routing"] == DataGapRecoveryRouting.ORDINARY.value
+
+
+def test_escalated_candidate_is_pending_approval_without_history_write():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1, business_date=date(2026, 8, 7), stock_id="000001", market="a_share", adjust="bfq",
+        status=DataGapRecoveryStatus.ESCALATED,
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    storage.load_history_data_stock.return_value = pd.DataFrame()
+    downloader.dl_history_data_stock_by_provider.return_value = _row("000001", "2026-08-07")
+
+    result = _service(storage, downloader, repository).recover_gap(gap)
+
+    assert result.status == "pending_approval"
+    repository.record_candidate.assert_called_once()
+    storage.save_history_data_stock.assert_not_called()
 
 
 def test_unexpected_diagnostic_failure_carries_processed_results():

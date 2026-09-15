@@ -196,6 +196,20 @@ def test_record_candidate_locks_gap_before_updating_latest_candidate_hash(tmp_pa
         assert locked_gap_ids == [gap.id, gap.id]
 
 
+def test_record_candidate_retry_returns_immutable_candidate(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {})
+        first = repository.record_candidate(gap.id, "a" * 64, {"row": 1}, {"ok": True}, "provider")
+        retry = repository.record_candidate(gap.id, "a" * 64, {"row": 1}, {"ok": True}, "provider")
+        assert retry is first
+        assert gap.latest_candidate_hash == "a" * 64
+        with pytest.raises(ValueError, match="immutable candidate"):
+            repository.record_candidate(gap.id, "a" * 64, {"row": 2}, {"ok": True}, "provider")
+
+
 def test_recording_existing_gap_updates_last_observed_at(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
     Base.metadata.create_all(engine)

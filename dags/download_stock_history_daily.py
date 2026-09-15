@@ -2,7 +2,6 @@
 """DAG for downloading stock history (HFQ) on weekdays."""
 
 import json
-import pandas as pd
 import logging
 import os
 import sys
@@ -322,12 +321,10 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
         session.close()
 
     recovery_repository = _FreshSessionRecoveryRepository(storage)
-    for approved_gap, approved_hash, payload in approved_candidates:
-        row = payload.get("row")
-        if isinstance(row, dict):
-            DataGapRecoveryService(repository=recovery_repository).execute_approved_gap(
-                _detach_gap(approved_gap), approved_hash, pd.DataFrame([row])
-            )
+    for approved_gap, approved_hash, _payload in approved_candidates:
+        DataGapRecoveryService(repository=recovery_repository).execute_approved_gap(
+            _detach_gap(approved_gap), approved_hash
+        )
     alert_service = DataGapAlertService(repository=recovery_repository)
     results: list[Any] = []
     try:
@@ -587,6 +584,9 @@ class _FreshSessionRecoveryRepository:
 
     def record_attempt(self, *args: Any) -> Any:
         return self._call(lambda repository: repository.record_attempt(*args))
+
+    def record_candidate(self, *args: Any) -> Any:
+        return self._call(lambda repository: repository.record_candidate(*args))
 
     def get_gap(self, gap_id: int, owner_user_id: int | None = None) -> Any:
         return self._call(lambda repository: repository.get_gap(gap_id, owner_user_id))

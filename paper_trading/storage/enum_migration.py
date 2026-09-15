@@ -688,7 +688,7 @@ def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
 
 def _preflight_recovery_schema(connection: Connection, *, rollback: bool) -> None:
     """Do not turn a partial recovery schema into a falsely complete one."""
-    if rollback or connection.dialect.name != "postgresql":
+    if connection.dialect.name != "postgresql":
         return
     required = {
         "paper_data_gap_recovery_gaps": {

@@ -613,6 +613,7 @@ Analytics reports valuation gaps separately in date order through `valuation_gap
 日线历史 DAG 对缺失或失败的 BFQ/HFQ 下载记录 provider 结果；汇总警告仍允许模拟交易匹配继续执行，只有致命的汇总失败会阻止匹配。
 
 Issue #113 的统一恢复在全部 HFQ/BFQ 分片完成并且模拟交易匹配成功或带 warning 完成后运行，仅处理普通 A 股 BFQ 精确业务日期缺口。分片或匹配失败时跳过恢复；匹配中的逐证券 warning 只记录并继续处理其他证券。恢复是幂等的：已存在精确行情的缺口会被跳过并解决，未解决缺口可脱离原批次独立重试。批次、尝试和缺口摘要记录 routing/classification 及相关 provider/结果证据；达到阈值的 unresolved 缺口由该流程自动升级并发送告警，账户恢复失败也发送独立告警。
+升级后的缺口即使 provider 找到并验证了候选，也只记录不可变 candidate 并转为 `pending_approval`；在浏览器审批前不会自动写入行情。
 
 ### 缺口升级审批（Issue #115）
 

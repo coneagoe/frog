@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
 from sqlalchemy import func, not_, select
@@ -157,11 +157,25 @@ class DataGapRecoveryRepository:
         if not re.fullmatch(r"[0-9a-fA-F]{64}", candidate_hash):
             raise ValueError("candidate_hash must be a 64-character SHA-256 hex digest")
         gap = self._locked_gap(gap_id)
+        existing = self.session.scalar(
+            select(PaperDataGapRecoveryCandidate).where(
+                PaperDataGapRecoveryCandidate.gap_id == gap_id,
+                PaperDataGapRecoveryCandidate.candidate_hash == candidate_hash,
+            )
+        )
+        if existing is not None:
+            if existing.payload != payload or existing.validation != validation or existing.source != source:
+                raise ValueError("candidate retry payload or evidence does not match immutable candidate")
+            gap.latest_candidate_hash = candidate_hash
+            self.session.flush()
+            return existing
         candidate = PaperDataGapRecoveryCandidate(
             gap_id=gap_id, candidate_hash=candidate_hash, payload=payload, validation=validation, source=source
         )
         self.session.add(candidate)
         gap.latest_candidate_hash = candidate_hash
+        if gap.status == DataGapRecoveryStatus.ESCALATED:
+            gap.status = DataGapRecoveryStatus.PENDING_APPROVAL
         self.session.flush()
         return candidate
 
@@ -349,7 +363,7 @@ class DataGapRecoveryRepository:
         )
         if candidate is None:
             raise ValueError("approved candidate payload is required")
-        return write_callback(gap, self.resolve_gap)
+        return write_callback(gap, dict(candidate.payload), self.resolve_gap)
 
     def approved_candidate_payload(self, gap_id: int, candidate_hash: str) -> dict[str, Any]:
         candidate = self.session.scalar(
@@ -438,6 +452,12 @@ class DataGapRecoveryRepository:
                 with self.session.begin_nested():
                     alert = self.get_alert(gap_id, key)
                     if alert is not None:
+                        if alert.delivery_state == DataGapRecoveryAlertDeliveryState.PENDING and (
+                            alert.created_at is None
+                            or alert.created_at < datetime.now(timezone.utc) - timedelta(minutes=15)
+                        ):
+                            alert.delivery_state = DataGapRecoveryAlertDeliveryState.FAILED
+                            self.session.flush()
                         if alert.delivery_state != DataGapRecoveryAlertDeliveryState.FAILED:
                             return alert, False
                         retry += 1
