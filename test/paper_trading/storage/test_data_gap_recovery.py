@@ -13,6 +13,7 @@ from paper_trading.domain.enums import (
     DataGapRecoveryBatchStatus,
     DataGapRecoveryClassification,
     DataGapRecoveryRouting,
+    DataGapRecoveryStatus,
 )
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
 from paper_trading.storage.models import (
@@ -100,6 +101,50 @@ def test_candidate_hash_and_approval_binding_are_enforced(tmp_path):
             gap.id, DataGapRecoveryApprovalDecision.APPROVED, candidate.candidate_hash, None, {}
         )
         assert approval.candidate_hash == candidate.candidate_hash
+
+
+def test_locked_escalation_approval_rejection_and_reopen_preserve_evidence(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {"impact": "none"})
+        candidate = repository.record_candidate(gap.id, "a" * 64, {"order": 1}, {"ok": True}, "caller")
+        user = {"id": 7, "email": "reviewer@example.com", "role": "reviewer"}
+
+        repository.escalate_gap(gap.id, 7, user, reason="needs review")
+        repository.reject_gap(gap.id, candidate.candidate_hash, 7, user, reason="not trustworthy")
+        assert gap.status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED
+        assert gap.summary == {"impact": "none"}
+        repository.reopen_gap(gap.id, 7, user, reason="new source available")
+
+        assert gap.status == DataGapRecoveryStatus.OPEN
+        evidence = repository.gap_evidence(gap.id)
+        assert len(evidence["candidates"]) == 1
+        assert [row.decision for row in evidence["approvals"]] == [
+            DataGapRecoveryApprovalDecision.REJECTED,
+            DataGapRecoveryApprovalDecision.REOPENED,
+        ]
+        assert evidence["approvals"][0].approver_snapshot["reason"] == "not trustworthy"
+        assert evidence["approvals"][1].approver_snapshot["email"] == "reviewer@example.com"
+
+
+def test_stale_candidate_hash_invalidates_to_pending_approval_without_losing_candidate(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        gap = repository.record_gap(date(2026, 1, 2), "a_share", "000001", "bfq", {"keep": True})
+        repository.record_candidate(gap.id, "a" * 64, {}, {}, "caller")
+        repository.record_candidate(gap.id, "b" * 64, {}, {}, "caller")
+
+        with pytest.raises(ValueError, match="stale"):
+            repository.approve_gap(gap.id, "a" * 64, 7, {"email": "reviewer@example.com"})
+
+        assert gap.status == DataGapRecoveryStatus.PENDING_APPROVAL
+        assert gap.latest_candidate_hash == "b" * 64
+        assert gap.summary == {"keep": True}
+        assert len(repository.gap_evidence(gap.id)["candidates"]) == 2
 
 
 def test_record_candidate_updates_gap_latest_candidate_hash(tmp_path):
