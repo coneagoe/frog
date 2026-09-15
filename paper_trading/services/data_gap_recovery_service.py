@@ -223,26 +223,38 @@ class DataGapRecoveryService:
     def execute_approved_gap(self, gap: Any, candidate_hash: str, candidate: pd.DataFrame) -> GapRecoveryResult:
         """Write an approved candidate only if it is still the current candidate."""
         classification, routing = self._diagnostic(gap)
-        if self.repository is not None and gap.latest_candidate_hash != candidate_hash:
-            self.repository.invalidate_stale_candidate(gap.id, candidate_hash)
+        if self.repository is None or not hasattr(self.repository, "execute_approved_candidate"):
             return self._result(
                 gap,
-                "pending_approval",
-                error="candidate hash is stale",
+                "failed",
+                error="authoritative approval repository is required",
                 classification=classification,
                 routing=routing,
             )
-        if classification == DataGapRecoveryClassification.NO_IMPACT.value:
-            return self._result(gap, "skipped", classification=classification, routing=routing)
-        try:
+
+        def write(locked_gap: Any) -> GapRecoveryResult:
+            locked_classification, locked_routing = self._diagnostic(locked_gap)
+            if locked_classification == DataGapRecoveryClassification.NO_IMPACT.value:
+                return self._result(
+                    locked_gap, "skipped", classification=locked_classification, routing=locked_routing
+                )
             if not self.storage.save_history_data_stock(candidate, PeriodType.DAILY, AdjustType.BFQ):
                 raise _RecoveryWriteError("save returned False")
-            if self._read_exact(gap.stock_id, gap.business_date).empty:
+            if self._read_exact(locked_gap.stock_id, locked_gap.business_date).empty:
                 raise _RecoveryWriteError("exact-key readback did not find recovered row")
-            self._resolve(gap)
-            return self._result(gap, "recovered", classification=classification, routing=routing)
+            self._resolve(locked_gap)
+            return self._result(
+                locked_gap, "recovered", classification=locked_classification, routing=locked_routing
+            )
+
+        try:
+            result = self.repository.execute_approved_candidate(gap.id, candidate_hash, write)
+            if not isinstance(result, GapRecoveryResult):
+                raise ValueError("approval repository did not execute the write callback")
+            return result
         except Exception as exc:  # noqa: BLE001
-            return self._result(gap, "failed", error=str(exc), classification=classification, routing=routing)
+            status = "pending_approval" if "stale" in str(exc) else "failed"
+            return self._result(gap, status, error=str(exc), classification=classification, routing=routing)
 
     @staticmethod
     def _diagnostic(gap: Any) -> tuple[str, str]:

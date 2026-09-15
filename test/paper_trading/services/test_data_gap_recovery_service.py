@@ -71,6 +71,57 @@ def test_escalation_occurs_after_five_business_days():
     repository.escalate_gap.assert_called_once()
 
 
+def test_escalation_counts_only_distinct_not_found_batches():
+    repository = Mock()
+    repository.gap_evidence.return_value = {
+        "attempts": [
+            SimpleNamespace(batch_id=1, outcome="failed"),
+            SimpleNamespace(batch_id=1, outcome="not_found"),
+            SimpleNamespace(batch_id=1, outcome="not_found"),
+            SimpleNamespace(batch_id=2, outcome="recovered"),
+            SimpleNamespace(batch_id=2, outcome="not_found"),
+        ]
+    }
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 7), summary={})
+
+    assert _service(Mock(), Mock(), repository).maybe_escalate_gap(
+        gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 8)
+    ) is False
+    repository.escalate_gap.assert_not_called()
+
+
+def test_four_business_days_does_not_count_weekend():
+    repository = Mock()
+    repository.gap_evidence.return_value = {"attempts": []}
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 10), summary={})
+
+    assert _service(Mock(), Mock(), repository).maybe_escalate_gap(
+        gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 15)
+    ) is False
+
+
+def test_approved_write_requires_authoritative_repository_and_approval():
+    storage = Mock()
+    gap = SimpleNamespace(
+        id=1, business_date=date(2026, 8, 7), stock_id="000001", market="a_share", adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+
+    result = DataGapRecoveryService(storage=storage, downloader=Mock()).execute_approved_gap(
+        gap, "a" * 64, _row("000001", "2026-08-07")
+    )
+    assert result.status == "failed"
+    storage.save_history_data_stock.assert_not_called()
+
+    repository = Mock()
+    repository.execute_approved_candidate.side_effect = ValueError("approved candidate is required")
+    result = _service(storage, Mock(), repository).execute_approved_gap(
+        gap, "a" * 64, _row("000001", "2026-08-07")
+    )
+    assert result.status == "failed"
+    storage.save_history_data_stock.assert_not_called()
+
+
 def test_approved_write_rechecks_hash_and_returns_pending_without_writing():
     storage, downloader, repository = Mock(), Mock(), Mock()
     gap = SimpleNamespace(
@@ -82,12 +133,13 @@ def test_approved_write_rechecks_hash_and_returns_pending_without_writing():
         latest_candidate_hash="b" * 64,
         summary={"classification": "order_dependent", "routing": "approval_escalation"},
     )
+    repository.execute_approved_candidate.side_effect = ValueError("approved candidate hash is stale")
     result = _service(storage, downloader, repository).execute_approved_gap(
         gap, "a" * 64, _row("000001", "2026-08-07")
     )
 
     assert result.status == "pending_approval"
-    repository.invalidate_stale_candidate.assert_called_once_with(gap.id, "a" * 64)
+    repository.execute_approved_candidate.assert_called_once()
     storage.save_history_data_stock.assert_not_called()
 
 
@@ -102,6 +154,7 @@ def test_approved_no_impact_gap_is_terminal_and_does_not_write():
         latest_candidate_hash="a" * 64,
         summary={"classification": "no_impact", "routing": "approval_escalation"},
     )
+    repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(gap)
     result = _service(storage, downloader, repository).execute_approved_gap(
         gap, "a" * 64, _row("000001", "2026-08-07")
     )
@@ -109,6 +162,31 @@ def test_approved_no_impact_gap_is_terminal_and_does_not_write():
     assert result.status == "skipped"
     storage.save_history_data_stock.assert_not_called()
     downloader.dl_history_data_stock_by_provider.assert_not_called()
+
+
+def test_approved_write_uses_repository_locked_gap_for_readback_and_resolution():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    detached_gap = SimpleNamespace(
+        id=1, business_date=date(2026, 8, 7), stock_id="000001", market="a_share", adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    locked_gap = SimpleNamespace(
+        id=99, business_date=date(2026, 8, 8), stock_id="000002", market="a_share", adjust="bfq",
+        summary={"classification": "valuation_only", "routing": "approval_escalation"},
+    )
+    repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(locked_gap)
+    storage.load_history_data_stock.return_value = _row("000002", "2026-08-08")
+    storage.save_history_data_stock.return_value = True
+
+    result = _service(storage, downloader, repository).execute_approved_gap(
+        detached_gap, "a" * 64, _row("000002", "2026-08-08")
+    )
+
+    assert result.gap_id == locked_gap.id
+    assert result.classification == "valuation_only"
+    repository.resolve_gap.assert_called_once_with(locked_gap.id)
+    assert storage.load_history_data_stock.call_args.args[0] == locked_gap.stock_id
+    assert storage.load_history_data_stock.call_args.kwargs["start_date"] == "2026-08-08"
 
 
 def test_unified_recovery_records_classification_and_ordinary_routing():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -313,8 +313,30 @@ class DataGapRecoveryRepository:
             user_id,
             user_snapshot,
             reason,
-            DataGapRecoveryStatus.RECOVERED,
+            DataGapRecoveryStatus.PENDING_APPROVAL,
         )
+
+    def execute_approved_candidate(
+        self, gap_id: int, candidate_hash: str, write_callback: Callable[[PaperDataGapRecoveryGap], Any]
+    ) -> Any:
+        """Lock and authorize a candidate while its write callback runs in this transaction."""
+        gap = self._locked_gap(gap_id)
+        if gap.status != DataGapRecoveryStatus.PENDING_APPROVAL:
+            raise ValueError("approved writes require a pending-approval gap")
+        if gap.latest_candidate_hash != candidate_hash:
+            gap.status = DataGapRecoveryStatus.PENDING_APPROVAL
+            self.session.flush()
+            raise ValueError("approved candidate hash is stale")
+        approval = self.session.scalar(
+            select(PaperDataGapRecoveryApproval).where(
+                PaperDataGapRecoveryApproval.gap_id == gap_id,
+                PaperDataGapRecoveryApproval.candidate_hash == candidate_hash,
+                PaperDataGapRecoveryApproval.decision == DataGapRecoveryApprovalDecision.APPROVED,
+            )
+        )
+        if approval is None:
+            raise ValueError("approved candidate decision is required")
+        return write_callback(gap)
 
     def reject_gap(
         self,
