@@ -1,8 +1,12 @@
 from datetime import date
 from types import SimpleNamespace
+from unittest.mock import Mock
+
+from sqlalchemy.exc import IntegrityError
 
 from paper_trading.domain.enums import DataGapRecoveryAlertDeliveryState
 from paper_trading.services.data_gap_alert_service import DataGapAlertService
+from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
 
 
 class RecordingRepository:
@@ -143,3 +147,25 @@ def test_recovery_system_failure_uses_safe_config_and_rejects_control_tokens(mon
         pass
     else:
         raise AssertionError("control characters must be rejected")
+
+
+def test_claim_collision_rereads_contested_key_before_allocating_retry():
+    session = Mock()
+    savepoint = Mock()
+    savepoint.__enter__ = Mock(return_value=savepoint)
+    savepoint.__exit__ = Mock(return_value=None)
+    session.begin_nested.return_value = savepoint
+    repository = DataGapRecoveryRepository(session)
+    winner = SimpleNamespace(delivery_state=DataGapRecoveryAlertDeliveryState.PENDING)
+    repository.get_alert = Mock(side_effect=[None, winner])
+    repository.record_alert = Mock(side_effect=IntegrityError("insert", {}, Exception("collision")))
+
+    alert, claimed = repository.claim_alert(4, "recovery_system:provider_timeout", {})
+
+    assert alert is winner
+    assert claimed is False
+    assert repository.record_alert.call_count == 1
+    assert repository.get_alert.call_args_list == [
+        ((4, "recovery_system:provider_timeout"), {}),
+        ((4, "recovery_system:provider_timeout"), {}),
+    ]

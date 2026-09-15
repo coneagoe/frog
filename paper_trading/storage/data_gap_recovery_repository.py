@@ -388,7 +388,9 @@ class DataGapRecoveryRepository:
         self, gap_id: int, cycle_key: str, evidence: dict[str, Any]
     ) -> tuple[PaperDataGapRecoveryAlert, bool]:
         """Atomically claim an alert cycle; failed cycles get a retry cycle."""
-        for retry in range(100):
+        retry = 0
+        collision_reads = 0
+        while retry < 100:
             key = cycle_key if retry == 0 else f"{cycle_key}:retry:{retry}"
             try:
                 with self.session.begin_nested():
@@ -399,10 +401,24 @@ class DataGapRecoveryRepository:
                         continue
                     return self.record_alert(gap_id, key, evidence), True
             except IntegrityError:
-                # Another worker won this key. The next iteration either observes it
-                # or claims the next retry key, without poisoning the outer transaction.
-                continue
+                # Re-read the contested key before allocating a retry. Otherwise a
+                # concurrent pending/delivered insert could cause duplicate delivery.
+                collision_reads += 1
+                alert = self._read_alert_after_collision(gap_id, key)
+                if alert is None:
+                    if collision_reads >= 100:
+                        break
+                    continue
+                collision_reads = 0
+                if alert.delivery_state != DataGapRecoveryAlertDeliveryState.FAILED:
+                    return alert, False
+                retry += 1
         raise RuntimeError("unable to claim data-gap alert cycle")
+
+    def _read_alert_after_collision(self, gap_id: int, cycle_key: str) -> PaperDataGapRecoveryAlert | None:
+        """Read a winner after a savepoint collision without affecting the outer transaction."""
+        with self.session.begin_nested():
+            return self.get_alert(gap_id, cycle_key)
 
     def get_alert(self, gap_id: int, cycle_key: str) -> PaperDataGapRecoveryAlert | None:
         return self.session.scalar(
