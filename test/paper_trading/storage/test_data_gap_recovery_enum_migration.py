@@ -240,11 +240,7 @@ def test_existing_recovery_status_enum_gets_pending_approval_additively(migratio
                 "('open', 'recovered', 'escalated', 'permanently_unresolved')"
             )
         )
-        connection.execute(
-            text(
-                "ALTER TABLE paper_data_gap_recovery_gaps ALTER COLUMN status DROP DEFAULT"
-            )
-        )
+        connection.execute(text("ALTER TABLE paper_data_gap_recovery_gaps ALTER COLUMN status DROP DEFAULT"))
         connection.execute(
             text(
                 "ALTER TABLE paper_data_gap_recovery_gaps ALTER COLUMN status TYPE paper_data_gap_recovery_status "

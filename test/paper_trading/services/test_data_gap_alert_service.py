@@ -157,15 +157,17 @@ def test_claim_collision_rereads_contested_key_before_allocating_retry():
     session.begin_nested.return_value = savepoint
     repository = DataGapRecoveryRepository(session)
     winner = SimpleNamespace(delivery_state=DataGapRecoveryAlertDeliveryState.PENDING)
-    repository.get_alert = Mock(side_effect=[None, winner])
-    repository.record_alert = Mock(side_effect=IntegrityError("insert", {}, Exception("collision")))
+    get_alert = Mock(side_effect=[None, winner])
+    record_alert = Mock(side_effect=IntegrityError("insert", {}, Exception("collision")))
+    setattr(repository, "get_alert", get_alert)
+    setattr(repository, "record_alert", record_alert)
 
     alert, claimed = repository.claim_alert(4, "recovery_system:provider_timeout", {})
 
     assert alert is winner
     assert claimed is False
-    assert repository.record_alert.call_count == 1
-    assert repository.get_alert.call_args_list == [
+    assert record_alert.call_count == 1
+    assert get_alert.call_args_list == [
         ((4, "recovery_system:provider_timeout"), {}),
         ((4, "recovery_system:provider_timeout"), {}),
     ]
@@ -183,11 +185,13 @@ def test_existing_failed_base_cycle_allocates_retry_one():
         cycle_key="recovery_system:provider_timeout:retry:1",
         delivery_state=DataGapRecoveryAlertDeliveryState.PENDING,
     )
-    repository.get_alert = Mock(side_effect=[failed, None])
-    repository.record_alert = Mock(return_value=retry)
+    get_alert = Mock(side_effect=[failed, None])
+    record_alert = Mock(return_value=retry)
+    setattr(repository, "get_alert", get_alert)
+    setattr(repository, "record_alert", record_alert)
 
     alert, claimed = repository.claim_alert(4, "recovery_system:provider_timeout", {})
 
     assert alert is retry
     assert claimed is True
-    assert repository.record_alert.call_args.args[1] == "recovery_system:provider_timeout:retry:1"
+    assert record_alert.call_args.args[1] == "recovery_system:provider_timeout:retry:1"

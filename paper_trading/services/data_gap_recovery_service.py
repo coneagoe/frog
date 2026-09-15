@@ -234,8 +234,12 @@ class DataGapRecoveryService:
                         )
                     if escalated:
                         self._record_attempt(
-                            gap, batch_id, DataGapRecoveryAttemptOutcome.RECOVERED, provider,
-                            classification=classification, routing=routing,
+                            gap,
+                            batch_id,
+                            DataGapRecoveryAttemptOutcome.RECOVERED,
+                            provider,
+                            classification=classification,
+                            routing=routing,
                         )
                         return self._result(
                             gap, "pending_approval", provider, classification=classification, routing=routing
@@ -440,10 +444,14 @@ class DataGapRecoveryService:
         explicit_no_impact = (
             isinstance(summary, dict) and summary.get("classification") == DataGapRecoveryClassification.NO_IMPACT.value
         )
-        return status in {
-            DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED.value,
-            DataGapRecoveryStatus.PENDING_APPROVAL.value,
-        } or explicit_no_impact
+        return (
+            status
+            in {
+                DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED.value,
+                DataGapRecoveryStatus.PENDING_APPROVAL.value,
+            }
+            or explicit_no_impact
+        )
 
     @staticmethod
     def _status(gap: Any) -> str | None:

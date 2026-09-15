@@ -375,9 +375,7 @@ def test_batch_account_recovery_excludes_no_impact_gap(tmp_path, monkeypatch):
         monkeypatch.setattr(
             repository,
             "_account_replay_events",
-            lambda account_id: [
-                type("Event", (), {"payload": {"symbol": "000001"}, "trade_date": date(2026, 1, 2)})()
-            ],
+            lambda account_id: [type("Event", (), {"payload": {"symbol": "000001"}, "trade_date": date(2026, 1, 2)})()],
         )
 
         assert repository.list_batch_account_recovery(batch.id) == []
