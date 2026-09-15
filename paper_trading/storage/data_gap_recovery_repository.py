@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from paper_trading.domain.enums import (
     DataGapRecoveryAccountStatus,
+    DataGapRecoveryAlertDeliveryState,
     DataGapRecoveryApprovalDecision,
     DataGapRecoveryAttemptOutcome,
     DataGapRecoveryBatchStatus,
@@ -381,6 +382,27 @@ class DataGapRecoveryRepository:
     def record_alert(self, gap_id: int, cycle_key: str, evidence: dict[str, Any]) -> PaperDataGapRecoveryAlert:
         alert = PaperDataGapRecoveryAlert(gap_id=gap_id, cycle_key=cycle_key, evidence=evidence)
         self.session.add(alert)
+        self.session.flush()
+        return alert
+
+    def get_alert(self, gap_id: int, cycle_key: str) -> PaperDataGapRecoveryAlert | None:
+        return self.session.scalar(
+            select(PaperDataGapRecoveryAlert).where(
+                PaperDataGapRecoveryAlert.gap_id == gap_id,
+                PaperDataGapRecoveryAlert.cycle_key == cycle_key,
+            )
+        )
+
+    def update_alert_delivery(
+        self, alert_id: int, state: DataGapRecoveryAlertDeliveryState, metadata: dict[str, Any]
+    ) -> PaperDataGapRecoveryAlert:
+        alert = self.session.get(PaperDataGapRecoveryAlert, alert_id)
+        if alert is None:
+            raise KeyError(alert_id)
+        evidence = dict(alert.evidence)
+        evidence["delivery"] = metadata
+        alert.evidence = evidence
+        alert.delivery_state = state
         self.session.flush()
         return alert
 
