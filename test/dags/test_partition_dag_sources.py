@@ -1,5 +1,8 @@
+import builtins
+import importlib
 import json
 import re
+import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -69,6 +72,61 @@ def test_partition_uses_business_date_not_wall_clock():
     assert 'context["data_interval_end"]' not in source
     assert "end_date=business_date.isoformat()" in source
     assert "datetime.now" not in source
+
+
+def test_daily_history_dag_does_not_import_browser_api_dependencies():
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+
+    assert "from paper_trading.api.deps import" not in source
+
+
+def test_daily_history_dag_import_does_not_load_paper_trading_auth(monkeypatch):
+    pytest.importorskip("airflow")
+
+    original_modules = sys.modules.copy()
+    dags_package = sys.modules.get("dags")
+    original_dag_attribute = getattr(dags_package, "download_stock_history_daily", None)
+    had_dag_attribute = dags_package is not None and hasattr(dags_package, "download_stock_history_daily")
+    paper_trading_package = sys.modules.get("paper_trading")
+    original_auth_attribute = getattr(paper_trading_package, "auth", None)
+    had_auth_attribute = paper_trading_package is not None and hasattr(paper_trading_package, "auth")
+
+    def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "argon2" or name.startswith("argon2."):
+            raise ModuleNotFoundError("argon2 imports are blocked for this regression test")
+        return original_import(name, globals, locals, fromlist, level)
+
+    original_import = builtins.__import__
+    try:
+        for module_name in (
+            "dags.download_stock_history_daily",
+            "paper_trading.auth",
+            "paper_trading.auth.service",
+        ):
+            sys.modules.pop(module_name, None)
+        if dags_package is not None:
+            dags_package.__dict__.pop("download_stock_history_daily", None)
+        if paper_trading_package is not None:
+            paper_trading_package.__dict__.pop("auth", None)
+        monkeypatch.setattr(builtins, "__import__", blocked_import)
+
+        importlib.import_module("dags.download_stock_history_daily")
+
+        assert "paper_trading.auth" not in sys.modules
+        assert "paper_trading.auth.service" not in sys.modules
+    finally:
+        sys.modules.clear()
+        sys.modules.update(original_modules)
+        if dags_package is not None:
+            if had_dag_attribute:
+                setattr(dags_package, "download_stock_history_daily", original_dag_attribute)
+            else:
+                dags_package.__dict__.pop("download_stock_history_daily", None)
+        if paper_trading_package is not None:
+            if had_auth_attribute:
+                setattr(paper_trading_package, "auth", original_auth_attribute)
+            else:
+                paper_trading_package.__dict__.pop("auth", None)
 
 
 def test_closed_business_date_is_skipped(monkeypatch):

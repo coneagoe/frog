@@ -52,7 +52,7 @@ from paper_trading.services.snapshot_recalculation_service import SnapshotRecalc
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository  # noqa: E402
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider  # noqa: E402
 from paper_trading.storage.market_data import StorageMarketDataProvider  # noqa: E402
-from paper_trading.api.deps import _DataAvailableCalendar  # noqa: E402
+from paper_trading.services.trade_calendar import _DataAvailableCalendar  # noqa: E402
 from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
 from stock.market import is_a_share_trade_date  # noqa: E402
 from storage import get_storage  # noqa: E402
