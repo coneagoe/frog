@@ -77,7 +77,13 @@ export function AuthForm({ mode, token, returnTo, onSuccess }: { mode: AuthMode;
       if (isReset && requestError instanceof ApiError && (requestError.status === 400 || requestError.status === 410)) {
         setExpired(true);
       } else {
-        setError(isRegister ? "We couldn't create your account. Check your details and try again." : isForgot ? "We couldn't send a password reset link. Try again." : isReset ? "We couldn't reset your password. Try again." : "We couldn't sign you in. Check your details and try again.");
+        if (isLogin && requestError instanceof ApiError && requestError.status === 503 && requestError.code === "AUTH_UNAVAILABLE") {
+          const evidence = requestError.requestId;
+          setPassword("");
+          setError(`登录服务暂时不可用，请稍后重试。${evidence ? ` 请求编号：${evidence}` : ""}`);
+        } else {
+          setError(isRegister ? "We couldn't create your account. Check your details and try again." : isForgot ? "We couldn't send a password reset link. Try again." : isReset ? "We couldn't reset your password. Try again." : "We couldn't sign you in. Check your details and try again.");
+        }
       }
     } finally {
       setPending(false);

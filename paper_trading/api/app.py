@@ -1,7 +1,8 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from paper_trading.api.routers import (
     accounts,
@@ -17,7 +18,7 @@ from paper_trading.api.routers import (
     snapshot_recalculation,
     snapshots,
 )
-from paper_trading.auth import AuthSettings
+from paper_trading.auth import AuthSettings, clear_auth_cookies
 from storage.storage_db import get_storage
 
 
@@ -32,6 +33,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Frog Paper Trading", lifespan=lifespan)
+
+    @app.exception_handler(HTTPException)
+    async def authenticated_session_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        if exc.status_code != 401 or not isinstance(exc.detail, dict) or exc.detail.get("code") != "SESSION_INVALID":
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+        response = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+        clear_auth_cookies(response, AuthSettings.from_environment())
+        return response
 
     app.include_router(accounts.router)
     app.include_router(auth.router)

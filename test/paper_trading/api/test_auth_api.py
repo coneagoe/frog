@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import cast
@@ -447,7 +448,8 @@ def test_login_limit_uses_generic_unauthorized_response(auth_client, monkeypatch
     limited = _login(client, "known@example.com")
 
     assert limited.status_code == unknown.status_code == 401
-    assert limited.json() == unknown.json()
+    assert limited.json()["detail"]["message"] == unknown.json()["detail"]["message"]
+    assert limited.json()["detail"]["code"] == "AUTHENTICATION_FAILED"
 
 
 def test_login_redis_failure_skips_database_and_password_verification(auth_client, monkeypatch):
@@ -472,9 +474,33 @@ def test_login_redis_failure_skips_database_and_password_verification(auth_clien
     response = _login(client)
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "Login is temporarily unavailable"
+    detail = response.json()["detail"]
+    assert detail["code"] == "AUTH_UNAVAILABLE"
+    assert detail["message"] == "登录服务暂时不可用，请稍后重试。"
+    assert uuid.UUID(response.headers["x-request-id"]).version == 4
+    assert detail["request_id"] == response.headers["x-request-id"]
+    assert "set-cookie" not in response.headers
     assert database_calls == []
     assert password_calls == []
+
+
+def test_login_backend_failure_reuses_valid_request_id(auth_client, monkeypatch):
+    client, _ = auth_client
+    request_id = "11111111-1111-4111-8111-111111111111"
+    monkeypatch.setattr(
+        "paper_trading.api.routers.auth._get_redis_client",
+        lambda: (_ for _ in ()).throw(RuntimeError("redis down")),
+    )
+
+    response = client.post(
+        "/auth/login",
+        headers={"X-Request-ID": request_id},
+        json={"email": "user@example.com", "password": "WrongPassword1"},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["x-request-id"] == request_id
+    assert response.json()["detail"]["request_id"] == request_id
 
 
 def test_login_database_failure_returns_generic_503(auth_client, monkeypatch):
@@ -488,7 +514,12 @@ def test_login_database_failure_returns_generic_503(auth_client, monkeypatch):
     response = _login(client)
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "Login is temporarily unavailable"
+    detail = response.json()["detail"]
+    assert detail["code"] == "AUTH_UNAVAILABLE"
+    assert detail["message"] == "登录服务暂时不可用，请稍后重试。"
+    assert uuid.UUID(response.headers["x-request-id"]).version == 4
+    assert detail["request_id"] == response.headers["x-request-id"]
+    assert "set-cookie" not in response.headers
 
 
 def test_login_password_verification_failure_returns_generic_503(auth_client, monkeypatch):
@@ -503,7 +534,12 @@ def test_login_password_verification_failure_returns_generic_503(auth_client, mo
     response = _login(client)
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "Login is temporarily unavailable"
+    detail = response.json()["detail"]
+    assert detail["code"] == "AUTH_UNAVAILABLE"
+    assert detail["message"] == "登录服务暂时不可用，请稍后重试。"
+    assert uuid.UUID(response.headers["x-request-id"]).version == 4
+    assert detail["request_id"] == response.headers["x-request-id"]
+    assert "set-cookie" not in response.headers
 
 
 def test_verify_email_marks_user_verified_and_consumes_token(auth_client, monkeypatch):

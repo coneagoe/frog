@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { forgotPassword, login, register, resetPassword } from "@/lib/api-client";
+import { parseApiError } from "@/lib/api-error";
 import { AuthForm } from "./auth-form";
 
 const { MockApiError } = vi.hoisted(() => ({
@@ -93,6 +94,22 @@ describe("AuthForm", () => {
     await user.click(screen.getByRole("button", { name: "Log in" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't sign you in. Check your details and try again.");
     expect(screen.queryByText("secret-password-from-server")).not.toBeInTheDocument();
+  });
+
+  it("shows unavailable evidence, retains email, and clears password", async () => {
+    const user = userEvent.setup();
+    const backendResponse = new Response(JSON.stringify({ detail: { code: "AUTH_UNAVAILABLE", message: "登录服务暂时不可用，请稍后重试。", request_id: "evidence-id" } }), { status: 503 });
+    const parsedError = await parseApiError(backendResponse);
+    Object.setPrototypeOf(parsedError, MockApiError.prototype);
+    loginMock.mockRejectedValue(parsedError);
+    render(<AuthForm mode="login" />);
+    await user.type(screen.getByLabelText("Email address"), "trader@example.com");
+    await user.type(screen.getByLabelText("Password"), "Validpassword1");
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("登录服务暂时不可用，请稍后重试。");
+    expect(screen.getByRole("alert")).toHaveTextContent("evidence-id");
+    expect(screen.getByLabelText("Email address")).toHaveValue("trader@example.com");
+    expect(screen.getByLabelText("Password")).toHaveValue("");
   });
 
   it("submits normalized-compatible email and password to login", async () => {

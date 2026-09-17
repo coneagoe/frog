@@ -120,4 +120,25 @@ describe("paper API proxy", () => {
     expect(response.headers.get("set-cookie")).toBe("paper_trading_csrf=next; Path=/");
     await expect(response.json()).resolves.toEqual({ code: "UNAUTHORIZED" });
   });
+
+  it("forwards a generated request ID and normalizes unavailable failures", async () => {
+    process.env.PAPER_TRADING_API_BASE_URL = "http://backend.test";
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("44444444-4444-4444-8444-444444444444") });
+    const fetchMock = vi.fn().mockRejectedValue(new Error("down"));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await GET(new Request("http://localhost/api/paper/accounts", { headers: { "x-request-id": "client-id" } }), {
+      params: Promise.resolve({ path: ["accounts"] })
+    });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ code: "AUTH_UNAVAILABLE", message: "登录服务暂时不可用，请稍后重试。", request_id: "44444444-4444-4444-8444-444444444444" });
+    expect((fetchMock.mock.calls[0][1].headers as Headers).get("x-request-id")).toBe("44444444-4444-4444-8444-444444444444");
+  });
+
+  it("preserves non-auth backend 503 responses", async () => {
+    process.env.PAPER_TRADING_API_BASE_URL = "http://backend.test";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: { code: "DATA_UNAVAILABLE" } }), { status: 503 })));
+    const response = await GET(new Request("http://localhost/api/paper/accounts"), { params: Promise.resolve({ path: ["accounts"] }) });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ detail: { code: "DATA_UNAVAILABLE" } });
+  });
 });

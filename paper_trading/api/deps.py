@@ -9,6 +9,7 @@ from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from paper_trading.api.auth_evidence import AuthEvidenceCode, error_detail, render_evidence, request_id_from_request
 from paper_trading.auth import AuthSettings, decode_session_token
 from paper_trading.services.etf_eligibility_service import ETFEligibilityService
 from paper_trading.services.position_valuation_service import PositionValuationService
@@ -36,10 +37,13 @@ def require_api_token(authorization: str | None = Header(default=None)) -> None:
         )
 
 
-def _unauthorized() -> HTTPException:
+def _unauthorized(request: Request) -> HTTPException:
+    request_id = request_id_from_request(request)
+    print(render_evidence(AuthEvidenceCode.SESSION_INVALID, "/paper", request_id))
     return HTTPException(
         status_code=401,
-        detail={"code": "UNAUTHORIZED", "message": "Unauthorized", "details": {}},
+        headers={"X-Request-ID": request_id},
+        detail=error_detail(AuthEvidenceCode.SESSION_INVALID, "Session is invalid.", request_id),
     )
 
 
@@ -69,14 +73,27 @@ def require_browser_user(request: Request, session: Session = Depends(get_sessio
     settings = AuthSettings.from_environment()
     token = request.cookies.get(settings.session_cookie_name)
     if not token:
-        raise _unauthorized()
+        raise _unauthorized(request)
     try:
         claims = decode_session_token(token, settings)
     except ValueError as exc:
-        raise _unauthorized() from exc
-    user = session.scalar(select(User).where(User.id == claims.user_id))
+        raise _unauthorized(request) from exc
+    try:
+        user = session.scalar(select(User).where(User.id == claims.user_id))
+    except Exception as exc:
+        request_id = request_id_from_request(request)
+        print(render_evidence(AuthEvidenceCode.AUTH_UNAVAILABLE, "/paper", request_id))
+        raise HTTPException(
+            status_code=503,
+            headers={"X-Request-ID": request_id},
+            detail=error_detail(
+                AuthEvidenceCode.AUTH_UNAVAILABLE,
+                "登录服务暂时不可用，请稍后重试。",
+                request_id,
+            ),
+        ) from exc
     if user is None or user.session_version != claims.session_version:
-        raise _unauthorized()
+        raise _unauthorized(request)
     return user
 
 
@@ -88,7 +105,7 @@ def require_csrf(
     if expected and request.headers.get("authorization") == f"Bearer {expected}":
         return
     if browser_user is None:
-        raise _unauthorized()
+        raise _unauthorized(request)
     settings = AuthSettings.from_environment()
     cookie_token = request.cookies.get(settings.csrf_cookie_name)
     header_token = request.headers.get("x-csrf-token")

@@ -11,6 +11,12 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from paper_trading.api.auth_evidence import (
+    AuthEvidenceCode,
+    error_detail,
+    render_evidence,
+    request_id_from_request,
+)
 from paper_trading.api.deps import get_session, require_browser_user, require_csrf
 from paper_trading.auth import (
     AuthSettings,
@@ -100,10 +106,11 @@ def _identity(user: User) -> Identity:
     return Identity(id=user.id, email=user.email, email_verified_at=user.email_verified_at)
 
 
-def _generic_unauthorized() -> HTTPException:
+def _generic_unauthorized(code: AuthEvidenceCode = AuthEvidenceCode.AUTH_INVALID_CREDENTIALS) -> HTTPException:
+    print(render_evidence(code, "/auth/login"))
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"code": "UNAUTHORIZED", "message": "Unauthorized", "details": {}},
+        detail=error_detail(AuthEvidenceCode.AUTHENTICATION_FAILED, "邮箱或密码不正确。"),
     )
 
 
@@ -336,26 +343,69 @@ def login(
     try:
         redis_client = _get_redis_client()
         if not _login_rate_limit(redis_client, request.client.host if request.client else "unknown", email):
-            raise _generic_unauthorized()
+            raise _generic_unauthorized(AuthEvidenceCode.AUTH_RATE_LIMITED)
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Login is temporarily unavailable") from exc
+        request_id = request_id_from_request(request)
+        print(render_evidence(AuthEvidenceCode.AUTH_UNAVAILABLE, "/auth/login", request_id))
+        raise HTTPException(
+            status_code=503,
+            headers={"X-Request-ID": request_id},
+            detail=error_detail(
+                AuthEvidenceCode.AUTH_UNAVAILABLE,
+                "登录服务暂时不可用，请稍后重试。",
+                request_id,
+            ),
+        ) from exc
 
     try:
         user = session.scalar(select(User).where(User.email == email))
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Login is temporarily unavailable") from exc
+        request_id = request_id_from_request(request)
+        print(render_evidence(AuthEvidenceCode.AUTH_UNAVAILABLE, "/auth/login", request_id))
+        raise HTTPException(
+            status_code=503,
+            headers={"X-Request-ID": request_id},
+            detail=error_detail(
+                AuthEvidenceCode.AUTH_UNAVAILABLE,
+                "登录服务暂时不可用，请稍后重试。",
+                request_id,
+            ),
+        ) from exc
     password_hash = user.password_hash if user is not None and credentials.password else _DUMMY_PASSWORD_HASH
     try:
         password_valid = verify_password(credentials.password, password_hash)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Login is temporarily unavailable") from exc
+        request_id = request_id_from_request(request)
+        print(render_evidence(AuthEvidenceCode.AUTH_UNAVAILABLE, "/auth/login", request_id))
+        raise HTTPException(
+            status_code=503,
+            headers={"X-Request-ID": request_id},
+            detail=error_detail(
+                AuthEvidenceCode.AUTH_UNAVAILABLE,
+                "登录服务暂时不可用，请稍后重试。",
+                request_id,
+            ),
+        ) from exc
     if user is None or not password_valid or user.email_verified_at is None:
         raise _generic_unauthorized()
-    settings = AuthSettings.from_environment()
-    build_session_cookie(response, create_session_token(user.id, user.session_version, settings), settings)
-    build_csrf_cookie(response, secrets.token_urlsafe(32), settings)
+    try:
+        settings = AuthSettings.from_environment()
+        build_session_cookie(response, create_session_token(user.id, user.session_version, settings), settings)
+        build_csrf_cookie(response, secrets.token_urlsafe(32), settings)
+    except Exception as exc:
+        request_id = request_id_from_request(request)
+        print(render_evidence(AuthEvidenceCode.AUTH_UNAVAILABLE, "/auth/login", request_id))
+        raise HTTPException(
+            status_code=503,
+            headers={"X-Request-ID": request_id},
+            detail=error_detail(
+                AuthEvidenceCode.AUTH_UNAVAILABLE,
+                "登录服务暂时不可用，请稍后重试。",
+                request_id,
+            ),
+        ) from exc
     return _identity(user)
 
 
