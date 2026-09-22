@@ -116,7 +116,6 @@ RECOVERY_APPEND_ONLY_TABLES=(
   paper_data_gap_recovery_candidates
   paper_data_gap_recovery_attempts
   paper_data_gap_recovery_approvals
-  paper_data_gap_recovery_batches
   paper_data_gap_recovery_alerts
 )
 # Recovery append-only functions are emitted as executable DDL by db_export.sh.

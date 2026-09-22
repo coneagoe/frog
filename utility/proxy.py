@@ -35,7 +35,7 @@ def _is_proxy_server(server: str) -> bool:
 def _get_proxy_from_proxy_pool() -> tuple[str, dict[str, str]]:
     response = requests.get(
         _proxy_pool_url(PROXY_POOL_GET_PATH),
-        params={"type": "https"},
+        params={"type": "http"},
         timeout=5,
     )
     payload = response.json()

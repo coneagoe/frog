@@ -48,7 +48,7 @@ def test_get_proxy_uses_proxy_pool_without_qingguo_credentials(monkeypatch):
         "https": "http://127.0.0.1:8080",
     }
     assert calls == [
-        ("http://pool:5010/get/", {"params": {"type": "https"}, "timeout": 5}),
+        ("http://pool:5010/get/", {"params": {"type": "http"}, "timeout": 5}),
         (
             proxy_module.PROXY_HEALTHCHECK_URL,
             {

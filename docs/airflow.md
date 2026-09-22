@@ -17,6 +17,7 @@
 注意：启动前请先在仓库根目录配置 `.env`：
 - `SMTP_HOST`、`SMTP_PORT`、`SMTP_USER`、`SMTP_PASSWORD`
 - `SMTP_MAIL_FROM`、`ALERT_EMAILS`
+- `AIRFLOW_FERNET_KEY`（必填；用于所有 Airflow 服务统一加密连接凭据）
 否则 `docker compose` 会提示 “is required” 并退出。
 
 同时建议在 `.env` 里配置 Airflow 管理员账号密码（首次初始化时使用）：

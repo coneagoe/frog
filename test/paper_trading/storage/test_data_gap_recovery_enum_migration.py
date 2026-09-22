@@ -87,6 +87,20 @@ def _table_exists(connection: Connection, table_name: str) -> bool:
     )
 
 
+def _trigger_exists(connection: Connection, trigger_name: str) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                "SELECT EXISTS (SELECT 1 FROM pg_trigger trigger "
+                "JOIN pg_class table_class ON table_class.oid = trigger.tgrelid "
+                "WHERE table_class.relnamespace = current_schema()::regnamespace "
+                "AND trigger.tgname = :trigger_name AND NOT trigger.tgisinternal)"
+            ),
+            {"trigger_name": trigger_name},
+        ).scalar_one()
+    )
+
+
 def _create_legacy_recovery_tables(connection: Connection) -> None:
     statements = (
         "CREATE TABLE users (id integer primary key)",
@@ -260,6 +274,21 @@ def test_existing_recovery_status_enum_gets_pending_approval_additively(migratio
         )
         assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
         assert not _type_exists(connection, "paper_data_gap_recovery_status")
+
+
+def test_migration_removes_batch_append_only_trigger_but_preserves_evidence_triggers(migration_schema):
+    engine, schema = migration_schema
+    with engine.begin() as connection:
+        connection.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        _create_legacy_schema(connection)
+        _create_legacy_recovery_tables(connection)
+
+        assert _trigger_exists(connection, "paper_data_gap_recovery_batches_append_only")
+        assert migrate_paper_trading_enums(connection).converted is True
+
+        assert not _trigger_exists(connection, "paper_data_gap_recovery_batches_append_only")
+        for table_name in ("candidates", "attempts", "approvals"):
+            assert _trigger_exists(connection, f"paper_data_gap_recovery_{table_name}_append_only")
 
 
 def test_partial_recovery_schema_without_alert_created_at_fails_closed(migration_schema):

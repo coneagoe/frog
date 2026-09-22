@@ -65,6 +65,7 @@ x-airflow-common: &airflow-common
   environment:
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?AIRFLOW_FERNET_KEY is required}
     # Airflow metadata DB (separate from business data DB)
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://quant:quant@db:5432/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
@@ -348,7 +349,7 @@ services:
   airflow-init:
     <<: *airflow-common
     command:
-      ["bash", "-c", "set -euo pipefail; if [ -z \"$$AIRFLOW_ADMIN_PASSWORD\" ]; then echo 'AIRFLOW_ADMIN_PASSWORD is required (set it in .env)'; exit 1; fi; airflow db migrate; airflow users create --username \"$$AIRFLOW_ADMIN_USERNAME\" --password \"$$AIRFLOW_ADMIN_PASSWORD\" --firstname \"$$AIRFLOW_ADMIN_FIRSTNAME\" --lastname \"$$AIRFLOW_ADMIN_LASTNAME\" --role Admin --email \"$$AIRFLOW_ADMIN_EMAIL\" || echo 'User already exists' "]
+      ["bash", "-c", "set -euo pipefail; if [ -z \"$$AIRFLOW_ADMIN_PASSWORD\" ]; then echo 'AIRFLOW_ADMIN_PASSWORD is required (set it in .env)'; exit 1; fi; airflow db migrate; airflow connections delete smtp_default || true; airflow connections add smtp_default --conn-type smtp --conn-host \"$$AIRFLOW__SMTP__SMTP_HOST\" --conn-port \"$$AIRFLOW__SMTP__SMTP_PORT\" --conn-login \"$$AIRFLOW__SMTP__SMTP_USER\" --conn-password \"$$AIRFLOW__SMTP__SMTP_PASSWORD\" --conn-extra \"{\\\"from_email\\\":\\\"$$AIRFLOW__SMTP__SMTP_MAIL_FROM\\\",\\\"disable_tls\\\":true}\"; airflow users create --username \"$$AIRFLOW_ADMIN_USERNAME\" --password \"$$AIRFLOW_ADMIN_PASSWORD\" --firstname \"$$AIRFLOW_ADMIN_FIRSTNAME\" --lastname \"$$AIRFLOW_ADMIN_LASTNAME\" --role Admin --email \"$$AIRFLOW_ADMIN_EMAIL\" || echo 'User already exists' "]
     restart: "no"
 
 volumes:

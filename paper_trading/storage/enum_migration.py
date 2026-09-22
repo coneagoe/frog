@@ -877,7 +877,6 @@ def _validate_recovery_append_only(connection: Connection) -> None:
         "paper_data_gap_recovery_candidates",
         "paper_data_gap_recovery_attempts",
         "paper_data_gap_recovery_approvals",
-        "paper_data_gap_recovery_batches",
         "paper_data_gap_recovery_alerts",
     ):
         trigger_name = f"{table_name}_append_only"
@@ -948,11 +947,16 @@ def _adapter_apply(connection: Connection) -> bool:
 def _ensure_recovery_append_only(connection: Connection) -> None:
     if connection.dialect.name != "postgresql":
         return
+    if _table_exists(connection, "paper_data_gap_recovery_batches"):
+        connection.execute(
+            text(
+                "DROP TRIGGER IF EXISTS paper_data_gap_recovery_batches_append_only ON paper_data_gap_recovery_batches"
+            )
+        )
     for table_name in (
         "paper_data_gap_recovery_candidates",
         "paper_data_gap_recovery_attempts",
         "paper_data_gap_recovery_approvals",
-        "paper_data_gap_recovery_batches",
         "paper_data_gap_recovery_alerts",
     ):
         if not _table_exists(connection, table_name):
