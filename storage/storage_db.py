@@ -1714,12 +1714,37 @@ class StorageDb:
                 output_columns=list(COL_MAP_STK_HOLDERNUMBER.values()),
             )
 
-            self._write_dataframe(
-                prepared,
-                tb_name_stk_holdernumber,
-                if_exists="append",
-                method="multi",
-            )
+            if self.engine is None:
+                raise ConnectionError("SQLAlchemy引擎未初始化")
+
+            if self.engine.dialect.name in ("postgresql", "sqlite"):
+                table = Base.metadata.tables[tb_name_stk_holdernumber]
+                for col in [COL_ANN_DATE, COL_END_DATE]:
+                    prepared[col] = pd.to_datetime(prepared[col], errors="coerce").dt.date
+                prepared = prepared.drop_duplicates(
+                    subset=[COL_STOCK_ID, COL_ANN_DATE],
+                    keep="last",
+                )
+                records = prepared.to_dict(orient="records")
+                if not records:
+                    return True
+
+                primary_keys = list(table.primary_key.columns.keys())
+                stmt: PostgreSQLInsert | SQLiteInsert
+                if self.engine.dialect.name == "postgresql":
+                    stmt = pg_insert(table).values(records).on_conflict_do_nothing(index_elements=primary_keys)
+                else:
+                    stmt = sqlite_insert(table).values(records).on_conflict_do_nothing(index_elements=primary_keys)
+
+                with self.engine.begin() as conn:
+                    conn.execute(stmt)
+            else:
+                self._write_dataframe(
+                    prepared,
+                    tb_name_stk_holdernumber,
+                    if_exists="append",
+                    method="multi",
+                )
             return True
 
         except Exception as e:

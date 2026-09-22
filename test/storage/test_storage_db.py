@@ -3230,6 +3230,25 @@ class TestSaveAndGetStkHoldernumber:
             assert call_args[1]["if_exists"] == "append"
             assert call_args[1]["method"] == "multi"
 
+    def test_save_stk_holdernumber_is_idempotent_for_same_primary_key(self, sqlite_storage):
+        db, engine = sqlite_storage
+        df = self._make_raw_df().iloc[[0]]
+
+        assert db.save_stk_holdernumber(df) is True
+        assert db.save_stk_holdernumber(df) is True
+
+        saved = pd.read_sql(f"SELECT * FROM {tb_name_stk_holdernumber}", engine)
+        assert len(saved) == 1
+
+    def test_save_stk_holdernumber_deduplicates_same_batch(self, sqlite_storage):
+        db, engine = sqlite_storage
+        df = pd.concat([self._make_raw_df().iloc[[0]]] * 2, ignore_index=True)
+
+        assert db.save_stk_holdernumber(df) is True
+
+        saved = pd.read_sql(f"SELECT * FROM {tb_name_stk_holdernumber}", engine)
+        assert len(saved) == 1
+
     def test_save_stk_holdernumber_converts_dates(self, sqlite_storage):
         """ann_date 和 end_date 必须从 YYYYMMDD 转换为 YYYY-MM-DD"""
         db, engine = sqlite_storage
