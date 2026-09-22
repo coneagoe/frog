@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Enum, String
+from sqlalchemy import Boolean, Date, DateTime, Enum, String
 
 from storage.domain_enums import HkSuspensionState
 
