@@ -46,6 +46,12 @@ class SSFChangeSignalStatus(StrEnum):
     NO_SIGNAL = "no_signal"
 
 
+class HkSuspensionState(StrEnum):
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    UNKNOWN = "unknown"
+
+
 class SSFEventType(StrEnum):
     INCREASE = "increase"
     DECREASE = "decrease"

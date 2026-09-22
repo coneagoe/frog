@@ -248,8 +248,9 @@ class PaperTradingApiClient:
     def list_snapshots(self, account_id: int) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._request("GET", f"/paper/accounts/{account_id}/snapshots"))
 
-    def list_data_gap_recovery(self) -> object:
-        return self._request("GET", "/paper/data-gap-recovery/gaps")
+    def list_data_gap_recovery(self, stock_id: str | None = None, market: str | None = None) -> object:
+        params = {key: value for key, value in (("stock_id", stock_id), ("market", market)) if value is not None}
+        return self._request("GET", "/paper/data-gap-recovery/gaps", params=params or None)
 
     def get_data_gap_recovery(self, gap_id: int) -> object:
         return self._request("GET", f"/paper/data-gap-recovery/gaps/{gap_id}")
@@ -505,7 +506,9 @@ def build_parser() -> _SafeParser:
     _add_repair_subparsers(subparsers)
     gap = subparsers.add_parser("data_gap_recovery", help="Read data-gap recovery state")
     gap_sub = gap.add_subparsers(dest="data_gap_recovery_command", required=True, parser_class=_SafeParser)
-    gap_sub.add_parser("list")
+    list_gaps = gap_sub.add_parser("list")
+    list_gaps.add_argument("--stock-id", default=None)
+    list_gaps.add_argument("--market", default=None, choices=["a_share", "hk_connect"])
     get_gap = gap_sub.add_parser("get")
     get_gap.add_argument("--gap-id", type=int, required=True)
     gap_sub.add_parser("batches")
@@ -801,7 +804,12 @@ def _handle_repair(client: PaperTradingApiClient, args: argparse.Namespace) -> A
 
 def _handle_data_gap_recovery(client: PaperTradingApiClient, args: argparse.Namespace) -> Any:
     if args.data_gap_recovery_command == "list":
-        return client.list_data_gap_recovery()
+        kwargs = {}
+        if args.stock_id is not None:
+            kwargs["stock_id"] = args.stock_id
+        if args.market is not None:
+            kwargs["market"] = args.market
+        return client.list_data_gap_recovery(**kwargs)
     if args.data_gap_recovery_command == "get":
         return client.get_data_gap_recovery(args.gap_id)
     return client.list_data_gap_batches()

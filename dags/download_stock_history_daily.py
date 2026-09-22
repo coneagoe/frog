@@ -45,14 +45,17 @@ from paper_trading.domain.enums import (  # noqa: E402
     DataGapRecoveryClassification,
     DataGapRecoveryRouting,
 )
-from paper_trading.services.data_gap_recovery_service import DataGapRecoveryService  # noqa: E402
+from paper_trading.services.data_gap_recovery_service import (  # noqa: E402
+    DataGapRecoveryService,
+    HkRecoveryAuthorityPolicy,
+)
 from paper_trading.services.data_gap_alert_service import DataGapAlertService  # noqa: E402
 from paper_trading.services.ledger_rebuild_service import LedgerRebuildService  # noqa: E402
 from paper_trading.services.snapshot_recalculation_service import SnapshotRecalculationService  # noqa: E402
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository  # noqa: E402
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider  # noqa: E402
 from paper_trading.storage.market_data import StorageMarketDataProvider  # noqa: E402
-from paper_trading.services.trade_calendar import _DataAvailableCalendar  # noqa: E402
+from paper_trading.services.trade_calendar import HkTradeCalendar, _DataAvailableCalendar  # noqa: E402
 from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
 from stock.market import is_a_share_trade_date  # noqa: E402
 from storage import get_storage  # noqa: E402
@@ -295,8 +298,15 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
     session = storage.Session()
     try:
         repository = DataGapRecoveryRepository(session)
+        hk_policy = HkRecoveryAuthorityPolicy(
+            HkTradeCalendar(),
+            HkConnectMetadataProvider(session),
+            StorageMarketDataProvider(storage, HkTradeCalendar()),
+        )
         approved_candidates = repository.list_pending_approved_candidates()
-        diagnostics = get_unresolved_ordinary_gaps(repository=repository, business_date=business_date)
+        diagnostics = get_unresolved_ordinary_gaps(
+            repository=repository, business_date=business_date, hk_recovery_policy=hk_policy
+        )
         gaps = [
             _detach_gap(
                 repository.get_or_create_gap_from_diagnostic(
@@ -322,14 +332,14 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
 
     recovery_repository = _FreshSessionRecoveryRepository(storage)
     for approved_gap, approved_hash, _payload in approved_candidates:
-        DataGapRecoveryService(repository=recovery_repository).execute_approved_gap(
+        DataGapRecoveryService(repository=recovery_repository, hk_recovery_policy=hk_policy).execute_approved_gap(
             _detach_gap(approved_gap), approved_hash
         )
     alert_service = DataGapAlertService(repository=recovery_repository)
     results: list[Any] = []
     try:
         results = DataGapRecoveryService(
-            repository=recovery_repository, alert_service=alert_service
+            repository=recovery_repository, alert_service=alert_service, hk_recovery_policy=hk_policy
         ).recover_unresolved_ordinary_gaps(gaps, batch_id=batch_id)
         batch_status = (
             DataGapRecoveryBatchStatus.FAILED
@@ -635,9 +645,27 @@ def classify_diagnostic(diagnostic: Any) -> DataGapRecoveryClassification:
     return DataGapRecoveryClassification.ORDER_DEPENDENT
 
 
-def get_unresolved_ordinary_gaps(repository: DataGapRecoveryRepository, *, business_date: date) -> list[Any]:
-    """Load ordinary unresolved BFQ diagnostics for the recovery date."""
-    return repository.list_unresolved_ordinary_diagnostics(business_date=business_date)
+def get_unresolved_ordinary_gaps(
+    repository: DataGapRecoveryRepository, *, business_date: date, hk_recovery_policy: Any | None = None
+) -> list[Any]:
+    """Load unresolved diagnostics, gating HK rows on date-qualified authority evidence."""
+    diagnostics = repository.list_unresolved_ordinary_diagnostics(business_date=business_date)
+    if hk_recovery_policy is None:
+        return diagnostics
+    eligible: list[Any] = []
+    for diagnostic in diagnostics:
+        if getattr(diagnostic, "market", None) != Market.HK_CONNECT.value:
+            eligible.append(diagnostic)
+            continue
+        try:
+            authority = hk_recovery_policy.evaluate(diagnostic.stock_id, business_date)
+            if authority.get("decision") is True:
+                eligible.append(diagnostic)
+        except Exception:
+            # Unknown policy evidence is retryable, but must not create a gap,
+            # attempt, provider call, or account-recovery work item.
+            logger.warning("HK recovery authority unavailable for %s on %s", diagnostic.stock_id, business_date)
+    return eligible
 
 
 # Create DAG

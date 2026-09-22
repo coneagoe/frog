@@ -21,6 +21,7 @@ from common.const import (
     PeriodType,
 )
 from paper_trading.domain.enums import DataGapRecoveryClassification, DataGapRecoveryRouting, DataGapRecoveryStatus
+from paper_trading.domain.market_data_diagnostics import canonical_stock_id
 from paper_trading.services.data_gap_recovery_service import (
     DataGapRecoveryService,
     canonical_candidate_hash,
@@ -44,7 +45,98 @@ def _row(stock_id: str, business_date: str) -> pd.DataFrame:
 
 
 def _service(storage: Mock, downloader: Mock, repository: Mock) -> DataGapRecoveryService:
-    return DataGapRecoveryService(storage=storage, downloader=downloader, repository=repository)
+    policy = Mock()
+    policy.evaluate.return_value = {
+        "target_date_calendar": True,
+        "ordinary_eligibility": True,
+        "suspension": "active",
+        "source": "test-authority",
+        "freshness": True,
+        "decision": True,
+    }
+    return DataGapRecoveryService(
+        storage=storage, downloader=downloader, repository=repository, hk_recovery_policy=policy
+    )
+
+
+@pytest.mark.parametrize("stock_id", ["00700", "700", "0700", "00700.HK", "HK.00700"])
+def test_hk_stock_identity_normalizes_to_five_ascii_digits(stock_id):
+    assert canonical_stock_id(stock_id, "hk_connect") == "00700"
+
+
+@pytest.mark.parametrize("stock_id", ["７００", "123456", "ABC", "000001"])
+def test_hk_stock_identity_rejects_invalid_symbols(stock_id):
+    with pytest.raises(ValueError):
+        canonical_stock_id(stock_id, "hk_connect")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"target_date_calendar": False},
+        {"ordinary_eligibility": False},
+        {"suspension": "suspended"},
+        {"suspension": "unknown"},
+        {"source": None},
+        {"freshness": False},
+        {"decision": None},
+    ],
+)
+def test_hk_authority_rejection_records_evidence_without_provider_or_write(change):
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    policy = Mock()
+    policy.evaluate.return_value = {
+        "target_date_calendar": True,
+        "ordinary_eligibility": True,
+        "suspension": "active",
+        "source": "official",
+        "freshness": True,
+        "decision": True,
+        **change,
+    }
+    gap = SimpleNamespace(
+        id=7,
+        business_date=date(2026, 8, 7),
+        stock_id="00700",
+        market="hk_connect",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    result = DataGapRecoveryService(
+        storage=storage, downloader=downloader, repository=repository, hk_recovery_policy=policy
+    ).recover_gap(gap, batch_id=3)
+
+    assert result.status == "failed"
+    downloader.dl_history_data_stock_by_provider.assert_not_called()
+    downloader.dl_history_data_stock_hk_by_provider.assert_not_called()
+    storage.save_history_data_stock.assert_not_called()
+    evidence = repository.record_attempt.call_args.args[3]
+    assert evidence["hk_authority"] == policy.evaluate.return_value
+
+
+@pytest.mark.parametrize(
+    "market,adjust,stock_id",
+    [("etf", "bfq", "510300"), ("a_share", "qfq", "000001"), ("hk_connect", "qfq", "00700")],
+)
+def test_recovery_rejects_unsupported_identity_without_side_effects(market, adjust, stock_id):
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id=stock_id,
+        market=market,
+        adjust=adjust,
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    result = DataGapRecoveryService(storage=storage, downloader=downloader, repository=repository).recover_gap(gap)
+
+    assert result.status == "failed"
+    storage.load_history_data_stock.assert_not_called()
+    storage.save_history_data_stock.assert_not_called()
+    downloader.dl_history_data_stock_by_provider.assert_not_called()
+    repository.record_candidate.assert_not_called()
 
 
 def test_escalation_waits_for_three_unavailable_batch_windows():
@@ -358,7 +450,7 @@ def test_escalated_candidate_is_pending_approval_without_history_write():
     storage.load_history_data_stock.return_value = pd.DataFrame()
     downloader.dl_history_data_stock_by_provider.return_value = _row("000001", "2026-08-07")
 
-    result = _service(storage, downloader, repository).recover_gap(gap)
+    result = DataGapRecoveryService(storage=storage, downloader=downloader, repository=repository).recover_gap(gap)
 
     assert result.status == "pending_approval"
     repository.record_candidate.assert_called_once()
@@ -659,6 +751,216 @@ def test_invalid_gap_identity_fails_before_storage_or_provider_interaction(marke
     downloader.dl_history_data_stock_by_provider.assert_not_called()
 
 
+def test_non_string_gap_identity_fails_without_any_recovery_side_effects():
+    storage, downloader, repository, alerts = Mock(), Mock(), Mock(), Mock()
+    gap = SimpleNamespace(id=1, business_date=date(2026, 8, 7), stock_id=700, market="hk_connect", adjust="bfq")
+
+    result = DataGapRecoveryService(
+        storage=storage, downloader=downloader, repository=repository, alert_service=alerts
+    ).recover_gap(gap)
+
+    assert result.status == "failed"
+    storage.load_history_data_stock.assert_not_called()
+    storage.save_history_data_stock.assert_not_called()
+    downloader.dl_history_data_stock_by_provider.assert_not_called()
+    repository.record_attempt.assert_not_called()
+    alerts.send_recovery_system_failure.assert_not_called()
+
+
+def test_batch_invalid_non_string_identity_does_not_escalate_or_alert():
+    storage, downloader, repository, alerts = Mock(), Mock(), Mock(), Mock()
+    repository.gap_evidence.return_value = {"attempts": []}
+    gap = SimpleNamespace(id=1, business_date=date(2026, 8, 7), stock_id=700, market="hk_connect", adjust="bfq")
+
+    results = DataGapRecoveryService(
+        storage=storage, downloader=downloader, repository=repository, alert_service=alerts
+    ).recover_unresolved_ordinary_gaps([gap], batch_id=9)
+
+    assert results[0].status == "failed"
+    storage.load_history_data_stock.assert_not_called()
+    storage.save_history_data_stock.assert_not_called()
+    downloader.dl_history_data_stock_by_provider.assert_not_called()
+    repository.record_attempt.assert_not_called()
+    repository.escalate_gap.assert_not_called()
+    alerts.send_escalation.assert_not_called()
+    alerts.send_recovery_system_failure.assert_not_called()
+
+
+def test_hk_recovery_normalizes_provider_row_before_write_readback_and_candidate_hash(monkeypatch):
+    monkeypatch.setattr(
+        "paper_trading.services.data_gap_recovery_service.parse_hk_stock_history_provider_order", lambda: ["tushare"]
+    )
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    storage.load_history_data_stock_hk_ggt.side_effect = [pd.DataFrame(), _row("00700", "2026-08-07")]
+    downloader.dl_history_data_stock_hk_by_provider.return_value = _row("700", "2026-08-07")
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="HK.00700",
+        market="hk_connect",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    result = _service(storage, downloader, repository).recover_gap(gap)
+
+    assert result.status == "recovered"
+    saved = storage.save_history_data_hk_stock.call_args.args[0]
+    assert saved.iloc[0][COL_STOCK_ID] == "00700"
+    candidate_hash, payload = repository.record_candidate.call_args.args[1:3]
+    assert payload["stock_id"] == "00700"
+    assert payload["row"][COL_STOCK_ID] == "00700"
+    assert candidate_hash == canonical_candidate_hash(payload)
+    assert storage.load_history_data_stock_hk_ggt.call_args_list[0].args[0] == "00700"
+
+
+@pytest.mark.parametrize(
+    "market, stock_id, loader",
+    [("hk_connect", "00700", "load_history_data_stock_hk_ggt"), ("a_share", "000001", "load_history_data_stock")],
+)
+def test_duplicate_exact_rows_are_rejected_before_provider_calls(market, stock_id, loader):
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    rows = pd.concat([_row(stock_id, "2026-08-07"), _row(stock_id, "2026-08-07")], ignore_index=True)
+    getattr(storage, loader).return_value = rows
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id=stock_id,
+        market=market,
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    result = _service(storage, downloader, repository).recover_gap(gap)
+
+    assert result.status == "failed"
+    downloader.dl_history_data_stock_by_provider.assert_not_called()
+    downloader.dl_history_data_stock_hk_by_provider.assert_not_called()
+    storage.save_history_data_stock.assert_not_called()
+    storage.save_history_data_hk_stock.assert_not_called()
+
+
+def test_preexisting_hk_exact_row_skips_provider_and_write():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    storage.load_history_data_stock_hk_ggt.return_value = _row("00700", "2026-08-07")
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="00700",
+        market="hk_connect",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    result = _service(storage, downloader, repository).recover_gap(gap)
+
+    assert result.status == "skipped"
+    downloader.dl_history_data_stock_hk_by_provider.assert_not_called()
+    storage.save_history_data_hk_stock.assert_not_called()
+
+
+def test_approved_hk_conflicting_exact_row_fails_without_append():
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    stored = _row("00700", "2026-08-07")
+    candidate = stored.copy()
+    candidate.loc[0, COL_CLOSE] = 99.0
+    storage.load_history_data_stock_hk_ggt.return_value = stored
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="00700",
+        market="hk_connect",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    repository.execute_approved_candidate.side_effect = lambda _id, _hash, callback: callback(gap)
+    payload = canonical_candidate_payload(
+        candidate, market=gap.market, stock_id=gap.stock_id, business_date=gap.business_date, adjust=gap.adjust
+    )
+
+    result = _service(storage, downloader, repository).execute_approved_gap(
+        gap, canonical_candidate_hash(payload), candidate
+    )
+
+    assert result.status == "failed"
+    storage.save_history_data_hk_stock.assert_not_called()
+
+
+def test_hk_provider_fallback_records_selected_provider_evidence(monkeypatch):
+    monkeypatch.setattr(
+        "paper_trading.services.data_gap_recovery_service.parse_hk_stock_history_provider_order",
+        lambda: ["invalid", "tushare"],
+    )
+    storage, downloader, repository = Mock(), Mock(), Mock()
+    storage.load_history_data_stock_hk_ggt.side_effect = [pd.DataFrame(), _row("00700", "2026-08-07")]
+    downloader.dl_history_data_stock_hk_by_provider.side_effect = [ValueError("invalid"), _row("00700", "2026-08-07")]
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="00700",
+        market="hk_connect",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    result = _service(storage, downloader, repository).recover_gap(gap)
+
+    assert result.status == "recovered"
+    assert result.provider == "tushare"
+    assert repository.record_attempt.call_args.args[3]["provider"] == "tushare"
+
+
+def test_hk_provider_loader_lookup_failure_falls_back_without_system_failure(monkeypatch):
+    monkeypatch.setattr(
+        "paper_trading.services.data_gap_recovery_service.parse_hk_stock_history_provider_order",
+        lambda: ["invalid", "tushare"],
+    )
+    storage = Mock()
+    storage.load_history_data_stock_hk_ggt.side_effect = [pd.DataFrame(), _row("00700", "2026-08-07")]
+
+    class DownloaderWithTransientHkLoaderLookup:
+        def __init__(self):
+            self.lookup_count = 0
+
+        @property
+        def dl_history_data_stock_hk_by_provider(self):
+            self.lookup_count += 1
+            if self.lookup_count == 1:
+                raise RuntimeError("HK loader unavailable")
+            return lambda *_args: _row("00700", "2026-08-07")
+
+    downloader = DownloaderWithTransientHkLoaderLookup()
+    repository = Mock()
+    alerts = Mock()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="00700",
+        market="hk_connect",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    policy = Mock()
+    policy.evaluate.return_value = {
+        "target_date_calendar": True,
+        "ordinary_eligibility": True,
+        "suspension": "active",
+        "source": "test-authority",
+        "freshness": True,
+        "decision": True,
+    }
+    service = DataGapRecoveryService(
+        storage=storage, downloader=downloader, repository=repository, hk_recovery_policy=policy, alert_service=alerts
+    )
+    result = service.recover_gap(gap)
+
+    assert result.status == "recovered"
+    assert result.provider == "tushare"
+    assert downloader.lookup_count == 2
+    alerts.send_recovery_system_failure.assert_not_called()
+
+
 def test_empty_provider_result_falls_back_to_next_provider(monkeypatch):
     monkeypatch.setattr(
         "paper_trading.services.data_gap_recovery_service.parse_stock_history_provider_order",
@@ -697,6 +999,36 @@ def test_invalid_provider_result_falls_back_to_next_provider(monkeypatch):
 
     assert result.status == "recovered"
     assert result.provider == "tushare"
+
+
+def test_provider_loader_lookup_failure_falls_back_to_next_provider(monkeypatch):
+    monkeypatch.setattr(
+        "paper_trading.services.data_gap_recovery_service.parse_stock_history_provider_order",
+        lambda: ["baostock", "tushare"],
+    )
+    storage = Mock()
+    storage.load_history_data_stock.side_effect = [pd.DataFrame(), _row("000001", "2026-08-07")]
+
+    class DownloaderWithTransientLoaderLookup:
+        def __init__(self):
+            self.lookup_count = 0
+
+        @property
+        def dl_history_data_stock_by_provider(self):
+            self.lookup_count += 1
+            if self.lookup_count == 1:
+                raise RuntimeError("loader unavailable")
+            return lambda *_args: _row("000001", "2026-08-07")
+
+    downloader = DownloaderWithTransientLoaderLookup()
+    repository = Mock()
+    gap = SimpleNamespace(id=1, business_date=date(2026, 8, 7), stock_id="000001", market="a_share", adjust="bfq")
+
+    result = DataGapRecoveryService(storage=storage, downloader=downloader, repository=repository).recover_gap(gap)
+
+    assert result.status == "recovered"
+    assert result.provider == "tushare"
+    assert downloader.lookup_count == 2
 
 
 def test_first_valid_exact_provider_short_circuits_later_providers(monkeypatch):
@@ -817,6 +1149,23 @@ def test_readback_failure_is_retryable():
 
     assert result.status == "failed"
     assert "readback" in (result.error or "")
+
+
+def test_duplicate_a_share_readback_fails_without_resolving():
+    duplicate_rows = pd.concat([_row("000001", "2026-08-07"), _row("000001", "2026-08-07")], ignore_index=True)
+    storage = Mock()
+    storage.load_history_data_stock.side_effect = [pd.DataFrame(), duplicate_rows]
+    storage.save_history_data_stock.return_value = True
+    downloader = Mock()
+    downloader.dl_history_data_stock_by_provider.return_value = _row("000001", "2026-08-07")
+    repository = Mock()
+    gap = SimpleNamespace(id=1, business_date=date(2026, 8, 7), stock_id="000001", market="a_share", adjust="bfq")
+
+    result = _service(storage, downloader, repository).recover_gap(gap)
+
+    assert result.status == "failed"
+    assert "multiple exact rows" in (result.error or "")
+    repository.resolve_gap.assert_not_called()
 
 
 @pytest.mark.parametrize("readback_row", [_row("000002", "2026-08-07"), _row("000001", "2026-08-08")])

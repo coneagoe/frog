@@ -104,6 +104,38 @@ def test_data_gap_recovery_lists_have_counts_filters_and_detail_evidence(data_ga
     assert {"attempts", "gaps", "alerts"} <= batch.json().keys()
 
 
+@pytest.fixture
+def hk_data_gap_recovery_client(monkeypatch, sqlite_session):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repository = DataGapRecoveryRepository(sqlite_session)
+    hk_gap = repository.record_gap(date(2026, 8, 1), "hk_connect", "00700", "bfq", {"missing": 1})
+    repository.record_gap(date(2026, 8, 1), "a_share", "000700", "bfq", {"missing": 1})
+    sqlite_session.commit()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: sqlite_session
+    return TestClient(app), hk_gap.id
+
+
+def test_data_gap_recovery_hk_filters_support_market_only_and_disambiguation(hk_data_gap_recovery_client):
+    client, hk_gap_id = hk_data_gap_recovery_client
+
+    by_market = client.get("/paper/data-gap-recovery/gaps?market=hk_connect", headers=AUTH_HEADERS)
+    assert by_market.status_code == 200
+    assert by_market.json()["total_count"] == 1
+    assert by_market.json()["items"][0]["stock_id"] == "00700"
+
+    by_identity = client.get("/paper/data-gap-recovery/gaps?stock_id=00700&market=hk_connect", headers=AUTH_HEADERS)
+    assert by_identity.json()["total_count"] == 1
+    assert by_identity.json()["items"][0]["market"] == "hk_connect"
+    detail = client.get(f"/paper/data-gap-recovery/gaps/{hk_gap_id}", headers=AUTH_HEADERS)
+    assert detail.status_code == 200
+    assert detail.json()["stock_id"] == "00700"
+
+    wrong_market = client.get("/paper/data-gap-recovery/gaps?stock_id=00700&market=a_share", headers=AUTH_HEADERS)
+    assert wrong_market.status_code == 422
+
+
 def test_browser_user_only_sees_recovery_records_linked_to_owned_accounts(monkeypatch, sqlite_session):
     monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
     monkeypatch.setenv("PAPER_TRADING_JWT_SECRET", "test-jwt-secret")

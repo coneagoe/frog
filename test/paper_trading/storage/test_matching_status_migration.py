@@ -177,7 +177,7 @@ def test_postgresql_bootstrap_creates_fresh_enum_table_and_index(empty_postgres_
             .scalars()
             .all()
         )
-        assert enum_names == ["paper_matching_run_status"]
+        assert enum_names == ["hk_suspension_state", "paper_matching_run_status"]
 
 
 def test_postgresql_bootstrap_reports_legacy_values_and_is_idempotent(postgres_schema):
@@ -278,7 +278,8 @@ def test_postgresql_storage_startup_preserves_governed_paper_storage_boundary(po
         storage_db_module._metadata_initialized_pids.discard(os.getpid())
         startup_engine.dispose()
 
-    assert enum_names == []
+    assert enum_names == ["hk_suspension_state"]
+    assert "hk_recovery_authority" in existing_tables
     assert all(column_type.startswith("character varying") for column_type in column_types.values())
     assert paper_account_snapshots is None
     assert paper_valuation_gaps is None

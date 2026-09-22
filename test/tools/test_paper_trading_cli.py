@@ -49,6 +49,26 @@ def test_data_gap_recovery_cli_has_no_mutations():
     assert "reopen" not in str(parser_commands)
 
 
+def test_data_gap_recovery_cli_forwards_hk_filters_and_renders_record(capsys):
+    client = _mock_client()
+    client.list_data_gap_recovery.return_value = {
+        "items": [{"market": "hk_connect", "stock_id": "00700", "id": 7}],
+        "total_count": 1,
+    }
+
+    assert (
+        main(
+            ["data_gap_recovery", "list", "--stock-id", "00700", "--market", "hk_connect"],
+            client=client,
+        )
+        == EXIT_CODES["OK"]
+    )
+    client.list_data_gap_recovery.assert_called_once_with(stock_id="00700", market="hk_connect")
+    output = capsys.readouterr().out
+    assert "hk_connect" in output
+    assert "00700" in output
+
+
 def _mock_client(**kwargs) -> MagicMock:
     """Build a minimal PaperTradingApiClient mock with success returns."""
     client = MagicMock(**kwargs)

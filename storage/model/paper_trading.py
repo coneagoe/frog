@@ -88,7 +88,19 @@ ETF_ELIGIBILITY_SYMBOL_CHECK_SQL = (
     "symbol, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), "
     "'5', ''), '6', ''), '7', ''), '8', ''), '9', '')) = 0"
 )
-DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL = ETF_ELIGIBILITY_SYMBOL_CHECK_SQL.replace("symbol", "stock_id")
+DATA_GAP_RECOVERY_STOCK_ID_CHECK_NAME = "ck_paper_data_gap_recovery_market_stock_id"
+_ASCII_DIGITS_ONLY = (
+    "length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace("
+    "stock_id, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), "
+    "'7', ''), '8', ''), '9', '')) = 0"
+)
+DATA_GAP_RECOVERY_LEGACY_SYMBOL_CHECK_SQL = "length(stock_id) = 6 AND " + _ASCII_DIGITS_ONLY
+DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL = (
+    "(market = 'a_share' AND length(stock_id) = 6 AND "
+    f"{_ASCII_DIGITS_ONLY}) OR "
+    "(market = 'hk_connect' AND length(stock_id) = 5 AND "
+    f"{_ASCII_DIGITS_ONLY})"
+)
 
 
 def _value_enum(enum_type: type[StrEnum], name: str) -> Enum:
@@ -608,17 +620,14 @@ class PaperDataGapRecoveryGap(Base):
         UniqueConstraint(
             "business_date", "market", "stock_id", "adjust", name="uq_paper_data_gap_recovery_gap_identity"
         ),
-        CheckConstraint("market = 'a_share'", name="ck_paper_data_gap_recovery_a_share"),
         CheckConstraint("adjust = 'bfq'", name="ck_paper_data_gap_recovery_bfq"),
-        CheckConstraint(
-            DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL, name="ck_paper_data_gap_recovery_stock_id_six_ascii_digits"
-        ),
+        CheckConstraint(DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL, name=DATA_GAP_RECOVERY_STOCK_ID_CHECK_NAME),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     business_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     market: Mapped[str] = mapped_column(_value_enum(Market, "paper_market"), nullable=False, server_default="a_share")
-    stock_id: Mapped[str] = mapped_column(String(6), nullable=False, index=True)
+    stock_id: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     adjust: Mapped[str] = mapped_column(
         _value_enum(DailyBarDiagnosticAdjust, "daily_bar_diagnostic_adjust"), nullable=False
     )

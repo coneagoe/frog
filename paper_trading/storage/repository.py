@@ -207,7 +207,7 @@ class PaperTradingRepository:
         resolved: bool,
     ) -> DailyBarDiagnostic:
         market = Market(market).value
-        normalized_stock_id = canonical_stock_id(stock_id)
+        normalized_stock_id = canonical_stock_id(stock_id, market)
         adjust = DailyBarDiagnosticAdjust(canonical_adjust_label(adjust)).value
         classification = DailyBarDiagnosticClassification(classification).value
         provider_outcomes = validate_provider_outcomes(provider_outcomes)
@@ -302,7 +302,7 @@ class PaperTradingRepository:
             .filter(
                 DailyBarDiagnostic.business_date == business_date,
                 DailyBarDiagnostic.market == market,
-                DailyBarDiagnostic.stock_id == canonical_stock_id(stock_id),
+                DailyBarDiagnostic.stock_id == canonical_stock_id(stock_id, market),
                 DailyBarDiagnostic.adjust == adjust,
                 DailyBarDiagnostic.resolved.is_(False),
             )

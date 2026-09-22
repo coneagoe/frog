@@ -2,6 +2,7 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
 from sqlalchemy.exc import IntegrityError
 
 from paper_trading.domain.enums import DataGapRecoveryAlertDeliveryState
@@ -46,8 +47,10 @@ class RecordingRepository:
         return alert
 
 
-def gap():
-    return SimpleNamespace(id=4, status="escalated", business_date=date(2026, 9, 15), stock_id="000001")
+def gap(market="a_share", stock_id="000001"):
+    return SimpleNamespace(
+        id=4, status="escalated", business_date=date(2026, 9, 15), market=market, stock_id=stock_id, adjust="bfq"
+    )
 
 
 def test_escalation_is_deduplicated_by_failure_class_and_records_success(monkeypatch):
@@ -62,6 +65,26 @@ def test_escalation_is_deduplicated_by_failure_class_and_records_success(monkeyp
     assert len(sent) == 1
     assert first.delivery_state == DataGapRecoveryAlertDeliveryState.DELIVERED
     assert first.evidence["delivery"]["state"] == "delivered"
+
+
+def test_hk_alert_persists_market_and_renders_it_in_body():
+    repository = RecordingRepository()
+    sent = []
+    service = DataGapAlertService(repository=repository, sender=lambda subject, body: sent.append(body))
+
+    alert = service.send_escalation(gap("hk_connect", "00700"), failure_class="approval_required")
+
+    assert alert.evidence["market"] == "hk_connect"
+    assert alert.evidence["stock_id"] == "00700"
+    assert "market=hk_connect" in sent[0]
+    assert "stock_id=00700" in sent[0]
+
+
+def test_hk_alert_rejects_wrong_symbol_identity():
+    service = DataGapAlertService(repository=RecordingRepository(), sender=lambda *_: None)
+
+    with pytest.raises(ValueError, match="invalid gap identifier"):
+        service.send_escalation(gap("hk_connect", "000001"))
 
 
 def test_account_failure_uses_account_and_failure_cycle_and_keeps_gap_status(monkeypatch):

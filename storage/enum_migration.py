@@ -25,6 +25,7 @@ from storage.model import (
     DailyBarDiagnostic,
     ForecastSnapshotRecord,
     ForecastSnapshotRun,
+    HkRecoveryAuthority,
     SSFChangeSignal,
     tb_name_forecast_snapshot_record,
     tb_name_forecast_snapshot_run,
@@ -142,6 +143,7 @@ def _result(
 
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
+    _ensure_hk_recovery_authority(connection, dry_run=True)
     snapshot_tables = (ForecastSnapshotRun.__table__, ForecastSnapshotRecord.__table__)
     snapshot_table_count = sum(_table_exists(connection, table.name) for table in snapshot_tables)
     if snapshot_table_count == 1:
@@ -154,11 +156,13 @@ def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
 
 
 def _adapter_apply(connection: Connection) -> bool:
+    hk_changed = _ensure_hk_recovery_authority(connection)
     _adapter_preflight(connection, rollback=False)
     labels_changed = _upgrade_daily_bar_diagnostic_adjust_labels(connection)
     missing = _preflight(connection, rollback=False)
     changed = (
-        labels_changed
+        hk_changed
+        or labels_changed
         or bool(missing)
         or any(
             not _column_has_type(connection, column, group.type_name)
@@ -336,6 +340,51 @@ def migrate_storage_enums(
     converted = STORAGE_ENUM_ADAPTER.apply(connection)
     STORAGE_ENUM_ADAPTER.verify(connection, rollback=False)
     return _result(converted=converted)
+
+
+def _ensure_hk_recovery_authority(connection: Connection, *, dry_run: bool = False) -> bool:
+    """Create or safely upgrade the dated HK authority table."""
+    table_name = HkRecoveryAuthority.__table__.name
+    type_name = "hk_suspension_state"
+    expected_labels = ("active", "suspended", "unknown")
+    existing_labels = _enum_labels(connection, type_name)
+    if existing_labels and existing_labels != expected_labels:
+        raise StorageEnumMigrationError(f"{type_name}: unexpected enum labels {existing_labels}")
+
+    if not _table_exists(connection, table_name):
+        if not dry_run:
+            if not existing_labels:
+                connection.execute(text("CREATE TYPE hk_suspension_state AS ENUM ('active', 'suspended', 'unknown')"))
+            HkRecoveryAuthority.__table__.create(connection, checkfirst=True)
+        return True
+    column_type = connection.execute(
+        text(
+            "SELECT udt_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = :table_name "
+            "AND column_name = 'suspension_state'"
+        ),
+        {"table_name": table_name},
+    ).scalar_one_or_none()
+    if column_type == type_name:
+        return False
+    invalid = connection.execute(
+        text(
+            f"SELECT suspension_state FROM {table_name} "
+            "WHERE suspension_state NOT IN ('active', 'suspended', 'unknown') LIMIT 1"
+        )
+    ).scalar_one_or_none()
+    if invalid is not None:
+        raise StorageEnumMigrationError("hk_suspension_state: invalid existing value")
+    if not dry_run:
+        if not existing_labels:
+            connection.execute(text("CREATE TYPE hk_suspension_state AS ENUM ('active', 'suspended', 'unknown')"))
+        connection.execute(
+            text(
+                f"ALTER TABLE {table_name} ALTER COLUMN suspension_state TYPE hk_suspension_state "
+                "USING suspension_state::text::hk_suspension_state"
+            )
+        )
+    return True
 
 
 def _preflight(connection: Connection, *, rollback: bool) -> set[str]:

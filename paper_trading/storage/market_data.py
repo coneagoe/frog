@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 import pandas as pd
 from sqlalchemy import text
@@ -19,7 +19,12 @@ from common.const import (
     AdjustType,
     PeriodType,
 )
-from storage.model import tb_name_stk_limit_a_stock, tb_name_suspend_d_a_stock
+from storage.domain_enums import HkSuspensionState
+from storage.model import (
+    tb_name_hk_recovery_authority,
+    tb_name_stk_limit_a_stock,
+    tb_name_suspend_d_a_stock,
+)
 
 
 @dataclass(frozen=True)
@@ -60,9 +65,10 @@ class TradeCalendar(Protocol):
 class StorageMarketDataProvider:
     """Market data provider backed by a history storage and a trade calendar."""
 
-    def __init__(self, storage, trade_calendar: TradeCalendar):
+    def __init__(self, storage, trade_calendar: TradeCalendar, hk_suspension_authority: Any | None = None):
         self._storage = storage
         self._trade_calendar = trade_calendar
+        self._hk_suspension_authority = hk_suspension_authority
 
     def is_trade_date(self, trade_date: date) -> bool:
         return self._trade_calendar.is_trade_date(trade_date)
@@ -87,6 +93,48 @@ class StorageMarketDataProvider:
         if market in {"hk_connect", "etf"}:
             return False
         return self._load_a_share_suspension(symbol, trade_date)
+
+    def get_symbol_suspension_evidence(
+        self, symbol: str, trade_date: date, market: str | None = None
+    ) -> dict[str, Any]:
+        if market == "hk_connect":
+            authority = self._hk_suspension_authority or self._load_hk_suspension_evidence
+            try:
+                evidence = authority(symbol, trade_date)
+                return dict(evidence)
+            except Exception:
+                return {"state": "unknown", "source": None, "fresh": False}
+        state = "suspended" if self.is_symbol_suspended(symbol, trade_date, market) else "active"
+        return {"state": state, "source": "suspend_d_a_stock", "fresh": True}
+
+    def _load_hk_suspension_evidence(self, symbol: str, trade_date: date) -> dict[str, Any]:
+        engine = getattr(self._storage, "engine", None)
+        if engine is None:
+            return {"state": "unknown", "source": None, "fresh": False}
+        try:
+            query = text(
+                f"SELECT suspension_state, source, fresh FROM {tb_name_hk_recovery_authority} "
+                'WHERE "股票代码" = :symbol AND authority_date = :authority_date'
+            )
+            rows = pd.read_sql(
+                query,
+                engine,
+                params={"symbol": self._to_storage_stock_id(symbol), "authority_date": trade_date.isoformat()},
+            )
+            if rows.empty:
+                return {"state": "unknown", "source": None, "fresh": False}
+            row = rows.iloc[-1]
+            stored_state = row["suspension_state"]
+            try:
+                state = HkSuspensionState(stored_state).value
+            except ValueError:
+                state = HkSuspensionState[str(stored_state)].value
+            return {"state": state, "source": row["source"], "fresh": bool(row["fresh"])}
+        except Exception:
+            return {"state": "unknown", "source": None, "fresh": False}
+
+    def get_symbol_suspension_state(self, symbol: str, trade_date: date, market: str | None = None) -> str:
+        return cast(str, self.get_symbol_suspension_evidence(symbol, trade_date, market)["state"])
 
     def get_latest_daily_close_with_date(
         self, symbol: str, trade_date: date, market: str | None = None

@@ -118,6 +118,11 @@ def test_selected_gap_export_includes_shared_market_and_adjust_enums():
     assert _business_enum_is_needed("daily_bar_diagnostic_adjust", "paper_data_gap_recovery_gaps")
 
 
+def test_hk_recovery_authority_registers_suspension_state_enum():
+    assert "hk_suspension_state" in _parse_business_enum_types()
+    assert _business_enum_is_needed("hk_suspension_state", "hk_recovery_authority")
+
+
 def test_db_common_declares_recovery_append_only_ddl_contract():
     content = DB_COMMON_PATH.read_text(encoding="utf-8")
     assert "paper_data_gap_recovery_candidates_append_only" in content

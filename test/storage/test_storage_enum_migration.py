@@ -7,14 +7,18 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
 from sqlalchemy.engine import Connection, Engine
 
+from storage.domain_enums import HkSuspensionState
+from storage.enum_governance import EnumGovernanceError, migrate_enums
 from storage.enum_migration import (
     STORAGE_ENUM_ADAPTER,
     STORAGE_ENUM_GROUPS,
     StorageEnumMigrationError,
     migrate_storage_enums,
 )
+from storage.model.hk_recovery_authority import HkRecoveryAuthority
 
 EXPECTED_TYPE_NAMES = {group.type_name for group in STORAGE_ENUM_GROUPS}
 CHECK_NAMES = {
@@ -128,6 +132,15 @@ def _enum_labels(connection: Connection, type_name: str) -> tuple[str, ...]:
             {"type_name": type_name},
         ).scalars()
     )
+
+
+def test_hk_suspension_state_binds_member_value_for_postgresql() -> None:
+    enum_type = HkRecoveryAuthority.__table__.c.suspension_state.type
+    bind_processor = enum_type.bind_processor(postgresql_dialect())
+
+    assert bind_processor is not None
+    assert bind_processor(HkSuspensionState.ACTIVE) == "active"
+    assert enum_type.enums == ["active", "suspended", "unknown"]
 
 
 def _check_names(connection: Connection) -> set[str]:
@@ -435,6 +448,121 @@ def test_direct_storage_rollback_removes_diagnostics_only_paper_market(empty_pos
         assert _enum_labels(connection, "paper_market") == ()
         assert _enum_types(connection) == set()
         assert _check_names(connection) == set()
+
+
+def test_fresh_schema_creates_hk_recovery_authority_enum_with_value_labels(empty_postgres_schema) -> None:
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        assert migrate_storage_enums(connection).converted is True
+
+        assert _enum_labels(connection, "hk_suspension_state") == ("active", "suspended", "unknown")
+        assert _column_type(connection, "hk_recovery_authority", "suspension_state") == "hk_suspension_state"
+
+
+def test_storage_governance_adapter_creates_hk_recovery_authority(empty_postgres_schema) -> None:
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        result = migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+
+        assert result.converted is True
+        assert _enum_labels(connection, "hk_suspension_state") == ("active", "suspended", "unknown")
+        assert _column_type(connection, "hk_recovery_authority", "suspension_state") == "hk_suspension_state"
+
+
+def test_missing_hk_authority_table_reuses_valid_precreated_enum(empty_postgres_schema) -> None:
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text("CREATE TYPE hk_suspension_state AS ENUM ('active', 'suspended', 'unknown')"))
+
+        result = migrate_enums(connection, dry_run=True, adapters=(STORAGE_ENUM_ADAPTER,))
+
+        assert result.dry_run is True
+        assert (
+            connection.execute(text("SELECT to_regclass(current_schema() || '.hk_recovery_authority')")).scalar_one()
+            is None
+        )
+        assert _enum_labels(connection, "hk_suspension_state") == ("active", "suspended", "unknown")
+
+        result = migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+
+        assert result.converted is True
+        assert _column_type(connection, "hk_recovery_authority", "suspension_state") == "hk_suspension_state"
+
+
+def test_existing_hk_recovery_authority_upgrades_to_value_labeled_enum(empty_postgres_schema) -> None:
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE hk_recovery_authority ("
+                "股票代码 varchar(5) NOT NULL, authority_date date NOT NULL, eligible boolean NOT NULL, "
+                "suspension_state varchar(16) NOT NULL, source varchar(100) NOT NULL, fresh boolean NOT NULL, "
+                "observed_at timestamptz, PRIMARY KEY (股票代码, authority_date))"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO hk_recovery_authority VALUES ('00700', '2026-09-22', true, 'active', 'test', true, NULL)")
+        )
+
+        assert migrate_storage_enums(connection).converted is True
+        assert _enum_labels(connection, "hk_suspension_state") == ("active", "suspended", "unknown")
+        assert (
+            connection.execute(text("SELECT suspension_state::text FROM hk_recovery_authority")).scalar_one()
+            == "active"
+        )
+
+
+def test_storage_governance_adapter_upgrades_hk_recovery_authority(empty_postgres_schema) -> None:
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE hk_recovery_authority ("
+                "股票代码 varchar(5) NOT NULL, authority_date date NOT NULL, eligible boolean NOT NULL, "
+                "suspension_state varchar(16) NOT NULL, source varchar(100) NOT NULL, fresh boolean NOT NULL, "
+                "observed_at timestamptz, PRIMARY KEY (股票代码, authority_date))"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO hk_recovery_authority VALUES ('00700', '2026-09-22', true, 'active', 'test', true, NULL)")
+        )
+
+        result = migrate_enums(connection, adapters=(STORAGE_ENUM_ADAPTER,))
+
+        assert result.converted is True
+        assert _column_type(connection, "hk_recovery_authority", "suspension_state") == "hk_suspension_state"
+
+
+@pytest.mark.parametrize("labels", [("ACTIVE", "suspended", "unknown"), ("active", "suspended", "unknown", "other")])
+def test_existing_hk_recovery_authority_rejects_invalid_native_enum_labels(empty_postgres_schema, labels) -> None:
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        quoted_labels = ", ".join(repr(label) for label in labels)
+        connection.execute(text(f"CREATE TYPE hk_suspension_state AS ENUM ({quoted_labels})"))
+        connection.execute(
+            text(
+                "CREATE TABLE hk_recovery_authority ("
+                "股票代码 varchar(5) NOT NULL, authority_date date NOT NULL, eligible boolean NOT NULL, "
+                "suspension_state hk_suspension_state NOT NULL, source varchar(100) NOT NULL, fresh boolean NOT NULL, "
+                "observed_at timestamptz, PRIMARY KEY (股票代码, authority_date))"
+            )
+        )
+
+        with pytest.raises(StorageEnumMigrationError, match="hk_suspension_state: unexpected enum labels"):
+            migrate_storage_enums(connection)
+
+
+@pytest.mark.parametrize("labels", [("ACTIVE", "suspended", "unknown"), ("active", "suspended", "unknown", "other")])
+def test_missing_hk_authority_table_rejects_malformed_precreated_enum(empty_postgres_schema, labels) -> None:
+    engine, schema = empty_postgres_schema
+    with _connection(engine, schema) as connection:
+        quoted_labels = ", ".join(repr(label) for label in labels)
+        connection.execute(text(f"CREATE TYPE hk_suspension_state AS ENUM ({quoted_labels})"))
+
+        with pytest.raises(
+            EnumGovernanceError, match="storage preflight failed: hk_suspension_state: unexpected enum labels"
+        ):
+            migrate_enums(connection, dry_run=True, adapters=(STORAGE_ENUM_ADAPTER,))
 
 
 def test_rollback_rejects_unmanaged_storage_enum_dependency(postgres_schema) -> None:

@@ -3487,6 +3487,18 @@ def test_same_symbol_diagnostics_are_isolated_by_market(sqlite_session):
     assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 1), "hk_connect", "00700") is True
 
 
+def test_hk_diagnostic_normalizes_bare_and_exchange_suffixed_symbols(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+
+    diagnostic = repo.upsert_daily_bar_diagnostic(
+        date(2026, 7, 1), "hk_connect", "700.HK", "bfq", "missing_exact_date", [], resolved=False
+    )
+
+    assert diagnostic.stock_id == "00700"
+    assert repo.has_unresolved_daily_bar_diagnostic(date(2026, 7, 1), "hk_connect", "HK.00700") is True
+
+
 def test_reset_orders_for_replay_resets_replayable_statuses(sqlite_session):
     """Orders with ACCEPTED, FILLED, PARTIALLY_FILLED, NEW statuses get reset."""
     Base.metadata.create_all(sqlite_session.get_bind())

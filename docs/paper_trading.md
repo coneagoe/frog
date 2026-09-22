@@ -615,6 +615,8 @@ Analytics reports valuation gaps separately in date order through `valuation_gap
 Issue #113 的统一恢复在全部 HFQ/BFQ 分片完成并且模拟交易匹配成功或带 warning 完成后运行，仅处理普通 A 股 BFQ 精确业务日期缺口。分片或匹配失败时跳过恢复；匹配中的逐证券 warning 只记录并继续处理其他证券。恢复是幂等的：已存在精确行情的缺口会被跳过并解决，未解决缺口可脱离原批次独立重试。批次、尝试和缺口摘要记录 routing/classification 及相关 provider/结果证据；达到阈值的 unresolved 缺口由该流程自动升级并发送告警，账户恢复失败也发送独立告警。
 升级后的缺口即使 provider 找到并验证了候选，也只记录不可变 candidate 并转为 `pending_approval`；在浏览器审批前不会自动写入行情。
 
+Issue #123 将同一精确日期 BFQ 恢复生命周期扩展到 HK Connect 普通股。A 股代码保持六位，HK 代码统一为五位，身份为 `(business_date, market, stock_id, adjust)`。HK 自动恢复必须具备目标日期 HK Connect 日历、日期限定普通股资格、明确非停牌状态和新鲜 authority 证据；停牌、过期或未知证据不会自动写入，只保留重试/升级路径。各市场使用对应 provider fallback 和行情存储路径，provider 结果必须是目标日期唯一行，写入后执行市场限定的精确读回并拒绝冲突或重复行。
+
 ### 缺口升级审批（Issue #115）
 
 达到升级阈值（三个不可用批次或五个工作日）后，系统按 failure class 去重记录一次告警周期。告警投递失败只标记 alert 为 `failed`，不会改变缺口、审批或恢复状态；SMTP 故障保持隔离。账户账本或快照恢复失败也按账户和 failure class 单独告警，其他账户继续处理。
@@ -631,9 +633,11 @@ uv run tools/paper_trading_cli.py data_gap_recovery get --gap-id 123
 uv run tools/paper_trading_cli.py data_gap_recovery batches
 ```
 
-### A 股 BFQ 精确日期缺口运维查询（Issue #112）
+### BFQ 精确日期缺口运维查询（Issue #112 / #123）
 
 数据缺口恢复记录目前只覆盖 A 股 BFQ 的**精确业务日期**缺口（`market=a_share`、`adjust=bfq`）。缺口主记录及账户汇总是可变状态，用于表示当前状态、最近观察时间和最新汇总；candidate、attempt、approval、batch、alert 是追加写入的证据，保留每次候选、尝试、审批、批次和告警的历史，不应将它们当作可变的当前状态表。
+
+HK Connect 普通股使用同一记录和审批生命周期（`market=hk_connect`、`adjust=bfq`），代码为五位。只读 API 可使用 `market` 和 `stock_id` 过滤，CLI 保持只读；审批仍要求浏览器会话、CSRF 和当前 candidate hash。
 
 运维和审计只使用以下只读 GET API：
 

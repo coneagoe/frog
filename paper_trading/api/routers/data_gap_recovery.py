@@ -31,27 +31,35 @@ def list_gaps(
     page_size: int = Query(default=50, ge=1, le=200),
     status: DataGapRecoveryStatus | None = None,
     business_date: date | None = None,
-    stock_id: str | None = Query(default=None, pattern=r"^[0-9]{6}$"),
+    stock_id: str | None = Query(default=None, pattern=r"^[0-9]{5,6}$"),
+    market: str | None = Query(default=None, pattern=r"^(a_share|hk_connect)$"),
     session: Session = Depends(get_session),
     user=Depends(require_browser_user),
 ):
     repository = DataGapRecoveryRepository(session)
     owner = None if user is None else user.id
+    if stock_id is not None:
+        expected_market = "hk_connect" if len(stock_id) == 5 else "a_share"
+        if market is not None and market != expected_market:
+            raise HTTPException(status_code=422, detail="stock_id does not match market")
+        market = market or expected_market
     items = repository.list_gaps(
         offset,
         page_size,
         status=status,
         business_date=business_date,
         stock_id=stock_id,
+        market=market,
         owner_user_id=owner,
+    )
+    total_count = repository.count_gaps(
+        status=status, business_date=business_date, stock_id=stock_id, market=market, owner_user_id=owner
     )
     return DataGapRecoveryPage(
         items=[DataGapRecoveryGapResponse.model_validate(item) for item in items],
         offset=offset,
         page_size=page_size,
-        total_count=repository.count_gaps(
-            status=status, business_date=business_date, stock_id=stock_id, owner_user_id=owner
-        ),
+        total_count=total_count,
     )
 
 

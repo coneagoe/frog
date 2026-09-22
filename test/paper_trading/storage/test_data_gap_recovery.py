@@ -19,6 +19,7 @@ from paper_trading.domain.enums import (
     DataGapRecoveryRouting,
     DataGapRecoveryStatus,
 )
+from paper_trading.domain.market_data_diagnostics import canonical_stock_id
 from paper_trading.services.data_gap_recovery_service import canonical_candidate_hash, canonical_candidate_payload
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
 from paper_trading.storage.models import (
@@ -67,9 +68,8 @@ def test_gap_model_has_a_share_bfq_identity_and_governed_outcomes(tmp_path):
     assert PaperDataGapRecoveryBatch.__table__.c.status.type.enum_class is DataGapRecoveryBatchStatus
     assert PaperDataGapRecoveryAlert.__table__.c.delivery_state.type.enum_class is DataGapRecoveryAlertDeliveryState
     assert {c.name for c in PaperDataGapRecoveryGap.__table__.constraints} >= {
-        "ck_paper_data_gap_recovery_a_share",
         "ck_paper_data_gap_recovery_bfq",
-        "ck_paper_data_gap_recovery_stock_id_six_ascii_digits",
+        "ck_paper_data_gap_recovery_market_stock_id",
     }
 
 
@@ -89,6 +89,21 @@ def test_repository_validates_identity_and_preserves_append_only_evidence(tmp_pa
             getattr(repository, "update_gap")(gap.id, {})
         with pytest.raises(AttributeError):
             getattr(repository, "delete_gap")(gap.id)
+
+
+@pytest.mark.parametrize("stock_id", ["00700", "700", "0700", "00700.HK", "HK.00700"])
+def test_repository_canonicalizes_hk_identity(stock_id):
+    assert canonical_stock_id(stock_id, "hk_connect") == "00700"
+
+
+@pytest.mark.parametrize("market,adjust,stock_id", [("etf", "bfq", "510300"), ("hk_connect", "qfq", "00700")])
+def test_repository_rejects_unsupported_identity(market, adjust, stock_id, tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        with pytest.raises(ValueError):
+            repository.record_gap(date(2026, 1, 2), market, stock_id, adjust, {})
 
 
 def test_candidate_hash_and_approval_binding_are_enforced(tmp_path):
@@ -451,6 +466,61 @@ def test_repository_selects_only_unresolved_ordinary_bfq_diagnostics(tmp_path):
         target = repository.list_unresolved_ordinary_diagnostics(business_date=date(2026, 1, 2))
 
         assert [(row.business_date, row.stock_id) for row in target] == [(date(2026, 1, 2), "000001")]
+
+
+def test_repository_selects_valid_unresolved_hk_bfq_diagnostic(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        diagnostics = PaperTradingRepository(session)
+        diagnostics.upsert_daily_bar_diagnostic(
+            date(2026, 1, 2), "hk_connect", "700", "bfq", "missing_exact_date", [], False
+        )
+        repository = DataGapRecoveryRepository(session)
+
+        target = repository.list_unresolved_ordinary_diagnostics(business_date=date(2026, 1, 2))
+
+        assert [(row.market, row.stock_id, row.resolved) for row in target] == [("hk_connect", "00700", False)]
+
+
+def test_batch_account_recovery_joins_orders_by_market_and_symbol(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        repository = DataGapRecoveryRepository(session)
+        account = PaperTradingRepository(session).create_account("market-isolation", Decimal("100"))
+        session.add_all(
+            [
+                PaperOrder(
+                    account_id=account.id,
+                    symbol="000001",
+                    market="a_share",
+                    side="buy",
+                    quantity=1,
+                    limit_price=Decimal("10"),
+                    trade_date=date(2026, 1, 2),
+                    status="accepted",
+                ),
+                PaperOrder(
+                    account_id=account.id,
+                    symbol="00001",
+                    market="hk_connect",
+                    side="buy",
+                    quantity=1,
+                    limit_price=Decimal("10"),
+                    trade_date=date(2026, 1, 2),
+                    status="accepted",
+                ),
+            ]
+        )
+        session.flush()
+        gap = repository.record_gap(date(2026, 1, 2), "hk_connect", "00001", "bfq", {})
+        batch = repository.record_batch(DataGapRecoveryBatchStatus.COMPLETED, {})
+        repository.record_attempt(gap.id, batch.id, DataGapRecoveryAttemptOutcome.RECOVERED, {})
+
+        result = repository.list_batch_account_recovery(batch.id)
+
+        assert [(item["gap_id"], item["account_id"]) for item in result] == [(gap.id, account.id)]
 
 
 def test_repository_reuses_gap_identity_and_updates_classification_without_duplicates(tmp_path):

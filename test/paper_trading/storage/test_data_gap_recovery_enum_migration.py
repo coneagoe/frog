@@ -6,6 +6,7 @@ import uuid
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import IntegrityError
 
 from paper_trading.domain.enums import (
     DataGapRecoveryAccountStatus,
@@ -240,6 +241,114 @@ def test_legacy_recovery_values_are_converted_and_unknown_labels_abort(migration
         assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
         assert not _type_exists(connection, "paper_data_gap_recovery_status")
         assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is False
+
+
+def test_recovery_identity_constraints_accept_both_markets_and_reject_invalid_values(migration_schema):
+    engine, schema = migration_schema
+    with _connection(engine, schema) as connection:
+        _create_legacy_schema(connection)
+        _create_legacy_recovery_tables(connection)
+        connection.execute(
+            text(
+                "INSERT INTO paper_data_gap_recovery_gaps "
+                "(id, business_date, market, stock_id, adjust, summary) "
+                "VALUES (10, '2026-01-01', 'a_share', '000001', 'bfq', '{}'::jsonb)"
+            )
+        )
+        assert migrate_paper_trading_enums(connection).converted is True
+        assert (
+            connection.execute(text("SELECT stock_id FROM paper_data_gap_recovery_gaps WHERE id = 10")).scalar_one()
+            == "000001"
+        )
+        assert migrate_paper_trading_enums(connection).converted is False
+
+        connection.execute(
+            text(
+                "INSERT INTO paper_data_gap_recovery_gaps "
+                "(id, business_date, market, stock_id, adjust, summary) VALUES "
+                "(1, '2026-01-02', 'a_share', '000700', 'bfq', '{}'::jsonb), "
+                "(2, '2026-01-02', 'hk_connect', '00700', 'bfq', '{}'::jsonb)"
+            )
+        )
+        with pytest.raises(IntegrityError):
+            with connection.begin_nested():
+                connection.execute(
+                    text(
+                        "INSERT INTO paper_data_gap_recovery_gaps "
+                        "(id, business_date, market, stock_id, adjust, summary) "
+                        "VALUES (3, '2026-01-02', 'a_share', '000700', 'bfq', '{}'::jsonb)"
+                    )
+                )
+        with pytest.raises(IntegrityError):
+            with connection.begin_nested():
+                connection.execute(
+                    text(
+                        "INSERT INTO paper_data_gap_recovery_gaps "
+                        "(id, business_date, market, stock_id, adjust, summary) "
+                        "VALUES (3, '2026-01-02', 'hk_connect', '00700', 'bfq', '{}'::jsonb)"
+                    )
+                )
+        for market, stock_id, adjust in (
+            ("etf", "510300", "bfq"),
+            ("a_share", "00001", "bfq"),
+            ("hk_connect", "000001", "bfq"),
+            ("hk_connect", "00700", "qfq"),
+        ):
+            with pytest.raises(IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(
+                        text(
+                            "INSERT INTO paper_data_gap_recovery_gaps "
+                            "(id, business_date, market, stock_id, adjust, summary) "
+                            "VALUES (3, '2026-01-03', :market, :stock_id, :adjust, '{}'::jsonb)"
+                        ),
+                        {"market": market, "stock_id": stock_id, "adjust": adjust},
+                    )
+
+
+def test_legacy_identity_checks_require_exact_definitions(migration_schema):
+    engine, schema = migration_schema
+    with _connection(engine, schema) as connection:
+        _create_legacy_schema(connection)
+        _create_legacy_recovery_tables(connection)
+        connection.execute(
+            text(
+                "ALTER TABLE paper_data_gap_recovery_gaps "
+                "DROP CONSTRAINT ck_paper_data_gap_recovery_a_share, "
+                "DROP CONSTRAINT ck_paper_data_gap_recovery_stock_id_six_ascii_digits"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE paper_data_gap_recovery_gaps "
+                "ADD CONSTRAINT ck_paper_data_gap_recovery_a_share CHECK (market = 'hk_connect'), "
+                "ADD CONSTRAINT ck_paper_data_gap_recovery_stock_id_six_ascii_digits CHECK (length(stock_id) = 5)"
+            )
+        )
+        with pytest.raises(PaperTradingEnumMigrationError, match="invalid checks on paper_data_gap_recovery_gaps"):
+            migrate_paper_trading_enums(connection)
+
+
+def test_legacy_stock_check_rejects_compound_predicate(migration_schema):
+    engine, schema = migration_schema
+    with _connection(engine, schema) as connection:
+        _create_legacy_schema(connection)
+        _create_legacy_recovery_tables(connection)
+        connection.execute(
+            text(
+                "ALTER TABLE paper_data_gap_recovery_gaps "
+                "DROP CONSTRAINT ck_paper_data_gap_recovery_stock_id_six_ascii_digits"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE paper_data_gap_recovery_gaps "
+                "ADD CONSTRAINT ck_paper_data_gap_recovery_stock_id_six_ascii_digits "
+                "CHECK (stock_id ~ '^[0-9]{6}$' OR market = 'hk_connect')"
+            )
+        )
+        with pytest.raises(PaperTradingEnumMigrationError, match="invalid checks on paper_data_gap_recovery_gaps"):
+            migrate_paper_trading_enums(connection)
 
 
 def test_existing_recovery_status_enum_gets_pending_approval_additively(migration_schema):

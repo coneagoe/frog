@@ -453,7 +453,7 @@ def test_matching_rebuild_api_replays_only_a_share_bfq_missing_date_order(monkey
         trade_date, Market.A_SHARE, "510300", "qfq", "missing_exact_date", [], resolved=False
     )
     repo.upsert_daily_bar_diagnostic(
-        trade_date, Market.HK_CONNECT, "510300", "qfq", "missing_exact_date", [], resolved=False
+        trade_date, Market.HK_CONNECT, "00700", "qfq", "missing_exact_date", [], resolved=False
     )
 
     class MarketData:
