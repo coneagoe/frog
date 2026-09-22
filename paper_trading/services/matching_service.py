@@ -214,7 +214,7 @@ class MatchingService:
 
     def _resolve_matching_diagnostic(self, order: PaperOrder) -> None:
         adjust = self._diagnostic_adjust(order.market)
-        if order.market in {"a_share", "etf"} and self.repo.has_unresolved_daily_bar_diagnostic(
+        if order.market in {"a_share", "hk_connect", "etf"} and self.repo.has_unresolved_daily_bar_diagnostic(
             order.trade_date, order.market, order.symbol, adjust
         ):
             self.repo.upsert_daily_bar_diagnostic(

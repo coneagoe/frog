@@ -41,3 +41,10 @@ class _DataAvailableCalendar:
             if next_date > trade_date:
                 return next_date
         return trade_date
+
+
+class HkTradeCalendar(_DataAvailableCalendar):
+    """Official Hong Kong exchange calendar used by recovery gates."""
+
+    def __init__(self, calendar_name: str = "XHKG"):
+        super().__init__(calendar_name)

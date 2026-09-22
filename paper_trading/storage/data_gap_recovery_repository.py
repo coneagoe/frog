@@ -19,6 +19,7 @@ from paper_trading.domain.enums import (
     DataGapRecoveryStatus,
     Market,
 )
+from paper_trading.domain.market_data_diagnostics import validate_recovery_identity
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
     PaperAccount,
@@ -32,7 +33,8 @@ from paper_trading.storage.models import (
     PaperOrder,
 )
 
-_STOCK_ID = re.compile(r"^[0-9]{6}$", re.ASCII)
+_A_SHARE_STOCK_ID = re.compile(r"^[0-9]{6}$", re.ASCII)
+_HK_STOCK_ID = re.compile(r"^[0-9]{5}$", re.ASCII)
 
 
 class DataGapRecoveryRepository:
@@ -42,14 +44,13 @@ class DataGapRecoveryRepository:
         self.session = session
 
     @staticmethod
-    def _validate_identity(market: str, stock_id: str, adjust: str) -> None:
-        if market != Market.A_SHARE.value or adjust != "bfq" or not _STOCK_ID.fullmatch(stock_id):
-            raise ValueError("data gap identity must be a_share/bfq with a six-digit ASCII stock_id")
+    def _validate_identity(market: str, stock_id: str, adjust: str) -> str:
+        return validate_recovery_identity(market, stock_id, adjust)
 
     def record_gap(
         self, business_date: date, market: str, stock_id: str, adjust: str, summary: dict[str, Any]
     ) -> PaperDataGapRecoveryGap:
-        self._validate_identity(market, stock_id, adjust)
+        stock_id = self._validate_identity(market, stock_id, adjust)
         gap = self.session.scalar(
             select(PaperDataGapRecoveryGap).where(
                 PaperDataGapRecoveryGap.business_date == business_date,
@@ -77,30 +78,45 @@ class DataGapRecoveryRepository:
         self.session.flush()
 
     def list_unresolved_ordinary_diagnostics(self, *, business_date: date) -> list[DailyBarDiagnostic]:
-        return list(
-            self.session.scalars(
-                select(DailyBarDiagnostic)
-                .where(
-                    DailyBarDiagnostic.business_date == business_date,
-                    DailyBarDiagnostic.market == Market.A_SHARE.value,
-                    DailyBarDiagnostic.adjust == "bfq",
-                    DailyBarDiagnostic.classification.in_(("missing_market_data", "missing_exact_date")),
-                    DailyBarDiagnostic.resolved.is_(False),
-                    not_(
-                        select(PaperDataGapRecoveryGap.id)
-                        .where(
-                            PaperDataGapRecoveryGap.business_date == DailyBarDiagnostic.business_date,
-                            PaperDataGapRecoveryGap.market == DailyBarDiagnostic.market,
-                            PaperDataGapRecoveryGap.stock_id == DailyBarDiagnostic.stock_id,
-                            PaperDataGapRecoveryGap.adjust == DailyBarDiagnostic.adjust,
-                            PaperDataGapRecoveryGap.status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED,
-                        )
-                        .exists()
-                    ),
-                )
-                .order_by(DailyBarDiagnostic.business_date, DailyBarDiagnostic.stock_id, DailyBarDiagnostic.id)
+        rows = self.session.scalars(
+            select(DailyBarDiagnostic)
+            .where(
+                DailyBarDiagnostic.business_date == business_date,
+                DailyBarDiagnostic.market.in_((Market.A_SHARE.value, Market.HK_CONNECT.value)),
+                DailyBarDiagnostic.adjust == "bfq",
+                DailyBarDiagnostic.classification.in_(("missing_market_data", "missing_exact_date")),
+                DailyBarDiagnostic.resolved.is_(False),
+                not_(
+                    select(PaperDataGapRecoveryGap.id)
+                    .where(
+                        PaperDataGapRecoveryGap.business_date == DailyBarDiagnostic.business_date,
+                        PaperDataGapRecoveryGap.market == DailyBarDiagnostic.market,
+                        PaperDataGapRecoveryGap.stock_id == DailyBarDiagnostic.stock_id,
+                        PaperDataGapRecoveryGap.adjust == DailyBarDiagnostic.adjust,
+                        PaperDataGapRecoveryGap.status == DataGapRecoveryStatus.PERMANENTLY_UNRESOLVED,
+                    )
+                    .exists()
+                ),
+            )
+            .order_by(
+                DailyBarDiagnostic.business_date,
+                DailyBarDiagnostic.market,
+                DailyBarDiagnostic.stock_id,
+                DailyBarDiagnostic.id,
             )
         )
+        # Diagnostics can be inserted by older callers without going through
+        # the canonical upsert.  Do not let a malformed HK identity enter the
+        # recovery pipeline (or collide with an A-share code).
+        return [
+            row
+            for row in rows
+            if (
+                _A_SHARE_STOCK_ID.fullmatch(row.stock_id)
+                if row.market == Market.A_SHARE.value
+                else _HK_STOCK_ID.fullmatch(row.stock_id)
+            )
+        ]
 
     def get_or_create_gap_from_diagnostic(
         self,
@@ -109,11 +125,12 @@ class DataGapRecoveryRepository:
         routing: DataGapRecoveryRouting,
         classification: DataGapRecoveryClassification,
     ) -> PaperDataGapRecoveryGap:
+        stock_id = self._validate_identity(diagnostic.market, diagnostic.stock_id, diagnostic.adjust)
         existing = self.session.scalar(
             select(PaperDataGapRecoveryGap).where(
                 PaperDataGapRecoveryGap.business_date == diagnostic.business_date,
                 PaperDataGapRecoveryGap.market == diagnostic.market,
-                PaperDataGapRecoveryGap.stock_id == diagnostic.stock_id,
+                PaperDataGapRecoveryGap.stock_id == stock_id,
                 PaperDataGapRecoveryGap.adjust == diagnostic.adjust,
             )
         )
@@ -126,7 +143,7 @@ class DataGapRecoveryRepository:
         return self.record_gap(
             diagnostic.business_date,
             diagnostic.market,
-            diagnostic.stock_id,
+            stock_id,
             diagnostic.adjust,
             summary,
         )
@@ -588,7 +605,8 @@ class DataGapRecoveryRepository:
             )
             .join(
                 PaperDataGapRecoveryGap,
-                (PaperDataGapRecoveryGap.stock_id == PaperOrder.symbol)
+                (PaperDataGapRecoveryGap.market == PaperOrder.market)
+                & (PaperDataGapRecoveryGap.stock_id == PaperOrder.symbol)
                 & (PaperOrder.trade_date >= PaperDataGapRecoveryGap.business_date)
                 & (cutoff is None or PaperOrder.trade_date <= cutoff),
             )
@@ -635,7 +653,8 @@ class DataGapRecoveryRepository:
                 for event in DataGapRecoveryRepository._account_replay_events(self, int(account_id)):
                     symbol = event.payload.get("symbol")
                     if (
-                        symbol == gap.stock_id
+                        event.payload.get("market") == gap.market
+                        and symbol == gap.stock_id
                         and gap.business_date <= event.trade_date <= (cutoff or event.trade_date)
                         and (gap.id, int(account_id)) not in known
                     ):
@@ -676,6 +695,7 @@ class DataGapRecoveryRepository:
             if (
                 gap is None
                 or (gap.summary or {}).get("classification") == "no_impact"
+                or gap.status != DataGapRecoveryStatus.RECOVERED
                 or (end_date is not None and gap.business_date > end_date)
             ):
                 continue
@@ -705,6 +725,7 @@ class DataGapRecoveryRepository:
         status: DataGapRecoveryStatus | None = None,
         business_date: date | None = None,
         stock_id: str | None = None,
+        market: str | None = None,
         owner_user_id: int | None = None,
     ) -> list[PaperDataGapRecoveryGap]:
         query = select(PaperDataGapRecoveryGap)
@@ -714,6 +735,8 @@ class DataGapRecoveryRepository:
             query = query.where(PaperDataGapRecoveryGap.business_date == business_date)
         if stock_id is not None:
             query = query.where(PaperDataGapRecoveryGap.stock_id == stock_id)
+        if market is not None:
+            query = query.where(PaperDataGapRecoveryGap.market == market)
         if owner_user_id is not None:
             query = (
                 query.join(PaperDataGapRecoveryAccount)
@@ -736,7 +759,7 @@ class DataGapRecoveryRepository:
         status = filters.get("status")
         if status is not None:
             query = query.where(PaperDataGapRecoveryGap.status == status)
-        for name in ("business_date", "stock_id"):
+        for name in ("business_date", "stock_id", "market"):
             if filters.get(name) is not None:
                 query = query.where(getattr(PaperDataGapRecoveryGap, name) == filters[name])
         owner_user_id = filters.get("owner_user_id")

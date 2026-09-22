@@ -3,29 +3,28 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Iterable
+from typing import Any, Iterable, Protocol
 
 import numpy as np
 import pandas as pd
 
 from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType
 from download.download_manager import _validate_stock_history_data
-from download.provider_order import parse_stock_history_provider_order
+from download.provider_order import parse_hk_stock_history_provider_order, parse_stock_history_provider_order
 from paper_trading.domain.enums import (
     DataGapRecoveryAttemptOutcome,
     DataGapRecoveryClassification,
     DataGapRecoveryRouting,
     DataGapRecoveryStatus,
 )
+from paper_trading.domain.market_data_diagnostics import canonical_stock_id, validate_recovery_identity
 from storage import get_storage
 
 logger = logging.getLogger(__name__)
-_STOCK_ID = re.compile(r"^[0-9]{6}$", re.ASCII)
 
 
 def _json_safe_candidate_value(value: Any) -> Any:
@@ -57,17 +56,21 @@ def _json_safe_candidate_value(value: Any) -> Any:
 def canonical_candidate_payload(
     candidate: pd.DataFrame, *, market: str, stock_id: str, business_date: date, adjust: str
 ) -> dict[str, Any]:
-    if market != "a_share" or adjust != "bfq" or _STOCK_ID.fullmatch(stock_id) is None or len(candidate) != 1:
-        raise ValueError("approved candidate must be one a_share/bfq row with a six-digit symbol")
+    stock_id = validate_recovery_identity(market, stock_id, adjust)
+    if len(candidate) != 1:
+        raise ValueError("approved candidate must contain exactly one supported recovery row")
     row = candidate.iloc[0]
-    if str(row[COL_STOCK_ID]) != stock_id or pd.to_datetime(row[COL_DATE]).date() != business_date:
+    row_stock_id = canonical_stock_id(str(row[COL_STOCK_ID]), market)
+    if row_stock_id != stock_id or pd.to_datetime(row[COL_DATE]).date() != business_date:
         raise ValueError("approved candidate identity or date does not match the gap")
+    row_payload = {str(key): _json_safe_candidate_value(value) for key, value in row.items()}
+    row_payload[COL_STOCK_ID] = stock_id
     return {
         "market": market,
         "stock_id": stock_id,
         "business_date": business_date.isoformat(),
         "adjust": adjust,
-        "row": {str(key): _json_safe_candidate_value(value) for key, value in row.items()},
+        "row": row_payload,
     }
 
 
@@ -93,6 +96,48 @@ class _RecoveryPersistenceError(RuntimeError):
     pass
 
 
+class HkRecoveryPolicy(Protocol):
+    def evaluate(self, symbol: str, business_date: date) -> Mapping[str, Any] | Any: ...
+
+
+class HkRecoveryAuthorityPolicy:
+    """Combine date-qualified HK calendar, eligibility, and suspension evidence."""
+
+    def __init__(self, calendar: Any, eligibility: Any, suspension: Any):
+        self.calendar = calendar
+        self.eligibility = eligibility
+        self.suspension = suspension
+
+    def evaluate(self, symbol: str, business_date: date) -> Mapping[str, Any]:
+        metadata = self.eligibility.get_security(symbol, as_of=business_date)
+        suspension = self.suspension.get_symbol_suspension_evidence(symbol, business_date, "hk_connect")
+        eligible = metadata is not None and metadata.eligible and metadata.effective_date == business_date
+        source = metadata.source if metadata is not None else None
+        fresh = bool(metadata is not None and metadata.fresh and suspension.get("fresh") is True)
+        active = suspension.get("state")
+        allowed = self.calendar.is_trade_date(business_date) and eligible and active == "active" and fresh
+        return {
+            "target_date_calendar": self.calendar.is_trade_date(business_date),
+            "ordinary_eligibility": eligible,
+            "suspension": active,
+            "source": source or suspension.get("source"),
+            "freshness": fresh,
+            "decision": allowed,
+        }
+
+
+def _hk_authority_allowed(evidence: Mapping[str, Any]) -> bool:
+    return (
+        evidence.get("target_date_calendar", evidence.get("calendar")) is True
+        and evidence.get("ordinary_eligibility", evidence.get("eligible")) is True
+        and evidence.get("suspension", evidence.get("suspension_state")) == "active"
+        and isinstance(evidence.get("source"), str)
+        and bool(evidence["source"].strip())
+        and evidence.get("freshness", evidence.get("fresh")) is True
+        and evidence.get("decision", evidence.get("allow")) is True
+    )
+
+
 class DataGapRecoveryService:
     """Recover only the exact A-share daily BFQ row represented by a gap."""
 
@@ -103,6 +148,7 @@ class DataGapRecoveryService:
         downloader: Any | None = None,
         repository: Any | None = None,
         alert_service: Any | None = None,
+        hk_recovery_policy: HkRecoveryPolicy | None = None,
     ):
         if storage is None:
             storage = get_storage()
@@ -115,6 +161,7 @@ class DataGapRecoveryService:
         # Keep the in-memory fallback for existing callers that do not inject a repository.
         self.repository = repository
         self.alert_service = alert_service
+        self.hk_recovery_policy = hk_recovery_policy
 
     def recover_gaps(self, gaps: Iterable[Any], *, batch_id: int | None = None) -> list[GapRecoveryResult]:
         results = []
@@ -154,7 +201,7 @@ class DataGapRecoveryService:
                 continue
             try:
                 result = self.recover_gap(gap, batch_id=batch_id)
-                if result.status == "failed":
+                if result.status == "failed" and result.error != "invalid gap identity":
                     self.maybe_escalate_gap(
                         gap,
                         user_id=0,
@@ -183,35 +230,65 @@ class DataGapRecoveryService:
             )
         business_date: date = gap.business_date
         stock_id = gap.stock_id
-        if (
-            gap.market != "a_share"
-            or gap.adjust != "bfq"
-            or not isinstance(stock_id, str)
-            or _STOCK_ID.fullmatch(stock_id) is None
-        ):
+        try:
+            stock_id = validate_recovery_identity(gap.market, stock_id, gap.adjust)
+        except (TypeError, ValueError):
             return self._result(
                 gap, "failed", error="invalid gap identity", classification=classification, routing=routing
             )
+        if gap.market == "hk_connect":
+            authority = self._evaluate_hk_authority(stock_id, business_date)
+            if not _hk_authority_allowed(authority):
+                self._record_attempt(
+                    gap,
+                    batch_id,
+                    DataGapRecoveryAttemptOutcome.NOT_FOUND,
+                    None,
+                    classification=classification,
+                    routing=routing,
+                    extra_evidence={"hk_authority": dict(authority)},
+                )
+                return self._result(
+                    gap,
+                    "failed",
+                    error="HK authority evidence does not permit automatic recovery",
+                    classification=classification,
+                    routing=routing,
+                )
         try:
-            existing = self._read_exact(stock_id, business_date)
+            request_date = business_date.strftime("%Y%m%d")
+            is_hk = gap.market == "hk_connect"
+            existing = self._read_exact(stock_id, business_date, gap.market)
             if not existing.empty:
+                # Treat an already stored exact row as an idempotent recovery, but
+                # run it through the same cardinality checks as writes.  In
+                # particular, duplicate rows must never be silently accepted.
+                self._persist_exact(existing.iloc[[0]].copy(), gap, existing=existing)
                 self._resolve(gap)
                 return self._result(gap, "skipped", classification=classification, routing=routing)
-
-            request_date = business_date.strftime("%Y%m%d")
-            for provider in parse_stock_history_provider_order():
+            providers = parse_hk_stock_history_provider_order() if is_hk else parse_stock_history_provider_order()
+            for provider in providers:
                 try:
-                    candidate = self.downloader.dl_history_data_stock_by_provider(
+                    provider_loader = (
+                        self.downloader.dl_history_data_stock_hk_by_provider
+                        if is_hk
+                        else self.downloader.dl_history_data_stock_by_provider
+                    )
+                    candidate = provider_loader(
                         provider, stock_id, request_date, request_date, PeriodType.DAILY, AdjustType.BFQ
                     )
                     candidate = _validate_stock_history_data(candidate)
                     exact = candidate[
-                        (candidate[COL_STOCK_ID].astype(str) == stock_id)
+                        (
+                            candidate[COL_STOCK_ID].map(lambda value: canonical_stock_id(str(value), gap.market))
+                            == stock_id
+                        )
                         & (pd.to_datetime(candidate[COL_DATE]).dt.date == business_date)
                     ]
                     if len(exact) != 1:
                         raise ValueError("provider result did not contain exactly one requested row")
                     exact = exact.iloc[[0]].copy()
+                    exact.loc[:, COL_STOCK_ID] = stock_id
                     # Persist the exact validated provider row before any later
                     # escalation decision.  This is the same canonical boundary
                     # used by approved execution; it is evidence, not a second
@@ -244,10 +321,10 @@ class DataGapRecoveryService:
                         return self._result(
                             gap, "pending_approval", provider, classification=classification, routing=routing
                         )
-                    if not self.storage.save_history_data_stock(exact, PeriodType.DAILY, AdjustType.BFQ):
-                        raise _RecoveryWriteError("save returned False")
-                    if self._read_exact(stock_id, business_date).empty:
-                        raise _RecoveryWriteError("exact-key readback did not find recovered row")
+                    already_present = self._persist_exact(exact, gap, existing=existing)
+                    if already_present:
+                        self._resolve(gap)
+                        return self._result(gap, "skipped", provider, classification=classification, routing=routing)
                 except _RecoveryWriteError as exc:
                     self._record_attempt(
                         gap,
@@ -401,10 +478,12 @@ class DataGapRecoveryService:
                 raise ValueError("approved candidate payload is required")
             if canonical_candidate_hash(stored_payload) != candidate_hash:
                 raise ValueError("approved candidate payload does not match approved hash")
-            existing = self._read_exact(locked_gap.stock_id, locked_gap.business_date)
-            if not existing.empty:
-                if not self._exact_rows_match_candidate(existing, stored_candidate, locked_gap):
-                    raise _RecoveryWriteError("existing exact row differs from approved candidate")
+            if locked_gap.market == "hk_connect":
+                stored_candidate = stored_candidate.copy()
+                stored_candidate.loc[:, COL_STOCK_ID] = validate_recovery_identity(
+                    locked_gap.market, locked_gap.stock_id, locked_gap.adjust
+                )
+            if self._persist_exact(stored_candidate, locked_gap):
                 if resolve_gap is None:
                     self._resolve(locked_gap)
                 else:
@@ -415,10 +494,6 @@ class DataGapRecoveryService:
                 return self._result(
                     locked_gap, "recovered", classification=locked_classification, routing=locked_routing
                 )
-            if not self.storage.save_history_data_stock(stored_candidate, PeriodType.DAILY, AdjustType.BFQ):
-                raise _RecoveryWriteError("save returned False")
-            if self._read_exact(locked_gap.stock_id, locked_gap.business_date).empty:
-                raise _RecoveryWriteError("exact-key readback did not find recovered row")
             if resolve_gap is None:
                 self._resolve(locked_gap)
             else:
@@ -490,20 +565,55 @@ class DataGapRecoveryService:
             routing if routing is not None else default_routing,
         )
 
-    def _read_exact(self, stock_id: str, business_date: date) -> pd.DataFrame:
+    def _read_exact(self, stock_id: str, business_date: date, market: str = "a_share") -> pd.DataFrame:
         value = business_date.isoformat()
-        rows = self.storage.load_history_data_stock(
-            stock_id, PeriodType.DAILY, AdjustType.BFQ, start_date=value, end_date=value
-        )
-        if rows.empty or COL_STOCK_ID not in rows or COL_DATE not in rows:
+        if market == "hk_connect":
+            rows = self.storage.load_history_data_stock_hk_ggt(
+                stock_id, PeriodType.DAILY, AdjustType.BFQ, start_date=value, end_date=value
+            )
+        else:
+            rows = self.storage.load_history_data_stock(
+                stock_id, PeriodType.DAILY, AdjustType.BFQ, start_date=value, end_date=value
+            )
+        if not isinstance(rows, pd.DataFrame) or rows.empty or COL_STOCK_ID not in rows or COL_DATE not in rows:
             return rows.iloc[0:0]
         return rows[
-            (rows[COL_STOCK_ID].astype(str) == stock_id)
+            (rows[COL_STOCK_ID].map(lambda value: canonical_stock_id(str(value), market)) == stock_id)
             & (pd.to_datetime(rows[COL_DATE], errors="coerce").dt.date == business_date)
         ]
 
+    def _persist_exact(self, candidate: pd.DataFrame, gap: Any, *, existing: pd.DataFrame | None = None) -> bool:
+        """Persist one exact row, treating an equal existing row as idempotent."""
+        stock_id = validate_recovery_identity(gap.market, gap.stock_id, gap.adjust)
+        stored_existing = (
+            existing if existing is not None else self._read_exact(stock_id, gap.business_date, gap.market)
+        )
+        if len(stored_existing) > 1:
+            raise _RecoveryWriteError("multiple existing exact rows match recovery key")
+        if len(stored_existing) == 1:
+            if not self._exact_rows_match_candidate(stored_existing, candidate, gap):
+                raise _RecoveryWriteError("existing exact row differs from recovery candidate")
+            return True
+
+        if gap.market == "hk_connect":
+            saved = self.storage.save_history_data_hk_stock(candidate, PeriodType.DAILY, AdjustType.BFQ)
+        else:
+            saved = self.storage.save_history_data_stock(candidate, PeriodType.DAILY, AdjustType.BFQ)
+        if not saved:
+            raise _RecoveryWriteError("save returned False")
+        readback = self._read_exact(stock_id, gap.business_date, gap.market)
+        if len(readback) != 1:
+            if len(readback) > 1:
+                raise _RecoveryWriteError("multiple exact rows found after recovery write")
+            raise _RecoveryWriteError("exact-key readback did not find recovered row")
+        return False
+
     @staticmethod
     def _exact_rows_match_candidate(existing: pd.DataFrame, candidate: pd.DataFrame, gap: Any) -> bool:
+        existing = existing.copy()
+        candidate = candidate.copy()
+        for frame in (existing, candidate):
+            frame[COL_DATE] = frame[COL_DATE].astype(object).map(lambda value: pd.to_datetime(value).date().isoformat())
         candidate_payload = canonical_candidate_payload(
             candidate,
             market=gap.market,
@@ -532,6 +642,7 @@ class DataGapRecoveryService:
         *,
         classification: str,
         routing: str,
+        extra_evidence: Mapping[str, Any] | None = None,
     ) -> None:
         if self.repository is not None:
             evidence = {
@@ -540,10 +651,36 @@ class DataGapRecoveryService:
             }
             if provider:
                 evidence["provider"] = provider
+            if extra_evidence:
+                evidence.update(extra_evidence)
             try:
                 self.repository.record_attempt(gap.id, batch_id, outcome, evidence)
             except Exception as exc:  # noqa: BLE001
                 raise _RecoveryPersistenceError(str(exc)) from exc
+
+    def _evaluate_hk_authority(self, stock_id: str, business_date: date) -> Mapping[str, Any]:
+        if self.hk_recovery_policy is None:
+            return {
+                "target_date_calendar": None,
+                "ordinary_eligibility": None,
+                "suspension": "unknown",
+                "source": None,
+                "freshness": False,
+                "decision": False,
+            }
+        try:
+            result = self.hk_recovery_policy.evaluate(stock_id, business_date)
+            return dict(result) if isinstance(result, Mapping) else dict(vars(result))
+        except Exception as exc:
+            return {
+                "target_date_calendar": None,
+                "ordinary_eligibility": None,
+                "suspension": "unknown",
+                "source": None,
+                "freshness": False,
+                "decision": False,
+                "reason": str(exc),
+            }
 
     def _resolve(self, gap: Any) -> None:
         if self.repository is not None and hasattr(self.repository, "resolve_gap"):

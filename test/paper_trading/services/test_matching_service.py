@@ -1467,7 +1467,7 @@ def test_matching_fill_resolves_historical_retry_diagnostic(tmp_path):
     engine.dispose()
 
 
-def test_matching_hk_fill_does_not_resolve_historical_bfq_diagnostic(tmp_path):
+def test_matching_hk_fill_resolves_historical_bfq_diagnostic(tmp_path):
     engine, session, repo, order_service, _, trade_date = _services(tmp_path)
     account = repo.create_account("hk-historical-retry", Decimal("100000.00"))
     repo.upsert_daily_bar_diagnostic(
@@ -1495,8 +1495,8 @@ def test_matching_hk_fill_does_not_resolve_historical_bfq_diagnostic(tmp_path):
 
     assert matching_service.match_order(order) == "filled"
     diagnostic = next(item for item in repo.list_daily_bar_diagnostics() if item.stock_id == "00700")
-    assert diagnostic.resolved is False
-    assert diagnostic.classification == "missing_exact_date"
+    assert diagnostic.resolved is True
+    assert diagnostic.classification == "resolved"
     engine.dispose()
 
 
@@ -1726,8 +1726,8 @@ def test_matching_same_symbol_isolates_fills_lots_pnl_and_diagnostics(sqlite_ses
     trade_date = date(2026, 7, 21)
     repo.upsert_position(account.id, Market.A_SHARE, "000001", 100, 100, Decimal("900.00"))
     repo.create_position_lot(account.id, Market.A_SHARE, "000001", date(2026, 7, 20), 100, 100, Decimal("9.00"))
-    repo.upsert_position(account.id, Market.HK_CONNECT, "000001", 200, 0, Decimal("1600.00"))
-    repo.create_position_lot(account.id, Market.HK_CONNECT, "000001", date(2026, 7, 20), 200, 200, Decimal("8.00"))
+    repo.upsert_position(account.id, Market.HK_CONNECT, "00001", 200, 0, Decimal("1600.00"))
+    repo.create_position_lot(account.id, Market.HK_CONNECT, "00001", date(2026, 7, 20), 200, 200, Decimal("8.00"))
     a_share_order = repo.create_order(
         account.id,
         "000001",
@@ -1741,7 +1741,7 @@ def test_matching_same_symbol_isolates_fills_lots_pnl_and_diagnostics(sqlite_ses
     )
     hk_order = repo.create_order(
         account.id,
-        "000001",
+        "00001",
         OrderSide.BUY,
         100,
         Decimal("10.00"),
@@ -1765,12 +1765,12 @@ def test_matching_same_symbol_isolates_fills_lots_pnl_and_diagnostics(sqlite_ses
     assert service.match_order(a_share_order) == "filled"
     assert service.match_order(hk_order) == "warning"
     assert repo.get_position(account.id, Market.A_SHARE, "000001") is None
-    hk_connect_position = repo.get_position(account.id, Market.HK_CONNECT, "000001")
+    hk_connect_position = repo.get_position(account.id, Market.HK_CONNECT, "00001")
     assert hk_connect_position is not None
     assert hk_connect_position.total_quantity == 200
-    assert repo.get_lots(account.id, Market.HK_CONNECT, "000001")[0].remaining_quantity == 200
+    assert repo.get_lots(account.id, Market.HK_CONNECT, "00001")[0].remaining_quantity == 200
     reloaded_account = repo.get_account(account.id)
     assert reloaded_account is not None
     assert reloaded_account.realized_pnl == Decimal("94.4900")
     diagnostics = repo.list_daily_bar_diagnostics()
-    assert [(item.market, item.stock_id, item.resolved) for item in diagnostics] == [("hk_connect", "000001", False)]
+    assert [(item.market, item.stock_id, item.resolved) for item in diagnostics] == [("hk_connect", "00001", False)]

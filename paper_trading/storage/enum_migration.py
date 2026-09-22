@@ -69,6 +69,8 @@ from storage.model import (
     User,
 )
 from storage.model.paper_trading import (
+    DATA_GAP_RECOVERY_LEGACY_SYMBOL_CHECK_SQL,
+    DATA_GAP_RECOVERY_STOCK_ID_CHECK_NAME,
     DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL,
     ETF_ELIGIBILITY_SYMBOL_CHECK_NAME,
     ETF_ELIGIBILITY_SYMBOL_CHECK_SQL,
@@ -796,17 +798,9 @@ def _validate_recovery_constraints(connection: Connection) -> None:
             raise PaperTradingEnumMigrationError(
                 f"incomplete recovery schema; migration refused: invalid keys on {table_name}"
             )
-    expected_checks = {
-        "paper_data_gap_recovery_gaps": {
-            "ck_paper_data_gap_recovery_a_share",
-            "ck_paper_data_gap_recovery_bfq",
-            "ck_paper_data_gap_recovery_stock_id_six_ascii_digits",
-        }
-    }
+    expected_checks = {"paper_data_gap_recovery_gaps": {"ck_paper_data_gap_recovery_bfq"}}
     expected_check_definitions = {
-        "ck_paper_data_gap_recovery_a_share": "market = 'a_share'",
         "ck_paper_data_gap_recovery_bfq": "adjust = 'bfq'",
-        "ck_paper_data_gap_recovery_stock_id_six_ascii_digits": DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL,
     }
     for table_name, constraint_names in expected_checks.items():
         observed_checks = {
@@ -826,6 +820,39 @@ def _validate_recovery_constraints(connection: Connection) -> None:
             raise PaperTradingEnumMigrationError(
                 f"incomplete recovery schema; migration refused: invalid checks on {table_name}"
             )
+        if table_name == "paper_data_gap_recovery_gaps":
+            new_check = observed_checks.get(DATA_GAP_RECOVERY_STOCK_ID_CHECK_NAME)
+            legacy_checks = {
+                "ck_paper_data_gap_recovery_a_share": observed_checks.get("ck_paper_data_gap_recovery_a_share"),
+                "ck_paper_data_gap_recovery_stock_id_six_ascii_digits": observed_checks.get(
+                    "ck_paper_data_gap_recovery_stock_id_six_ascii_digits"
+                ),
+            }
+            if new_check is None and not all(legacy_checks.values()):
+                raise PaperTradingEnumMigrationError(
+                    "incomplete recovery schema; migration refused: invalid checks on paper_data_gap_recovery_gaps"
+                )
+            if new_check is None:
+                legacy_market_check = legacy_checks["ck_paper_data_gap_recovery_a_share"]
+                legacy_stock_check = legacy_checks["ck_paper_data_gap_recovery_stock_id_six_ascii_digits"]
+                assert legacy_market_check is not None and legacy_stock_check is not None
+                if not _recovery_check_definition_matches(legacy_market_check, "market = 'a_share'") or not (
+                    _recovery_check_definition_matches(legacy_stock_check, DATA_GAP_RECOVERY_LEGACY_SYMBOL_CHECK_SQL)
+                ):
+                    raise PaperTradingEnumMigrationError(
+                        "incomplete recovery schema; migration refused: invalid checks on paper_data_gap_recovery_gaps"
+                    )
+            if new_check is not None and not _recovery_check_definition_matches(
+                new_check, DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL
+            ):
+                raise PaperTradingEnumMigrationError(
+                    "incomplete recovery schema; migration refused: invalid checks on paper_data_gap_recovery_gaps"
+                )
+            if new_check is not None and any(value is not None for value in legacy_checks.values()):
+                # The upgraded schema must not retain a partially replaced identity check set.
+                raise PaperTradingEnumMigrationError(
+                    "incomplete recovery schema; migration refused: invalid checks on paper_data_gap_recovery_gaps"
+                )
     foreign_keys = {
         ("paper_data_gap_recovery_candidates", ("gap_id",), "paper_data_gap_recovery_gaps"),
         ("paper_data_gap_recovery_attempts", ("gap_id",), "paper_data_gap_recovery_gaps"),
@@ -867,9 +894,7 @@ def _recovery_check_definition_matches(observed: str, expected: str) -> bool:
     expected_normalized = _normalize_recovery_check_definition(expected)
     if observed_normalized == expected_normalized:
         return True
-    return expected_normalized.startswith("lengthstock_id=6andlength") and bool(
-        re.search(r"stock_id.*~.*'\^\[0-9\]\{6\}\$'", observed_normalized)
-    )
+    return expected == DATA_GAP_RECOVERY_LEGACY_SYMBOL_CHECK_SQL and observed_normalized == ("stock_id~'^[0-9]{6}$'")
 
 
 def _validate_recovery_append_only(connection: Connection) -> None:
@@ -923,6 +948,7 @@ def _adapter_apply(connection: Connection) -> bool:
             _alter_group(connection, group, rollback=False)
         ensure_snapshot_valuation_metadata(connection)
         _upgrade_market_qualified_keys(connection)
+        changed = _upgrade_recovery_identity_constraints(connection) or changed
         _preflight(connection, groups, rollback=False)
         _ensure_recovery_append_only(connection)
         return True
@@ -938,9 +964,44 @@ def _adapter_apply(connection: Connection) -> bool:
             _alter_group(connection, group, rollback=False)
     changed = ensure_snapshot_valuation_metadata(connection) or changed
     _upgrade_market_qualified_keys(connection)
+    changed = _upgrade_recovery_identity_constraints(connection) or changed
     if groups is PAPER_TRADING_ENUM_GROUPS:
         _create_missing_tables(connection, set(), create_operational_tables=True)
         _ensure_recovery_append_only(connection)
+    return changed
+
+
+def _upgrade_recovery_identity_constraints(connection: Connection) -> bool:
+    if connection.dialect.name != "postgresql" or not _table_exists(connection, "paper_data_gap_recovery_gaps"):
+        return False
+    changed = False
+    column = _column_facts(
+        connection,
+        PaperTradingEnumColumn("paper_data_gap_recovery_gaps", "stock_id", "", None, False),
+    )
+    if column is not None and column[0] != "character varying(20)":
+        connection.execute(
+            text(
+                "ALTER TABLE paper_data_gap_recovery_gaps ALTER COLUMN stock_id TYPE VARCHAR(20) "
+                "USING stock_id::varchar(20)"
+            )
+        )
+        changed = True
+    for constraint_name in (
+        "ck_paper_data_gap_recovery_a_share",
+        "ck_paper_data_gap_recovery_stock_id_six_ascii_digits",
+    ):
+        if _constraint_exists(connection, "paper_data_gap_recovery_gaps", constraint_name):
+            connection.execute(text(f"ALTER TABLE paper_data_gap_recovery_gaps DROP CONSTRAINT {constraint_name}"))
+            changed = True
+    if not _constraint_exists(connection, "paper_data_gap_recovery_gaps", DATA_GAP_RECOVERY_STOCK_ID_CHECK_NAME):
+        connection.execute(
+            text(
+                f"ALTER TABLE paper_data_gap_recovery_gaps ADD CONSTRAINT {DATA_GAP_RECOVERY_STOCK_ID_CHECK_NAME} "
+                f"CHECK ({DATA_GAP_RECOVERY_SYMBOL_CHECK_SQL})"
+            )
+        )
+        changed = True
     return changed
 
 

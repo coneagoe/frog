@@ -7,10 +7,10 @@ from email.message import EmailMessage
 from typing import Any, Callable, cast
 
 from paper_trading.domain.enums import DataGapRecoveryAlertDeliveryState
+from paper_trading.domain.market_data_diagnostics import validate_recovery_identity
 
 _SENSITIVE_ERROR = re.compile(r"(?i)(password|passwd|secret|token|api[_ -]?key)\s*[=:]\s*[^\s,;]+")
 _SAFE_TOKEN = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,47}$")
-_SAFE_STOCK = re.compile(r"^[0-9]{6}$")
 
 
 class DataGapAlertService:
@@ -45,7 +45,12 @@ class DataGapAlertService:
         account_id: int | None = None,
     ) -> Any:
         failure_class = self._safe_token(failure_class, "failure_class")
-        if not isinstance(gap.id, int) or gap.id <= 0 or not _SAFE_STOCK.fullmatch(str(gap.stock_id)):
+        market = getattr(gap, "market", "a_share")
+        try:
+            stock_id = validate_recovery_identity(market, str(gap.stock_id), getattr(gap, "adjust", "bfq"))
+        except ValueError as exc:
+            raise ValueError("invalid gap identifier") from exc
+        if not isinstance(gap.id, int) or gap.id <= 0:
             raise ValueError("invalid gap identifier")
         if account_id is not None and (not isinstance(account_id, int) or account_id <= 0):
             raise ValueError("invalid account identifier")
@@ -53,7 +58,8 @@ class DataGapAlertService:
             "event": subject.lower().replace(" ", "_"),
             "failure_class": failure_class,
             "business_date": gap.business_date.isoformat(),
-            "stock_id": gap.stock_id,
+            "market": market,
+            "stock_id": stock_id,
         }
         if account_id is not None:
             evidence["account_id"] = account_id
@@ -61,7 +67,7 @@ class DataGapAlertService:
         if not claimed:
             return alert
         try:
-            self.sender(subject, self._body(gap, failure_class, account_id))
+            self.sender(subject, self._body(gap, failure_class, account_id, market=market, stock_id=stock_id))
         except Exception as exc:  # noqa: BLE001
             return self.repository.update_alert_delivery(
                 alert.id,
@@ -73,11 +79,19 @@ class DataGapAlertService:
         )
 
     @staticmethod
-    def _body(gap: Any, failure_class: str, account_id: int | None) -> str:
+    def _body(
+        gap: Any,
+        failure_class: str,
+        account_id: int | None,
+        *,
+        market: str = "a_share",
+        stock_id: str | None = None,
+    ) -> str:
         account = f" account_id={account_id}" if account_id is not None else ""
+        stock_id = stock_id or str(gap.stock_id)
         return (
             "Data gap recovery alert\n"
-            f"gap_id={gap.id} business_date={gap.business_date.isoformat()} stock_id={gap.stock_id}"
+            f"gap_id={gap.id} business_date={gap.business_date.isoformat()} market={market} stock_id={stock_id}"
             f"{account} failure_class={failure_class}"
         )
 

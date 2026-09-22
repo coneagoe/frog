@@ -307,13 +307,14 @@ def test_warning_summary_and_matching_warning_run_unified_recovery(monkeypatch):
 
     service = Mock()
     service.recover_unresolved_ordinary_gaps.return_value = []
+    service_factory = Mock(return_value=service)
     repository = Mock()
     repository.list_unresolved_ordinary_diagnostics.return_value = []
     batch = Mock(id=1)
     repository.record_batch.return_value = batch
     session = MagicMock()
     storage = MagicMock(Session=Mock(return_value=session))
-    monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: service)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", service_factory)
     monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
     monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
     monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: date(2026, 7, 28))
@@ -322,7 +323,41 @@ def test_warning_summary_and_matching_warning_run_unified_recovery(monkeypatch):
     )
     assert result["gap_count"] == 0
     service.recover_unresolved_ordinary_gaps.assert_called_once_with([], batch_id=1)
+    assert service_factory.call_args.kwargs["hk_recovery_policy"] is not None
+    assert service_factory.call_args.kwargs["hk_recovery_policy"].calendar.__class__.__name__ == "HkTradeCalendar"
     session.close.assert_called_once()
+
+
+def test_hk_diagnostic_selection_requires_authority_but_keeps_a_share(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    business_date = date(2026, 7, 28)
+    a_share = SimpleNamespace(market="a_share", stock_id="000001")
+    hk = SimpleNamespace(market="hk_connect", stock_id="00700")
+    repository = Mock()
+    repository.list_unresolved_ordinary_diagnostics.return_value = [a_share, hk]
+    authority = Mock()
+    authority.evaluate.return_value = {
+        "target_date_calendar": True,
+        "ordinary_eligibility": True,
+        "suspension": "active",
+        "source": "official",
+        "freshness": True,
+        "decision": True,
+    }
+
+    selected = dag_module.get_unresolved_ordinary_gaps(
+        repository=repository, business_date=business_date, hk_recovery_policy=authority
+    )
+
+    assert selected == [a_share, hk]
+    authority.evaluate.assert_called_once_with("00700", business_date)
+
+    authority.evaluate.return_value = {"decision": None}
+    assert dag_module.get_unresolved_ordinary_gaps(
+        repository=repository, business_date=business_date, hk_recovery_policy=authority
+    ) == [a_share]
 
 
 def test_unified_recovery_uses_detached_gaps_and_persistence_repository(monkeypatch):
@@ -421,6 +456,59 @@ def test_unified_recovery_callable_does_not_invoke_account_side_effect_apis(monk
     account_recovery.assert_called_once()
     assert account_recovery.call_args.kwargs["affected_account_ids"] == []
     assert account_recovery.call_args.kwargs["recovery_work"] == []
+
+
+def test_unified_recovery_sends_only_recovered_and_skipped_work_to_accounts(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    @dataclass
+    class RecoveryResult:
+        gap_id: int
+        status: str
+
+    business_date = date(2026, 7, 28)
+    diagnostic = SimpleNamespace(classification="missing_market_data")
+    gap = SimpleNamespace(
+        id=7,
+        business_date=business_date,
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+    repository = Mock()
+    repository.list_unresolved_ordinary_diagnostics.return_value = [diagnostic]
+    repository.get_or_create_gap_from_diagnostic.return_value = gap
+    repository.record_batch.return_value = SimpleNamespace(id=3)
+    persistence = Mock()
+    persistence.list_batch_account_recovery.return_value = [
+        {"gap_id": 7, "account_id": 11, "start_date": business_date, "end_date": business_date},
+        {"gap_id": 8, "account_id": 22, "start_date": business_date, "end_date": business_date},
+        {"gap_id": 9, "account_id": 33, "start_date": business_date, "end_date": business_date},
+    ]
+    persistence.list_retryable_recovery_work.return_value = []
+    service = Mock()
+    service.recover_unresolved_ordinary_gaps.return_value = [
+        RecoveryResult(7, "recovered"),
+        RecoveryResult(8, "failed"),
+        RecoveryResult(9, "skipped"),
+    ]
+    storage = MagicMock(Session=Mock(return_value=MagicMock()))
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: business_date)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
+    monkeypatch.setattr(dag_module, "_FreshSessionRecoveryRepository", lambda storage: persistence)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: service)
+    account_recovery = Mock(return_value={})
+    monkeypatch.setattr(dag_module, "run_paper_trading_account_recovery", account_recovery)
+
+    dag_module.run_unified_bfq_data_gap_recovery(
+        ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
+    )
+
+    assert account_recovery.call_args.kwargs["affected_account_ids"] == [11, 33]
+    assert [item["gap_id"] for item in account_recovery.call_args.kwargs["recovery_work"]] == [7, 9]
 
 
 def test_unexpected_recovery_failure_preserves_processed_batch_counts(monkeypatch):

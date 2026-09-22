@@ -21,6 +21,7 @@ from common.const import (
 )
 from paper_trading.storage.market_data import DailyBar, StorageMarketDataProvider
 from storage.model.base import Base
+from storage.model.hk_recovery_authority import HkRecoveryAuthority
 from storage.model.stk_limit_a_stock import StkLimitAStock
 from storage.model.suspend_d_a_stock import SuspendDAStock
 from test.paper_trading.fakes import FakeHistoryStorage, FakeMarketDataProvider, FakeTradeCalendar
@@ -351,6 +352,51 @@ def test_provider_reports_false_when_market_has_no_suspension_source(monkeypatch
 
     assert provider.is_symbol_suspended("00700.HK", date(2026, 8, 25), "hk_connect") is False
     assert provider.is_symbol_suspended("518880", date(2026, 8, 25), "etf") is False
+
+
+@pytest.mark.parametrize(
+    "evidence, expected",
+    [
+        ({"state": "active", "source": "hk_authority", "fresh": True}, "active"),
+        ({"state": "suspended", "source": "hk_authority", "fresh": True}, "suspended"),
+        ({"state": "unknown", "source": None, "fresh": False}, "unknown"),
+    ],
+)
+def test_hk_suspension_authority_returns_three_state_evidence(evidence, expected):
+    provider = StorageMarketDataProvider(
+        FakeHistoryStorage({}), FakeTradeCalendar([]), hk_suspension_authority=lambda *_: evidence
+    )
+
+    assert provider.get_symbol_suspension_evidence("00700", date(2026, 8, 25), "hk_connect") == evidence
+    assert provider.get_symbol_suspension_state("00700", date(2026, 8, 25), "hk_connect") == expected
+
+
+def test_real_model_path_reads_hk_suspension_authority(tmp_path):
+    from sqlalchemy import create_engine
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'hk_authority.db'}")
+    Base.metadata.create_all(engine, tables=[HkRecoveryAuthority.__table__])
+    with engine.begin() as connection:
+        connection.execute(
+            HkRecoveryAuthority.__table__.insert(),
+            {
+                "股票代码": "00700",
+                "authority_date": date(2026, 8, 25),
+                "eligible": True,
+                "suspension_state": "active",
+                "source": "official",
+                "fresh": True,
+            },
+        )
+
+    provider = StorageMarketDataProvider(FakeStorageWithEngine(engine, {}), FakeTradeCalendar([]))
+
+    assert provider.get_symbol_suspension_evidence("00700", date(2026, 8, 25), "hk_connect") == {
+        "state": "active",
+        "source": "official",
+        "fresh": True,
+    }
+    engine.dispose()
 
 
 def test_provider_does_not_treat_missing_bar_as_suspension():
