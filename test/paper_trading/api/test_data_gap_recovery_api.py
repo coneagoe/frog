@@ -1,8 +1,13 @@
+import os
+import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 from paper_trading.api.app import create_app
 from paper_trading.api.deps import get_session
@@ -13,9 +18,56 @@ from paper_trading.domain.enums import (
     DataGapRecoveryBatchStatus,
 )
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
+from paper_trading.storage.enum_migration import migrate_paper_trading_enums
+from paper_trading.storage.models import (
+    PaperAccount,
+    PaperDataGapRecoveryAccount,
+    PaperDataGapRecoveryAlert,
+    PaperDataGapRecoveryApproval,
+    PaperDataGapRecoveryAttempt,
+    PaperDataGapRecoveryBatch,
+    PaperDataGapRecoveryCandidate,
+    PaperDataGapRecoveryGap,
+)
 from paper_trading.storage.repository import PaperTradingRepository
+from storage.enum_migration import migrate_storage_enums
 from storage.model.auth import User
 from storage.model.base import Base
+
+
+@pytest.fixture
+def postgresql_api_session():
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    schema_name = f"paper_data_gap_recovery_api_{uuid.uuid4().hex}"
+    engine = create_engine(cast(str, url), connect_args={"options": f"-csearch_path={schema_name}"})
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+        Base.metadata.create_all(connection, tables=[User.__table__])
+        migrate_storage_enums(connection)
+        migrate_paper_trading_enums(connection)
+        Base.metadata.create_all(
+            connection,
+            tables=[
+                PaperAccount.__table__,
+                PaperDataGapRecoveryGap.__table__,
+                PaperDataGapRecoveryCandidate.__table__,
+                PaperDataGapRecoveryAttempt.__table__,
+                PaperDataGapRecoveryApproval.__table__,
+                PaperDataGapRecoveryAccount.__table__,
+                PaperDataGapRecoveryBatch.__table__,
+                PaperDataGapRecoveryAlert.__table__,
+            ],
+        )
+    try:
+        with Session(engine) as session:
+            yield session
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        engine.dispose()
+
 
 AUTH_HEADERS = {"Authorization": "Bearer secret"}
 GET_PATHS = [
@@ -366,3 +418,25 @@ def test_data_gap_recovery_mutations_map_missing_and_stale_to_expected_errors(mo
         client.post(path.replace(str(gap.id), "999"), json={"candidate_hash": "c" * 64}, headers=headers).status_code
         == 404
     )
+
+
+def test_postgresql_detail_is_read_only_and_exposes_persisted_evidence(postgresql_api_session, monkeypatch):
+    monkeypatch.setenv("PAPER_TRADING_API_TOKEN", "secret")
+    repository = DataGapRecoveryRepository(postgresql_api_session)
+    gap = repository.record_gap(date(2026, 9, 3), "hk_connect", "700", "bfq", {"diagnostic": True})
+    repository.record_candidate(gap.id, "a" * 64, {"close": 10}, {"valid": True}, "provider")
+    repository.record_attempt(gap.id, None, DataGapRecoveryAttemptOutcome.NOT_FOUND, {"source": "provider"})
+    postgresql_api_session.commit()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: postgresql_api_session
+    client = TestClient(app)
+
+    response = client.get(f"/paper/data-gap-recovery/gaps/{gap.id}", headers=AUTH_HEADERS)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stock_id"] == "00700"
+    assert body["candidates"][0]["payload"] == {"close": 10}
+    assert body["attempts"][0]["evidence"] == {"source": "provider"}
+
+    assert client.post(f"/paper/data-gap-recovery/gaps/{gap.id}", headers=AUTH_HEADERS).status_code == 405
+    assert client.get(f"/paper/data-gap-recovery/gaps/{gap.id}", headers=AUTH_HEADERS).json()["status"] == "open"

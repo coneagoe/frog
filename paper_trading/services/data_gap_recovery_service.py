@@ -15,6 +15,7 @@ import pandas as pd
 from common.const import COL_DATE, COL_STOCK_ID, AdjustType, PeriodType
 from download.download_manager import _validate_stock_history_data
 from download.provider_order import parse_hk_stock_history_provider_order, parse_stock_history_provider_order
+from monitor.monitor_health import sanitize_error_detail
 from paper_trading.domain.enums import (
     DataGapRecoveryAttemptOutcome,
     DataGapRecoveryClassification,
@@ -22,6 +23,7 @@ from paper_trading.domain.enums import (
     DataGapRecoveryStatus,
 )
 from paper_trading.domain.market_data_diagnostics import canonical_stock_id, validate_recovery_identity
+from paper_trading.services.trade_calendar import HkTradeCalendar
 from storage import get_storage
 
 logger = logging.getLogger(__name__)
@@ -149,6 +151,7 @@ class DataGapRecoveryService:
         repository: Any | None = None,
         alert_service: Any | None = None,
         hk_recovery_policy: HkRecoveryPolicy | None = None,
+        hk_trade_calendar: Any | None = None,
     ):
         if storage is None:
             storage = get_storage()
@@ -162,6 +165,7 @@ class DataGapRecoveryService:
         self.repository = repository
         self.alert_service = alert_service
         self.hk_recovery_policy = hk_recovery_policy
+        self.hk_trade_calendar = hk_trade_calendar
 
     def recover_gaps(self, gaps: Iterable[Any], *, batch_id: int | None = None) -> list[GapRecoveryResult]:
         results = []
@@ -171,7 +175,7 @@ class DataGapRecoveryService:
             except Exception as exc:  # noqa: BLE001
                 logger.exception("BFQ gap recovery failed at batch boundary: gap_id=%s", getattr(gap, "id", None))
                 self._send_recovery_system_failure(gap, exc)
-                results.append(self._result(gap, "failed", error=str(exc)))
+                results.append(self._result(gap, "failed", error=sanitize_error_detail(exc)))
         return results
 
     def recover_unresolved_ordinary_gaps(
@@ -211,7 +215,13 @@ class DataGapRecoveryService:
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Unified ordinary gap recovery failed: gap_id=%s", getattr(gap, "id", None))
                 results.append(
-                    GapRecoveryResult(gap.id, "failed", error=str(exc), classification=classification, routing=routing)
+                    GapRecoveryResult(
+                        gap.id,
+                        "failed",
+                        error=sanitize_error_detail(exc),
+                        classification=classification,
+                        routing=routing,
+                    )
                 )
         return results
 
@@ -335,9 +345,14 @@ class DataGapRecoveryService:
                         routing=routing,
                     )
                     self._send_recovery_system_failure(gap, exc)
-                    return self._result(gap, "failed", provider, str(exc), classification, routing)
+                    return self._result(gap, "failed", provider, sanitize_error_detail(exc), classification, routing)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("BFQ gap provider failed: stock_id=%s provider=%s error=%s", stock_id, provider, exc)
+                    logger.warning(
+                        "BFQ gap provider failed: stock_id=%s provider=%s error=%s",
+                        stock_id,
+                        provider,
+                        sanitize_error_detail(exc),
+                    )
                     continue
                 self._record_attempt(
                     gap,
@@ -360,10 +375,14 @@ class DataGapRecoveryService:
             )
             error = RuntimeError("all providers failed")
             self._send_recovery_system_failure(gap, error)
-            return self._result(gap, "failed", error=str(error), classification=classification, routing=routing)
+            return self._result(
+                gap, "failed", error=sanitize_error_detail(error), classification=classification, routing=routing
+            )
         except _RecoveryPersistenceError as exc:
             self._send_recovery_system_failure(gap, exc)
-            return self._result(gap, "failed", error=str(exc), classification=classification, routing=routing)
+            return self._result(
+                gap, "failed", error=sanitize_error_detail(exc), classification=classification, routing=routing
+            )
         except Exception as exc:  # noqa: BLE001
             self._record_attempt(
                 gap,
@@ -374,7 +393,9 @@ class DataGapRecoveryService:
                 routing=routing,
             )
             self._send_recovery_system_failure(gap, exc)
-            return self._result(gap, "failed", error=str(exc), classification=classification, routing=routing)
+            return self._result(
+                gap, "failed", error=sanitize_error_detail(exc), classification=classification, routing=routing
+            )
 
     def maybe_escalate_gap(
         self,
@@ -400,10 +421,17 @@ class DataGapRecoveryService:
             and getattr(attempt, "batch_id", None) is not None
         }
         today = as_of or date.today()
-        business_days = sum(
-            (gap.business_date + timedelta(days=offset)).weekday() < 5
-            for offset in range(max(0, (today - gap.business_date).days + 1))
-        )
+        if getattr(gap, "market", None) == "hk_connect":
+            calendar = self.hk_trade_calendar or HkTradeCalendar()
+            business_days = sum(
+                calendar.is_trade_date(gap.business_date + timedelta(days=offset))
+                for offset in range(max(0, (today - gap.business_date).days + 1))
+            )
+        else:
+            business_days = sum(
+                (gap.business_date + timedelta(days=offset)).weekday() < 5
+                for offset in range(max(0, (today - gap.business_date).days + 1))
+            )
         if len(unavailable_batches) < 3 and business_days < 5:
             return False
         self.repository.escalate_gap(gap.id, user_id, user_snapshot, reason=reason)
@@ -509,8 +537,9 @@ class DataGapRecoveryService:
                 raise ValueError("approval repository did not execute the write callback")
             return result
         except Exception as exc:  # noqa: BLE001
-            status = "pending_approval" if "stale" in str(exc) else "failed"
-            return self._result(gap, status, error=str(exc), classification=classification, routing=routing)
+            detail = sanitize_error_detail(exc) or ""
+            status = "pending_approval" if "stale" in detail else "failed"
+            return self._result(gap, status, error=detail, classification=classification, routing=routing)
 
     @staticmethod
     def _is_terminal(gap: Any) -> bool:
@@ -679,7 +708,7 @@ class DataGapRecoveryService:
                 "source": None,
                 "freshness": False,
                 "decision": False,
-                "reason": str(exc),
+                "reason": sanitize_error_detail(exc),
             }
 
     def _resolve(self, gap: Any) -> None:

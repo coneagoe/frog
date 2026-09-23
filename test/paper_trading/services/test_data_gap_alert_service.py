@@ -1,13 +1,48 @@
+import os
+import uuid
 from datetime import date
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from paper_trading.domain.enums import DataGapRecoveryAlertDeliveryState
 from paper_trading.services.data_gap_alert_service import DataGapAlertService
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
+from paper_trading.storage.enum_migration import migrate_paper_trading_enums
+from paper_trading.storage.models import PaperDataGapRecoveryAlert, PaperDataGapRecoveryGap
+from storage.enum_migration import migrate_storage_enums
+from storage.model.auth import User
+from storage.model.base import Base
+
+
+@pytest.fixture
+def postgresql_alert_session():
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    schema_name = f"paper_data_gap_recovery_alert_{uuid.uuid4().hex}"
+    engine = create_engine(cast(str, url), connect_args={"options": f"-csearch_path={schema_name}"})
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+        Base.metadata.create_all(connection, tables=[User.__table__])
+        migrate_storage_enums(connection)
+        migrate_paper_trading_enums(connection)
+        Base.metadata.create_all(
+            connection,
+            tables=[PaperDataGapRecoveryGap.__table__, PaperDataGapRecoveryAlert.__table__],
+        )
+    try:
+        with Session(engine) as session:
+            yield session
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        engine.dispose()
 
 
 class RecordingRepository:
@@ -218,3 +253,27 @@ def test_existing_failed_base_cycle_allocates_retry_one():
     assert alert is retry
     assert claimed is True
     assert record_alert.call_args.args[1] == "recovery_system:provider_timeout:retry:1"
+
+
+def test_postgresql_alerts_deduplicate_and_redact_delivery_errors(postgresql_alert_session):
+    repository = DataGapRecoveryRepository(postgresql_alert_session)
+    persisted_gap = repository.record_gap(date(2026, 9, 15), "a_share", "000001", "bfq", {})
+    sent = []
+    service = DataGapAlertService(repository=repository, sender=lambda subject, body: sent.append((subject, body)))
+
+    first = service.send_escalation(persisted_gap, failure_class="approval_required")
+    second = service.send_escalation(persisted_gap, failure_class="approval_required")
+    assert first.id == second.id
+    assert len(sent) == 1
+
+    def fail(_subject, _body):
+        raise RuntimeError("password=super-secret token=hidden")
+
+    failed = DataGapAlertService(repository=repository, sender=fail).send_recovery_system_failure(
+        persisted_gap, failure_class="provider_timeout"
+    )
+    postgresql_alert_session.commit()
+    assert failed.delivery_metadata["state"] == "failed"
+    assert "super-secret" not in failed.delivery_metadata["error"]
+    assert "hidden" not in failed.delivery_metadata["error"]
+    assert postgresql_alert_session.query(PaperDataGapRecoveryAlert).count() == 2

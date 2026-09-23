@@ -4,7 +4,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TypedDict
@@ -848,6 +848,155 @@ def test_unified_recovery_wires_default_account_recovery_and_exposes_persisted_s
         "ledger": [{"account_id": 11, "status": "completed"}],
         "snapshots": [{"account_id": 11, "status": "completed"}],
     }
+
+
+def test_unified_hk_recovery_replays_from_earliest_gap_to_batch_cutoff(monkeypatch):
+    """HK replay must cover the complete affected range, not only today's bar."""
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    cutoff = date(2026, 9, 3)
+    earliest_gap = date(2026, 9, 1)
+    diagnostic = SimpleNamespace(classification="missing_market_data", market="hk_connect")
+    gap = SimpleNamespace(
+        id=7,
+        business_date=earliest_gap,
+        stock_id="00700",
+        market="hk_connect",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+    repository = Mock()
+    repository.list_unresolved_ordinary_diagnostics.return_value = [diagnostic]
+    repository.get_or_create_gap_from_diagnostic.return_value = gap
+    repository.record_batch.return_value = SimpleNamespace(id=3)
+    persistence = Mock()
+    persistence.list_batch_account_recovery.return_value = [
+        {"gap_id": 7, "account_id": 11, "start_date": earliest_gap, "end_date": cutoff}
+    ]
+    persistence.list_retryable_recovery_work.return_value = []
+    service = Mock()
+    service.recover_unresolved_ordinary_gaps.return_value = [SimpleNamespace(gap_id=7, status="recovered")]
+    storage = MagicMock(Session=Mock(return_value=MagicMock()))
+    account_recovery = Mock(return_value={})
+    monkeypatch.setattr(dag_module, "ensure_a_share_trade_date", lambda context: cutoff)
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: repository)
+    monkeypatch.setattr(dag_module, "_FreshSessionRecoveryRepository", lambda storage: persistence)
+    monkeypatch.setattr(dag_module, "DataGapRecoveryService", lambda **kwargs: service)
+    monkeypatch.setattr(dag_module, "run_paper_trading_account_recovery", account_recovery)
+
+    dag_module.run_unified_bfq_data_gap_recovery(
+        ti=MagicMock(xcom_pull=Mock(return_value={"result": "success", "status": "warning"}))
+    )
+
+    persistence.list_retryable_recovery_work.assert_called_once_with(
+        datetime.combine(cutoff, time.max, tzinfo=timezone.utc)
+    )
+    assert account_recovery.call_args.kwargs["start_date"] == earliest_gap
+    assert account_recovery.call_args.kwargs["end_date"] == cutoff
+
+
+def test_account_recovery_retry_skips_completed_ledger_and_retries_failed_snapshot(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    progress_repository = Mock()
+    progress_repository.get_account_progress.side_effect = [
+        SimpleNamespace(summary={"ledger": {"status": "completed"}, "snapshot": {"status": "failed"}}),
+        SimpleNamespace(summary={"ledger": {"status": "completed"}, "snapshot": {"status": "failed"}}),
+    ]
+    progress_session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=progress_session))
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: progress_repository)
+    rebuild = Mock()
+    recalculate = Mock()
+    work = [{"gap_id": 7, "account_id": 11, "start_date": date(2026, 9, 1), "end_date": date(2026, 9, 3)}]
+
+    result = dag_module.run_paper_trading_account_recovery(
+        affected_account_ids=[11],
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 3),
+        rebuild_account=rebuild,
+        recalculate_snapshots=recalculate,
+        recovery_work=work,
+        storage=storage,
+    )
+
+    assert result == {"recovered_account_ids": [11], "failed_account_ids": []}
+    rebuild.assert_not_called()
+    recalculate.assert_called_once_with(11, date(2026, 9, 1), date(2026, 9, 3))
+
+
+def test_account_recovery_replay_preserves_hk_t_plus_two_and_cross_market_evidence():
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    rebuild = Mock()
+    recalculate = Mock()
+    work = [
+        {
+            "gap_id": 7,
+            "account_id": 11,
+            "market": "hk_connect",
+            "stock_id": "00700",
+            "start_date": date(2026, 9, 1),
+            "end_date": date(2026, 9, 3),
+            "settlement_days": 2,
+        },
+        {
+            "gap_id": 8,
+            "account_id": 11,
+            "market": "a_share",
+            "stock_id": "000001",
+            "start_date": date(2026, 9, 2),
+            "end_date": date(2026, 9, 2),
+        },
+    ]
+
+    result = dag_module.run_paper_trading_account_recovery(
+        affected_account_ids=[11],
+        start_date=date(2026, 9, 2),
+        end_date=date(2026, 9, 2),
+        rebuild_account=rebuild,
+        recalculate_snapshots=recalculate,
+        recovery_work=work,
+    )
+
+    assert result == {"recovered_account_ids": [11], "failed_account_ids": []}
+    rebuild.assert_called_once_with(11, date(2026, 9, 1))
+    recalculate.assert_called_once_with(11, date(2026, 9, 1), date(2026, 9, 3))
+
+
+def test_account_recovery_failure_redacts_sensitive_error_details(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    progress_repository = Mock()
+    progress_repository.get_account_progress.return_value = None
+    progress_session = MagicMock()
+    storage = MagicMock(Session=Mock(return_value=progress_session))
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: progress_repository)
+    alert_service = Mock()
+    alert_service.repository.get_gap.return_value = SimpleNamespace(id=7)
+    secret = "authorization=super-secret token=not-for-logs"
+
+    result = dag_module.run_paper_trading_account_recovery(
+        affected_account_ids=[11],
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 1),
+        rebuild_account=Mock(side_effect=RuntimeError(secret)),
+        recalculate_snapshots=Mock(),
+        recovery_work=[{"gap_id": 7, "account_id": 11, "start_date": date(2026, 9, 1), "end_date": date(2026, 9, 1)}],
+        storage=storage,
+        alert_service=alert_service,
+    )
+
+    assert result["failed_account_ids"] == [11]
+    assert secret not in result["errors"][11]
+    assert "super-secret" not in str(progress_repository.record_account_recovery_step.call_args)
+    assert "not-for-logs" not in str(alert_service.send_account_recovery_failure.call_args)
+    assert result["errors"][11] == "[redacted] [redacted]"
 
 
 def test_daily_dag_exposes_independent_account_recovery_hook():

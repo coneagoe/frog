@@ -595,7 +595,10 @@ def _ensure_alert_delivery_trigger(connection: Connection) -> None:
         text(
             "CREATE OR REPLACE FUNCTION paper_data_gap_recovery_alerts_append_only() "
             "RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
-            "IF TG_OP = 'DELETE' OR OLD.evidence IS DISTINCT FROM NEW.evidence THEN "
+            "IF TG_OP = 'DELETE' OR OLD.id IS DISTINCT FROM NEW.id "
+            "OR OLD.gap_id IS DISTINCT FROM NEW.gap_id "
+            "OR OLD.cycle_key IS DISTINCT FROM NEW.cycle_key "
+            "OR OLD.evidence::jsonb IS DISTINCT FROM NEW.evidence::jsonb THEN "
             "RAISE EXCEPTION 'append-only evidence cannot be changed'; END IF; "
             "RETURN NEW; END; $$"
         )

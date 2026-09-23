@@ -619,6 +619,15 @@ Issue #123 将同一精确日期 BFQ 恢复生命周期扩展到 HK Connect 普�
 
 ### 缺口升级审批（Issue #115）
 
+### Issue #125 运行手册
+
+- 恢复范围是 A 股和 HK Connect 普通股的 BFQ 精确业务日期 bars；身份为 `(business_date, market, stock_id, adjust)`。A 股代码为六位，HK Connect 代码为五位，市场不可由代码推断后混用。
+- HK 自动恢复只有在目标日期为 HK Connect 交易日、日期限定普通股资格有效、停牌证据明确为 `active` 且 authority 证据新鲜时才写入。未知、过期、停牌或不适用证据只保留重试/升级路径。
+- provider fallback 按市场路由；每个 provider 必须返回目标日期恰好一行。写入前后按完整身份精确读回，重复、冲突或无法读回均失败，不覆盖已有记录。
+- 三个不可用批次或五个工作日达到任一阈值后升级，并按 failure class 去重告警。升级候选只保存不可变 payload 和 SHA-256 `candidate_hash`，转为 `pending_approval`，浏览器审批前不会写行情。
+- 仅带 CSRF 的已登录浏览器 session 可 approve、reject 或 reopen；approve 必须提交当前 candidate hash，hash 变化时拒绝。CLI 和 GET API 只读。reject 进入 `permanently_unresolved`；只有已有 candidate 的永久未解决缺口可 reopen 回 `open`。
+- 账户修复按账户独立执行，持久化账本和快照步骤进度；失败账户不回滚其他账户，后续只重试未完成步骤。SMTP 投递失败只标记 alert 为 `failed`，不改变恢复或审批状态；同一 gap/cycle_key 去重，失败投递使用 retry cycle。告警脱敏 password、secret、token、API key 等敏感文本，不记录 Bearer token 或 provider 凭据。
+
 达到升级阈值（三个不可用批次或五个工作日）后，系统按 failure class 去重记录一次告警周期。告警投递失败只标记 alert 为 `failed`，不会改变缺口、审批或恢复状态；SMTP 故障保持隔离。账户账本或快照恢复失败也按账户和 failure class 单独告警，其他账户继续处理。
 
 审批仅允许已登录浏览器 session，并要求 CSRF：浏览器可执行 **approve**、**reject** 或 **reopen**。approve 必须提交详情中最新 candidate 的 SHA-256 `candidate_hash`；候选 hash 变化时操作被拒绝。CLI 不提供这些 mutation 命令。
@@ -635,7 +644,7 @@ uv run tools/paper_trading_cli.py data_gap_recovery batches
 
 ### BFQ 精确日期缺口运维查询（Issue #112 / #123）
 
-数据缺口恢复记录目前只覆盖 A 股 BFQ 的**精确业务日期**缺口（`market=a_share`、`adjust=bfq`）。缺口主记录及账户汇总是可变状态，用于表示当前状态、最近观察时间和最新汇总；candidate、attempt、approval、batch、alert 是追加写入的证据，保留每次候选、尝试、审批、批次和告警的历史，不应将它们当作可变的当前状态表。
+数据缺口恢复记录覆盖 A 股和 HK Connect 普通股 BFQ 的**精确业务日期**缺口（`adjust=bfq`）。缺口主记录及账户汇总是可变状态，用于表示当前状态、最近观察时间和最新汇总；candidate、attempt、approval、batch、alert 是追加写入的证据，保留每次候选、尝试、审批、批次和告警的历史，不应将它们当作可变的当前状态表。
 
 HK Connect 普通股使用同一记录和审批生命周期（`market=hk_connect`、`adjust=bfq`），代码为五位。只读 API 可使用 `market` 和 `stock_id` 过滤，CLI 保持只读；审批仍要求浏览器会话、CSRF 和当前 candidate hash。
 
@@ -648,7 +657,7 @@ GET /paper/data-gap-recovery/batches
 GET /paper/data-gap-recovery/batches/{id}
 ```
 
-列表接口使用 `offset`（默认 `0`）和 `page_size`（默认 `50`，最大 `200`）分页。`/gaps` 还支持 `status`、`business_date`、六位 `stock_id` 过滤；`/batches` 支持 `status` 过滤。详情响应包含关联的 evidence 集合，适合核对缺口当前汇总与追加证据链。请求必须使用已登录的浏览器 session cookie，或受信任自动化使用 `Authorization: Bearer $PAPER_TRADING_API_TOKEN`；不要把 Bearer token 放入浏览器代码或日志。
+列表接口使用 `offset`（默认 `0`）和 `page_size`（默认 `50`，最大 `200`）分页。`/gaps` 还支持 `status`、`business_date`、`market` 和五位或六位 `stock_id` 过滤；五位代码对应 HK Connect，六位代码对应 A 股；`/batches` 支持 `status` 过滤。详情响应包含关联的 evidence 集合，适合核对缺口当前汇总与追加证据链。请求必须使用已登录的浏览器 session cookie，或受信任自动化使用 `Authorization: Bearer $PAPER_TRADING_API_TOKEN`；不要把 Bearer token 放入浏览器代码或日志。
 
 该查询面不提供 approval mutation，也不执行 recovery；审批变更和恢复执行不属于这些 GET API 的能力。Issue #110 的 provider contract 仍是独立边界：本功能记录和查询缺口恢复证据，不替代或修改 provider contract。
 

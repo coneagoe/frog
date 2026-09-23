@@ -1,11 +1,14 @@
 import json
+import os
+import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import cast
 
 import numpy as np
 import pandas as pd
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from common.const import COL_AMOUNT, COL_CLOSE, COL_DATE, COL_HIGH, COL_LOW, COL_OPEN, COL_STOCK_ID, COL_VOLUME
@@ -22,6 +25,7 @@ from paper_trading.domain.enums import (
 from paper_trading.domain.market_data_diagnostics import canonical_stock_id
 from paper_trading.services.data_gap_recovery_service import canonical_candidate_hash, canonical_candidate_payload
 from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRepository
+from paper_trading.storage.enum_migration import migrate_paper_trading_enums
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
     PaperAccount,
@@ -32,11 +36,13 @@ from paper_trading.storage.models import (
     PaperDataGapRecoveryApproval,
     PaperDataGapRecoveryAttempt,
     PaperDataGapRecoveryBatch,
+    PaperDataGapRecoveryCandidate,
     PaperDataGapRecoveryGap,
     PaperLedgerRebuild,
     PaperOrder,
 )
 from paper_trading.storage.repository import PaperTradingRepository
+from storage.enum_migration import migrate_storage_enums
 from storage.model.auth import User
 from storage.model.base import Base
 from storage.storage_db import (
@@ -44,6 +50,45 @@ from storage.storage_db import (
     _PAPER_TRADING_TABLES_WITH_GOVERNED_FOREIGN_KEYS,
     _non_enum_governed_paper_trading_tables,
 )
+
+
+@pytest.fixture
+def postgresql_recovery_session():
+    url = os.getenv("TEST_POSTGRESQL_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRESQL_URL is unavailable")
+    schema_name = f"paper_data_gap_recovery_{uuid.uuid4().hex}"
+    engine = create_engine(cast(str, url), connect_args={"options": f"-csearch_path={schema_name}"})
+    with engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema_name}"'))
+        Base.metadata.create_all(connection, tables=[User.__table__])
+        migrate_storage_enums(connection)
+        migrate_paper_trading_enums(connection)
+        Base.metadata.create_all(
+            connection,
+            tables=[
+                PaperAccount.__table__,
+                PaperOrder.__table__,
+                DailyBarDiagnostic.__table__,
+                PaperCashLedger.__table__,
+                PaperAccountSnapshot.__table__,
+                PaperLedgerRebuild.__table__,
+                PaperDataGapRecoveryGap.__table__,
+                PaperDataGapRecoveryCandidate.__table__,
+                PaperDataGapRecoveryAttempt.__table__,
+                PaperDataGapRecoveryApproval.__table__,
+                PaperDataGapRecoveryAccount.__table__,
+                PaperDataGapRecoveryBatch.__table__,
+                PaperDataGapRecoveryAlert.__table__,
+            ],
+        )
+    try:
+        with Session(engine) as session:
+            yield session
+    finally:
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE'))
+        engine.dispose()
 
 
 def test_recovery_classification_and_routing_are_closed_values():
@@ -642,3 +687,74 @@ def test_repository_retry_selection_keeps_completed_ledger_when_snapshot_failed(
         assert [(row.gap_id, row.account_id) for row in retryable] == [(gap.id, account.id)]
         assert retryable[0].summary["ledger"]["status"] == "completed"
         assert retryable[0].summary["snapshot"]["status"] == "failed"
+
+
+def test_postgresql_preserves_hk_identity_evidence_and_account_progress(postgresql_recovery_session):
+    repository = DataGapRecoveryRepository(postgresql_recovery_session)
+    account = PaperTradingRepository(postgresql_recovery_session).create_account("hk-progress", Decimal("100"))
+    gap = repository.record_gap(date(2026, 9, 1), "hk_connect", "700", "bfq", {"source": "diagnostic"})
+    candidate = repository.record_candidate(gap.id, "a" * 64, {"close": 10}, {"valid": True}, "provider")
+    repository.record_attempt(gap.id, None, DataGapRecoveryAttemptOutcome.NOT_FOUND, {"provider": "test"})
+    progress = repository.upsert_account_progress(
+        gap.id, account.id, DataGapRecoveryAccountStatus.PENDING, {"phase": "ledger"}
+    )
+    repository.record_account_recovery_step(gap.id, account.id, "ledger", "completed", {"rows": 2})
+    postgresql_recovery_session.commit()
+
+    with Session(postgresql_recovery_session.get_bind()) as session:
+        stored = DataGapRecoveryRepository(session).gap_evidence(gap.id)
+        stored_gap = session.get(PaperDataGapRecoveryGap, gap.id)
+        assert stored_gap is not None
+        assert stored_gap.stock_id == "00700"
+        assert stored["candidates"][0].candidate_hash == candidate.candidate_hash
+        assert stored["attempts"][0].evidence == {"provider": "test"}
+        assert stored["accounts"][0].id == progress.id
+        assert stored["accounts"][0].summary["ledger"] == {"status": "completed", "evidence": {"rows": 2}}
+
+
+def test_postgresql_alert_trigger_allows_delivery_updates_only(postgresql_recovery_session):
+    repository = DataGapRecoveryRepository(postgresql_recovery_session)
+    gap = repository.record_gap(date(2026, 9, 3), "a_share", "000001", "bfq", {})
+    alert = repository.record_alert(gap.id, "cycle-1", {"source": "test"})
+    postgresql_recovery_session.commit()
+
+    postgresql_recovery_session.execute(
+        text(
+            "UPDATE paper_data_gap_recovery_alerts "
+            "SET delivery_metadata = '{\"attempts\": 1}', delivery_state = 'delivered' "
+            "WHERE id = :alert_id"
+        ),
+        {"alert_id": alert.id},
+    )
+    postgresql_recovery_session.commit()
+
+    with pytest.raises(Exception, match="append-only"):
+        postgresql_recovery_session.execute(
+            text("UPDATE paper_data_gap_recovery_alerts SET evidence = '{\"changed\": true}' WHERE id = :alert_id"),
+            {"alert_id": alert.id},
+        )
+    postgresql_recovery_session.rollback()
+
+
+def test_postgresql_candidate_approval_stale_hash_returns_to_current_pending_lifecycle(
+    postgresql_recovery_session,
+):
+    repository = DataGapRecoveryRepository(postgresql_recovery_session)
+    approver = User(email="reviewer@example.com", password_hash="test-password")
+    postgresql_recovery_session.add(approver)
+    postgresql_recovery_session.flush()
+    gap = repository.record_gap(date(2026, 9, 2), "a_share", "000001", "bfq", {})
+    first = repository.record_candidate(gap.id, "a" * 64, {"version": 1}, {}, "provider")
+    repository.escalate_gap(gap.id, approver.id, {"email": "reviewer@example.com"})
+    latest = repository.record_candidate(gap.id, "b" * 64, {"version": 2}, {}, "provider")
+
+    stale = repository.approve_gap(gap.id, first.candidate_hash, approver.id, {"email": "reviewer@example.com"})
+    assert stale.status == DataGapRecoveryStatus.PENDING_APPROVAL
+    assert repository.gap_evidence(gap.id)["approvals"] == []
+
+    current = repository.approve_gap(gap.id, latest.candidate_hash, approver.id, {"email": "reviewer@example.com"})
+    postgresql_recovery_session.commit()
+    assert current.status == DataGapRecoveryStatus.PENDING_APPROVAL
+    approvals = repository.gap_evidence(gap.id)["approvals"]
+    assert len(approvals) == 1
+    assert approvals[0].candidate_hash == latest.candidate_hash

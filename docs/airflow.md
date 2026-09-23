@@ -150,11 +150,17 @@ DOWNLOAD_PROCESS_COUNT=4
 - 汇总完成后，EOD 模拟交易匹配也使用这个相同的显式日期。
 - 其余仍按墙上时钟运行的路径包括：周末 QFQ 历史 DAG、`daily_basic`/`stk_limit`/`suspend_d` DAG，以及调用方未传 `end_date` 时 `DownloadManager` 的通用回退逻辑。
 
-### A 股 BFQ 统一缺口恢复（Issue #113）
+### BFQ 统一缺口恢复（Issue #113 / #125）
+
+#### Issue #125 运行范围与故障响应
+
+恢复范围是 A 股和 HK Connect 普通股的 BFQ 精确业务日期缺口；身份为 `(business_date, market, stock_id, adjust)`，A 股代码六位，HK Connect 代码五位。HK 只有在目标日期为交易日、普通股资格有效、停牌状态明确为 `active` 且 authority 新鲜时才允许自动写入；否则保留重试/升级路径。各市场使用对应 provider fallback，每个 provider 必须返回目标日期恰好一行，并在写入前后按完整身份精确读回，拒绝重复或冲突。
+
+日线分片、汇总和匹配任一失败时跳过恢复；成功或带 warning 完成后才运行。三个不可用批次或五个工作日达到任一阈值后升级；候选只保存不可变 payload 和 SHA-256 `candidate_hash`，进入 `pending_approval`，不会在浏览器审批前自动写入。approve、reject、reopen 仅可由带 CSRF 的浏览器 session 执行，approve 必须使用当前 hash；reject 为 `permanently_unresolved`，只有已有 candidate 的该状态可 reopen。账户账本/快照修复按账户持久化步骤，失败账户只重试未完成部分。告警按 gap/cycle_key 去重，投递失败不改变恢复状态并使用 retry cycle；邮件和日志脱敏 password、secret、token、API key，不记录 Bearer token 或 provider 凭据。
 
 Issue #123 将该恢复任务扩展到 HK Connect BFQ 缺口，不改变其调度、依赖、重试或任务边界。HK 自动恢复仅在目标日期 HK Connect 日历、日期限定普通股资格、明确非停牌状态和新鲜 authority 证据均满足时执行；任一证据未知或过期都会跳过写入并保留重试/升级路径。恢复按市场路由 provider 和行情存储：A 股使用六位代码，HK Connect 使用五位代码和 HK provider fallback。每个 provider 必须返回目标日期唯一行情行，恢复会执行市场限定的精确读回并拒绝重复或冲突记录；候选、尝试和告警证据保留 authority、停牌和实际 provider 信息。
 
-每日 BFQ/HFQ 全部分片完成后，日线汇总允许成功或带警告的下载结果继续进入模拟交易匹配；匹配成功（包括带逐证券 warning 的完成状态）后，DAG 再运行统一的普通 A 股 BFQ 精确日期缺口恢复。任一分片或匹配任务失败都会使恢复任务跳过，不会把不完整的批次当作可恢复输入。单个证券的 provider、写入或匹配 warning 不会阻断其他证券继续处理。
+每日 BFQ/HFQ 全部分片完成后，日线汇总允许成功或带警告的下载结果继续进入模拟交易匹配；匹配成功（包括带逐证券 warning 的完成状态）后，DAG 再运行统一的普通股 BFQ 精确日期缺口恢复。任一分片、汇总或匹配任务失败都会使恢复任务跳过，不会把不完整的批次当作可恢复输入。单个证券的 provider、写入或匹配 warning 不会阻断其他证券继续处理。
 
 恢复按证券缺口幂等执行：已有精确 BFQ 数据的缺口会被标记为已解决，未解决缺口可独立重试，不会重复写入已恢复的行情行。每次批次、尝试及缺口摘要都会保留 routing/classification 和 provider/结果证据，便于审计和重试。阈值升级、不可变候选记录、待浏览器审批、告警及账户修复均属于匹配后的恢复流程；升级候选在审批前不会自动写入行情。
 

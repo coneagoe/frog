@@ -250,6 +250,45 @@ def test_four_business_days_does_not_count_weekend():
     )
 
 
+def test_hk_escalation_counts_hk_trade_dates_with_injected_calendar():
+    repository = Mock()
+    repository.gap_evidence.return_value = {"attempts": []}
+    calendar = Mock()
+    calendar.is_trade_date.side_effect = lambda value: value not in {date(2026, 9, 12)}
+    gap = SimpleNamespace(id=1, business_date=date(2026, 9, 10), market="hk_connect", summary={})
+
+    service = DataGapRecoveryService(
+        storage=Mock(), downloader=Mock(), repository=repository, hk_trade_calendar=calendar
+    )
+
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={}, as_of=date(2026, 9, 15)) is True
+    assert calendar.is_trade_date.call_count == 6
+
+
+def test_account_recovery_failure_detail_is_sanitized_before_return_and_persistence(monkeypatch):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_daily as dag_module
+
+    progress_repository = Mock()
+    progress_repository.get_account_progress.return_value = None
+    storage = Mock(Session=Mock(return_value=Mock()))
+    monkeypatch.setattr(dag_module, "DataGapRecoveryRepository", lambda session: progress_repository)
+    secret = "authorization=super-secret token=not-for-logs"
+
+    result = dag_module.run_paper_trading_account_recovery(
+        affected_account_ids=[11],
+        start_date=date(2026, 9, 1),
+        end_date=date(2026, 9, 1),
+        rebuild_account=Mock(side_effect=RuntimeError(secret)),
+        recalculate_snapshots=Mock(),
+        recovery_work=[{"gap_id": 7, "account_id": 11, "start_date": date(2026, 9, 1), "end_date": date(2026, 9, 1)}],
+        storage=storage,
+    )
+
+    assert result["errors"][11] == "[redacted] [redacted]"
+    assert "super-secret" not in str(progress_repository.record_account_recovery_step.call_args)
+
+
 def test_approved_write_requires_authoritative_repository_and_approval():
     storage = Mock()
     gap = SimpleNamespace(

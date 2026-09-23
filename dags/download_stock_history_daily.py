@@ -56,6 +56,7 @@ from paper_trading.storage.data_gap_recovery_repository import DataGapRecoveryRe
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider  # noqa: E402
 from paper_trading.storage.market_data import StorageMarketDataProvider  # noqa: E402
 from paper_trading.services.trade_calendar import HkTradeCalendar, _DataAvailableCalendar  # noqa: E402
+from monitor.monitor_health import sanitize_error_detail  # noqa: E402
 from paper_trading.storage.repository import PaperTradingRepository  # noqa: E402
 from stock.market import is_a_share_trade_date  # noqa: E402
 from storage import get_storage  # noqa: E402
@@ -348,14 +349,17 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
 
     recovery_repository = _FreshSessionRecoveryRepository(storage)
     for approved_gap, approved_hash, _payload in approved_candidates:
-        DataGapRecoveryService(repository=recovery_repository, hk_recovery_policy=hk_policy).execute_approved_gap(
-            _detach_gap(approved_gap), approved_hash
-        )
+        DataGapRecoveryService(
+            repository=recovery_repository, hk_recovery_policy=hk_policy, hk_trade_calendar=hk_policy.calendar
+        ).execute_approved_gap(_detach_gap(approved_gap), approved_hash)
     alert_service = DataGapAlertService(repository=recovery_repository)
     results: list[Any] = []
     try:
         results = DataGapRecoveryService(
-            repository=recovery_repository, alert_service=alert_service, hk_recovery_policy=hk_policy
+            repository=recovery_repository,
+            alert_service=alert_service,
+            hk_recovery_policy=hk_policy,
+            hk_trade_calendar=hk_policy.calendar,
         ).recover_unresolved_ordinary_gaps(gaps, batch_id=batch_id)
         batch_status = (
             DataGapRecoveryBatchStatus.FAILED
@@ -524,7 +528,8 @@ def run_paper_trading_account_recovery(
                 )
         except Exception as exc:  # noqa: BLE001
             failed.append(account_id)
-            errors[account_id] = str(exc)
+            safe_error = sanitize_error_detail(exc) or "account recovery failed"
+            errors[account_id] = safe_error
             if storage is not None and not (ledger_committed and not ledger_persisted):
                 try:
                     _persist_account_steps(
@@ -533,17 +538,22 @@ def run_paper_trading_account_recovery(
                         account_id,
                         "snapshot" if ledger_committed else "ledger",
                         "failed",
-                        {"error": str(exc), "ledger_committed": ledger_committed},
+                        {"error": safe_error, "ledger_committed": ledger_committed},
                     )
                 except Exception as persist_exc:  # noqa: BLE001
-                    errors[account_id] = f"{exc}; progress persistence failed: {persist_exc}"
+                    errors[account_id] = (
+                        f"{safe_error}; progress persistence failed: "
+                        f"{sanitize_error_detail(persist_exc) or 'unknown error'}"
+                    )
             if alert_service is not None:
                 for item in account_work or []:
                     try:
                         gap = alert_service.repository.get_gap(item["gap_id"])
                         if gap is not None:
                             alert_service.send_account_recovery_failure(
-                                gap, account_id=account_id, failure_class=type(exc).__name__.lower()
+                                gap,
+                                account_id=account_id,
+                                failure_class=sanitize_error_detail(type(exc).__name__.lower()) or "failure",
                             )
                     except Exception:  # noqa: BLE001
                         logger.exception(
