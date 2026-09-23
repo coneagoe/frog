@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -496,6 +496,93 @@ def test_escalated_candidate_is_pending_approval_without_history_write():
     storage.save_history_data_stock.assert_not_called()
 
 
+def test_legacy_repository_without_candidate_recording_allows_ordinary_recovery():
+    class LegacyRepository:
+        def __init__(self):
+            self.attempts = []
+            self.resolved = []
+
+        def record_attempt(self, gap_id, batch_id, outcome, evidence):
+            self.attempts.append((gap_id, batch_id, outcome, evidence))
+
+        def resolve_gap(self, gap_id):
+            self.resolved.append(gap_id)
+
+    storage = Mock()
+    storage.load_history_data_stock.side_effect = [pd.DataFrame(), _row("000001", "2026-08-07")]
+    downloader = Mock()
+    downloader.dl_history_data_stock_by_provider.return_value = _row("000001", "2026-08-07")
+    repository = LegacyRepository()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    result = DataGapRecoveryService(storage=storage, downloader=downloader, repository=repository).recover_gap(gap)
+
+    assert result.status == "recovered"
+    assert repository.resolved == [gap.id]
+    storage.save_history_data_stock.assert_called_once()
+
+
+def test_recovery_without_repository_resolves_gap_in_memory():
+    storage = Mock()
+    storage.load_history_data_stock.side_effect = [pd.DataFrame(), _row("000001", "2026-08-07")]
+    downloader = Mock()
+    downloader.dl_history_data_stock_by_provider.return_value = _row("000001", "2026-08-07")
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    before = datetime.now(timezone.utc)
+    result = DataGapRecoveryService(storage=storage, downloader=downloader).recover_gap(gap)
+    after = datetime.now(timezone.utc)
+
+    assert result.status == "recovered"
+    assert gap.status == DataGapRecoveryStatus.RECOVERED.value
+    assert before <= gap.resolved_at <= after
+    assert gap.resolved_at.tzinfo is timezone.utc
+
+
+def test_escalated_recovery_without_candidate_recording_fails_before_pending_approval():
+    class LegacyRepository:
+        def record_attempt(self, gap_id, batch_id, outcome, evidence):
+            pass
+
+        def resolve_gap(self, gap_id):
+            pass
+
+    storage = Mock()
+    storage.load_history_data_stock.return_value = pd.DataFrame()
+    downloader = Mock()
+    downloader.dl_history_data_stock_by_provider.return_value = _row("000001", "2026-08-07")
+    repository = LegacyRepository()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        status=DataGapRecoveryStatus.ESCALATED,
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+
+    result = DataGapRecoveryService(storage=storage, downloader=downloader, repository=repository).recover_gap(gap)
+
+    assert result.status == "failed"
+    assert "candidate evidence" in (result.error or "")
+    storage.save_history_data_stock.assert_not_called()
+
+
 def test_canonical_candidate_payload_normalizes_provider_scalars_for_persistence():
     candidate = pd.DataFrame(
         {
@@ -584,6 +671,262 @@ def test_existing_exact_row_is_idempotent_and_does_not_call_provider():
     assert result[0].status == "skipped"
     downloader.dl_history_data_stock_by_provider.assert_not_called()
     storage.save_history_data_stock.assert_not_called()
+
+
+def test_recovery_accepts_narrow_injected_ports(monkeypatch):
+    monkeypatch.setattr(
+        "paper_trading.services.data_gap_recovery_service.parse_stock_history_provider_order",
+        lambda: ["first", "second"],
+    )
+
+    class CandidateSource:
+        def __init__(self):
+            self.requested_providers = []
+
+        def load(self, provider, stock_id, start_date, end_date, market):
+            self.requested_providers.append(provider)
+            assert (stock_id, start_date, end_date, market) == ("000001", "20260807", "20260807", "a_share")
+            if provider == "first":
+                return _row("000001", "2026-08-06")
+            return pd.concat(
+                [_row("000001", "2026-08-06"), _row("000001", "2026-08-07"), _row("000001", "2026-08-08")],
+                ignore_index=True,
+            )
+
+    class MarketData:
+        def __init__(self):
+            self.rows = pd.DataFrame()
+            self.saved = []
+
+        def read_exact(self, stock_id, business_date, market):
+            if self.rows.empty:
+                return self.rows
+            return self.rows[
+                (self.rows[COL_STOCK_ID] == stock_id) & (pd.to_datetime(self.rows[COL_DATE]).dt.date == business_date)
+            ]
+
+        def save_exact(self, candidate, gap):
+            self.saved.append(candidate.copy())
+            self.rows = candidate.copy()
+            return True
+
+    class Evidence:
+        def __init__(self):
+            self.attempts = []
+            self.resolved = []
+
+        def record_attempt(self, gap_id, batch_id, outcome, evidence):
+            self.attempts.append((gap_id, batch_id, outcome, evidence))
+
+        def record_candidate(self, gap_id, candidate_hash, payload, evidence, provider):
+            pass
+
+        def gap_evidence(self, gap_id):
+            return {"attempts": []}
+
+        def escalate_gap(self, gap_id, user_id, user_snapshot, *, reason=None):
+            pass
+
+        def execute_approved_candidate(self, gap_id, approved_hash, callback):
+            raise NotImplementedError
+
+        def resolve_gap(self, gap_id):
+            self.resolved.append(gap_id)
+
+    source, market_data, evidence = CandidateSource(), MarketData(), Evidence()
+    gap = SimpleNamespace(
+        id=1,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "ordinary"},
+    )
+
+    result = DataGapRecoveryService(
+        candidate_source=source,
+        market_data=market_data,
+        evidence=evidence,
+    ).recover_gap(gap, batch_id=9)
+
+    assert result.status == "recovered"
+    assert result.provider == "second"
+    assert source.requested_providers == ["first", "second"]
+    assert len(market_data.saved) == 1
+    assert market_data.saved[0].iloc[0][COL_DATE].date() == gap.business_date
+    assert evidence.resolved == [gap.id]
+
+    retry = DataGapRecoveryService(
+        candidate_source=source,
+        market_data=market_data,
+        evidence=evidence,
+    ).recover_gap(gap, batch_id=10)
+
+    assert retry.status == "skipped"
+    assert source.requested_providers == ["first", "second"]
+    assert len(market_data.saved) == 1
+    assert evidence.resolved == [gap.id, gap.id]
+
+
+def test_approved_execution_uses_injected_market_data_and_evidence_ports():
+    class MarketData:
+        def __init__(self):
+            self.rows = pd.DataFrame()
+            self.saved = []
+
+        def read_exact(self, stock_id, business_date, market):
+            if self.rows.empty:
+                return self.rows
+            return self.rows[
+                (self.rows[COL_STOCK_ID] == stock_id) & (pd.to_datetime(self.rows[COL_DATE]).dt.date == business_date)
+            ]
+
+        def save_exact(self, candidate, gap):
+            self.saved.append(candidate.copy())
+            self.rows = candidate.copy()
+            return True
+
+    class Evidence:
+        def __init__(self):
+            self.resolved = []
+
+        def execute_approved_candidate(self, gap_id, approved_hash, callback):
+            assert gap_id == gap.id
+            return callback(gap)
+
+        def record_attempt(self, gap_id, batch_id, outcome, evidence):
+            pass
+
+        def record_candidate(self, gap_id, candidate_hash, payload, evidence, provider):
+            pass
+
+        def gap_evidence(self, gap_id):
+            return {"attempts": []}
+
+        def escalate_gap(self, gap_id, user_id, user_snapshot, *, reason=None):
+            pass
+
+        def resolve_gap(self, gap_id):
+            self.resolved.append(gap_id)
+
+    gap = SimpleNamespace(
+        id=2,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    candidate = _row("000001", "2026-08-07")
+    payload = canonical_candidate_payload(
+        candidate, market=gap.market, stock_id=gap.stock_id, business_date=gap.business_date, adjust=gap.adjust
+    )
+    market_data, evidence = MarketData(), Evidence()
+
+    result = DataGapRecoveryService(
+        candidate_source=Mock(),
+        market_data=market_data,
+        evidence=evidence,
+    ).execute_approved_gap(gap, canonical_candidate_hash(payload), candidate)
+
+    assert result.status == "recovered"
+    assert len(market_data.saved) == 1
+    assert evidence.resolved == [gap.id]
+
+
+def test_evidence_only_port_records_immutable_escalated_candidate_and_executes_approval(monkeypatch):
+    monkeypatch.setattr(
+        "paper_trading.services.data_gap_recovery_service.parse_stock_history_provider_order", lambda: ["primary"]
+    )
+
+    class CandidateSource:
+        def __init__(self):
+            self.candidate = _row("000001", "2026-08-07")
+
+        def load(self, provider, stock_id, start_date, end_date, market):
+            assert (provider, stock_id, start_date, end_date, market) == (
+                "primary",
+                "000001",
+                "20260807",
+                "20260807",
+                "a_share",
+            )
+            return self.candidate
+
+    class MarketData:
+        def __init__(self):
+            self.rows = pd.DataFrame()
+            self.saved = []
+
+        def read_exact(self, stock_id, business_date, market):
+            if self.rows.empty:
+                return self.rows
+            return self.rows[
+                (self.rows[COL_STOCK_ID] == stock_id) & (pd.to_datetime(self.rows[COL_DATE]).dt.date == business_date)
+            ]
+
+        def save_exact(self, candidate, gap):
+            self.saved.append(candidate.copy())
+            self.rows = candidate.copy()
+            return True
+
+    class Evidence:
+        def __init__(self):
+            self.candidates = {}
+            self.resolved = []
+            self.escalations = []
+
+        def record_attempt(self, gap_id, batch_id, outcome, evidence):
+            pass
+
+        def resolve_gap(self, gap_id):
+            self.resolved.append(gap_id)
+
+        def record_candidate(self, gap_id, candidate_hash, payload, evidence, provider):
+            self.candidates[gap_id] = (candidate_hash, json.loads(json.dumps(payload)), evidence, provider)
+
+        def gap_evidence(self, gap_id):
+            return {"attempts": []}
+
+        def escalate_gap(self, gap_id, user_id, user_snapshot, *, reason=None):
+            self.escalations.append((gap_id, user_id, user_snapshot, reason))
+            gap.status = DataGapRecoveryStatus.ESCALATED
+
+        def execute_approved_candidate(self, gap_id, approved_hash, callback):
+            candidate_hash, payload, _, _ = self.candidates[gap_id]
+            assert approved_hash == candidate_hash
+            return callback(gap, payload, self.resolve_gap)
+
+    gap = SimpleNamespace(
+        id=4,
+        business_date=date(2026, 8, 7),
+        stock_id="000001",
+        market="a_share",
+        adjust="bfq",
+        status=DataGapRecoveryStatus.OPEN,
+        summary={"classification": "order_dependent", "routing": "approval_escalation"},
+    )
+    source, market_data, evidence = CandidateSource(), MarketData(), Evidence()
+    service = DataGapRecoveryService(candidate_source=source, market_data=market_data, evidence=evidence)
+
+    assert service.maybe_escalate_gap(gap, user_id=7, user_snapshot={"actor": "operator"}, as_of=date(2026, 8, 14))
+    assert evidence.escalations == [(gap.id, 7, {"actor": "operator"}, None)]
+
+    pending = service.recover_gap(gap)
+
+    assert pending.status == "pending_approval"
+    candidate_hash, payload, candidate_evidence, provider = evidence.candidates[gap.id]
+    assert candidate_hash == canonical_candidate_hash(payload)
+    assert payload["row"][COL_CLOSE] == 10.5
+    assert candidate_evidence == {"validated": True, "provider": "primary"}
+    assert provider == "primary"
+
+    source.candidate.loc[0, COL_CLOSE] = 999.0
+    result = service.execute_approved_gap(gap, candidate_hash)
+
+    assert result.status == "recovered"
+    assert market_data.saved[0].iloc[0][COL_CLOSE] == 10.5
+    assert evidence.resolved == [gap.id]
 
 
 def test_account_repair_and_approval_routes_are_not_executed():

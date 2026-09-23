@@ -409,6 +409,30 @@ def test_unified_recovery_uses_detached_gaps_and_persistence_repository(monkeypa
     assert result["gap_count"] == 1
 
 
+def test_unified_recovery_injects_fresh_session_repository_as_evidence_port():
+    source = read_source(ROOT / "dags/download_stock_history_daily.py")
+
+    assert source.count("evidence=recovery_repository") == 2
+
+    evidence_start = source.index("class _FreshSessionRecoveryRepository")
+    evidence_end = source.index("def classify_diagnostic")
+    evidence_source = source[evidence_start:evidence_end]
+    assert "session = self.storage.Session()" in evidence_source
+    assert "session.commit()" in evidence_source
+    assert "session.rollback()" in evidence_source
+    assert "session.close()" in evidence_source
+
+    account_source = source[
+        source.index("def run_paper_trading_account_recovery") : source.index("def _persist_account_steps")
+    ]
+    assert "session = session_factory()" in account_source
+    assert "LedgerRebuildService(" in account_source
+    assert "session.commit()" in account_source
+    assert "session.rollback()" in account_source
+    assert "session.close()" in account_source
+    assert "SnapshotRecalculationService(\n                session_factory," in account_source
+
+
 def test_unified_recovery_callable_does_not_invoke_account_side_effect_apis(monkeypatch):
     pytest.importorskip("airflow")
     import dags.download_stock_history_daily as dag_module

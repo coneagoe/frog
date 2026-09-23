@@ -370,13 +370,13 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
     recovery_repository = _FreshSessionRecoveryRepository(storage)
     for approved_gap, approved_hash, _payload in approved_candidates:
         DataGapRecoveryService(
-            repository=recovery_repository, hk_recovery_policy=hk_policy, hk_trade_calendar=hk_policy.calendar
+            evidence=recovery_repository, hk_recovery_policy=hk_policy, hk_trade_calendar=hk_policy.calendar
         ).execute_approved_gap(_detach_gap(approved_gap), approved_hash)
     alert_service = DataGapAlertService(repository=recovery_repository)
     results: list[Any] = []
     try:
         results = DataGapRecoveryService(
-            repository=recovery_repository,
+            evidence=recovery_repository,
             alert_service=alert_service,
             hk_recovery_policy=hk_policy,
             hk_trade_calendar=hk_policy.calendar,
@@ -638,11 +638,15 @@ class _FreshSessionRecoveryRepository:
         finally:
             session.close()
 
-    def record_attempt(self, *args: Any) -> Any:
-        return self._call(lambda repository: repository.record_attempt(*args))
+    def record_attempt(self, gap_id: int, batch_id: int | None, outcome: Any, evidence: dict[str, Any]) -> Any:
+        return self._call(lambda repository: repository.record_attempt(gap_id, batch_id, outcome, evidence))
 
-    def record_candidate(self, *args: Any) -> Any:
-        return self._call(lambda repository: repository.record_candidate(*args))
+    def record_candidate(
+        self, gap_id: int, candidate_hash: str, payload: dict[str, Any], evidence: dict[str, Any], provider: str
+    ) -> Any:
+        return self._call(
+            lambda repository: repository.record_candidate(gap_id, candidate_hash, payload, evidence, provider)
+        )
 
     def get_gap(self, gap_id: int, owner_user_id: int | None = None) -> Any:
         return self._call(lambda repository: repository.get_gap(gap_id, owner_user_id))
@@ -669,8 +673,8 @@ class _FreshSessionRecoveryRepository:
     def resolve_gap(self, gap_id: int) -> None:
         self._call(lambda repository: repository.resolve_gap(gap_id))
 
-    def execute_approved_candidate(self, gap_id: int, candidate_hash: str, callback: Callable[..., Any]) -> Any:
-        return self._call(lambda repository: repository.execute_approved_candidate(gap_id, candidate_hash, callback))
+    def execute_approved_candidate(self, gap_id: int, approved_hash: str, callback: Any) -> Any:
+        return self._call(lambda repository: repository.execute_approved_candidate(gap_id, approved_hash, callback))
 
     def finalize_batch(self, *args: Any, **kwargs: Any) -> Any:
         return self._call(lambda repository: repository.finalize_batch(*args, **kwargs))
