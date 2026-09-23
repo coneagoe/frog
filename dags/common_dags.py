@@ -3,7 +3,7 @@
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import Final
+from typing import Callable, Final, TypeVar
 from zoneinfo import ZoneInfo
 
 # Ensure project root is on sys.path
@@ -17,6 +17,8 @@ else:
 LOCAL_TZ: Final = ZoneInfo("Asia/Shanghai")
 MAX_PARTITIONS: Final = 16
 DEFAULT_PARTITION_COUNT: Final = 4
+ItemT = TypeVar("ItemT")
+OutcomeT = TypeVar("OutcomeT")
 
 
 def parse_alert_emails(raw: str) -> list[str]:
@@ -85,15 +87,48 @@ def get_partition_ids(partition_count: int | None = None) -> range:
     return range(max(1, partition_count))
 
 
-def get_partitioned_ids(stock_ids: list[str], partition_id: int, partition_count: int) -> list[str]:
-    """Get a subset of stock IDs for a specific partition.
+def get_partitioned_ids(items: list[ItemT], partition_id: int, partition_count: int) -> list[ItemT]:
+    """Get a subset of items for a specific partition.
 
     Args:
-        stock_ids: List of all stock IDs
+        items: List of all items
         partition_id: The partition identifier (0-based)
         partition_count: Total number of partitions
 
     Returns:
-        List of stock IDs assigned to this partition
+        List of items assigned to this partition
     """
-    return [sid for idx, sid in enumerate(stock_ids) if (idx % partition_count) == partition_id]
+    return [item for idx, item in enumerate(items) if (idx % partition_count) == partition_id]
+
+
+def run_partition_items(
+    items: list[ItemT],
+    partition_index: int,
+    partition_count: int,
+    action: Callable[[ItemT], OutcomeT],
+    is_failure: Callable[[OutcomeT], bool],
+    on_progress: Callable[[ItemT, int, int], None] | None = None,
+) -> tuple[list[ItemT], list[tuple[ItemT, OutcomeT]]]:
+    """Run an action for this partition and return items with failed outcomes.
+
+    Items are selected in their input order using round-robin partitioning, so
+    both the selected items and failure results preserve that order. Exceptions
+    from ``action``, ``is_failure``, or ``on_progress`` are not caught.
+
+    The optional progress callback is called after each item's action has
+    completed and its outcome has been classified. It receives the item, the
+    one-based number of completed selected items, and the total number of
+    selected items.
+    """
+    selected = get_partitioned_ids(items, partition_index, partition_count)
+    failures: list[tuple[ItemT, OutcomeT]] = []
+    total_selected = len(selected)
+
+    for completed, item in enumerate(selected, start=1):
+        outcome = action(item)
+        if is_failure(outcome):
+            failures.append((item, outcome))
+        if on_progress is not None:
+            on_progress(item, completed, total_selected)
+
+    return selected, failures

@@ -18,7 +18,7 @@ from dags.common_dags import (  # noqa: E402, I001
     get_default_args,
     get_partition_count,
     get_partition_ids,
-    get_partitioned_ids,
+    run_partition_items,
 )
 
 from monitor.top10_floatholder import run_ssf_change_alert  # noqa: E402
@@ -51,19 +51,36 @@ def scan_top10_floatholder_partition_task(*, partition_id: int, partition_count:
         raise Exception("无法获取股票基本信息数据")
 
     stock_ids = df_stocks[COL_STOCK_ID].tolist()
-    my_ids = get_partitioned_ids(stock_ids, partition_id, partition_count)
-
     manager = DownloadManager()
-    failed_ids: list[str] = []
-    total = len(my_ids)
+    failed_count = 0
 
-    for idx, stock_id in enumerate(my_ids, start=1):
-        ok = manager.download_top10_floatholders_a_stock(stock_id)
-        if not ok:
-            failed_ids.append(stock_id)
+    def action(stock_id):
+        nonlocal failed_count
+        result = manager.download_top10_floatholders_a_stock(stock_id)
+        if not result:
+            failed_count += 1
+        return result
 
-        if idx % 100 == 0 or idx == total:
-            print(f"[top10 floatholder scan p{partition_id:02d}] 进度: {idx}/{total} (failed={len(failed_ids)})")
+    def on_progress(stock_id, completed, total):
+        if completed % 100 == 0 or completed == total:
+            print(
+                f"[top10 floatholder scan p{partition_id:02d}] "
+                f"进度: {completed}/{total} (failed={failed_count})"
+            )
+
+    def is_failure(result):
+        return not result
+
+    selected_ids, failures = run_partition_items(
+        stock_ids,
+        partition_id,
+        partition_count,
+        action,
+        is_failure=is_failure,
+        on_progress=on_progress,
+    )
+    failed_ids = [stock_id for stock_id, _ in failures]
+    total = len(selected_ids)
 
     if failed_ids:
         preview = ",".join(failed_ids[:10])

@@ -29,7 +29,7 @@ from dags.common_dags import (  # noqa: E402
     get_default_args,
     get_partition_count,
     get_partition_ids,
-    get_partitioned_ids,
+    run_partition_items,
 )
 
 from common.const import (  # noqa: E402
@@ -139,14 +139,11 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
         raise Exception("无法获取股票基本信息数据")
 
     stock_ids = df_stocks[COL_STOCK_ID].tolist()
-    my_ids = get_partitioned_ids(stock_ids, partition_id, partition_count)
-
     manager = DownloadManager()
 
-    outcomes = []
-    total = len(my_ids)
+    outcomes: list[dict[str, Any]] = []
     storage = get_storage()
-    for idx, stock_id in enumerate(my_ids, start=1):
+    def action(stock_id):
         outcome = manager.download_stock_history_outcome(
             stock_id=stock_id,
             period=PeriodType.DAILY,
@@ -157,10 +154,22 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
         outcomes.append(asdict(outcome))
         if outcome.classification != "downloaded":
             _persist_diagnostic(storage, business_date, stock_id, AdjustType.HFQ, outcome)
-        if idx % 50 == 0 or idx == total:
-            print(f"[HFQ p{partition_id:02d}] 进度: {idx}/{total}")
+        return outcome
 
-    return {"adjust": "hfq", "partition_id": partition_id, "count": total, "outcomes": outcomes}
+    def on_progress(_stock_id, completed, total):
+        if completed % 50 == 0 or completed == total:
+            print(f"[HFQ p{partition_id:02d}] 进度: {completed}/{total}")
+
+    selected_ids = run_partition_items(
+        stock_ids,
+        partition_id,
+        partition_count,
+        action,
+        lambda _outcome: False,
+        on_progress=on_progress,
+    )[0]
+
+    return {"adjust": "hfq", "partition_id": partition_id, "count": len(selected_ids), "outcomes": outcomes}
 
 
 def download_stock_history_bfq_partition_task(*, partition_id: int, partition_count: int, **context):
@@ -192,14 +201,11 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
         raise Exception("无法获取股票基本信息数据")
 
     stock_ids = df_stocks[COL_STOCK_ID].tolist()
-    my_ids = get_partitioned_ids(stock_ids, partition_id, partition_count)
-
     manager = DownloadManager()
 
-    outcomes = []
-    total = len(my_ids)
+    outcomes: list[dict[str, Any]] = []
     storage = get_storage()
-    for idx, stock_id in enumerate(my_ids, start=1):
+    def action(stock_id):
         outcome = manager.download_stock_history_outcome(
             stock_id=stock_id,
             period=PeriodType.DAILY,
@@ -210,10 +216,22 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
         outcomes.append(asdict(outcome))
         if outcome.classification != "downloaded":
             _persist_diagnostic(storage, business_date, stock_id, AdjustType.BFQ, outcome)
-        if idx % 50 == 0 or idx == total:
-            print(f"[BFQ p{partition_id:02d}] 进度: {idx}/{total}")
+        return outcome
 
-    return {"adjust": "bfq", "partition_id": partition_id, "count": total, "outcomes": outcomes}
+    def on_progress(_stock_id, completed, total):
+        if completed % 50 == 0 or completed == total:
+            print(f"[BFQ p{partition_id:02d}] 进度: {completed}/{total}")
+
+    selected_ids = run_partition_items(
+        stock_ids,
+        partition_id,
+        partition_count,
+        action,
+        lambda _outcome: False,
+        on_progress=on_progress,
+    )[0]
+
+    return {"adjust": "bfq", "partition_id": partition_id, "count": len(selected_ids), "outcomes": outcomes}
 
 
 def save_download_result_to_redis(*, partition_count: int, **context):

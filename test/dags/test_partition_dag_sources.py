@@ -50,6 +50,13 @@ PARTITION_DAG_SPECS = [
     ),
 ]
 
+PARTITION_ITEM_DAG_SPECS = [
+    (ROOT / "dags/download_stock_history_qfq_weekend.py", "stock_ids"),
+    (ROOT / "dags/download_stk_holdernumber_weekly.py", "stock_ids"),
+    (ROOT / "dags/scan_top10_floatholder_weekly.py", "stock_ids"),
+    (ROOT / "dags/download_etf_daily.py", "etf_ids"),
+]
+
 
 def read_source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -1044,13 +1051,59 @@ def test_partition_dag_sources_freeze_shared_partition_count_once(path: Path, ta
     assert re.search(r"for\s+_?pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)", source)
     assert re.search(build_task_signature_pattern(task_name), source)
     assert re.search(build_partition_kwargs_pattern(source), source)
-    assert f"get_partitioned_ids({ids_name}, partition_id, partition_count)" in source
+    expected_selection = f"run_partition_items(\n        {ids_name},"
+    assert expected_selection in source
 
 
 def test_partition_dag_runtime_logic_uses_explicit_partition_count_argument():
     for path, _, _ in PARTITION_DAG_SPECS[:-1]:
         source = read_source(path)
         assert "partition_count = PARTITION_COUNT" not in source
+
+
+@pytest.mark.parametrize(
+    "path",
+    [ROOT / "dags/download_stock_history_daily.py", ROOT / "dags/download_hk_ggt_history_daily.py"],
+)
+def test_structured_partition_dags_keep_classification_in_action_adapter(path: Path):
+    source = read_source(path)
+
+    assert "run_partition_items" in source
+    assert "on_progress=on_progress" in source
+    assert "is_failure=" not in source
+    assert "_failures" not in source
+    assert "outcomes.append(asdict(outcome))" in source
+    assert 'if outcome.classification != "downloaded":' in source
+
+
+@pytest.mark.parametrize(("path", "items_name"), PARTITION_ITEM_DAG_SPECS)
+def test_partition_item_dags_use_common_runner_with_progress_callback(path: Path, items_name: str):
+    source = read_source(path)
+
+    assert "run_partition_items" in source
+    assert f"run_partition_items(\n        {items_name}," in source
+    assert "on_progress=on_progress" in source
+
+
+def test_qfq_partition_treats_none_as_failure_in_runtime_contract(monkeypatch, capsys):
+    pytest.importorskip("airflow")
+    import dags.download_stock_history_qfq_weekend as dag_module
+    import download
+    import storage
+
+    monkeypatch.setattr(
+        storage,
+        "get_storage",
+        lambda: SimpleNamespace(load_general_info_stock=lambda: pd.DataFrame({"股票代码": ["000001"]})),
+    )
+    manager = Mock()
+    manager.download_stock_history.return_value = None
+    monkeypatch.setattr(download, "DownloadManager", lambda: manager)
+
+    with pytest.raises(Exception, match=r"QFQ 分片下载失败: partition=0/1, failed=1/1, ids\(sample\)=000001"):
+        dag_module.download_stock_history_qfq_partition_task(partition_id=0, partition_count=1)
+
+    assert "failed=1" in capsys.readouterr().out
 
 
 def test_hk_partition_dag_uses_frozen_partition_count_everywhere():
@@ -1347,7 +1400,7 @@ def test_etf_partition_dag_uses_frozen_partition_count_everywhere():
     )
     assert re.search(r"for\s+_?pid\s+in\s+get_partition_ids\s*\(\s*PARTITION_COUNT\s*\)", source)
     assert re.search(build_partition_kwargs_pattern(source), source)
-    assert "get_partitioned_ids(etf_ids, partition_id, partition_count)" in source
+    assert "run_partition_items(\n        etf_ids," in source
     assert "partition_count = PARTITION_COUNT" not in source
 
 

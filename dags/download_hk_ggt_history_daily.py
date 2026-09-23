@@ -24,7 +24,7 @@ from dags.common_dags import (  # noqa: E402, I001
     LOCAL_TZ,
     get_default_args,
     get_partition_ids,
-    get_partitioned_ids,
+    run_partition_items,
 )
 
 from common.const import (  # noqa: E402
@@ -144,8 +144,6 @@ def download_hk_ggt_history_none_partition_task(*, partition_id: int, partition_
         raise Exception("无法获取港股通股票基本信息数据")
 
     stock_ids = df_stocks[COL_STOCK_ID].tolist()
-    my_ids = get_partitioned_ids(stock_ids, partition_id, partition_count)
-
     manager = DownloadManager()
 
     storage = get_storage()
@@ -161,8 +159,8 @@ def download_hk_ggt_history_none_partition_task(*, partition_id: int, partition_
         session.close()
 
     outcomes: list[dict[str, Any]] = []
-    total = len(my_ids)
-    for idx, stock_id in enumerate(my_ids, start=1):
+
+    def action(stock_id):
         authority_evidence = None
         if authority_policy is not None:
             try:
@@ -199,11 +197,22 @@ def download_hk_ggt_history_none_partition_task(*, partition_id: int, partition_
         outcomes.append(asdict(outcome))
         if outcome.classification != "downloaded":
             _persist_diagnostic(get_storage(), business_date, stock_id, outcome)
+        return outcome
 
-        if idx % 50 == 0 or idx == total:
-            print(f"[HK NONE p{partition_id:02d}] 进度: {idx}/{total}")
+    def on_progress(_stock_id, completed, total):
+        if completed % 50 == 0 or completed == total:
+            print(f"[HK NONE p{partition_id:02d}] 进度: {completed}/{total}")
 
-    return {"adjust": "bfq", "partition_id": partition_id, "count": total, "outcomes": outcomes}
+    selected_ids = run_partition_items(
+        stock_ids,
+        partition_id,
+        partition_count,
+        action,
+        lambda _outcome: False,
+        on_progress=on_progress,
+    )[0]
+
+    return {"adjust": "bfq", "partition_id": partition_id, "count": len(selected_ids), "outcomes": outcomes}
 
 
 def aggregate_and_save_result(*, partition_count: int, **context):
