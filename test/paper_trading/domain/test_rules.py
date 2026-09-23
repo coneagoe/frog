@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from paper_trading.domain.enums import OrderSide, TradeValidityStatus
+from paper_trading.domain.enums import OrderSide, TradeValidityReason, TradeValidityStatus
 from paper_trading.domain.errors import PaperTradingError
 from paper_trading.domain.rules import (
     ensure_lot_size,
@@ -56,7 +56,7 @@ def test_daily_validity_rejects_price_below_low():
         _LIMIT_DOWN,
     )
     assert result.status == TradeValidityStatus.INVALID
-    assert result.reason_code == "PRICE_OUT_OF_DAILY_RANGE"
+    assert result.reason_code is TradeValidityReason.PRICE_OUT_OF_DAILY_RANGE
     assert result.price_in_range is False
 
 
@@ -70,7 +70,7 @@ def test_daily_validity_marks_buy_limit_up_touch_suspicious():
         _LIMIT_DOWN,
     )
     assert result.status == TradeValidityStatus.SUSPICIOUS
-    assert result.reason_code == "BUY_ON_LIMIT_UP_TOUCH"
+    assert result.reason_code is TradeValidityReason.BUY_ON_LIMIT_UP_TOUCH
     assert result.touched_limit_up is True
 
 
@@ -84,7 +84,7 @@ def test_daily_validity_rejects_buy_at_touched_limit_up():
         _LIMIT_DOWN,
     )
     assert result.status == TradeValidityStatus.INVALID
-    assert result.reason_code == "BUY_AT_LIMIT_UP_TOUCH"
+    assert result.reason_code is TradeValidityReason.BUY_AT_LIMIT_UP_TOUCH
 
 
 def test_daily_validity_marks_sell_limit_down_touch_suspicious():
@@ -97,7 +97,7 @@ def test_daily_validity_marks_sell_limit_down_touch_suspicious():
         _LIMIT_DOWN,
     )
     assert result.status == TradeValidityStatus.SUSPICIOUS
-    assert result.reason_code == "SELL_ON_LIMIT_DOWN_TOUCH"
+    assert result.reason_code is TradeValidityReason.SELL_ON_LIMIT_DOWN_TOUCH
     assert result.touched_limit_down is True
 
 
@@ -111,7 +111,7 @@ def test_daily_validity_rejects_sell_at_touched_limit_down():
         _LIMIT_DOWN,
     )
     assert result.status == TradeValidityStatus.INVALID
-    assert result.reason_code == "SELL_AT_LIMIT_DOWN_TOUCH"
+    assert result.reason_code is TradeValidityReason.SELL_AT_LIMIT_DOWN_TOUCH
 
 
 def test_daily_validity_accepts_normal_price():
@@ -124,4 +124,4 @@ def test_daily_validity_accepts_normal_price():
         _LIMIT_DOWN,
     )
     assert result.status == TradeValidityStatus.VALID
-    assert result.reason_code == "VALID"
+    assert result.reason_code is TradeValidityReason.VALID

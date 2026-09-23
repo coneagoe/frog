@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 
-from paper_trading.domain.enums import MigrationRepairReason
+from paper_trading.domain.enums import MigrationRepairReason, TradeValidityReason
 from paper_trading.storage.enum_migration import (
     PAPER_TRADING_ENUM_ADAPTER,
     PAPER_TRADING_ENUM_GROUPS,
@@ -71,10 +71,10 @@ def _create_legacy_schema(connection: Connection) -> None:  # noqa: E501
         "CREATE TABLE paper_cash_ledger (id integer primary key, event_type varchar(20) NOT NULL)",
         "CREATE TABLE paper_positions (id integer primary key, account_id integer NOT NULL, symbol varchar(20) NOT NULL, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share', CONSTRAINT uq_paper_positions_account_symbol UNIQUE (account_id, symbol))",
         "CREATE TABLE paper_position_lots (id integer primary key, source varchar(20) NOT NULL DEFAULT 'trade', market varchar(20) NOT NULL DEFAULT 'a_share')",
-        "CREATE TABLE paper_orders (id integer primary key, side varchar(10) NOT NULL, status varchar(30) NOT NULL, validity_status varchar(20), market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_orders (id integer primary key, side varchar(10) NOT NULL, status varchar(30) NOT NULL, validity_status varchar(20), validity_reason varchar(50), market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_trades (id integer primary key, side varchar(10) NOT NULL, market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_position_round_trips (id integer primary key, account_id integer NOT NULL, symbol varchar(20) NOT NULL, status varchar(20) NOT NULL DEFAULT 'open')",
-        "CREATE TABLE paper_trade_validity_checks (id integer primary key, side varchar(10) NOT NULL, status varchar(20) NOT NULL, data_granularity varchar(20) NOT NULL DEFAULT 'daily', market varchar(20) NOT NULL DEFAULT 'a_share')",
+        "CREATE TABLE paper_trade_validity_checks (id integer primary key, side varchar(10) NOT NULL, status varchar(20) NOT NULL, reason_code varchar(50) NOT NULL, data_granularity varchar(20) NOT NULL DEFAULT 'daily', market varchar(20) NOT NULL DEFAULT 'a_share')",
         "CREATE TABLE paper_pending_settlement (id integer primary key, source varchar(20) NOT NULL)",
         "CREATE TABLE paper_ledger_rebuilds (id integer primary key, status varchar(20) NOT NULL)",
         "CREATE TABLE daily_bar_diagnostics (id integer primary key, business_date date NOT NULL, stock_id varchar(20) NOT NULL, adjust varchar(10) NOT NULL, classification varchar(50) NOT NULL, provider_outcomes jsonb NOT NULL, CONSTRAINT uq_daily_bar_diagnostics_business_key UNIQUE (business_date, stock_id, adjust))",
@@ -211,6 +211,89 @@ def test_migration_repair_reason_group_declares_nullable_varchar40_column():
     assert column.nullable is True
     assert column.default_sql is None
     assert column.indexes == ()
+
+
+def test_validity_reason_migration_shares_enum_preserves_values_and_rolls_back(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text("INSERT INTO paper_orders (id, side, status, validity_reason) VALUES (1, 'buy', 'new', :reason)"),
+            {"reason": TradeValidityReason.VALID.value},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO paper_trade_validity_checks (id, side, status, reason_code) "
+                "VALUES (1, 'buy', 'valid', :reason)"
+            ),
+            {"reason": TradeValidityReason.MARKET_DATA_UNAVAILABLE.value},
+        )
+
+        first_result = migrate_paper_trading_enums(connection)
+        assert first_result.converted is True
+        assert _column_type(connection, "paper_orders", "validity_reason") == "paper_trade_validity_reason"
+        assert _column_type(connection, "paper_trade_validity_checks", "reason_code") == "paper_trade_validity_reason"
+        assert _enum_labels(connection, "paper_trade_validity_reason") == tuple(
+            member.value for member in TradeValidityReason
+        )
+        assert connection.execute(text("SELECT validity_reason FROM paper_orders WHERE id = 1")).scalar_one() == (
+            TradeValidityReason.VALID.value
+        )
+        assert connection.execute(
+            text("SELECT reason_code FROM paper_trade_validity_checks WHERE id = 1")
+        ).scalar_one() == (TradeValidityReason.MARKET_DATA_UNAVAILABLE.value)
+        assert migrate_paper_trading_enums(connection).converted is False
+
+        rollback_result = migrate_paper_trading_enums(connection, rollback=True)
+        assert rollback_result.rolled_back is True
+        assert _column_type(connection, "paper_orders", "validity_reason") == "character varying(50)"
+        assert _column_type(connection, "paper_trade_validity_checks", "reason_code") == "character varying(50)"
+        assert connection.execute(text("SELECT validity_reason FROM paper_orders WHERE id = 1")).scalar_one() == (
+            TradeValidityReason.VALID.value
+        )
+        assert connection.execute(
+            text("SELECT reason_code FROM paper_trade_validity_checks WHERE id = 1")
+        ).scalar_one() == (TradeValidityReason.MARKET_DATA_UNAVAILABLE.value)
+
+
+@pytest.mark.parametrize(
+    ("table_name", "column_name", "insert_sql"),
+    (
+        (
+            "paper_orders",
+            "validity_reason",
+            "INSERT INTO paper_orders (id, side, status, validity_reason) VALUES (1, 'buy', 'new', 'legacy_unknown')",
+        ),
+        (
+            "paper_trade_validity_checks",
+            "reason_code",
+            "INSERT INTO paper_trade_validity_checks (id, side, status, reason_code) "
+            "VALUES (1, 'buy', 'valid', 'legacy_unknown')",
+        ),
+    ),
+)
+def test_validity_reason_preflight_rejects_unknown_values_without_schema_mutation(
+    postgres_schema, table_name: str, column_name: str, insert_sql: str
+):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(text(insert_sql))
+        schema_changes = []
+
+        def capture_schema_change(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith(("ALTER ", "CREATE ", "DROP ")):
+                schema_changes.append(statement)
+
+        event.listen(connection, "before_cursor_execute", capture_schema_change)
+
+        with pytest.raises(PaperTradingEnumMigrationError, match="paper_trade_validity_reason: unknown legacy values"):
+            migrate_paper_trading_enums(connection)
+        event.remove(connection, "before_cursor_execute", capture_schema_change)
+
+        assert schema_changes == []
+        assert _column_type(connection, table_name, column_name) == "character varying(50)"
+        assert _column_type(connection, "paper_orders", "validity_reason") == "character varying(50)"
+        assert _column_type(connection, "paper_trade_validity_checks", "reason_code") == "character varying(50)"
+        assert _enum_types(connection) == set()
 
 
 def test_adapter_preflight_does_not_convert_matching_status(postgres_schema):

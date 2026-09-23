@@ -4099,6 +4099,7 @@ def test_postgresql_paper_schema_upgrade_leaves_diagnostics_to_storage_enum_adap
                         side VARCHAR(10) NOT NULL,
                         status VARCHAR(30) NOT NULL,
                         validity_status VARCHAR(20),
+                        validity_reason VARCHAR(50),
                         idempotency_key VARCHAR(100)
                     )
                     """

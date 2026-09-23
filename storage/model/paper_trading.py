@@ -50,6 +50,7 @@ from paper_trading.domain.enums import (
     SnapshotQualityStatus,
     SnapshotValuationQuality,
     TradeValidityGranularity,
+    TradeValidityReason,
     TradeValidityStatus,
 )
 from storage.domain_enums import DailyBarDiagnosticAdjust, DailyBarDiagnosticClassification
@@ -303,7 +304,9 @@ class PaperOrder(Base):
     validity_status: Mapped[str | None] = mapped_column(
         _value_enum(TradeValidityStatus, "paper_trade_validity_status"), nullable=True, index=True
     )
-    validity_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    validity_reason: Mapped[str | None] = mapped_column(
+        _value_enum(TradeValidityReason, "paper_trade_validity_reason"), nullable=True
+    )
     validity_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     market: Mapped[str] = mapped_column(
         _value_enum(Market, "paper_market"), nullable=False, server_default="a_share", index=True
@@ -364,7 +367,9 @@ class PaperTradeValidityCheck(Base):
     status: Mapped[str] = mapped_column(
         _value_enum(TradeValidityStatus, "paper_trade_validity_status"), nullable=False, index=True
     )
-    reason_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    reason_code: Mapped[str] = mapped_column(
+        _value_enum(TradeValidityReason, "paper_trade_validity_reason"), nullable=False
+    )
     reason_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     data_granularity: Mapped[str] = mapped_column(
         _value_enum(TradeValidityGranularity, "paper_trade_validity_granularity"),

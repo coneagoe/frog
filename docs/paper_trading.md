@@ -558,7 +558,7 @@ curl -X DELETE "$PAPER_TRADING_API_BASE_URL/paper/orders/123" \
 
 ### Rebuild an account ledger from a date
 
-Use an explicit historical ledger rebuild when derived account state needs to be replayed from a known `start_date` without deleting source facts. The rebuild preserves orders, cancellations, deposits, withdrawals, manual cash adjustments, existing validity checks, and historical matching runs, then recreates derived trades, trade cash events, positions, lots, round trips, snapshots, valuation gaps, and new replay matching runs from that date forward. A lightweight audit row records the account, start date, trigger evidence, deleted/regenerated counts, terminal status, and any error detail.
+Use an explicit historical ledger rebuild when derived account state needs to be replayed from a known `start_date` without deleting source facts. The rebuild preserves orders, cancellations, deposits, withdrawals, manual cash adjustments, validity checks strictly before `start_date`, and historical matching runs; validity checks on or after `start_date` are deleted and regenerated from replayed eligible orders. It then recreates derived trades, trade cash events, positions, lots, round trips, snapshots, valuation gaps, and new replay matching runs from that date forward. A lightweight audit row records the account, start date, trigger evidence, deleted/regenerated counts, terminal status, and any error detail.
 
 ```bash
 uv run tools/paper_trading_cli.py account rebuild_ledger --account-id 1 --start-date 2026-07-17 --trigger-evidence "manual repair"
@@ -1085,10 +1085,11 @@ production operator interface for the governed Paper Trading, Monitor, Forecast
 SSF, and Storage schemas. Keep the maintenance record, verified backup, and
 every command's JSON output together.
 
-The governed types are the 18 Paper Trading types:
+The governed types are the 19 Paper Trading types:
 `paper_account_status`, `paper_fee_preset`, `paper_cash_event_type`,
 `paper_order_side`, `paper_order_status`, `paper_trade_validity_status`,
-`paper_market`, `paper_position_source`, `paper_round_trip_status`,
+`paper_trade_validity_reason`, `paper_market`, `paper_position_source`,
+`paper_round_trip_status`,
 `paper_trade_validity_granularity`, `paper_pending_settlement_source`,
 `paper_ledger_rebuild_status`, `paper_matching_run_status`,
 `paper_etf_eligibility_status`, `paper_snapshot_point_type`,
@@ -1108,6 +1109,19 @@ exports create only the required types with duplicate-safe DDL, so a restore
 does not replace an existing shared type. `pg_dump` preserves table-owned
 defaults, indexes, foreign keys, and JSON checks. A full clean restore drops
 dependent tables before the managed types.
+
+Trade-validity reasons use the shared `paper_trade_validity_reason` enum on
+`paper_orders.validity_reason` (nullable) and
+`paper_trade_validity_checks.reason_code` (not nullable). Before deploying code
+that reads or writes these columns, run and independently verify the unified
+enum governance migration below; keep the order/check writers stopped until it
+passes. Its stable labels are `VALID`, `MARKET_DATA_UNAVAILABLE`,
+`LIMIT_PRICE_UNAVAILABLE`, `INVALID_TICK_SIZE`, `PRICE_OUT_OF_DAILY_RANGE`,
+`BUY_AT_LIMIT_UP_TOUCH`, `BUY_ON_LIMIT_UP_TOUCH`,
+`SELL_AT_LIMIT_DOWN_TOUCH`, `SELL_ON_LIMIT_DOWN_TOUCH`, and
+`UNKNOWN_HK_SECURITY`, in that order. Rollback uses the documented schema
+rollback procedure below while writers remain stopped; restore a verified
+backup instead if recovery requires restoring pre-migration data.
 
 Monitor `condition` remains JSON because it carries structured rule
 configuration. Application write paths validate the complete conditional-rule
@@ -1226,6 +1240,7 @@ WITH expected(type_name, labels) AS (
     ('paper_order_side', ARRAY['buy','sell']),
     ('paper_order_status', ARRAY['new','accepted','partially_filled','filled','cancelled','rejected']),
     ('paper_trade_validity_status', ARRAY['valid','suspicious','invalid','unchecked']),
+    ('paper_trade_validity_reason', ARRAY['VALID','MARKET_DATA_UNAVAILABLE','LIMIT_PRICE_UNAVAILABLE','INVALID_TICK_SIZE','PRICE_OUT_OF_DAILY_RANGE','BUY_AT_LIMIT_UP_TOUCH','BUY_ON_LIMIT_UP_TOUCH','SELL_AT_LIMIT_DOWN_TOUCH','SELL_ON_LIMIT_DOWN_TOUCH','UNKNOWN_HK_SECURITY']),
     ('paper_market', ARRAY['a_share','hk_connect','etf']),
     ('paper_position_source', ARRAY['trade','imported']),
     ('paper_round_trip_status', ARRAY['open','closed']),
@@ -1275,7 +1290,9 @@ WITH expected(table_name, column_name, type_name) AS (
     ('paper_cash_ledger','event_type','paper_cash_event_type'), ('paper_orders','side','paper_order_side'),
     ('paper_trades','side','paper_order_side'), ('paper_trade_validity_checks','side','paper_order_side'),
     ('paper_orders','status','paper_order_status'), ('paper_orders','validity_status','paper_trade_validity_status'),
-    ('paper_trade_validity_checks','status','paper_trade_validity_status'), ('paper_orders','market','paper_market'),
+    ('paper_trade_validity_checks','status','paper_trade_validity_status'),
+    ('paper_orders','validity_reason','paper_trade_validity_reason'),
+    ('paper_trade_validity_checks','reason_code','paper_trade_validity_reason'), ('paper_orders','market','paper_market'),
     ('paper_positions','market','paper_market'), ('paper_position_lots','market','paper_market'),
     ('paper_trades','market','paper_market'), ('paper_trade_validity_checks','market','paper_market'),
     ('paper_positions','source','paper_position_source'), ('paper_position_lots','source','paper_position_source'),
@@ -1306,7 +1323,7 @@ ORDER BY e.table_name, e.column_name;
 SQL
 ```
 
-Expected result: zero rows. This proves all 35 governed columns use their
+Expected result: zero rows. This proves all 37 governed columns use their
 managed enum types.
 
 ```bash
@@ -1337,7 +1354,8 @@ WITH expected AS (
     ('paper_cash_ledger','event_type', NULL),
     ('paper_orders','side', NULL), ('paper_trades','side', NULL),
     ('paper_trade_validity_checks','side', NULL), ('paper_orders','status', NULL),
-    ('paper_orders','validity_status', NULL), ('paper_trade_validity_checks','status', NULL),
+    ('paper_orders','validity_status', NULL), ('paper_orders','validity_reason', NULL),
+    ('paper_trade_validity_checks','status', NULL), ('paper_trade_validity_checks','reason_code', NULL),
     ('paper_pending_settlement','source', NULL), ('paper_ledger_rebuilds','status', NULL),
     ('paper_matching_runs','status', NULL), ('forecast_ssf_candidates','state', NULL),
     ('paper_accounts','migration_repair_reason', NULL)

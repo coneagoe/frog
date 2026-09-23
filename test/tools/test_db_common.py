@@ -80,6 +80,13 @@ def test_business_enum_types_include_paper_order_event_type_and_replay_provenanc
     } <= _parse_business_enum_types()
 
 
+def test_business_enum_types_include_trade_validity_reason_and_map_its_tables():
+    assert "paper_trade_validity_reason" in _parse_business_enum_types()
+    assert _business_enum_is_needed("paper_trade_validity_reason", "paper_orders")
+    assert _business_enum_is_needed("paper_trade_validity_reason", "paper_trade_validity_checks")
+    assert not _business_enum_is_needed("paper_trade_validity_reason", "paper_trades")
+
+
 def test_business_tables_and_enum_types_register_data_gap_recovery():
     assert {
         "paper_data_gap_recovery_gaps",

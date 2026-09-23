@@ -381,6 +381,7 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
         ("510300", buy_date, Market.ETF),
         ("510300", buy_date, Market.ETF.value),
         ("510300", buy_date, Market.ETF),
+        ("510300", buy_date, Market.ETF.value),
     ]
 
     market_data.requested_bars.clear()
@@ -408,6 +409,7 @@ def test_historical_etf_buy_then_next_date_sell_rebuilds_full_lifecycle(tmp_path
     assert market_data.requested_bars == [
         ("510300", sell_date, Market.ETF.value),
         ("510300", sell_date, Market.ETF),
+        ("510300", sell_date, Market.ETF.value),
     ]
     assert repo.get_cash_available(account.id) == Decimal("100009.9360")
     assert repo.list_pending_settlements(account.id) == []

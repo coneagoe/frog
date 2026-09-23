@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from paper_trading.domain.enums import OrderSide, TradeValidityStatus
+from paper_trading.domain.enums import OrderSide, TradeValidityReason, TradeValidityStatus
 from paper_trading.domain.hk_connect_rules import get_hk_tick_size
 from paper_trading.domain.rules import evaluate_daily_trade_validity
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
@@ -52,7 +52,7 @@ class TradeValidityService:
                 touched_limit_down=None,
                 price_in_range=None,
                 status=TradeValidityStatus.UNCHECKED.value,
-                reason_code="UNKNOWN_HK_SECURITY",
+                reason_code=TradeValidityReason.UNKNOWN_HK_SECURITY,
                 reason_detail="HK metadata provider not configured",
                 market=market,
             )
@@ -77,7 +77,7 @@ class TradeValidityService:
                 touched_limit_down=None,
                 price_in_range=None,
                 status=TradeValidityStatus.UNCHECKED.value,
-                reason_code="UNKNOWN_HK_SECURITY",
+                reason_code=TradeValidityReason.UNKNOWN_HK_SECURITY,
                 reason_detail=f"HK security {order.symbol} not found in metadata",
                 market=market,
             )
@@ -103,7 +103,7 @@ class TradeValidityService:
                 touched_limit_down=None,
                 price_in_range=None,
                 status=TradeValidityStatus.UNCHECKED.value,
-                reason_code="MARKET_DATA_UNAVAILABLE",
+                reason_code=TradeValidityReason.MARKET_DATA_UNAVAILABLE,
                 reason_detail=str(exc),
                 market=market,
             )
@@ -122,15 +122,15 @@ class TradeValidityService:
 
         if not tick_aligned:
             status = TradeValidityStatus.INVALID
-            reason_code = "INVALID_TICK_SIZE"
+            reason_code = TradeValidityReason.INVALID_TICK_SIZE
             reason_detail = f"Price {price} is not aligned to HK tick size {tick_size}"
         elif not price_in_range:
             status = TradeValidityStatus.INVALID
-            reason_code = "PRICE_OUT_OF_DAILY_RANGE"
+            reason_code = TradeValidityReason.PRICE_OUT_OF_DAILY_RANGE
             reason_detail = "Input price is outside the daily low/high range"
         else:
             status = TradeValidityStatus.VALID
-            reason_code = "VALID"
+            reason_code = TradeValidityReason.VALID
             reason_detail = "Price is inside daily range and tick-aligned"
 
         check = self.repo.create_trade_validity_check(
@@ -177,7 +177,7 @@ class TradeValidityService:
                 touched_limit_down=None,
                 price_in_range=None,
                 status=TradeValidityStatus.UNCHECKED.value,
-                reason_code="MARKET_DATA_UNAVAILABLE",
+                reason_code=TradeValidityReason.MARKET_DATA_UNAVAILABLE,
                 reason_detail=str(exc),
                 market=market,
             )
@@ -187,7 +187,7 @@ class TradeValidityService:
         price = Decimal(order.limit_price)
         price_in_range = bar.low <= price <= bar.high
         status = TradeValidityStatus.VALID if price_in_range else TradeValidityStatus.INVALID
-        reason_code = "VALID" if price_in_range else "PRICE_OUT_OF_DAILY_RANGE"
+        reason_code = TradeValidityReason.VALID if price_in_range else TradeValidityReason.PRICE_OUT_OF_DAILY_RANGE
         reason_detail = (
             "Price is inside daily range" if price_in_range else "Input price is outside the daily low/high range"
         )
@@ -219,7 +219,7 @@ class TradeValidityService:
     def _analyze_a_share(self, order: PaperOrder) -> PaperTradeValidityCheck:
         market = getattr(order, "market", None) or "a_share"
         try:
-            bar = self.market_data.get_daily_bar(order.symbol, order.trade_date)
+            bar = self.market_data.get_daily_bar(order.symbol, order.trade_date, market=market)
         except (KeyError, ValueError) as exc:
             check = self.repo.create_trade_validity_check(
                 order_id=order.id,
@@ -237,7 +237,7 @@ class TradeValidityService:
                 touched_limit_down=None,
                 price_in_range=None,
                 status=TradeValidityStatus.UNCHECKED.value,
-                reason_code="MARKET_DATA_UNAVAILABLE",
+                reason_code=TradeValidityReason.MARKET_DATA_UNAVAILABLE,
                 reason_detail=str(exc),
                 market=market,
             )
@@ -252,11 +252,11 @@ class TradeValidityService:
             price_in_range = bar.low <= price <= bar.high
             if not price_in_range:
                 status = TradeValidityStatus.INVALID
-                reason_code = "PRICE_OUT_OF_DAILY_RANGE"
+                reason_code = TradeValidityReason.PRICE_OUT_OF_DAILY_RANGE
                 reason_detail = "Input price is outside the daily low/high range"
             else:
                 status = TradeValidityStatus.UNCHECKED
-                reason_code = "LIMIT_PRICE_UNAVAILABLE"
+                reason_code = TradeValidityReason.LIMIT_PRICE_UNAVAILABLE
                 reason_detail = "Daily limit prices not available; limit-touch analysis skipped"
             check = self.repo.create_trade_validity_check(
                 order_id=order.id,

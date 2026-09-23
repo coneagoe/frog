@@ -6,9 +6,10 @@ from paper_trading.services.matching_service import MatchingService
 from paper_trading.services.order_delete_service import OrderDeleteService
 from paper_trading.services.round_trip_service import RoundTripService
 from paper_trading.services.snapshot_service import SnapshotService
+from paper_trading.services.trade_validity_service import TradeValidityService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import MarketDataProvider
-from paper_trading.storage.models import PaperLedgerRebuild, PaperOrder
+from paper_trading.storage.models import PaperLedgerRebuild, PaperOrder, PaperTradeValidityCheck
 from paper_trading.storage.repository import PaperTradingRepository
 
 
@@ -46,6 +47,7 @@ class LedgerRebuildService:
                 self.repo.reset_orders_for_replay_from(account_id, start_date)
                 self.repo.session.expunge_all()
                 self._replay_orders(account_id, start_date, regenerated_counts)
+                self._regenerate_validity_checks(account_id, start_date)
                 RoundTripService(self.repo).rebuild_account(account_id)
                 persisted = self.repo.session.get(PaperLedgerRebuild, rebuild_id)
                 if persisted is None:
@@ -137,3 +139,20 @@ class LedgerRebuildService:
                 run_status,
                 warning_count=warning_count,
             )
+
+    def _regenerate_validity_checks(self, account_id: int, start_date: date) -> None:
+        self.repo.session.query(PaperTradeValidityCheck).filter(
+            PaperTradeValidityCheck.account_id == account_id,
+            PaperTradeValidityCheck.trade_date >= start_date,
+        ).delete(synchronize_session=False)
+
+        validity_service = TradeValidityService(self.repo, self.market_data, hk_metadata=self.hk_metadata)
+        for order in self.repo.list_orders(account_id):
+            if order.trade_date >= start_date and order.status in (
+                OrderStatus.ACCEPTED.value,
+                OrderStatus.FILLED.value,
+                OrderStatus.PARTIALLY_FILLED.value,
+                OrderStatus.REJECTED.value,
+                OrderStatus.CANCELLED.value,
+            ):
+                validity_service.analyze_order(order)

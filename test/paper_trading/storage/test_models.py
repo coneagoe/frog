@@ -18,6 +18,7 @@ from paper_trading.domain.enums import (
     SnapshotPointType,
     SnapshotQualityStatus,
     SnapshotValuationQuality,
+    TradeValidityReason,
 )
 from paper_trading.storage.models import (
     DailyBarDiagnostic,
@@ -334,6 +335,33 @@ def test_selected_paper_columns_use_shared_value_enums():
     assert PaperAccountSnapshot.__table__.c.point_type.type.name == "paper_snapshot_point_type"
     assert PaperAccountSnapshot.__table__.c.quality_status.type.name == "paper_snapshot_quality_status"
     assert PaperAccountSnapshot.__table__.c.valuation_quality.type.name == "paper_snapshot_valuation_quality"
+
+
+def test_trade_validity_reason_has_exact_supported_labels():
+    assert [reason.value for reason in TradeValidityReason] == [
+        "VALID",
+        "MARKET_DATA_UNAVAILABLE",
+        "LIMIT_PRICE_UNAVAILABLE",
+        "INVALID_TICK_SIZE",
+        "PRICE_OUT_OF_DAILY_RANGE",
+        "BUY_AT_LIMIT_UP_TOUCH",
+        "BUY_ON_LIMIT_UP_TOUCH",
+        "SELL_AT_LIMIT_DOWN_TOUCH",
+        "SELL_ON_LIMIT_DOWN_TOUCH",
+        "UNKNOWN_HK_SECURITY",
+    ]
+
+
+def test_order_and_validity_check_share_validity_reason_enum_mapping():
+    order_reason = PaperOrder.__table__.c.validity_reason
+    check_reason = PaperTradeValidityCheck.__table__.c.reason_code
+
+    assert isinstance(order_reason.type, Enum)
+    assert isinstance(check_reason.type, Enum)
+    assert order_reason.type.name == check_reason.type.name == "paper_trade_validity_reason"
+    assert order_reason.type.enums == check_reason.type.enums == [reason.value for reason in TradeValidityReason]
+    assert order_reason.nullable is True
+    assert check_reason.nullable is False
 
 
 def test_selected_paper_enum_columns_reject_unknown_values(tmp_path):

@@ -12,6 +12,7 @@ PAPER_ENUM_TYPES = (
     "paper_order_event_type",
     "paper_replay_time_provenance",
     "paper_trade_validity_status",
+    "paper_trade_validity_reason",
     "paper_market",
     "paper_position_source",
     "paper_round_trip_status",
@@ -113,6 +114,31 @@ def test_order_events_export_places_event_enum_before_table_dump(tmp_path: Path)
     assert 'CREATE TYPE "public"."paper_replay_time_provenance"' in dump
     assert dump.index('CREATE TYPE "public"."paper_order_event_type"') < dump.index("-- dump output")
     assert dump.index('CREATE TYPE "public"."paper_replay_time_provenance"') < dump.index("-- dump output")
+
+
+def test_trade_validity_reason_export_and_clean_import_preserve_ordering(tmp_path: Path):
+    output_file = tmp_path / "trade-validity.sql"
+    input_file = tmp_path / "trade-validity-input.sql"
+    input_file.write_text("SELECT 1;\n", encoding="utf-8")
+
+    _, export_commands = _run_script(
+        "db_export.sh",
+        ["--no-gzip", "--table", "paper_orders", "--out", str(output_file)],
+        tmp_path,
+    )
+    _run_script(
+        "db_import.sh",
+        ["--clean", "--table", "paper_orders", "--in", str(input_file)],
+        tmp_path,
+    )
+
+    dump = output_file.read_text(encoding="utf-8")
+    assert "type=paper_trade_validity_reason" in export_commands
+    assert dump.index('CREATE TYPE "public"."paper_trade_validity_reason"') < dump.index("-- dump output")
+
+    drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
+    assert 'DROP TABLE IF EXISTS "public"."paper_orders"' in drop_sql
+    assert 'DROP TYPE IF EXISTS "public"."paper_trade_validity_reason"' not in drop_sql
 
 
 def test_replay_provenance_selected_exports_query_only_required_enum(tmp_path: Path):
@@ -297,7 +323,7 @@ def test_paper_orders_export_preserves_shared_enum_types(tmp_path: Path):
     drop_sql = (tmp_path / "commands.log").read_text(encoding="utf-8").split(" -c ", 1)[1]
     assert 'DROP TYPE IF EXISTS "public"."paper_market"' not in dump
     assert 'DROP TYPE IF EXISTS "public"."paper_market"' not in drop_sql
-    for type_name in ("paper_order_side", "paper_trade_validity_status", "paper_market"):
+    for type_name in ("paper_order_side", "paper_trade_validity_status", "paper_trade_validity_reason", "paper_market"):
         assert f'CREATE TYPE "public"."{type_name}" AS ENUM' in dump
     assert "EXCEPTION WHEN duplicate_object THEN NULL" in dump
 

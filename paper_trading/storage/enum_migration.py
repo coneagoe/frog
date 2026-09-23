@@ -36,6 +36,7 @@ from paper_trading.domain.enums import (
     SnapshotQualityStatus,
     SnapshotValuationQuality,
     TradeValidityGranularity,
+    TradeValidityReason,
     TradeValidityStatus,
 )
 from storage.enum_governance_adapter import EnumGovernanceAdapter
@@ -253,6 +254,14 @@ PAPER_TRADING_ENUM_GROUPS = (
         ),
     ),
     PaperTradingEnumGroup(
+        "paper_trade_validity_reason",
+        _labels(TradeValidityReason),
+        (
+            _column("paper_orders", "validity_reason", "VARCHAR(50)", nullable=True),
+            _column("paper_trade_validity_checks", "reason_code", "VARCHAR(50)"),
+        ),
+    ),
+    PaperTradingEnumGroup(
         "paper_market",
         _labels(Market),
         (
@@ -458,6 +467,10 @@ PAPER_TRADING_ENUM_GROUPS = (
         _labels(DataGapRecoveryAlertDeliveryState),
         (_column("paper_data_gap_recovery_alerts", "delivery_state", "VARCHAR(40)", "'pending'"),),
     ),
+)
+
+_TRADE_VALIDITY_REASON_GROUP = next(
+    group for group in PAPER_TRADING_ENUM_GROUPS if group.type_name == "paper_trade_validity_reason"
 )
 
 _GOVERNED_TABLES = (
@@ -666,6 +679,7 @@ def _result(
 
 def _adapter_preflight(connection: Connection, *, rollback: bool) -> None:
     groups = PAPER_TRADING_ENUM_GROUPS
+    _preflight(connection, (_TRADE_VALIDITY_REASON_GROUP,), rollback=rollback)
     if not rollback:
         _add_alert_delivery_metadata_column(connection)
     _preflight_recovery_schema(connection, rollback=rollback)

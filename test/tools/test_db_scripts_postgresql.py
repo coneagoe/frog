@@ -323,6 +323,7 @@ def test_full_export_import_preserves_data_gap_recovery_enum_registrations(
                 "ALTER TABLE paper_orders ADD COLUMN side varchar(10) NOT NULL DEFAULT 'buy', "
                 "ADD COLUMN status varchar(30) NOT NULL, "
                 "ADD COLUMN validity_status varchar(20), "
+                "ADD COLUMN validity_reason varchar(50), "
                 "ADD COLUMN market varchar(20) NOT NULL DEFAULT 'a_share'"
             )
         )
@@ -336,6 +337,7 @@ def test_full_export_import_preserves_data_gap_recovery_enum_registrations(
             text(
                 "ALTER TABLE paper_trade_validity_checks ADD COLUMN side varchar(10) NOT NULL DEFAULT 'buy', "
                 "ADD COLUMN status varchar(20) NOT NULL DEFAULT 'valid', "
+                "ADD COLUMN reason_code varchar(50) NOT NULL, "
                 "ADD COLUMN data_granularity varchar(20) NOT NULL DEFAULT 'daily', "
                 "ADD COLUMN market varchar(20) NOT NULL DEFAULT 'a_share'"
             )

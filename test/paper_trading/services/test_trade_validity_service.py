@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from paper_trading.domain.enums import Market, OrderSide, OrderStatus
+from paper_trading.domain.enums import Market, OrderSide, OrderStatus, TradeValidityReason
 from paper_trading.services.trade_validity_service import TradeValidityService
 from paper_trading.storage.hk_metadata import HkConnectMetadataProvider
 from paper_trading.storage.market_data import DailyBar
@@ -138,6 +138,14 @@ def test_analyze_order_marks_missing_market_data_unchecked(tmp_path):
         date(2026, 6, 16),
         OrderStatus.ACCEPTED,
     )
+    captured_reasons = []
+    create_trade_validity_check = repo.create_trade_validity_check
+
+    def capture_reason(**values):
+        captured_reasons.append(values["reason_code"])
+        return create_trade_validity_check(**values)
+
+    repo.create_trade_validity_check = capture_reason
     service = TradeValidityService(repo, StaticMarketData(None))
 
     check = service.analyze_order(order)
@@ -145,6 +153,9 @@ def test_analyze_order_marks_missing_market_data_unchecked(tmp_path):
 
     assert check.status == "unchecked"
     assert check.reason_code == "MARKET_DATA_UNAVAILABLE"
+    assert len(captured_reasons) == 1
+    assert captured_reasons[0] is TradeValidityReason.MARKET_DATA_UNAVAILABLE
+    assert str(check.reason_code) == "MARKET_DATA_UNAVAILABLE"
     assert repo.get_order(order.id).validity_status == "unchecked"
     engine.dispose()
 
@@ -400,6 +411,45 @@ def test_a_share_validity_unchanged(sqlite_session):
     service = TradeValidityService(repo, md)
     check = service.analyze_order(order)
     assert check.touched_limit_up is not None  # A-share sets these
+
+
+def test_a_share_validity_passes_market_to_provider(sqlite_session):
+    Base.metadata.create_all(sqlite_session.get_bind())
+    repo = PaperTradingRepository(sqlite_session)
+    account = repo.create_account("a-market", Decimal("100000.00"))
+    order = repo.create_order(
+        account_id=account.id,
+        symbol="000001.SZ",
+        side=OrderSide.BUY,
+        quantity=100,
+        limit_price=Decimal("10.00"),
+        trade_date=date(2026, 7, 21),
+        status=OrderStatus.ACCEPTED,
+        market=Market.A_SHARE,
+    )
+
+    class MarketAwareProvider(FakeMarketDataProvider):
+        def __init__(self):
+            super().__init__()
+            self.captured_markets: list[str | None] = []
+
+        def get_daily_bar(self, symbol: str, trade_date: date, market: str | None = None) -> DailyBar:
+            self.captured_markets.append(market)
+            return DailyBar(
+                symbol=symbol,
+                trade_date=trade_date,
+                open=Decimal("10"),
+                high=Decimal("11"),
+                low=Decimal("9"),
+                close=Decimal("10.5"),
+                up_limit=Decimal("11.5"),
+                down_limit=Decimal("8.5"),
+            )
+
+    md = MarketAwareProvider()
+    TradeValidityService(repo, md).analyze_order(order)
+
+    assert md.captured_markets == [Market.A_SHARE.value]
 
 
 def test_hk_connect_passes_market_to_provider(sqlite_session):
