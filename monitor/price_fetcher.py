@@ -1,14 +1,14 @@
 """Fetch current price and historical OHLCV data for monitor conditions."""
 
-import os
 from datetime import date, timedelta
-from pathlib import Path
 from typing import Iterable, Optional, cast
 
 import numpy as np
 import pandas as pd
 
 from common.const import COL_DATE, AdjustType, PeriodType
+from common.market_code import Market, to_tushare_code
+from common.tushare_client import create_tushare_client
 from storage import get_storage
 
 # How many calendar days to fetch per requested trading period
@@ -20,70 +20,21 @@ def _format_tushare_date(value: date) -> str:
     return value.strftime("%Y%m%d")
 
 
-def _env_file_candidates() -> list[Path]:
-    return [Path.cwd() / ".env", Path(__file__).resolve().parents[1] / ".env"]
-
-
-def _read_token_from_env_file() -> str | None:
-    for env_file in _env_file_candidates():
-        if not env_file.exists():
-            continue
-        try:
-            lines = env_file.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            name, value = line.split("=", 1)
-            name = name.strip().removeprefix("export ").strip()
-            if name == "TUSHARE_TOKEN":
-                return value.strip().strip('"').strip("'") or None
-    return None
-
-
 def _create_tushare_client():
-    token = os.getenv("TUSHARE_TOKEN") or _read_token_from_env_file()
-    if not token:
-        return None
-
-    try:
-        import tushare as ts
-    except Exception:
-        return None
-
-    try:
-        return ts.pro_api(token=token)
-    except Exception:
-        # If pro_api raises during creation, treat as unavailable
-        return None
+    return create_tushare_client()
 
 
-def _to_ts_code(stock_code: str, market: str) -> str | None:
-    normalized = stock_code.strip()
-    if market == "HK":
-        return f"{normalized.zfill(5)}.HK"
-    if market == "ETF":
-        suffix = ".SH" if normalized.startswith("5") else ".SZ"
-        return f"{normalized}{suffix}"
-    if market == "A":
-        # A-share: 6 and 9 are Shanghai; 5-prefixes are ETF-style and should be handled by market="ETF".
-        suffix = ".SH" if normalized.startswith(("6", "9")) else ".SZ"
-        return f"{normalized}{suffix}"
-    return None
+def _to_ts_code(stock_code: str, market: str) -> str:
+    if market not in ("A", "ETF", "HK"):
+        raise ValueError(f"Unknown market: {market}")
+    return to_tushare_code(stock_code, cast(Market, market))
 
 
 def _fetch_a_share_daily_history_from_tushare(
     stock_code: str, start_date: date, end_date: date
 ) -> Optional[pd.DataFrame]:
-    pro = _create_tushare_client()
-    if pro is None:
-        return None
-
     ts_code = _to_ts_code(stock_code, "A")
-    if ts_code is None:
-        return None
+    pro = _create_tushare_client()
 
     try:
         df = pro.daily(
@@ -152,41 +103,39 @@ def _fetch_rt_hk_k_map(pro, ts_codes: list[str]) -> dict[str, float]:
 def fetch_price_map(items: Iterable[tuple[str, str]]) -> dict[tuple[str, str], float]:
     pairs = list(items)
     result = {(stock_code, market): np.nan for stock_code, market in pairs}
-    pro = _create_tushare_client()
-    if pro is None:
-        return result
-
-    a_etf_codes = []
-    hk_codes = []
-    reverse_lookup = {}
+    a_etf_codes: list[str] = []
+    hk_codes: list[str] = []
+    reverse_lookup: dict[str, list[tuple[str, str]]] = {}
 
     for stock_code, market in pairs:
-        ts_code = _to_ts_code(stock_code, market)
-        if ts_code is None:
-            continue
-        reverse_lookup[ts_code] = (stock_code, market)
+        ts_code = _to_ts_code(stock_code, market)  # validates every input before client construction
+        reverse_lookup.setdefault(ts_code, []).append((stock_code, market))
         if market == "HK":
             hk_codes.append(ts_code)
         else:
             a_etf_codes.append(ts_code)
 
+    pro = _create_tushare_client()
+
     for ts_code, price in _fetch_rt_k_map(pro, a_etf_codes).items():
-        result[reverse_lookup[ts_code]] = price
+        for pair in reverse_lookup.get(ts_code, ()):
+            result[pair] = price
 
     for ts_code, price in _fetch_rt_hk_k_map(pro, hk_codes).items():
-        result[reverse_lookup[ts_code]] = price
+        for pair in reverse_lookup.get(ts_code, ()):
+            result[pair] = price
 
     return result
 
 
-def fetch_price(stock_code: str, market: str) -> float:
+def fetch_price(stock_code: str, market: Market) -> float:
     price = fetch_price_map([(stock_code, market)]).get((stock_code, market), np.nan)
     if price is None:
         return float(np.nan)
     return float(price)
 
 
-def fetch_current_price(stock_code: str, market: str) -> float:
+def fetch_current_price(stock_code: str, market: Market) -> float:
     return fetch_price(stock_code, market)
 
 
@@ -222,6 +171,8 @@ def fetch_history_df(
         DataFrame with at least COL_CLOSE column, sorted ascending by date,
         or None if insufficient data.
     """
+    # Validate the market and identifier before choosing any history source.
+    _to_ts_code(stock_code, market)
     end_day = date.today()
     start_day = end_day - timedelta(days=min_periods * _CALENDAR_MULTIPLIER)
 

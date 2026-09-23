@@ -9,7 +9,6 @@ from typing import Any, Callable, TypeVar, cast
 
 import pandas as pd
 import retrying
-import tushare as ts
 
 from common.const import (
     COL_AMOUNT,
@@ -31,6 +30,8 @@ from common.const import (
     AdjustType,
     PeriodType,
 )
+from common.market_code import to_tushare_code
+from common.tushare_client import create_tushare_client
 
 F = TypeVar("F", bound=Callable[..., Any])
 _HK_DAILY_ADJ_CACHE_BY_TRADE_DATE: dict[str, pd.DataFrame] = {}
@@ -38,22 +39,23 @@ _HK_DAILY_ADJ_RATE_LIMIT_LOCK_PATH = os.path.join(tempfile.gettempdir(), "frog_h
 _HK_DAILY_ADJ_RATE_LIMIT_STATE_PATH = os.path.join(tempfile.gettempdir(), "frog_hk_daily_adj.last_call")
 
 
+def _create_tushare_client() -> Any:
+    return create_tushare_client()
+
+
 def _create_pro_client() -> Any:
-    token = os.getenv("TUSHARE_TOKEN")
-    if not token:
-        raise ConnectionError("Tushare token is missing. Please set env var TUSHARE_TOKEN.")
-    return ts.pro_api(token=token)
+    return _create_tushare_client()
 
 
 def get_pro(func: F) -> F:
-    """Decorator to create a TuShare pro client and inject it into function.
+    """Create a TuShare pro client and inject it into the decorated function.
 
     Token source: env var `TUSHARE_TOKEN`.
 
     The decorated function must accept a keyword argument `pro`.
 
     Raises:
-        ConnectionError: if token is missing.
+        ConnectionError: if the token is missing or the TuShare client cannot be imported or created.
     """
 
     @wraps(func)
@@ -401,16 +403,15 @@ etf_basic_fields = [
 
 
 def _to_hk_ts_code(stock_id: str) -> str:
-    if not re.fullmatch(r"\d{5}", stock_id):
-        raise ValueError("Stock ID must be 5 digits.")
-    return f"{stock_id}.HK"
+    try:
+        return to_tushare_code(stock_id, "HK")
+    except ValueError as exc:
+        # Keep the historical compatibility error while using the shared validator.
+        raise ValueError("Stock ID must be 5 digits.") from exc
 
 
 def _to_a_stock_ts_code(stock_id: str) -> str:
-    if not re.fullmatch(r"\d{6}", stock_id):
-        raise ValueError("Stock ID must be 6 digits.")
-    suffix = "SH" if stock_id.startswith("6") else "SZ"
-    return f"{stock_id}.{suffix}"
+    return to_tushare_code(stock_id, "A")
 
 
 def _pro_bar_freq(period: PeriodType) -> str:
@@ -528,6 +529,8 @@ def download_history_data_stock_ts(
     adjust: AdjustType = AdjustType.QFQ,
 ) -> pd.DataFrame:
     client = _create_pro_client()
+    import tushare as ts
+
     df = ts.pro_bar(
         api=client,
         ts_code=_to_a_stock_ts_code(stock_id),
@@ -652,20 +655,19 @@ def _get_etf_suffix(etf_id: str) -> str:
                    518xxx, 519xxx, 530xxx, 531xxx, 532xxx, 533xxx
     Shenzhen ETFs: 159xxx, 160xxx, 161xxx, 162xxx, 163xxx, 164xxx
     """
-    if etf_id.startswith(("159", "160", "161", "162", "163", "164")):
-        return ".SZ"
-    # Default to Shanghai for 510xxx, 511xxx, etc.
-    return ".SH"
+    return to_tushare_code(etf_id, "ETF")[len(etf_id) :]
 
 
 def _to_etf_ts_code(etf_id_or_ts_code: str) -> str:
     if not etf_id_or_ts_code:
         return ""
-    if re.fullmatch(r"\d{6}\.(SH|SZ)", etf_id_or_ts_code):
-        return etf_id_or_ts_code
-    if not re.fullmatch(r"\d{6}", etf_id_or_ts_code):
-        raise ValueError("ETF code must be 6 digits or provider-style ts_code.")
-    return etf_id_or_ts_code + _get_etf_suffix(etf_id_or_ts_code)
+    match = re.fullmatch(r"(\d{6})\.(SH|SZ)", etf_id_or_ts_code)
+    if match:
+        stem = match.group(1)
+        if to_tushare_code(stem, "ETF") == etf_id_or_ts_code:
+            return etf_id_or_ts_code
+        raise ValueError(f"Invalid ETF provider code: {etf_id_or_ts_code}")
+    return to_tushare_code(etf_id_or_ts_code, "ETF")
 
 
 def _empty_etf_share_size_dataframe() -> pd.DataFrame:
@@ -680,6 +682,7 @@ def _empty_index_daily_turnover_dataframe() -> pd.DataFrame:
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
     stop_max_attempt_number=3,
+    retry_on_exception=retry_on_non_validation_errors,
 )
 @get_pro
 def download_history_data_etf_ts(
@@ -695,7 +698,7 @@ def download_history_data_etf_ts(
 
     normalized_start_date = convert_date(start_date) if start_date else ""
     normalized_end_date = convert_date(end_date) if end_date else ""
-    ts_code = etf_id + _get_etf_suffix(etf_id)
+    ts_code = _to_etf_ts_code(etf_id)
 
     client = require_pro_client(pro)
     df = client.fund_daily(
@@ -757,6 +760,7 @@ def download_history_data_etf_ts(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
     stop_max_attempt_number=3,
+    retry_on_exception=retry_on_non_validation_errors,
 )
 @get_pro
 def download_etf_daily(
@@ -773,8 +777,7 @@ def download_etf_daily(
     if end_date:
         end_date = convert_date(end_date)
 
-    # Add suffix based on ETF code
-    ts_code = etf_id + _get_etf_suffix(etf_id)
+    ts_code = _to_etf_ts_code(etf_id)
 
     client = require_pro_client(pro)
 
@@ -795,6 +798,7 @@ def download_etf_daily(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
     stop_max_attempt_number=3,
+    retry_on_exception=retry_on_non_validation_errors,
 )
 @get_pro
 def download_etf_share_size(
@@ -968,6 +972,17 @@ forecast_fields = [
 ]
 
 
+def _is_valid_forecast_provider_code(value: object) -> bool:
+    provider_code = str(value)
+    code, separator, suffix = provider_code.partition(".")
+    if not separator or suffix not in ("SH", "SZ", "BJ"):
+        return False
+    try:
+        return to_tushare_code(code, "A") == provider_code
+    except ValueError:
+        return False
+
+
 @retrying.retry(
     wait_exponential_multiplier=2000,
     wait_exponential_max=60000,
@@ -987,7 +1002,8 @@ def download_forecast(ann_date: str = "", pro: Any | None = None) -> pd.DataFram
         raise ValueError(f"forecast 缺少字段: {sorted(missing)}")
 
     source_rows = len(df)
-    result = df[df["ts_code"].astype(str).str.endswith((".SH", ".SZ"))].copy()
+    valid_codes = [_is_valid_forecast_provider_code(value) for value in df["ts_code"]]
+    result = df.loc[valid_codes].copy()
     result["ts_code"] = result["ts_code"].str.split(".").str[0]
     result = result.rename(
         columns={
