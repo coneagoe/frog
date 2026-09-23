@@ -1,6 +1,6 @@
 import pytest
 
-from common.market_code import to_tushare_code
+from common.market_code import Market, to_tushare_code
 
 
 @pytest.mark.parametrize(
@@ -18,7 +18,7 @@ from common.market_code import to_tushare_code
         ("12345", "HK", "12345.HK"),
     ],
 )
-def test_to_tushare_code(code: str, market: str, expected: str) -> None:
+def test_to_tushare_code(code: str, market: Market, expected: str) -> None:
     assert to_tushare_code(code, market) == expected
 
 

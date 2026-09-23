@@ -133,11 +133,16 @@ def test_run_partition_items_runs_selected_items_and_reports_failures():
 
 
 def test_run_partition_items_empty_selection_does_nothing():
-    calls = []
-    progress = []
+    calls: list[str] = []
+    progress: list[tuple[str, int, int]] = []
 
     result = run_partition_items(
-        ["a"], 1, 2, calls.append, lambda outcome: True, progress.append
+        ["a"],
+        1,
+        2,
+        calls.append,
+        lambda outcome: True,
+        lambda item, completed, total: progress.append((item, completed, total)),
     )
 
     assert result == ([], [])
@@ -166,6 +171,4 @@ def test_run_partition_items_does_not_suppress_on_progress_exception():
         raise LookupError("progress failed")
 
     with pytest.raises(LookupError, match="progress failed"):
-        run_partition_items(
-            ["a"], 0, 1, lambda _item: "result", lambda _outcome: False, on_progress
-        )
+        run_partition_items(["a"], 0, 1, lambda _item: "result", lambda _outcome: False, on_progress)

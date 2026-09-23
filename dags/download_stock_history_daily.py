@@ -143,6 +143,7 @@ def download_stock_history_hfq_partition_task(*, partition_id: int, partition_co
 
     outcomes: list[dict[str, Any]] = []
     storage = get_storage()
+
     def action(stock_id):
         outcome = manager.download_stock_history_outcome(
             stock_id=stock_id,
@@ -205,6 +206,7 @@ def download_stock_history_bfq_partition_task(*, partition_id: int, partition_co
 
     outcomes: list[dict[str, Any]] = []
     storage = get_storage()
+
     def action(stock_id):
         outcome = manager.download_stock_history_outcome(
             stock_id=stock_id,

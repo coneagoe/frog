@@ -63,10 +63,7 @@ def scan_top10_floatholder_partition_task(*, partition_id: int, partition_count:
 
     def on_progress(stock_id, completed, total):
         if completed % 100 == 0 or completed == total:
-            print(
-                f"[top10 floatholder scan p{partition_id:02d}] "
-                f"进度: {completed}/{total} (failed={failed_count})"
-            )
+            print(f"[top10 floatholder scan p{partition_id:02d}] 进度: {completed}/{total} (failed={failed_count})")
 
     def is_failure(result):
         return not result

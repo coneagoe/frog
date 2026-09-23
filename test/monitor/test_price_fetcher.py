@@ -92,9 +92,7 @@ def test_fetch_price_rejects_unsupported_a_code(monkeypatch):
 
 
 def test_fetch_price_map_applies_shared_provider_code_to_distinct_input_keys(monkeypatch):
-    pro_client = SimpleNamespace(
-        rt_k=lambda ts_code: pd.DataFrame([{"ts_code": "600519.SH", "close": 1800.5}])
-    )
+    pro_client = SimpleNamespace(rt_k=lambda ts_code: pd.DataFrame([{"ts_code": "600519.SH", "close": 1800.5}]))
     monkeypatch.setenv("TUSHARE_TOKEN", "token")
     _install_tushare_stub(monkeypatch, pro_client)
 
@@ -151,9 +149,7 @@ def test_fetch_history_df_prefers_tushare_daily_for_a_share(monkeypatch):
     ("stock_code", "market"),
     [("51030", "ETF"), ("1234", "HK"), ("600519", "UNKNOWN")],
 )
-def test_fetch_history_df_validates_code_and_market_before_source_selection(
-    monkeypatch, stock_code, market
-):
+def test_fetch_history_df_validates_code_and_market_before_source_selection(monkeypatch, stock_code, market):
     monkeypatch.setattr("monitor.price_fetcher.get_storage", lambda: pytest.fail("source must not be selected"))
     with pytest.raises(ValueError):
         fetch_history_df(stock_code, market, min_periods=3)
