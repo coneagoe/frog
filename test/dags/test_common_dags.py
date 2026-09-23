@@ -7,7 +7,12 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../dags")))
 
-from common_dags import get_default_args, get_partition_count, get_partition_ids  # noqa: E402
+from common_dags import (  # noqa: E402
+    get_default_args,
+    get_partition_count,
+    get_partition_ids,
+    run_partition_items,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 DAGS_DIR = ROOT / "dags"
@@ -102,3 +107,65 @@ def test_default_args_do_not_enable_smtp_notifier_without_alert_emails(monkeypat
     default_args = get_default_args()
 
     assert "on_failure_callback" not in default_args
+
+
+def test_run_partition_items_runs_selected_items_and_reports_failures():
+    calls = []
+    progress = []
+
+    def action(item):
+        calls.append(item)
+        return f"result-{item}"
+
+    selected, failures = run_partition_items(
+        ["a", "b", "c", "d", "e"],
+        partition_index=1,
+        partition_count=2,
+        action=action,
+        is_failure=lambda result: result.endswith(("b", "e")),
+        on_progress=lambda item, completed, total: progress.append((item, completed, total)),
+    )
+
+    assert selected == ["b", "d"]
+    assert calls == ["b", "d"]
+    assert failures == [("b", "result-b")]
+    assert progress == [("b", 1, 2), ("d", 2, 2)]
+
+
+def test_run_partition_items_empty_selection_does_nothing():
+    calls = []
+    progress = []
+
+    result = run_partition_items(
+        ["a"], 1, 2, calls.append, lambda outcome: True, progress.append
+    )
+
+    assert result == ([], [])
+    assert calls == []
+    assert progress == []
+
+
+def test_run_partition_items_does_not_suppress_action_exception():
+    def action(_item):
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        run_partition_items(["a"], 0, 1, action, lambda _outcome: False)
+
+
+def test_run_partition_items_does_not_suppress_is_failure_exception():
+    def is_failure(_outcome):
+        raise ValueError("classification failed")
+
+    with pytest.raises(ValueError, match="classification failed"):
+        run_partition_items(["a"], 0, 1, lambda _item: "result", is_failure)
+
+
+def test_run_partition_items_does_not_suppress_on_progress_exception():
+    def on_progress(_item, _completed, _total):
+        raise LookupError("progress failed")
+
+    with pytest.raises(LookupError, match="progress failed"):
+        run_partition_items(
+            ["a"], 0, 1, lambda _item: "result", lambda _outcome: False, on_progress
+        )
