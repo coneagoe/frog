@@ -4,7 +4,7 @@
 
 ## 必填变量
 
-- `TUSHARE_TOKEN`：Tushare API Token（必填，用于数据下载）
+- `TUSHARE_TOKEN`：Tushare API Token（必填，用于数据下载和实时监控）
   - 获取地址：https://tushare.pro/register
   - 登录后在个人中心获取
 

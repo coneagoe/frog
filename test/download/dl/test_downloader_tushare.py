@@ -83,6 +83,92 @@ def test_download_daily_basic_missing_token_raises(downloader_ts_module, monkeyp
     ts_stub.pro_api.assert_not_called()
 
 
+def test_downloader_imports_without_tushare_and_normalizes_missing_import(monkeypatch):
+    module_name = "download.dl.downloader_tushare"
+    for mod in [module_name, "download.dl.downloader", "download.dl", "download"]:
+        sys.modules.pop(mod, None)
+    monkeypatch.setitem(sys.modules, "tushare", None)
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    module = importlib.import_module(module_name)
+
+    with pytest.raises(ConnectionError, match="Unable to create Tushare client") as exc_info:
+        module.download_daily_basic_a_stock_ts("2024-01-05")
+
+    assert isinstance(exc_info.value.__cause__, ModuleNotFoundError)
+
+
+def test_switchboard_stock_history_normalizes_missing_tushare_import(monkeypatch):
+    from download.dl import Downloader
+
+    monkeypatch.setitem(sys.modules, "tushare", None)
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    with pytest.raises(ConnectionError, match="Unable to create Tushare client") as exc_info:
+        Downloader().dl_history_data_stock_by_provider(
+            "tushare", "000001", "2024-01-01", "2024-01-02", PeriodType.DAILY, AdjustType.QFQ
+        )
+
+    assert isinstance(exc_info.value.__cause__, ModuleNotFoundError)
+
+
+def test_create_tushare_client_returns_pro_client(downloader_ts_module, monkeypatch):
+    from common.tushare_client import create_tushare_client
+
+    _, ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+
+    assert create_tushare_client() is pro_stub
+    ts_stub.pro_api.assert_called_once_with(token="test_token_123")
+
+
+def test_create_tushare_client_wraps_provider_failures(downloader_ts_module, monkeypatch):
+    from common.tushare_client import create_tushare_client
+
+    _, ts_stub, _ = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    cause = RuntimeError("provider unavailable")
+    ts_stub.pro_api.side_effect = cause
+
+    with pytest.raises(ConnectionError, match="Unable to create Tushare client") as exc_info:
+        create_tushare_client()
+
+    assert exc_info.value.__cause__ is cause
+
+
+def test_create_tushare_client_missing_token_raises(downloader_ts_module, monkeypatch):
+    from common.tushare_client import create_tushare_client
+
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+
+    with pytest.raises(ConnectionError, match="Tushare token is missing") as exc_info:
+        create_tushare_client()
+
+    assert isinstance(exc_info.value.__cause__, ValueError)
+
+
+def test_create_tushare_client_wraps_import_failure(downloader_ts_module, monkeypatch):
+    from common.tushare_client import create_tushare_client
+
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    monkeypatch.setitem(sys.modules, "tushare", None)
+
+    with pytest.raises(ConnectionError, match="Unable to create Tushare client") as exc_info:
+        create_tushare_client()
+
+    assert isinstance(exc_info.value.__cause__, ModuleNotFoundError)
+
+
+def test_create_pro_client_delegates_to_compatibility_factory(downloader_ts_module, monkeypatch):
+    module, _, _ = downloader_ts_module
+    expected_client = object()
+    factory = Mock(return_value=expected_client)
+    monkeypatch.setattr(module, "create_tushare_client", factory)
+
+    assert module._create_pro_client() is expected_client
+    factory.assert_called_once_with()
+
+
 def test_download_daily_basic_a_stock_ts_success(downloader_ts_module, monkeypatch):
     """Test successful download of daily basic A-stock data."""
     module, ts_stub, pro_stub = downloader_ts_module
@@ -262,6 +348,33 @@ def test_download_history_data_etf_ts_success_ignores_period_adjust(downloader_t
     ]
     assert result[module.COL_STOCK_ID].tolist() == ["510300", "510300"]
     assert result[module.COL_DATE].tolist() == ["2024-01-01", "2024-01-02"]
+
+
+@pytest.mark.parametrize("etf_id", ["51030", "149915", "600000"])
+def test_etf_download_paths_reject_invalid_codes(downloader_ts_module, monkeypatch, etf_id):
+    module, _ts_stub, pro_stub = downloader_ts_module
+    monkeypatch.setenv("TUSHARE_TOKEN", "test_token_123")
+    pro_stub.fund_daily = Mock()
+    pro_stub.etf_share_size = Mock()
+
+    with pytest.raises(ValueError):
+        module.download_history_data_etf_ts(etf_id, "2024-01-01", "2024-01-02")
+    with pytest.raises(ValueError):
+        module.download_etf_daily(etf_id, start_date="2024-01-01", end_date="2024-01-02")
+    with pytest.raises(ValueError):
+        module.download_etf_share_size(ts_code=etf_id, trade_date="20240102")
+
+    pro_stub.fund_daily.assert_not_called()
+    pro_stub.etf_share_size.assert_not_called()
+
+
+def test_to_etf_ts_code_validates_provider_code_with_shared_normalizer(downloader_ts_module):
+    module, _ts_stub, _pro_stub = downloader_ts_module
+
+    assert module._to_etf_ts_code("510300") == "510300.SH"
+    assert module._to_etf_ts_code("159915.SZ") == "159915.SZ"
+    with pytest.raises(ValueError):
+        module._to_etf_ts_code("600000.SH")
 
 
 def test_download_etf_share_size_uses_explicit_fields_and_normalizes(downloader_ts_module, monkeypatch):
@@ -810,7 +923,7 @@ def test_throttle_records_timestamp_even_on_failed_api_call(downloader_ts_module
 
 def test_download_history_data_stock_ts_normalizes_pro_bar(monkeypatch):
     pro_client = MagicMock(name="pro_client")
-    monkeypatch.setattr(dt, "_create_pro_client", lambda: pro_client)
+    monkeypatch.setattr(dt, "create_tushare_client", lambda: pro_client)
 
     def fake_pro_bar(**kwargs):
         assert kwargs["api"] is pro_client
@@ -833,7 +946,7 @@ def test_download_history_data_stock_ts_normalizes_pro_bar(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(dt.ts, "pro_bar", fake_pro_bar)
+    monkeypatch.setitem(sys.modules, "tushare", types.SimpleNamespace(pro_bar=fake_pro_bar))
 
     df = dt.download_history_data_stock_ts("000001", "2024-01-01", "2024-01-02", PeriodType.DAILY, AdjustType.QFQ)
 
@@ -844,7 +957,7 @@ def test_download_history_data_stock_ts_normalizes_pro_bar(monkeypatch):
 
 
 def test_download_history_data_stock_ts_uses_none_adj_for_bfq(monkeypatch):
-    monkeypatch.setattr(dt, "_create_pro_client", lambda: MagicMock(name="pro_client"))
+    monkeypatch.setattr(dt, "create_tushare_client", lambda: MagicMock(name="pro_client"))
     captured = {}
 
     def fake_pro_bar(**kwargs):
@@ -862,7 +975,7 @@ def test_download_history_data_stock_ts_uses_none_adj_for_bfq(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(dt.ts, "pro_bar", fake_pro_bar)
+    monkeypatch.setitem(sys.modules, "tushare", types.SimpleNamespace(pro_bar=fake_pro_bar))
 
     dt.download_history_data_stock_ts("600000", "20240101", "20240101", PeriodType.DAILY, AdjustType.BFQ)
 
@@ -872,7 +985,7 @@ def test_download_history_data_stock_ts_uses_none_adj_for_bfq(monkeypatch):
 def test_download_history_data_stock_ts_missing_open_raises(monkeypatch):
     """Missing required 'open' column in pro_bar response must raise ValueError."""
     pro_client = MagicMock(name="pro_client")
-    monkeypatch.setattr(dt, "_create_pro_client", lambda: pro_client)
+    monkeypatch.setattr(dt, "create_tushare_client", lambda: pro_client)
 
     def fake_pro_bar(**kwargs):
         return pd.DataFrame(
@@ -888,7 +1001,7 @@ def test_download_history_data_stock_ts_missing_open_raises(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(dt.ts, "pro_bar", fake_pro_bar)
+    monkeypatch.setitem(sys.modules, "tushare", types.SimpleNamespace(pro_bar=fake_pro_bar))
 
     with pytest.raises(ValueError, match="Missing required column"):
         dt.download_history_data_stock_ts("000001", "2024-01-01", "2024-01-02")
@@ -897,7 +1010,7 @@ def test_download_history_data_stock_ts_missing_open_raises(monkeypatch):
 def test_download_history_data_stock_ts_missing_date_raises(monkeypatch):
     """Missing required 'trade_date' column in pro_bar response must raise ValueError."""
     pro_client = MagicMock(name="pro_client")
-    monkeypatch.setattr(dt, "_create_pro_client", lambda: pro_client)
+    monkeypatch.setattr(dt, "create_tushare_client", lambda: pro_client)
 
     def fake_pro_bar(**kwargs):
         return pd.DataFrame(
@@ -913,7 +1026,7 @@ def test_download_history_data_stock_ts_missing_date_raises(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(dt.ts, "pro_bar", fake_pro_bar)
+    monkeypatch.setitem(sys.modules, "tushare", types.SimpleNamespace(pro_bar=fake_pro_bar))
 
     with pytest.raises(ValueError, match="Missing required column"):
         dt.download_history_data_stock_ts("000001", "2024-01-01", "2024-01-02")

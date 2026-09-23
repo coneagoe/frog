@@ -19,6 +19,7 @@ from common.const import (
     PeriodType,
     SecurityType,
 )
+from common.market_code import to_tushare_code
 from download.core_indexes import CORE_INDEX_TS_CODES
 from download.etf_index_mapping import ETFFlowIndexContext
 from download.etf_index_mapping import prepare_etf_flow_index_context as _prepare_etf_flow_index_context
@@ -55,11 +56,7 @@ from .mp_utils import run_history_download_mp
 
 def _get_a_stock_ts_code(stock_id: str) -> str:
     """根据股票代码前缀推断 TuShare ts_code（含交易所后缀）。"""
-    if stock_id.startswith("6"):
-        return stock_id + ".SH"
-    if stock_id.startswith(("8", "4")):
-        return stock_id + ".BJ"
-    return stock_id + ".SZ"
+    return to_tushare_code(stock_id, "A")
 
 
 REQUIRED_STOCK_HISTORY_COLUMNS = (
