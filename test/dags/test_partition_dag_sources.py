@@ -13,6 +13,8 @@ from unittest.mock import MagicMock, Mock, call
 import pandas as pd
 import pytest
 
+from paper_trading.domain.market_data_diagnostics import ProviderOutcome, StockHistoryOutcome
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -938,6 +940,251 @@ def test_hk_partition_dag_uses_frozen_partition_count_everywhere():
     assert "max_active_runs=1" in source
     assert "REDIS_KEY_DOWNLOAD_HK_GGT_HISTORY" in source
     assert re.search(r"for task in partition_tasks:\s+task >> aggregate_task", source)
+
+
+def test_hk_partition_uses_logical_date_and_returns_structured_outcomes(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    monkeypatch.setattr(dag_module, "is_hk_market_open", lambda business_date: business_date == "2026-07-27")
+    monkeypatch.setattr(
+        dag_module,
+        "get_storage",
+        lambda: SimpleNamespace(load_general_info_hk_ggt=lambda: pd.DataFrame({"股票代码": ["00700"]})),
+    )
+    outcome = StockHistoryOutcome(
+        stock_id="00700",
+        business_date="2026-07-27",
+        adjust="bfq",
+        classification="missing_exact_date",
+        resolved=False,
+        provider_outcomes=(ProviderOutcome(provider="tushare", status="empty", detail="no exact date"),),
+    )
+    manager = Mock()
+    manager.download_hk_ggt_history_outcome.return_value = outcome
+    monkeypatch.setattr(dag_module, "DownloadManager", lambda: manager)
+    monkeypatch.setattr(dag_module, "_persist_diagnostic", Mock())
+
+    result = dag_module.download_hk_ggt_history_none_partition_task(
+        partition_id=0,
+        partition_count=1,
+        logical_date=pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
+    )
+
+    assert result["outcomes"][0]["classification"] == "missing_exact_date"
+    assert manager.download_hk_ggt_history_outcome.call_args.kwargs["end_date"] == "2026-07-27"
+
+
+@pytest.mark.parametrize(
+    ("classification", "metadata", "suspension"),
+    [
+        ("authority_unavailable", RuntimeError("metadata unavailable"), {"state": "active", "fresh": True}),
+        ("ineligible", None, {"state": "active", "fresh": True}),
+        (
+            "suspended",
+            SimpleNamespace(eligible=True, effective_date=date(2026, 7, 27), fresh=True, source="hk"),
+            {"state": "suspended", "fresh": True, "source": "hk"},
+        ),
+    ],
+)
+def test_hk_partition_persists_authority_classifications(monkeypatch, classification, metadata, suspension):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    class FakeSession:
+        def close(self):
+            pass
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    storage = SimpleNamespace(
+        Session=FakeSession,
+        load_general_info_hk_ggt=lambda: pd.DataFrame({"股票代码": ["00700"]}),
+    )
+    saved = []
+
+    class FakeRepository:
+        def __init__(self, session):
+            pass
+
+        def upsert_daily_bar_diagnostic(self, *args):
+            saved.append(args)
+
+    class FakeEligibility:
+        def get_security(self, symbol, *, as_of):
+            if isinstance(metadata, Exception):
+                raise metadata
+            return metadata
+
+    class FakeSuspension:
+        def get_symbol_suspension_evidence(self, symbol, business_date, market):
+            return suspension
+
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "PaperTradingRepository", FakeRepository)
+    monkeypatch.setattr(dag_module, "HkTradeCalendar", lambda: SimpleNamespace(is_trade_date=lambda value: True))
+    monkeypatch.setattr(dag_module, "HkConnectMetadataProvider", lambda session: FakeEligibility())
+    monkeypatch.setattr(dag_module, "StorageMarketDataProvider", lambda value, calendar: FakeSuspension())
+    manager = Mock()
+    monkeypatch.setattr(dag_module, "DownloadManager", lambda: manager)
+
+    result = dag_module.download_hk_ggt_history_none_partition_task(
+        partition_id=0,
+        partition_count=1,
+        logical_date=pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
+    )
+
+    outcome = result["outcomes"][0]
+    assert outcome["classification"] == classification
+    assert outcome["provider_outcomes"][0]["detail"].startswith(f"{classification}:")
+    assert saved[0][1] == dag_module.Market.HK_CONNECT
+    assert saved[0][2] == "00700"
+    assert saved[0][4] == classification
+    assert saved[0][5][0]["provider"] == "hk_authority"
+    manager.download_hk_ggt_history_outcome.assert_not_called()
+
+
+def test_hk_aggregate_marks_fatal_and_bounds_evidence(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    redis_client = MagicMock()
+    monkeypatch.setattr(dag_module, "get_redis_client", lambda: redis_client)
+    outcomes = [
+        {"stock_id": f"{i:05d}", "classification": "provider_error", "provider_outcomes": []} for i in range(25)
+    ]
+    ti = MagicMock(xcom_pull=Mock(return_value={"outcomes": outcomes}))
+
+    with pytest.raises(RuntimeError, match="fatal"):
+        dag_module.aggregate_and_save_result(
+            partition_count=1,
+            ti=ti,
+            logical_date=pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
+        )
+
+    payload = json.loads(redis_client.set.call_args.args[1])
+    assert payload["date"] == "2026-07-27"
+    assert payload["result"] == "fail"
+    assert payload["status"] == "fatal"
+    assert len(payload["provider_evidence"]) == 20
+
+
+def test_hk_aggregate_persists_then_raises_fatal(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    redis_client = MagicMock()
+    monkeypatch.setattr(dag_module, "get_redis_client", lambda: redis_client)
+    ti = MagicMock(
+        xcom_pull=Mock(return_value={"outcomes": [{"stock_id": "00700", "classification": "provider_error"}]})
+    )
+    with pytest.raises(Exception):
+        dag_module.aggregate_and_save_result(
+            partition_count=1, ti=ti, logical_date=pendulum.datetime(2026, 7, 27, 8, tz="UTC")
+        )
+    assert redis_client.set.called
+
+
+def test_hk_aggregate_missing_partition_persists_fatal_payload_before_raise(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    redis_client = MagicMock()
+    monkeypatch.setattr(dag_module, "get_redis_client", lambda: redis_client)
+    monkeypatch.setattr(dag_module, "is_hk_market_open", lambda value: True)
+    with pytest.raises(RuntimeError):
+        dag_module.aggregate_and_save_result(
+            partition_count=1,
+            ti=MagicMock(xcom_pull=Mock(return_value=None)),
+            logical_date=pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
+        )
+    payload = json.loads(redis_client.set.call_args.args[1])
+    assert payload["result"] == "fail"
+    assert payload["status"] == "fatal"
+    assert payload["date"] == "2026-07-27"
+
+
+def test_hk_closed_aggregate_writes_skipped_payload(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    monkeypatch.setattr(dag_module, "is_hk_market_open", lambda value: False)
+    redis_client = MagicMock()
+    monkeypatch.setattr(dag_module, "get_redis_client", lambda: redis_client)
+    dag_module.aggregate_and_save_result(
+        partition_count=1,
+        ti=MagicMock(xcom_pull=Mock(return_value=None)),
+        logical_date=pendulum.datetime(2026, 7, 26, 8, tz="UTC"),
+    )
+    payload = json.loads(redis_client.set.call_args.args[1])
+    assert payload["status"] == "skipped"
+
+
+def test_hk_warning_aggregate_runs_matching_and_recovery(monkeypatch):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    matching = Mock(return_value={"id": 1})
+    recovery = Mock(return_value={"gap_count": 1})
+    monkeypatch.setattr(dag_module, "run_paper_trading_matching_for_active_accounts", matching)
+    monkeypatch.setattr(dag_module, "run_unified_bfq_data_gap_recovery", recovery)
+    dag_module.run_hk_matching_task(
+        aggregate_task_id="aggregate_results",
+        logical_date=pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
+        ti=MagicMock(xcom_pull=Mock(return_value={"date": "2026-07-27", "result": "success", "status": "warning"})),
+    )
+    dag_module.run_hk_recovery_task(
+        aggregate_task_id="aggregate_results",
+        logical_date=pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
+        ti=MagicMock(xcom_pull=Mock(return_value={"date": "2026-07-27", "result": "success", "status": "warning"})),
+    )
+    matching.assert_called_once()
+    recovery.assert_called_once()
+    assert matching.call_args.kwargs["_business_date"] == pendulum.date(2026, 7, 27)
+    assert matching.call_args.kwargs["_aggregate_task_id"] == "aggregate_results"
+    assert recovery.call_args.kwargs["_business_date"] == pendulum.date(2026, 7, 27)
+    assert recovery.call_args.kwargs["_aggregate_task_id"] == "aggregate_results"
+
+
+@pytest.mark.parametrize("result", ["fail", "fatal", "skipped"])
+def test_hk_matching_and_recovery_skip_non_success_aggregate(monkeypatch, result):
+    pendulum = pytest.importorskip("pendulum")
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    matching = Mock(side_effect=AssertionError("matching should be skipped"))
+    recovery = Mock(side_effect=AssertionError("recovery should be skipped"))
+    monkeypatch.setattr(dag_module, "run_paper_trading_matching_for_active_accounts", matching)
+    monkeypatch.setattr(dag_module, "run_unified_bfq_data_gap_recovery", recovery)
+    context = {
+        "logical_date": pendulum.datetime(2026, 7, 27, 8, tz="UTC"),
+        "ti": MagicMock(xcom_pull=Mock(return_value={"result": result})),
+    }
+    with pytest.raises(Exception):
+        dag_module.run_hk_matching_task(aggregate_task_id="aggregate_results", **context)
+    with pytest.raises(Exception):
+        dag_module.run_hk_recovery_task(aggregate_task_id="aggregate_results", **context)
+    matching.assert_not_called()
+    recovery.assert_not_called()
+
+
+def test_hk_aggregate_operator_runs_after_partition_skip_or_failure():
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    assert str(dag_module.aggregate_task.trigger_rule) in {"all_done", "TriggerRule.ALL_DONE"}
+    assert dag_module.aggregate_task.task_id == "aggregate_results"
 
 
 def test_etf_partition_dag_uses_frozen_partition_count_everywhere():

@@ -483,6 +483,19 @@ def test_repository_selects_valid_unresolved_hk_bfq_diagnostic(tmp_path):
         assert [(row.market, row.stock_id, row.resolved) for row in target] == [("hk_connect", "00700", False)]
 
 
+def test_repository_excludes_hk_authority_diagnostics(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        diagnostics = PaperTradingRepository(session)
+        for index, classification in enumerate(("authority_unavailable", "ineligible", "suspended"), start=1):
+            diagnostics.upsert_daily_bar_diagnostic(
+                date(2026, 1, 2), "hk_connect", f"0000{index}", "bfq", classification, [], False
+            )
+        repository = DataGapRecoveryRepository(session)
+        assert repository.list_unresolved_ordinary_diagnostics(business_date=date(2026, 1, 2)) == []
+
+
 def test_batch_account_recovery_joins_orders_by_market_and_symbol(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'gaps.db'}")
     Base.metadata.create_all(engine)

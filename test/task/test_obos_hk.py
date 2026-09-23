@@ -2,7 +2,6 @@ import importlib
 import os
 import sys
 from datetime import date, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -94,10 +93,15 @@ def test_celery_beat_does_not_schedule_obos_hk_directly():
     assert "obos_hk" not in celery_config.beat_schedule
 
 
-def test_hk_ggt_dag_checks_hk_market_calendar():
-    source = (Path(__file__).resolve().parents[2] / "dags" / "download_hk_ggt_history_daily.py").read_text(
-        encoding="utf-8"
-    )
+def test_hk_ggt_dag_uses_logical_date_calendar(monkeypatch):
+    import pytest
 
-    assert "from stock.market import is_hk_market_open_today" in source
-    assert "if not is_hk_market_open_today():" in source
+    pytest.importorskip("airflow")
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    monkeypatch.setattr(dag_module, "is_hk_market_open", lambda value: value == "2026-07-27")
+    import pendulum
+
+    assert dag_module.get_business_date({"logical_date": pendulum.datetime(2026, 7, 27, 8, tz="UTC")}).isoformat() == (
+        "2026-07-27"
+    )

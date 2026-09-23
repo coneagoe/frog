@@ -1236,7 +1236,7 @@ WITH expected(type_name, labels) AS (
     ('blackroom_market', ARRAY['A','HK','ETF']),
     ('blackroom_source', ARRAY['manual','shareholder_selling','shareholder_reduction']),
     ('daily_bar_diagnostic_adjust', ARRAY['bfq','qfq','hfq']),
-    ('daily_bar_diagnostic_classification', ARRAY['missing_market_data','missing_exact_date','provider_error','downloaded','resolved']),
+    ('daily_bar_diagnostic_classification', ARRAY['missing_market_data','missing_exact_date','provider_error','downloaded','resolved','authority_unavailable','ineligible','suspended']),
     ('ssf_change_signal_status', ARRAY['signal','no_signal'])
 ), observed AS (
   SELECT t.typname AS type_name, array_agg(e.enumlabel ORDER BY e.enumsortorder) AS labels

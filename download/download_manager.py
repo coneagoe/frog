@@ -457,59 +457,40 @@ class DownloadManager:
                 )
         return None, tuple(outcomes)
 
-    def _download_hk_stock_history_with_fallback(
+    def _download_hk_stock_history_with_provider_outcomes(
         self,
         stock_id: str,
         start_date: str,
         end_date: str,
         period: PeriodType,
         adjust: AdjustType,
-    ) -> pd.DataFrame | None:
-        provider_errors: dict[str, str] = {}
+    ) -> tuple[pd.DataFrame | None, tuple[ProviderOutcome, ...]]:
+        outcomes: list[ProviderOutcome] = []
+        requested_date = pd.Timestamp(end_date).date()
         for provider in parse_hk_stock_history_provider_order():
+            df: Any = None
             try:
-                logging.info(
-                    "Downloading HK stock history via %s: stock_id=%s, start_date=%s, "
-                    "end_date=%s, period=%s, adjust=%s",
-                    provider,
-                    stock_id,
-                    start_date,
-                    end_date,
-                    period.value,
-                    adjust.value,
-                )
                 df = self.downloader.dl_history_data_stock_hk_by_provider(
-                    provider,
-                    stock_id,
-                    start_date,
-                    end_date,
-                    period,
-                    adjust,
+                    provider, stock_id, start_date, end_date, period, adjust
                 )
                 validated = _validate_hk_stock_history_data(df)
-                logging.info(
-                    "Downloaded HK stock history via %s: stock_id=%s, rows=%d",
-                    provider,
-                    stock_id,
-                    len(validated),
-                )
-                return validated
+                if requested_date not in pd.to_datetime(validated[COL_DATE]).dt.date.values:
+                    raise ValueError(f"missing exact date: {end_date}")
+                outcomes.append(ProviderOutcome(provider, "downloaded", f"rows={len(validated)}"))
+                return validated, tuple(outcomes)
             except Exception as exc:  # noqa: BLE001
-                provider_errors[provider] = str(exc)
-                logging.warning(  # noqa: E501
-                    "HK stock history provider failed: provider=%s, stock_id=%s, "
-                    "start_date=%s, end_date=%s, period=%s, adjust=%s, error=%s",
-                    provider,
-                    stock_id,
-                    start_date,
-                    end_date,
-                    period.value,
-                    adjust.value,
-                    exc,
+                status: ProviderStatus = (
+                    "empty"
+                    if isinstance(df, pd.DataFrame)
+                    and (
+                        df.empty
+                        or (COL_DATE in df and requested_date not in pd.to_datetime(df[COL_DATE]).dt.date.values)
+                    )
+                    else "error"
                 )
-
-        logging.error("All HK stock history providers failed for %s: %s", stock_id, provider_errors)
-        return None
+                outcomes.append(ProviderOutcome(provider, status, str(exc)))
+                logging.warning("HK provider failed: provider=%s, stock_id=%s, error=%s", provider, stock_id, exc)
+        return None, tuple(outcomes)
 
     def download_stock_history(
         self,
@@ -713,21 +694,47 @@ class DownloadManager:
             else:
                 actual_start_date = start_date
 
-            df = self._download_hk_stock_history_with_fallback(
-                stock_id,
-                actual_start_date,
-                end_date,
-                period,
-                adjust,
-            )
-            if df is None:
-                return False
-
-            return get_storage().save_history_data_hk_stock(df, period, adjust)
+            outcome = self.download_hk_ggt_history_outcome(stock_id, period, actual_start_date, end_date, adjust)
+            return outcome.resolved
 
         except Exception as e:  # noqa: BLE001
             logging.error(f"Error processing HK history for {stock_id}: {e}")
             return False
+
+    def download_hk_ggt_history_outcome(
+        self,
+        stock_id: str,
+        period: PeriodType,
+        start_date: str,
+        end_date: str,
+        adjust: AdjustType = AdjustType.HFQ,
+    ) -> StockHistoryOutcome:
+        table_name = get_table_name(SecurityType.HK_GGT_STOCK, period, adjust)
+        last_record = get_storage().get_last_record(table_name, stock_id)
+        actual_start_date = start_date
+        if last_record is not None:
+            actual_start_ts = pd.Timestamp(last_record[COL_DATE]) + pd.Timedelta(days=1)
+            actual_start_date = actual_start_ts.strftime("%Y%m%d")
+            if actual_start_ts > pd.to_datetime(end_date):
+                return StockHistoryOutcome(stock_id, end_date, canonical_adjust_label(adjust), "downloaded", (), True)
+
+        df, provider_outcomes = self._download_hk_stock_history_with_provider_outcomes(
+            stock_id, actual_start_date, end_date, period, adjust
+        )
+        if df is None:
+            classification = (
+                "provider_error" if any(item.status == "error" for item in provider_outcomes) else "missing_exact_date"
+            )
+            return StockHistoryOutcome(
+                stock_id, end_date, canonical_adjust_label(adjust), classification, provider_outcomes, False
+            )
+        if not get_storage().save_history_data_hk_stock(df, period, adjust):
+            return StockHistoryOutcome(
+                stock_id, end_date, canonical_adjust_label(adjust), "provider_error", provider_outcomes, False
+            )
+        return StockHistoryOutcome(
+            stock_id, end_date, canonical_adjust_label(adjust), "downloaded", provider_outcomes, True
+        )
 
     def download_all_hk_stock_history(
         self,

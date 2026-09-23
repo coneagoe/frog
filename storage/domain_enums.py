@@ -27,6 +27,9 @@ class DailyBarDiagnosticClassification(StrEnum):
     PROVIDER_ERROR = "provider_error"
     DOWNLOADED = "downloaded"
     RESOLVED = "resolved"
+    AUTHORITY_UNAVAILABLE = "authority_unavailable"
+    INELIGIBLE = "ineligible"
+    SUSPENDED = "suspended"
 
 
 class ForecastSnapshotStatus(StrEnum):

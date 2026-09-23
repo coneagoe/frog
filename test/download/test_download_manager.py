@@ -1071,7 +1071,7 @@ def _stock_history_df(stock_id="000001"):
 def _hk_stock_history_df(stock_id="00700"):
     return pd.DataFrame(
         {
-            COL_DATE: [pd.Timestamp("2026-01-02")],
+            COL_DATE: [pd.Timestamp("2026-01-03")],
             COL_STOCK_ID: [stock_id],
             COL_OPEN: [300.0],
             COL_HIGH: [302.0],
@@ -1084,6 +1084,53 @@ def _hk_stock_history_df(stock_id="00700"):
 
 
 class TestDownloadHkGgtHistoryFallback:
+    def test_hk_outcome_prioritizes_provider_error_over_empty(self, monkeypatch):
+        import download.download_manager as dm
+
+        storage = MagicMock(get_last_record=MagicMock(return_value=None))
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+        manager = dm.DownloadManager()
+        monkeypatch.setattr(
+            manager.downloader,
+            "dl_history_data_stock_hk_by_provider",
+            MagicMock(side_effect=[RuntimeError("down"), pd.DataFrame()]),
+        )
+
+        outcome = manager.download_hk_ggt_history_outcome(
+            "00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ
+        )
+
+        assert outcome.classification == "provider_error"
+
+    def test_download_hk_ggt_history_outcome_rejects_provider_without_exact_business_date(self, monkeypatch):
+        import download.download_manager as dm
+
+        storage = MagicMock()
+        storage.get_last_record.return_value = None
+        storage.save_history_data_hk_stock.return_value = True
+        monkeypatch.setattr(dm, "get_storage", lambda: storage)
+        monkeypatch.setattr(dm, "parse_hk_stock_history_provider_order", lambda: ["tushare", "akshare"])
+        stale = _hk_stock_history_df()
+        stale[COL_DATE] = pd.Timestamp("2026-01-02")
+        fallback = _hk_stock_history_df()
+        fallback[COL_DATE] = pd.Timestamp("2026-01-03")
+        manager = dm.DownloadManager()
+        monkeypatch.setattr(
+            manager.downloader,
+            "dl_history_data_stock_hk_by_provider",
+            MagicMock(side_effect=[stale, fallback]),
+        )
+
+        outcome = manager.download_hk_ggt_history_outcome(
+            "00700", PeriodType.DAILY, "2026-01-01", "2026-01-03", AdjustType.BFQ
+        )
+
+        assert outcome.classification == "downloaded"
+        assert outcome.resolved is True
+        assert [item.status for item in outcome.provider_outcomes] == ["empty", "downloaded"]
+        storage.save_history_data_hk_stock.assert_called_once()
+
     def test_download_hk_ggt_history_uses_yfinance_then_falls_back(self, monkeypatch):
         import download.download_manager as dm
         from download.download_manager import DownloadManager

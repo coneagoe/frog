@@ -255,14 +255,22 @@ def save_download_result_to_redis(*, partition_count: int, **context):
 def run_paper_trading_matching_for_active_accounts(**context):
     """Run paper-trading matching for all active accounts after successful download."""
     ti: Any = context.get("ti")
-    aggregate_summary = ti.xcom_pull(task_ids="save_download_result_to_redis") if ti is not None else None
+    aggregate_summary = context.get("_aggregate_summary")
+    if aggregate_summary is None:
+        aggregate_summary = (
+            ti.xcom_pull(task_ids=context.get("_aggregate_task_id", "save_download_result_to_redis"))
+            if ti is not None
+            else None
+        )
     aggregate_is_fatal = isinstance(aggregate_summary, dict) and aggregate_summary.get("result") != "success"
     aggregate_is_fatal = aggregate_is_fatal or (
         isinstance(aggregate_summary, str) and "result=fail" in aggregate_summary
     )
     if aggregate_is_fatal:
         raise AirflowSkipException("daily-history aggregate was fatal; skip paper trading matching")
-    trade_date = ensure_a_share_trade_date(context)
+    trade_date = context.get("_business_date")
+    if trade_date is None:
+        trade_date = ensure_a_share_trade_date(context)
     result = run_paper_trading_matching(
         trade_date=trade_date.isoformat(),
         base_url=os.environ.get("PAPER_TRADING_API_BASE_URL", "http://paper-trading:8000"),
@@ -284,7 +292,13 @@ def run_paper_trading_matching_for_active_accounts(**context):
 def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
     """Run the independent post-matching ordinary BFQ recovery batch."""
     ti: Any = context.get("ti")
-    aggregate_summary = ti.xcom_pull(task_ids="save_download_result_to_redis") if ti is not None else None
+    aggregate_summary = context.get("_aggregate_summary")
+    if aggregate_summary is None:
+        aggregate_summary = (
+            ti.xcom_pull(task_ids=context.get("_aggregate_task_id", "save_download_result_to_redis"))
+            if ti is not None
+            else None
+        )
     aggregate_is_fatal = isinstance(aggregate_summary, dict) and aggregate_summary.get("result") != "success"
     aggregate_is_fatal = aggregate_is_fatal or (
         isinstance(aggregate_summary, str) and "result=fail" in aggregate_summary
@@ -292,7 +306,9 @@ def run_unified_bfq_data_gap_recovery(**context) -> dict[str, Any]:
     if aggregate_is_fatal:
         raise AirflowSkipException("daily-history aggregate was fatal; skip unified BFQ recovery")
 
-    business_date = ensure_a_share_trade_date(context)
+    business_date = context.get("_business_date")
+    if business_date is None:
+        business_date = ensure_a_share_trade_date(context)
     storage = get_storage()
     assert storage.Session is not None
     session = storage.Session()
