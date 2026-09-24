@@ -174,9 +174,7 @@ def test_download_history_data_stock_hk_returns_correct_data(tmp_path, downloade
     assert pd.api.types.is_datetime64_any_dtype(result[module.COL_DATE])
 
 
-def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
-    monkeypatch,
-):
+def test_download_general_info_stock_retries_proxy_fetch_failure(monkeypatch):
     module_name = "download.dl.downloader_akshare"
 
     # Save original modules to restore after test to avoid pollution
@@ -187,11 +185,17 @@ def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
 
     try:
         get_proxy_calls = 0
+        ak_calls = 0
+        proxy_failure_count = 1
 
         ak_stub = types.SimpleNamespace()
 
         def fail_with_proxy_error():
-            raise ConnectionError("proxy failed")
+            nonlocal ak_calls
+            ak_calls += 1
+            if ak_calls == 1:
+                raise ConnectionError("proxy failed")
+            return pd.DataFrame({"code": ["000001"], "name": ["Ping An Bank"]})
 
         ak_stub.stock_info_a_code_name = fail_with_proxy_error
         monkeypatch.setitem(sys.modules, "akshare", ak_stub)
@@ -224,6 +228,8 @@ def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
         def fake_get_proxy():
             nonlocal get_proxy_calls
             get_proxy_calls += 1
+            if get_proxy_calls <= proxy_failure_count:
+                raise ProxyError("temporary proxy fetch failure")
             return {"http": "http://new:8080", "https": "http://new:8080"}
 
         monkeypatch.setattr(proxy_module, "get_proxy", fake_get_proxy)
@@ -236,12 +242,18 @@ def test_download_general_info_stock_limits_proxy_refreshes_with_outer_retry(
         module = importlib.import_module(module_name)
         module = importlib.reload(module)
 
-        ak_stub.stock_info_a_code_name = lambda: pd.DataFrame({"code": ["000001"], "name": ["Ping An Bank"]})
-        assert module.download_general_info_stock_ak()[module.COL_STOCK_ID].tolist() == ["000001"]
-        assert get_proxy_calls == 0
+        result = module.download_general_info_stock_ak()
+        assert result[module.COL_STOCK_ID].tolist() == ["000001"]
+        assert get_proxy_calls == 1
+        assert ak_calls == 2
 
-        ak_stub.stock_info_a_code_name = fail_with_proxy_error
-        with pytest.raises(ProxyError, match="Maximum proxy retry attempts exceeded"):
+        def always_fail_with_proxy_error():
+            raise ConnectionError("proxy failed")
+
+        ak_stub.stock_info_a_code_name = always_fail_with_proxy_error
+        proxy_failure_count = 100
+        get_proxy_calls = 0
+        with pytest.raises(ProxyError, match="temporary proxy fetch failure"):
             module.download_general_info_stock_ak()
 
         assert get_proxy_calls == 3

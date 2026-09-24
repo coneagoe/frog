@@ -150,13 +150,20 @@ def download_hk_ggt_history_none_partition_task(*, partition_id: int, partition_
     authority_policy = None
     session_factory = getattr(storage, "Session", None)
     if session_factory is not None:
-        session = cast(Callable[[], Any], session_factory)()
+
+        class SessionScopedMetadataProvider:
+            def get_security(self, symbol, *, as_of):
+                session = cast(Callable[[], Any], session_factory)()
+                try:
+                    return HkConnectMetadataProvider(session).get_security(symbol, as_of=as_of)
+                finally:
+                    session.close()
+
         authority_policy = HkRecoveryAuthorityPolicy(
             HkTradeCalendar(),
-            HkConnectMetadataProvider(session),
+            SessionScopedMetadataProvider(),
             StorageMarketDataProvider(storage, HkTradeCalendar()),
         )
-        session.close()
 
     outcomes: list[dict[str, Any]] = []
 

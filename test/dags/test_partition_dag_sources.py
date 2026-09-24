@@ -5,8 +5,9 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
+from importlib.util import find_spec
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import TypedDict
 from unittest.mock import MagicMock, Mock, call
 
@@ -1273,6 +1274,134 @@ def test_hk_partition_persists_authority_classifications(monkeypatch, classifica
     assert saved[0][2] == "00700"
     assert saved[0][4] == classification
     assert saved[0][5][0]["provider"] == "hk_authority"
+    manager.download_hk_ggt_history_outcome.assert_not_called()
+
+
+def test_hk_authority_releases_metadata_connection_before_suspension_read_and_diagnostic(monkeypatch, tmp_path):
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import QueuePool
+
+    if find_spec("airflow") is None:
+        airflow_modules = (
+            "airflow",
+            "airflow.providers",
+            "airflow.providers.standard",
+            "airflow.providers.standard.operators",
+            "airflow.providers.standard.operators.python",
+            "airflow.sdk",
+            "airflow.sdk.exceptions",
+            "airflow.utils",
+            "airflow.utils.trigger_rule",
+        )
+        for module_name in airflow_modules:
+            module = ModuleType(module_name)
+            module.__path__ = []
+            monkeypatch.setitem(sys.modules, module_name, module)
+            if "." in module_name:
+                parent_name, child_name = module_name.rsplit(".", 1)
+                setattr(sys.modules[parent_name], child_name, module)
+
+        class FakeDAG:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class FakePythonOperator:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __rshift__(self, other):
+                return other
+
+        sys.modules["airflow.sdk"].__dict__["DAG"] = FakeDAG
+        sys.modules["airflow.sdk.exceptions"].__dict__["AirflowSkipException"] = type(
+            "AirflowSkipException", (Exception,), {}
+        )
+        sys.modules["airflow.providers.standard.operators.python"].__dict__["PythonOperator"] = FakePythonOperator
+        sys.modules["airflow.utils.trigger_rule"].__dict__["TriggerRule"] = SimpleNamespace(
+            ALL_DONE="all_done", ALL_SUCCESS="all_success"
+        )
+
+    dag_module_names = ("dags.download_stock_history_daily", "dags.download_hk_ggt_history_daily")
+    previous_modules = {name: sys.modules.get(name) for name in dag_module_names}
+    dags_package = sys.modules.get("dags")
+    previous_dag_attributes = {
+        name.rsplit(".", 1)[1]: getattr(dags_package, name.rsplit(".", 1)[1], None)
+        for name in dag_module_names
+        if dags_package is not None
+    }
+    import dags.download_hk_ggt_history_daily as dag_module
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'hk_authority.sqlite'}",
+        poolclass=QueuePool,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.1,
+    )
+    storage = SimpleNamespace(
+        Session=sessionmaker(bind=engine),
+        load_general_info_hk_ggt=lambda: pd.DataFrame({"股票代码": ["00700"]}),
+    )
+    suspension_reads = []
+    diagnostic_writes = []
+
+    class FakeEligibility:
+        def __init__(self, session):
+            self.session = session
+
+        def get_security(self, symbol, *, as_of):
+            self.session.execute(text("SELECT 1")).scalar_one()
+            return SimpleNamespace(eligible=True, effective_date=as_of, fresh=True, source="hk")
+
+    class FakeSuspension:
+        def get_symbol_suspension_evidence(self, symbol, target_date, market):
+            suspension_reads.append(pd.read_sql(text("SELECT 1"), engine).iloc[0, 0])
+            return {"state": "suspended", "fresh": True, "source": "hk"}
+
+    class FakeRepository:
+        def __init__(self, session):
+            self.session = session
+
+        def upsert_daily_bar_diagnostic(self, *args):
+            diagnostic_writes.append(self.session.execute(text("SELECT 1")).scalar_one())
+
+    monkeypatch.setattr(dag_module, "is_hk_market_open", lambda _day: True)
+    monkeypatch.setattr(dag_module, "ensure_hk_trade_date", lambda _context: date(2026, 7, 27))
+    monkeypatch.setattr(dag_module, "get_storage", lambda: storage)
+    monkeypatch.setattr(dag_module, "HkConnectMetadataProvider", FakeEligibility)
+    monkeypatch.setattr(
+        dag_module,
+        "StorageMarketDataProvider",
+        lambda _storage, _calendar: FakeSuspension(),
+    )
+    monkeypatch.setattr(dag_module, "HkTradeCalendar", lambda: SimpleNamespace(is_trade_date=lambda _day: True))
+    monkeypatch.setattr(dag_module, "PaperTradingRepository", FakeRepository)
+    manager = Mock()
+    monkeypatch.setattr(dag_module, "DownloadManager", lambda: manager)
+
+    try:
+        result = dag_module.download_hk_ggt_history_none_partition_task(
+            partition_id=0,
+            partition_count=1,
+        )
+    finally:
+        engine.dispose()
+        for module_name, previous_module in previous_modules.items():
+            if previous_module is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous_module
+        if dags_package is not None:
+            for attribute, previous_attribute in previous_dag_attributes.items():
+                if previous_attribute is None:
+                    dags_package.__dict__.pop(attribute, None)
+                else:
+                    dags_package.__dict__[attribute] = previous_attribute
+
+    assert result["outcomes"][0]["classification"] == "suspended"
+    assert suspension_reads == [1]
+    assert diagnostic_writes == [1]
     manager.download_hk_ggt_history_outcome.assert_not_called()
 
 
