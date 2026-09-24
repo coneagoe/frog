@@ -71,7 +71,7 @@ REQUIRED_STOCK_HISTORY_COLUMNS = (
 )
 
 
-def _validate_stock_history_data(df: Any) -> pd.DataFrame:
+def _validate_history_data(df: Any, required_columns: tuple[str, ...]) -> pd.DataFrame:
     if df is None:
         raise ValueError("provider returned None")
     if not isinstance(df, pd.DataFrame):
@@ -79,7 +79,7 @@ def _validate_stock_history_data(df: Any) -> pd.DataFrame:
     if df.empty:
         raise ValueError("provider returned empty DataFrame")
 
-    missing_columns = [column for column in REQUIRED_STOCK_HISTORY_COLUMNS if column not in df.columns]
+    missing_columns = [column for column in required_columns if column not in df.columns]
     if missing_columns:
         raise ValueError(f"provider result missing required columns: {missing_columns}")
 
@@ -89,29 +89,17 @@ def _validate_stock_history_data(df: Any) -> pd.DataFrame:
     for column in numeric_columns:
         validated[column] = pd.to_numeric(validated[column], errors="raise")
     return validated
+
+
+def _validate_stock_history_data(df: Any) -> pd.DataFrame:
+    return _validate_history_data(df, REQUIRED_STOCK_HISTORY_COLUMNS)
 
 
 REQUIRED_HK_STOCK_HISTORY_COLUMNS = REQUIRED_STOCK_HISTORY_COLUMNS
 
 
 def _validate_hk_stock_history_data(df: Any) -> pd.DataFrame:
-    if df is None:
-        raise ValueError("provider returned None")
-    if not isinstance(df, pd.DataFrame):
-        raise TypeError(f"provider returned {type(df)}, expected DataFrame")
-    if df.empty:
-        raise ValueError("provider returned empty DataFrame")
-
-    missing_columns = [column for column in REQUIRED_HK_STOCK_HISTORY_COLUMNS if column not in df.columns]
-    if missing_columns:
-        raise ValueError(f"provider result missing required columns: {missing_columns}")
-
-    validated = df.copy()
-    validated[COL_DATE] = pd.to_datetime(validated[COL_DATE])
-    numeric_columns = [COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_AMOUNT]
-    for column in numeric_columns:
-        validated[column] = pd.to_numeric(validated[column], errors="raise")
-    return validated
+    return _validate_history_data(df, REQUIRED_HK_STOCK_HISTORY_COLUMNS)
 
 
 # Wrapper for dl_etf_daily to match the signature expected by _download_history_data

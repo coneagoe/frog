@@ -8,7 +8,7 @@ from paper_trading.storage.repository import PaperTradingRepository
 from test.paper_trading.fakes import FakeMarketDataProvider
 
 
-def _validity_check(repo, order, reason_code: TradeValidityReason) -> PaperTradeValidityCheck:
+def _validity_check(repo: PaperTradingRepository, order, reason_code: TradeValidityReason) -> PaperTradeValidityCheck:
     return repo.create_trade_validity_check(
         order_id=order.id,
         account_id=order.account_id,

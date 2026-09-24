@@ -5,6 +5,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
@@ -26,6 +27,63 @@ from common.const import (
 )  # noqa: E402
 from download.core_indexes import CORE_INDEX_TS_CODES  # noqa: E402
 from download.etf_net_flow import ETFNetFlowRebuildResult  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "validator",
+    [dm._validate_stock_history_data, dm._validate_hk_stock_history_data],
+)
+def test_stock_history_validator_converts_without_mutating_input(validator):
+    source = pd.DataFrame(
+        {
+            COL_DATE: ["2024-01-01"],
+            COL_STOCK_ID: ["000001"],
+            COL_OPEN: ["10.0"],
+            COL_HIGH: ["11.0"],
+            COL_LOW: ["9.0"],
+            COL_CLOSE: ["10.5"],
+            COL_VOLUME: ["1000"],
+            COL_AMOUNT: ["10000"],
+            "extra": ["preserved"],
+        }
+    )
+    original = source.copy(deep=True)
+
+    result = validator(source)
+
+    assert result is not source
+    pd.testing.assert_frame_equal(source, original)
+    assert pd.api.types.is_datetime64_any_dtype(result[COL_DATE])
+    for column in (COL_OPEN, COL_HIGH, COL_LOW, COL_CLOSE, COL_VOLUME, COL_AMOUNT):
+        assert pd.api.types.is_numeric_dtype(result[column])
+    assert result["extra"].tolist() == ["preserved"]
+
+
+@pytest.mark.parametrize(
+    "validator",
+    [dm._validate_stock_history_data, dm._validate_hk_stock_history_data],
+)
+@pytest.mark.parametrize(
+    ("invalid_case", "exception"),
+    [
+        (None, ValueError),
+        ("not a dataframe", TypeError),
+        (pd.DataFrame(), ValueError),
+        ("missing", ValueError),
+        ("date", ValueError),
+        ("numeric", ValueError),
+    ],
+)
+def test_stock_history_validator_rejects_invalid_input(validator, invalid_case, exception):
+    value = invalid_case
+    if isinstance(invalid_case, str) and invalid_case == "missing":
+        value = _stock_history_df().drop(columns=[COL_CLOSE])
+    elif isinstance(invalid_case, str) and invalid_case == "date":
+        value = _stock_history_df().assign(**{COL_DATE: "not a date"})
+    elif isinstance(invalid_case, str) and invalid_case == "numeric":
+        value = _stock_history_df().assign(**{COL_CLOSE: "not numeric"})
+    with pytest.raises(exception):
+        validator(value)
 
 
 def _make_manager(monkeypatch):

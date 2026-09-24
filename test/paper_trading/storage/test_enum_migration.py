@@ -156,6 +156,43 @@ def _column_type(connection: Connection, table_name: str, column_name: str) -> s
     return None if value is None else str(value)
 
 
+def _column_nullable(connection: Connection, table_name: str, column_name: str) -> bool:
+    return bool(
+        connection.execute(
+            text(
+                "SELECT NOT a.attnotnull FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
+                "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :table_name "
+                "AND a.attname = :column_name"
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        ).scalar_one()
+    )
+
+
+def _column_default(connection: Connection, table_name: str, column_name: str) -> str | None:
+    result = connection.execute(
+        text(
+            "SELECT pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid "
+            "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.adnum "
+            "WHERE c.relnamespace = current_schema()::regnamespace AND c.relname = :table_name "
+            "AND a.attname = :column_name"
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    ).scalar_one_or_none()
+    return None if result is None else str(result)
+
+
+def _constraint_definition(connection: Connection, table_name: str, constraint_name: str) -> str | None:
+    result = connection.execute(
+        text(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conrelid = CAST(:table_name AS regclass) AND conname = :constraint_name"
+        ),
+        {"table_name": table_name, "constraint_name": constraint_name},
+    ).scalar_one_or_none()
+    return None if result is None else str(result)
+
+
 def _index_exists(connection: Connection, index_name: str) -> bool:
     return bool(
         connection.execute(text("SELECT to_regclass(:index_name) IS NOT NULL"), {"index_name": index_name}).scalar_one()
@@ -216,6 +253,13 @@ def test_migration_repair_reason_group_declares_nullable_varchar40_column():
 def test_validity_reason_migration_shares_enum_preserves_values_and_rolls_back(postgres_schema):
     engine, schema = postgres_schema
     with _connection(engine, schema) as connection:
+        connection.execute(text("CREATE INDEX ix_paper_orders_validity_reason ON paper_orders (validity_reason)"))
+        connection.execute(
+            text(
+                "ALTER TABLE paper_trade_validity_checks ADD CONSTRAINT ck_validity_reason_nonempty "
+                "CHECK (reason_code <> '')"
+            )
+        )
         connection.execute(
             text("INSERT INTO paper_orders (id, side, status, validity_reason) VALUES (1, 'buy', 'new', :reason)"),
             {"reason": TradeValidityReason.VALID.value},
@@ -232,6 +276,15 @@ def test_validity_reason_migration_shares_enum_preserves_values_and_rolls_back(p
         assert first_result.converted is True
         assert _column_type(connection, "paper_orders", "validity_reason") == "paper_trade_validity_reason"
         assert _column_type(connection, "paper_trade_validity_checks", "reason_code") == "paper_trade_validity_reason"
+        assert _column_nullable(connection, "paper_orders", "validity_reason") is True
+        assert _column_nullable(connection, "paper_trade_validity_checks", "reason_code") is False
+        assert _column_default(connection, "paper_orders", "validity_reason") is None
+        assert _column_default(connection, "paper_trade_validity_checks", "reason_code") is None
+        assert _index_exists(connection, "ix_paper_orders_validity_reason")
+        assert _constraint_definition(connection, "paper_trade_validity_checks", "ck_validity_reason_nonempty") == (
+            "CHECK (((reason_code)::text <> ''::text))"
+        )
+        assert not _index_exists(connection, "ix_paper_trade_validity_checks_reason_code")
         assert _enum_labels(connection, "paper_trade_validity_reason") == tuple(
             member.value for member in TradeValidityReason
         )
@@ -242,17 +295,83 @@ def test_validity_reason_migration_shares_enum_preserves_values_and_rolls_back(p
             text("SELECT reason_code FROM paper_trade_validity_checks WHERE id = 1")
         ).scalar_one() == (TradeValidityReason.MARKET_DATA_UNAVAILABLE.value)
         assert migrate_paper_trading_enums(connection).converted is False
+        reason_audit = next(
+            group
+            for group in PAPER_TRADING_ENUM_ADAPTER.audit(connection, rollback=False).groups
+            if group.type_name == "paper_trade_validity_reason"
+        )
+        assert reason_audit.ready is True
+        assert reason_audit.observed_labels == tuple(member.value for member in TradeValidityReason)
+        assert all(column.ready for column in reason_audit.columns)
+        assert _index_exists(connection, "ix_paper_orders_validity_reason")
+        assert _constraint_definition(connection, "paper_trade_validity_checks", "ck_validity_reason_nonempty") == (
+            "CHECK (((reason_code)::text <> ''::text))"
+        )
 
         rollback_result = migrate_paper_trading_enums(connection, rollback=True)
         assert rollback_result.rolled_back is True
         assert _column_type(connection, "paper_orders", "validity_reason") == "character varying(50)"
         assert _column_type(connection, "paper_trade_validity_checks", "reason_code") == "character varying(50)"
+        assert _column_nullable(connection, "paper_orders", "validity_reason") is True
+        assert _column_nullable(connection, "paper_trade_validity_checks", "reason_code") is False
+        assert _index_exists(connection, "ix_paper_orders_validity_reason")
+        assert _constraint_definition(connection, "paper_trade_validity_checks", "ck_validity_reason_nonempty") == (
+            "CHECK (((reason_code)::text <> ''::text))"
+        )
+        assert connection.execute(text("SELECT to_regtype('paper_trade_validity_reason')")).scalar_one() is None
         assert connection.execute(text("SELECT validity_reason FROM paper_orders WHERE id = 1")).scalar_one() == (
             TradeValidityReason.VALID.value
         )
         assert connection.execute(
             text("SELECT reason_code FROM paper_trade_validity_checks WHERE id = 1")
         ).scalar_one() == (TradeValidityReason.MARKET_DATA_UNAVAILABLE.value)
+
+
+def test_validity_reason_dependency_blocks_rollback_until_view_is_dropped(postgres_schema):
+    engine, schema = postgres_schema
+    with _connection(engine, schema) as connection:
+        connection.execute(
+            text("INSERT INTO paper_orders (id, side, status, validity_reason) VALUES (1, 'buy', 'new', :reason)"),
+            {"reason": TradeValidityReason.VALID.value},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO paper_trade_validity_checks (id, side, status, reason_code) "
+                "VALUES (1, 'buy', 'valid', :reason)"
+            ),
+            {"reason": TradeValidityReason.MARKET_DATA_UNAVAILABLE.value},
+        )
+        assert migrate_paper_trading_enums(connection).converted is True
+        connection.execute(text("CREATE VIEW validity_reason_dependency AS SELECT validity_reason FROM paper_orders"))
+        schema_changes = []
+
+        def capture_ddl(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith(("ALTER ", "CREATE ", "DROP ")):
+                schema_changes.append(statement)
+
+        event.listen(connection, "before_cursor_execute", capture_ddl)
+        with pytest.raises(PaperTradingEnumMigrationError, match="paper_trade_validity_reason: dependencies remain"):
+            migrate_paper_trading_enums(connection, rollback=True)
+        event.remove(connection, "before_cursor_execute", capture_ddl)
+
+        assert schema_changes == []
+        assert _column_type(connection, "paper_orders", "validity_reason") == "paper_trade_validity_reason"
+        assert _column_type(connection, "paper_trade_validity_checks", "reason_code") == "paper_trade_validity_reason"
+        assert connection.execute(text("SELECT validity_reason FROM paper_orders WHERE id = 1")).scalar_one() == (
+            TradeValidityReason.VALID.value
+        )
+        assert connection.execute(
+            text("SELECT reason_code FROM paper_trade_validity_checks WHERE id = 1")
+        ).scalar_one() == (TradeValidityReason.MARKET_DATA_UNAVAILABLE.value)
+        assert connection.execute(text("SELECT to_regtype('paper_trade_validity_reason')")).scalar_one() == (
+            "paper_trade_validity_reason"
+        )
+
+        connection.execute(text("DROP VIEW validity_reason_dependency"))
+        assert migrate_paper_trading_enums(connection, rollback=True).rolled_back is True
+        assert connection.execute(text("SELECT to_regtype('paper_trade_validity_reason')")).scalar_one() is None
+        assert _column_type(connection, "paper_orders", "validity_reason") == "character varying(50)"
+        assert _column_type(connection, "paper_trade_validity_checks", "reason_code") == "character varying(50)"
 
 
 @pytest.mark.parametrize(
